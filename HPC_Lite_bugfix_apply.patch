@@ -1,0 +1,2822 @@
+--- a/allocation.py
++++ b/allocation.py
+@@ -1,87 +1,64 @@
+ import torch
+ import torch.nn as nn
+-import torch.nn.functional as F
+-from typing import Tuple, Optional
+ 
+ 
+ class LocalAllocationLoss(nn.Module):
+-    """Local spatial allocation loss supervising how count mass is distributed
+-    inside small 16x16 blocks without Gaussian density-map targets.
+-    
+-    Formula:
+-        p_{bk} = (D_{bk} + eps) / (mu_b + K * eps)
+-        ell_{alloc, b} = - (1 / y_b) * sum_k Z_{bk} * log(p_{bk} + eps)
+-        L_{alloc} = mean_{b in B_+} ell_{alloc, b}
+-    """
++    """Block-local spatial allocation cross-entropy on positive blocks."""
++
+     def __init__(self, block_size: int = 16, output_stride: int = 4, eps: float = 1e-8):
+         super().__init__()
+-        self.block_size = block_size
+-        self.output_stride = output_stride
+-        self.k_dim = block_size // output_stride  # 4
+-        self.k_cells = self.k_dim * self.k_dim    # 16
+-        self.eps = eps
+-
+-    def forward(
+-        self,
+-        d_map: torch.Tensor,
+-        z_map: torch.Tensor,
+-        y_16: torch.Tensor,
+-    ) -> torch.Tensor:
+-        """Compute local allocation loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map (B, 1, H_out, W_out).
+-            z_map: Target soft allocation map (B, 1, H_out, W_out) or (B, H_out, W_out).
+-            y_16: Exact integer block counts at 16x16 scale (B, H_16, W_16) or (B, 1, H_16, W_16).
+-            
+-        Returns:
+-            Scalar loss.
+-        """
+-        if d_map.dim() == 4 and d_map.shape[1] == 1:
+-            d = d_map.squeeze(1)
+-        else:
+-            d = d_map
+-            
+-        if z_map.dim() == 4 and z_map.shape[1] == 1:
+-            z = z_map.squeeze(1)
+-        else:
+-            z = z_map
+-            
+-        if y_16.dim() == 4 and y_16.shape[1] == 1:
+-            y = y_16.squeeze(1)
+-        else:
+-            y = y_16
+-            
+-        b, h_out, w_out = d.shape
+-        kd = self.k_dim  # 4
+-        
+-        h_16 = h_out // kd
+-        w_16 = w_out // kd
+-        
+-        # Reshape into blocks of K=16 cells: (B, H_16, kd, W_16, kd) -> (B, H_16, W_16, 16)
+-        d_blocks = d.view(b, h_16, kd, w_16, kd).permute(0, 1, 3, 2, 4).contiguous().view(b, h_16, w_16, self.k_cells)
+-        z_blocks = z.to(d.device).view(b, h_16, kd, w_16, kd).permute(0, 1, 3, 2, 4).contiguous().view(b, h_16, w_16, self.k_cells)
+-        y_blocks = y.to(d.device).view(b, h_16, w_16)
+-        
+-        # Positive block mask (y_b > 0)
+-        pos_mask = y_blocks > 0
++        if block_size % output_stride != 0:
++            raise ValueError("block_size must be divisible by output_stride")
++        self.block_size = int(block_size)
++        self.output_stride = int(output_stride)
++        self.k_dim = self.block_size // self.output_stride
++        self.k_cells = self.k_dim * self.k_dim
++        self.eps = float(eps)
++
++    def forward(self, d_map: torch.Tensor, z_map: torch.Tensor, y_16: torch.Tensor) -> torch.Tensor:
++        d = d_map.squeeze(1) if d_map.ndim == 4 and d_map.shape[1] == 1 else d_map
++        z = z_map.squeeze(1) if z_map.ndim == 4 and z_map.shape[1] == 1 else z_map
++        y = y_16.squeeze(1) if y_16.ndim == 4 and y_16.shape[1] == 1 else y_16
++
++        if d.ndim != 3 or z.ndim != 3 or y.ndim != 3:
++            raise ValueError("Expected d/z/y as BxHxW tensors after optional channel squeeze")
++
++        # Compute this probabilistic normalization in float32 under AMP.
++        d = d.float()
++        z = z.to(device=d.device, dtype=torch.float32)
++        y = y.to(device=d.device, dtype=torch.float32)
++
++        bsz, h_out, w_out = d.shape
++        kd = self.k_dim
++        if h_out % kd != 0 or w_out % kd != 0:
++            raise ValueError(f"d_map spatial shape {(h_out, w_out)} not divisible by local block {kd}")
++        if z.shape != d.shape:
++            raise ValueError(f"z_map shape {tuple(z.shape)} != d_map shape {tuple(d.shape)}")
++
++        h_blk, w_blk = h_out // kd, w_out // kd
++        if y.shape != (bsz, h_blk, w_blk):
++            raise ValueError(f"y block shape {tuple(y.shape)} != expected {(bsz, h_blk, w_blk)}")
++
++        d_blocks = d.reshape(bsz, h_blk, kd, w_blk, kd).permute(0, 1, 3, 2, 4).reshape(
++            bsz, h_blk, w_blk, self.k_cells
++        )
++        z_blocks = z.reshape(bsz, h_blk, kd, w_blk, kd).permute(0, 1, 3, 2, 4).reshape(
++            bsz, h_blk, w_blk, self.k_cells
++        )
++
++        pos_mask = y > 0
+         if not pos_mask.any():
+             return d.new_zeros(())
+-            
+-        # Select positive blocks: (N_pos, 16)
++
+         d_pos = d_blocks[pos_mask]
+         z_pos = z_blocks[pos_mask]
+-        y_pos = y_blocks[pos_mask].float()  # (N_pos,)
+-        
+-        # Block mass mu_b = sum_k D_bk
+-        mu_pos = d_pos.sum(dim=-1, keepdim=True)  # (N_pos, 1)
+-        
+-        # Normalized predicted cell allocation: p_{bk}
++        y_pos = y[pos_mask]
++
++        # Sanity: allocation target mass must equal exact local count up to float tolerance.
++        if not torch.allclose(z_pos.sum(-1), y_pos, atol=1e-4, rtol=0.0):
++            raise ValueError("Allocation target does not conserve block counts")
++
++        mu_pos = d_pos.sum(dim=-1, keepdim=True)
+         p_pos = (d_pos + self.eps) / (mu_pos + self.k_cells * self.eps)
+-        
+-        # ell_{alloc, b} = -(1 / y_b) * sum_k Z_{bk} * log(p_{bk} + eps)
+-        log_p = torch.log(p_pos + self.eps)
+-        cross_entropy_per_block = -(z_pos * log_p).sum(dim=-1)  # (N_pos,)
+-        normalized_loss = cross_entropy_per_block / torch.clamp_min(y_pos, 1.0)
+-        
+-        return normalized_loss.mean()
++        ce = -(z_pos * torch.log(p_pos.clamp_min(self.eps))).sum(dim=-1)
++        return (ce / y_pos.clamp_min(1.0)).mean()
+--- a/allocation_target.py
++++ b/allocation_target.py
+@@ -41,23 +41,27 @@
+     out_h = crop_h // output_stride       # H/4
+     out_w = crop_w // output_stride       # W/4
+     
+-    z_map = torch.zeros((out_h, out_w), dtype=torch.float32, device=device)
+-    
+-    if points is None or len(points) == 0:
+-        return z_map
+-        
++    if points is None:
++        return torch.zeros((out_h, out_w), dtype=torch.float32, device=device)
++
+     if isinstance(points, np.ndarray):
+         pts = torch.from_numpy(points).float()
+     elif isinstance(points, (list, tuple)):
+         pts = torch.tensor(points, dtype=torch.float32)
+-    else:
++    elif isinstance(points, torch.Tensor):
+         pts = points.float()
+-        
+-    if device is not None and pts.device != device:
+-        pts = pts.to(device)
+-        
++    else:
++        raise TypeError(f"Unsupported points type: {type(points)!r}")
++
+     if pts.numel() == 0:
+-        return z_map
++        target_device = device if device is not None else pts.device
++        return torch.zeros((out_h, out_w), dtype=torch.float32, device=target_device)
++    if pts.ndim != 2 or pts.shape[1] != 2:
++        raise ValueError(f"points must have shape (N,2), got {tuple(pts.shape)}")
++
++    target_device = device if device is not None else pts.device
++    pts = pts.to(target_device)
++    z_map = torch.zeros((out_h, out_w), dtype=torch.float32, device=target_device)
+         
+     xs = pts[:, 0]
+     ys = pts[:, 1]
+--- a/backbone.py
++++ b/backbone.py
+@@ -1,13 +1,13 @@
++from typing import Tuple
++
+ import torch
+ import torch.nn as nn
+-from typing import List, Tuple, Dict, Optional
+ import timm
+ 
+ 
+ class MobileNetV4Backbone(nn.Module):
+-    """MobileNetV4 backbone with programmatic feature selection at reductions [4, 8, 16]
+-    and physical truncation of unused later stages (reduction 32 / classifier).
+-    """
++    """MobileNetV4 feature backbone returning the last feature at reductions 4/8/16."""
++
+     def __init__(
+         self,
+         model_name: str = "mobilenetv4_conv_small_050",
+@@ -17,83 +17,43 @@
+     ):
+         super().__init__()
+         self.model_name = model_name
+-        self.target_reductions = list(target_reductions)
+-        import logging
+-        timm_logger = logging.getLogger("timm")
+-        prev_level = timm_logger.level
+-        timm_logger.setLevel(logging.ERROR)
+-        try:
+-            # Query feature reductions and channels
+-            dummy_model = timm.create_model(
+-                model_name,
+-                pretrained=False,
+-                features_only=True,
+-            )
+-            all_reductions = dummy_model.feature_info.reduction()
+-            all_channels = dummy_model.feature_info.channels()
+-            
+-            # Programmatically find indices for target reductions [4, 8, 16]
+-            selected_indices = []
+-            selected_channels = []
+-            for r in self.target_reductions:
+-                if r not in all_reductions:
+-                    raise ValueError(
+-                        f"Reduction {r} not found in model {model_name} reductions: {all_reductions}"
+-                    )
+-                idx = all_reductions.index(r)
+-                selected_indices.append(idx)
+-                selected_channels.append(all_channels[idx])
+-                
+-            self.selected_indices = selected_indices
+-            self.out_channels = selected_channels  # e.g. [16, 32, 48]
+-            self.max_stage_idx = max(selected_indices)
+-            
+-            # Single backbone creation with exact out_indices and pretrained weights
+-            self.backbone = timm.create_model(
+-                model_name,
+-                pretrained=pretrained,
+-                features_only=True,
+-                out_indices=tuple(self.selected_indices),
+-            )
+-            if truncate:
+-                self._physically_truncate()
+-        finally:
+-            timm_logger.setLevel(prev_level)
+-            
+-    def _physically_truncate(self):
+-        """Physically remove unused layers (e.g. stage 4 / reduction 32 / conv_head / classifier)
+-        so they do not consume parameters or memory.
+-        """
+-        # In timm's mobilenetv4 implementation:
+-        # stages are in self.backbone.blocks or self.backbone.conv_head / classifier
+-        if hasattr(self.backbone, "blocks"):
+-            # Keep only blocks up to max_stage_idx
+-            # Note: feature_info mapping may map feature index to block stage
+-            # timm feature_info has info for each return index
+-            if hasattr(self.backbone, "feature_info"):
+-                # Check last used module name
+-                last_info = self.backbone.feature_info[-1]
+-                last_module = last_info.get("module", "")
+-                if "." in last_module:
+-                    parent, idx = last_module.split(".", 1)
+-                    if hasattr(self.backbone, parent) and idx.isdigit():
+-                        container = getattr(self.backbone, parent)
+-                        if isinstance(container, (nn.Sequential, nn.ModuleList)):
+-                            max_k = int(idx) + 1
+-                            if len(container) > max_k:
+-                                # Truncate remaining elements
+-                                truncated = nn.Sequential(*[container[i] for i in range(max_k)])
+-                                setattr(self.backbone, parent, truncated)
+-                                
+-        # Prune any conv_head or global_pool / classifier if still attached
+-        for attr in ["conv_head", "bn2", "act2", "global_pool", "head", "classifier"]:
+-            if hasattr(self.backbone, attr):
+-                setattr(self.backbone, attr, nn.Identity())
++        self.target_reductions = tuple(int(r) for r in target_reductions)
++
++        # Query feature metadata once without downloading weights.
++        probe = timm.create_model(model_name, pretrained=False, features_only=True)
++        reductions = list(probe.feature_info.reduction())
++        channels = list(probe.feature_info.channels())
++        del probe
++
++        selected_indices = []
++        selected_channels = []
++        for r in self.target_reductions:
++            matches = [i for i, rr in enumerate(reductions) if rr == r]
++            if not matches:
++                raise ValueError(f"Reduction {r} not found in {model_name}: {reductions}")
++            # Prefer the deepest/most semantic feature if a reduction appears more than once.
++            idx = matches[-1]
++            selected_indices.append(idx)
++            selected_channels.append(channels[idx])
++        if selected_indices != sorted(selected_indices):
++            raise ValueError(f"Non-monotonic selected feature indices: {selected_indices}")
++
++        self.selected_indices = tuple(selected_indices)
++        self.out_channels = selected_channels
++        self.backbone = timm.create_model(
++            model_name,
++            pretrained=pretrained,
++            features_only=True,
++            out_indices=self.selected_indices,
++        )
++
++        # No manual mutation is performed. timm's FeatureList/FeatureDict wrapper already
++        # rebuilds modules only through the last requested return layer. Manual surgery on
++        # wrapper internals is version-sensitive and can accidentally remove a requested stage.
++        self.truncate = bool(truncate)
+ 
+-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
++    def forward(self, x: torch.Tensor):
+         features = self.backbone(x)
+-        # features is a list matching selected_indices
+-        c4 = features[0]
+-        c8 = features[1]
+-        c16 = features[2]
+-        return c4, c8, c16
++        if len(features) != 3:
++            raise RuntimeError(f"Expected 3 backbone features, got {len(features)}")
++        return features[0], features[1], features[2]
+--- a/block_counts.py
++++ b/block_counts.py
+@@ -28,23 +28,25 @@
+     h_b = crop_h // block_size
+     w_b = crop_w // block_size
+     
+-    y_map = torch.zeros((h_b, w_b), dtype=torch.float32, device=device)
+-    
+-    if points is None or len(points) == 0:
+-        return y_map
+-        
++    if points is None:
++        return torch.zeros((h_b, w_b), dtype=torch.float32, device=device)
++
+     if isinstance(points, np.ndarray):
+         pts = torch.from_numpy(points).float()
+     elif isinstance(points, (list, tuple)):
+         pts = torch.tensor(points, dtype=torch.float32)
+-    else:
++    elif isinstance(points, torch.Tensor):
+         pts = points.float()
+-        
+-    if device is not None and pts.device != device:
+-        pts = pts.to(device)
+-        
++    else:
++        raise TypeError(f"Unsupported points type: {type(points)!r}")
++
++    target_device = device if device is not None else pts.device
+     if pts.numel() == 0:
+-        return y_map
++        return torch.zeros((h_b, w_b), dtype=torch.float32, device=target_device)
++    if pts.ndim != 2 or pts.shape[1] != 2:
++        raise ValueError(f"points must have shape (N,2), got {tuple(pts.shape)}")
++    pts = pts.to(target_device)
++    y_map = torch.zeros((h_b, w_b), dtype=torch.float32, device=target_device)
+         
+     xs = pts[:, 0]
+     ys = pts[:, 1]
+--- a/checkpoint.py
++++ b/checkpoint.py
+@@ -1,6 +1,7 @@
+ import os
++from typing import Any, Dict, Optional
++
+ import torch
+-from typing import Dict, Any, Optional
+ 
+ 
+ def save_checkpoint(
+@@ -9,29 +10,57 @@
+     filename: str = "checkpoint.pt",
+     is_best: bool = False,
+ ):
+-    """Save model checkpoint."""
++    """Save a pre-built training state dictionary."""
+     os.makedirs(save_dir, exist_ok=True)
+     filepath = os.path.join(save_dir, filename)
+     torch.save(state, filepath)
+     if is_best:
+-        best_path = os.path.join(save_dir, "best.pt")
+-        torch.save(state, best_path)
++        torch.save(state, os.path.join(save_dir, "best.pt"))
++
++
++def build_checkpoint_state(
++    model: torch.nn.Module,
++    criterion: Optional[torch.nn.Module] = None,
++    optimizer: Optional[torch.optim.Optimizer] = None,
++    lr_scheduler: Optional[Any] = None,
++    scaler: Optional[Any] = None,
++    **extra,
++) -> Dict[str, Any]:
++    """Build a checkpoint that includes learnable criterion state (e.g. NB dispersion)."""
++    state: Dict[str, Any] = {"model_state_dict": model.state_dict(), **extra}
++    if criterion is not None:
++        state["criterion_state_dict"] = criterion.state_dict()
++    if optimizer is not None:
++        state["optimizer_state_dict"] = optimizer.state_dict()
++    if lr_scheduler is not None:
++        state["scheduler_state_dict"] = lr_scheduler.state_dict()
++    if scaler is not None:
++        state["scaler_state_dict"] = scaler.state_dict()
++    return state
+ 
+ 
+ def load_checkpoint(
+     filepath: str,
+     model: torch.nn.Module,
++    criterion: Optional[torch.nn.Module] = None,
+     optimizer: Optional[torch.optim.Optimizer] = None,
+     lr_scheduler: Optional[Any] = None,
++    scaler: Optional[Any] = None,
+     device: Optional[torch.device] = None,
++    strict: bool = True,
+ ) -> Dict[str, Any]:
+-    """Load model checkpoint."""
+     if not os.path.exists(filepath):
+         raise FileNotFoundError(f"Checkpoint not found at: {filepath}")
+     checkpoint = torch.load(filepath, map_location=device or "cpu")
+-    model.load_state_dict(checkpoint["model_state_dict"])
++    model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
++    if criterion is not None:
++        if "criterion_state_dict" not in checkpoint:
++            raise KeyError("Checkpoint has no criterion_state_dict")
++        criterion.load_state_dict(checkpoint["criterion_state_dict"], strict=strict)
+     if optimizer is not None and "optimizer_state_dict" in checkpoint:
+         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+     if lr_scheduler is not None and "scheduler_state_dict" in checkpoint:
+         lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
++    if scaler is not None and "scaler_state_dict" in checkpoint:
++        scaler.load_state_dict(checkpoint["scaler_state_dict"])
+     return checkpoint
+--- a/common.py
++++ b/common.py
+@@ -1,9 +1,10 @@
+ import os
+ import random
+-from typing import List, Tuple, Dict, Optional, Any, Callable
+-from PIL import Image
++from typing import Any, Dict, List, Optional, Tuple
++
+ import numpy as np
+ import torch
++from PIL import Image
+ from torch.utils.data import Dataset
+ import torchvision.transforms.functional as TF
+ 
+@@ -17,7 +18,8 @@
+ 
+ 
+ class BaseCrowdDataset(Dataset):
+-    """Base dataset class for crowd counting datasets (SHA, SHB, QNRF, NWPU)."""
++    """Base dataset with deterministic sample schema suitable for default DataLoader collate."""
++
+     def __init__(
+         self,
+         image_paths: List[str],
+@@ -30,76 +32,100 @@
+         flip_prob: float = 0.5,
+         second_view_prob: float = 0.30,
+         photometric_cfg: Optional[Dict[str, Any]] = None,
++        has_ground_truth: Optional[List[bool]] = None,
+     ):
+-        self.image_paths = image_paths
+-        self.points_list = points_list
+-        self.crop_size = crop_size
+-        self.hnb_blocks = list(hnb_blocks)
+-        self.allocation_block = allocation_block
+-        self.is_train = is_train
+-        self.second_view_prob = second_view_prob if is_train else 0.0
+-        
++        if len(image_paths) != len(points_list):
++            raise ValueError("image_paths and points_list must have the same length")
++        if not 0.0 <= second_view_prob <= 1.0:
++            raise ValueError("second_view_prob must be in [0,1]")
++        if crop_size <= 0:
++            raise ValueError("crop_size must be positive")
++
++        self.image_paths = list(image_paths)
++        self.points_list = [np.asarray(p, dtype=np.float32).reshape(-1, 2) for p in points_list]
++        self.crop_size = int(crop_size)
++        self.hnb_blocks = [int(b) for b in hnb_blocks]
++        self.allocation_block = int(allocation_block)
++        self.is_train = bool(is_train)
++        self.second_view_prob = float(second_view_prob) if self.is_train else 0.0
++        self.has_ground_truth = list(has_ground_truth) if has_ground_truth is not None else [True] * len(self.image_paths)
++
++        if len(self.has_ground_truth) != len(self.image_paths):
++            raise ValueError("has_ground_truth must match dataset length")
++        if self.is_train and not all(self.has_ground_truth):
++            raise ValueError("Training dataset contains samples without ground truth")
++
++        for b in self.hnb_blocks + [self.allocation_block]:
++            if self.crop_size % b != 0:
++                raise ValueError(f"crop_size={self.crop_size} must be divisible by block size {b}")
++        if self.allocation_block % 4 != 0:
++            raise ValueError("allocation_block must be divisible by output stride 4")
++
+         self.geom_transform = GeometricTransforms(
+-            crop_size=crop_size,
++            crop_size=self.crop_size,
+             scale_range=scale_range,
+             flip_prob=flip_prob,
+         )
+-        
+-        photo_kwargs = photometric_cfg or {}
+-        self.photo_transform = PhotometricTransforms(**photo_kwargs)
++        self.photo_transform = PhotometricTransforms(**(photometric_cfg or {}))
+ 
+     def __len__(self) -> int:
+         return len(self.image_paths)
+ 
+     def __getitem__(self, idx: int) -> Dict[str, Any]:
+         img_path = self.image_paths[idx]
+-        image = Image.open(img_path).convert("RGB")
+-        points = self.points_list[idx].copy().astype(np.float32)
+-        
++        if not os.path.exists(img_path):
++            raise FileNotFoundError(f"Image not found: {img_path}")
++
++        with Image.open(img_path) as im:
++            image = im.convert("RGB")
++        points = self.points_list[idx].copy()
++        has_gt = bool(self.has_ground_truth[idx])
++
+         if self.is_train:
+-            # Apply geometric augmentations
+             image_crop, crop_pts = self.geom_transform(image, points)
+-            
+-            # Convert clean image to tensor
+             img_tensor = TF.to_tensor(image_crop)
+             img_clean = TF.normalize(img_tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD)
+-            
+-            # Second view (photometric degradation) with probability second_view_prob
+-            img_degraded = None
+-            if random.random() < self.second_view_prob:
+-                deg_pil = self.photo_transform(image_crop)
++
++            # Always return the same keys so default_collate never fails.
++            use_degraded = random.random() < self.second_view_prob
++            if use_degraded:
++                deg_pil = self.photo_transform(image_crop.copy())
+                 deg_tensor = TF.to_tensor(deg_pil)
+                 img_degraded = TF.normalize(deg_tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD)
+-                
+-            # Build target representations
++            else:
++                # Placeholder only. The criterion must use has_degraded to mask it out.
++                img_degraded = img_clean.clone()
++
+             gt_blocks = build_hierarchical_block_counts(
+                 crop_pts, self.crop_size, self.crop_size, self.hnb_blocks
+             )
+             gt_z_alloc = build_block_constrained_allocation_target(
+-                crop_pts, self.crop_size, self.crop_size, block_size=self.allocation_block, output_stride=4
++                crop_pts,
++                self.crop_size,
++                self.crop_size,
++                block_size=self.allocation_block,
++                output_stride=4,
+             )
+-            gt_count = torch.tensor(len(crop_pts), dtype=torch.float32)
+-            
+-            sample = {
++            gt_count = torch.tensor(float(len(crop_pts)), dtype=torch.float32)
++
++            return {
+                 "image": img_clean,
++                "image_degraded": img_degraded,
++                "has_degraded": torch.tensor(use_degraded, dtype=torch.bool),
+                 "gt_blocks": gt_blocks,
+                 "gt_z_alloc": gt_z_alloc,
+                 "gt_count": gt_count,
++                "has_gt": torch.tensor(True, dtype=torch.bool),
+                 "img_path": img_path,
+             }
+-            if img_degraded is not None:
+-                sample["image_degraded"] = img_degraded
+-                
+-            return sample
+-        else:
+-            # Validation / Testing mode: keep original dimensions
+-            img_tensor = TF.to_tensor(image)
+-            img_norm = TF.normalize(img_tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD)
+-            gt_count = torch.tensor(len(points), dtype=torch.float32)
+-            
+-            return {
+-                "image": img_norm,
+-                "gt_count": gt_count,
+-                "gt_points": points,
+-                "img_path": img_path,
+-            }
++
++        img_tensor = TF.to_tensor(image)
++        img_norm = TF.normalize(img_tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD)
++        gt_count = torch.tensor(float(len(points)) if has_gt else float("nan"), dtype=torch.float32)
++        return {
++            "image": img_norm,
++            "gt_count": gt_count,
++            "gt_points": points,
++            "has_gt": torch.tensor(has_gt, dtype=torch.bool),
++            "img_path": img_path,
++        }
+--- a/counting.py
++++ b/counting.py
+@@ -1,55 +1,56 @@
+-import math
+-from typing import List, Tuple, Dict, Union
++from typing import Dict, Union
++
+ import numpy as np
+ import torch
+ 
+ 
++def _as_flat(x):
++    if isinstance(x, torch.Tensor):
++        x = x.detach().cpu().numpy()
++    return np.asarray(x, dtype=np.float64).reshape(-1)
++
++
++def _validate_pair(predictions, targets):
++    preds, gts = _as_flat(predictions), _as_flat(targets)
++    if preds.shape != gts.shape:
++        raise ValueError(f"Prediction/target shapes differ: {preds.shape} vs {gts.shape}")
++    return preds, gts
++
++
+ def compute_mae(predictions: Union[np.ndarray, torch.Tensor], targets: Union[np.ndarray, torch.Tensor]) -> float:
+-    """Mean Absolute Error (MAE)."""
+-    if isinstance(predictions, torch.Tensor):
+-        predictions = predictions.detach().cpu().numpy()
+-    if isinstance(targets, torch.Tensor):
+-        targets = targets.detach().cpu().numpy()
+-    preds = np.asarray(predictions).flatten()
+-    gts = np.asarray(targets).flatten()
+-    if len(preds) == 0:
+-        return 0.0
+-    return float(np.mean(np.abs(preds - gts)))
++    preds, gts = _validate_pair(predictions, targets)
++    return float(np.mean(np.abs(preds - gts))) if len(preds) else 0.0
+ 
+ 
+ def compute_rmse(predictions: Union[np.ndarray, torch.Tensor], targets: Union[np.ndarray, torch.Tensor]) -> float:
+-    """Root Mean Squared Error (RMSE)."""
+-    if isinstance(predictions, torch.Tensor):
+-        predictions = predictions.detach().cpu().numpy()
+-    if isinstance(targets, torch.Tensor):
+-        targets = targets.detach().cpu().numpy()
+-    preds = np.asarray(predictions).flatten()
+-    gts = np.asarray(targets).flatten()
+-    if len(preds) == 0:
+-        return 0.0
+-    return float(np.sqrt(np.mean((preds - gts) ** 2)))
++    preds, gts = _validate_pair(predictions, targets)
++    return float(np.sqrt(np.mean((preds - gts) ** 2))) if len(preds) else 0.0
+ 
+ 
+-def compute_nae(predictions: Union[np.ndarray, torch.Tensor], targets: Union[np.ndarray, torch.Tensor]) -> float:
+-    """Normalized Absolute Error (NAE)."""
+-    if isinstance(predictions, torch.Tensor):
+-        predictions = predictions.detach().cpu().numpy()
+-    if isinstance(targets, torch.Tensor):
+-        targets = targets.detach().cpu().numpy()
+-    preds = np.asarray(predictions).flatten()
+-    gts = np.asarray(targets).flatten()
+-    if len(preds) == 0:
++def compute_nae(
++    predictions: Union[np.ndarray, torch.Tensor],
++    targets: Union[np.ndarray, torch.Tensor],
++    ignore_zero: bool = True,
++) -> float:
++    """Normalized absolute error.
++
++    NWPU official evaluation uses |pred-gt|/gt only for gt>0; empty samples are
++    excluded from NAE. Set ignore_zero=False only for a custom diagnostic.
++    """
++    preds, gts = _validate_pair(predictions, targets)
++    if not len(preds):
+         return 0.0
+-    return float(np.mean(np.abs(preds - gts) / (gts + 1.0)))
++    if ignore_zero:
++        mask = gts > 0
++        if not np.any(mask):
++            return 0.0
++        return float(np.mean(np.abs(preds[mask] - gts[mask]) / gts[mask]))
++    return float(np.mean(np.abs(preds - gts) / np.maximum(gts, 1.0)))
+ 
+ 
+-def evaluate_counting_metrics(
+-    predictions: Union[np.ndarray, torch.Tensor],
+-    targets: Union[np.ndarray, torch.Tensor],
+-) -> Dict[str, float]:
+-    """Compute standard counting metrics dictionary."""
++def evaluate_counting_metrics(predictions, targets) -> Dict[str, float]:
+     return {
+         "mae": compute_mae(predictions, targets),
+         "rmse": compute_rmse(predictions, targets),
+-        "nae": compute_nae(predictions, targets),
++        "nae": compute_nae(predictions, targets, ignore_zero=True),
+     }
+--- a/criterion.py
++++ b/criterion.py
+@@ -1,6 +1,7 @@
++from typing import Dict, List, Optional, Tuple
++
+ import torch
+ import torch.nn as nn
+-from typing import Dict, List, Tuple, Optional, Any
+ 
+ from .negative_binomial import HierarchicalNBLoss
+ from .allocation import LocalAllocationLoss
+@@ -9,24 +10,19 @@
+ 
+ 
+ class HPCLossCriterion(nn.Module):
+-    """Full HPC-Lite criterion coordinating all training-only objectives:
+-    L = lambda_H * L_HNB + lambda_A * L_alloc + lambda_N * L_HN + lambda_E * L_empty + lambda_G * L_global + lambda_R * L_rob
+-    
+-    Includes curriculum schedule and ablation switches.
+-    """
++    """Full HPC-Lite training criterion with curriculum implemented as multipliers."""
++
+     def __init__(
+         self,
+         block_sizes: List[int],
+         allocation_block: int = 16,
+         quantiles: Optional[Dict[int, Tuple[float, float]]] = None,
+-        # Loss weights
+         lambda_hnb: float = 1.0,
+         lambda_alloc: float = 0.5,
+         lambda_hn: float = 0.25,
+         lambda_empty: float = 0.5,
+         lambda_global: float = 1.0,
+         lambda_rob: float = 0.1,
+-        # Options
+         hard_negative_fraction: float = 0.10,
+         use_stratified_nb: bool = True,
+         use_poisson: bool = False,
+@@ -34,34 +30,57 @@
+         enable_curriculum: bool = True,
+     ):
+         super().__init__()
+-        self.block_sizes = list(block_sizes)
+-        self.allocation_block = allocation_block
+-        self.lambda_hnb = lambda_hnb
+-        self.lambda_alloc = lambda_alloc
+-        self.lambda_hn = lambda_hn
+-        self.lambda_empty = lambda_empty
+-        self.lambda_global = lambda_global
+-        self.lambda_rob = lambda_rob
+-        self.enable_curriculum = enable_curriculum
+-        
+-        # Sub-loss modules
++        self.block_sizes = [int(b) for b in block_sizes]
++        self.allocation_block = int(allocation_block)
++        if self.allocation_block not in self.block_sizes:
++            raise ValueError("allocation_block must be present in block_sizes")
++
++        self.lambda_hnb = float(lambda_hnb)
++        self.lambda_alloc = float(lambda_alloc)
++        self.lambda_hn = float(lambda_hn)
++        self.lambda_empty = float(lambda_empty)
++        self.lambda_global = float(lambda_global)
++        self.lambda_rob = float(lambda_rob)
++        self.enable_curriculum = bool(enable_curriculum)
++
+         self.hnb_loss = HierarchicalNBLoss(
+-            block_sizes=block_sizes,
++            block_sizes=self.block_sizes,
+             quantiles=quantiles,
+             use_stratified=use_stratified_nb,
+             use_poisson=use_poisson,
+         )
+         self.alloc_loss = LocalAllocationLoss(
+-            block_size=allocation_block,
++            block_size=self.allocation_block,
+             output_stride=4,
+         )
+         self.hn_loss = HardNegativeMassLoss(
+             top_fraction=hard_negative_fraction,
+-            block_size=allocation_block,
++            block_size=self.allocation_block,
+         )
+         self.empty_loss = WholeImageEmptyLoss(use_warmup_log=False)
+         self.global_loss = GlobalCountLoss(mode=global_count_mode)
+-        self.rob_loss = RobustConsistencyLoss(block_sizes=block_sizes, output_stride=4)
++        self.rob_loss = RobustConsistencyLoss(block_sizes=self.block_sizes, output_stride=4)
++
++    def _effective_weights(self, progress: float) -> Dict[str, float]:
++        progress = min(max(float(progress), 0.0), 1.0)
++        # Multipliers preserve user-configured lambdas and make lambda=0 a true ablation.
++        if not self.enable_curriculum or progress >= 0.30:
++            factors = dict(hnb=1.0, global_=1.0, alloc=1.0, hn=1.0, empty=1.0, rob=1.0)
++        elif progress < 0.10:
++            # Old effective defaults: HNB=1, Global=1, Alloc=0.25, others=0.
++            factors = dict(hnb=1.0, global_=1.0, alloc=0.5, hn=0.0, empty=0.0, rob=0.0)
++        else:
++            # Old effective defaults: HNB=1, Global=1, Alloc=0.5, HN=0.10, Empty=0.25.
++            factors = dict(hnb=1.0, global_=1.0, alloc=1.0, hn=0.4, empty=0.5, rob=0.0)
++
++        return {
++            "hnb": self.lambda_hnb * factors["hnb"],
++            "global": self.lambda_global * factors["global_"],
++            "alloc": self.lambda_alloc * factors["alloc"],
++            "hn": self.lambda_hn * factors["hn"],
++            "empty": self.lambda_empty * factors["empty"],
++            "rob": self.lambda_rob * factors["rob"],
++        }
+ 
+     def forward(
+         self,
+@@ -70,96 +89,46 @@
+         gt_z_alloc: torch.Tensor,
+         gt_counts: torch.Tensor,
+         d_degraded: Optional[torch.Tensor] = None,
+-        progress: float = 1.0,  # Training progress in [0, 1]
++        degraded_mask: Optional[torch.Tensor] = None,
++        progress: float = 1.0,
+     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+-        """Compute full loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map of clean crop (B, 1, H_out, W_out).
+-            gt_block_counts: Dict of ground-truth integer counts at each scale B.
+-            gt_z_alloc: Block-constrained soft allocation target map (B, H_out, W_out).
+-            gt_counts: Ground-truth image counts (B,).
+-            d_degraded: Optional predicted mass map on degraded crop.
+-            progress: Progress ratio t in [0, 1].
+-            
+-        Returns:
+-            total_loss: Scalar loss.
+-            loss_dict: Dictionary of all loss terms and coefficients.
+-        """
+         loss_dict: Dict[str, torch.Tensor] = {}
+-        
+-        # 1. Hierarchical NB Loss
++
+         l_hnb, hnb_details = self.hnb_loss(d_map, gt_block_counts)
+         loss_dict.update(hnb_details)
+-        loss_dict["loss_hnb"] = l_hnb.detach()
+-        
+-        # 2. Global Count Loss
+         l_global = self.global_loss(d_map, gt_counts)
+-        loss_dict["loss_global"] = l_global.detach()
+-        
+-        # 3. Local Spatial Allocation Loss
+-        y16 = gt_block_counts[self.allocation_block]
+-        l_alloc = self.alloc_loss(d_map, gt_z_alloc, y16)
+-        loss_dict["loss_alloc"] = l_alloc.detach()
+-        
+-        # 4. Hard-Negative False Mass Mining
+-        l_hn = self.hn_loss(d_map, y16)
+-        loss_dict["loss_hn"] = l_hn.detach()
+-        
+-        # 5. Whole-Image Empty Loss
++
++        y_alloc = gt_block_counts[self.allocation_block]
++        l_alloc = self.alloc_loss(d_map, gt_z_alloc, y_alloc)
++        l_hn = self.hn_loss(d_map, y_alloc)
+         l_empty = self.empty_loss(d_map, gt_counts)
+-        loss_dict["loss_empty"] = l_empty.detach()
+-        
+-        # 6. Robustness Consistency Loss (if degraded view provided)
++
+         if d_degraded is not None:
+-            l_rob = self.rob_loss(d_map, d_degraded)
+-            loss_dict["loss_rob"] = l_rob.detach()
++            l_rob = self.rob_loss(d_map, d_degraded, valid_mask=degraded_mask)
+         else:
+             l_rob = d_map.new_zeros(())
+-            loss_dict["loss_rob"] = l_rob.detach()
+-            
+-        # Determine effective loss weights based on curriculum progress
+-        if self.enable_curriculum:
+-            if progress < 0.10:
+-                # Phase A: Count stabilization (0 - 10%)
+-                w_hnb = 1.0
+-                w_global = 1.0
+-                w_alloc = 0.25
+-                w_hn = 0.0
+-                w_empty = 0.0
+-                w_rob = 0.0
+-            elif progress < 0.30:
+-                # Phase B: Spatial + negative learning (10 - 30%)
+-                w_hnb = 1.0
+-                w_global = 1.0
+-                w_alloc = 0.5
+-                w_hn = 0.10
+-                w_empty = 0.25
+-                w_rob = 0.0
+-            else:
+-                # Phase C: Full robust training (30 - 100%)
+-                w_hnb = self.lambda_hnb
+-                w_global = self.lambda_global
+-                w_alloc = self.lambda_alloc
+-                w_hn = self.lambda_hn
+-                w_empty = self.lambda_empty
+-                w_rob = self.lambda_rob
+-        else:
+-            w_hnb = self.lambda_hnb
+-            w_global = self.lambda_global
+-            w_alloc = self.lambda_alloc
+-            w_hn = self.lambda_hn
+-            w_empty = self.lambda_empty
+-            w_rob = self.lambda_rob
+-            
++
++        weights = self._effective_weights(progress)
+         total_loss = (
+-            w_hnb * l_hnb
+-            + w_global * l_global
+-            + w_alloc * l_alloc
+-            + w_hn * l_hn
+-            + w_empty * l_empty
+-            + (w_rob * l_rob if d_degraded is not None else 0.0)
++            weights["hnb"] * l_hnb
++            + weights["global"] * l_global
++            + weights["alloc"] * l_alloc
++            + weights["hn"] * l_hn
++            + weights["empty"] * l_empty
++            + weights["rob"] * l_rob
+         )
+-        
+-        loss_dict["loss_total"] = total_loss.detach()
++
++        for name, value in {
++            "loss_hnb": l_hnb,
++            "loss_global": l_global,
++            "loss_alloc": l_alloc,
++            "loss_hn": l_hn,
++            "loss_empty": l_empty,
++            "loss_rob": l_rob,
++            "loss_total": total_loss,
++        }.items():
++            loss_dict[name] = value.detach()
++        for name, value in weights.items():
++            loss_dict[f"weight_{name}"] = d_map.new_tensor(value)
++
+         return total_loss, loss_dict
+--- a/hard_negative.py
++++ b/hard_negative.py
+@@ -2,109 +2,87 @@
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+-from typing import Optional, List, Tuple
+ from .negative_binomial import sum_pool
+ 
+ 
+ class HardNegativeMassLoss(nn.Module):
+-    """Per-image top-k zero-block false mass mining loss.
+-    Penalizes the highest hallucinated mass in true zero blocks per image.
+-    """
++    """Per-image top-k false-mass penalty on GT-zero blocks."""
++
+     def __init__(self, top_fraction: float = 0.10, block_size: int = 16):
+         super().__init__()
+-        self.top_fraction = top_fraction
+-        self.block_size = block_size
++        if not 0.0 <= top_fraction <= 1.0:
++            raise ValueError("top_fraction must be in [0, 1]")
++        self.top_fraction = float(top_fraction)
++        self.block_size = int(block_size)
+ 
+     def forward(self, d_map: torch.Tensor, gt_y16: torch.Tensor) -> torch.Tensor:
+-        """Compute hard negative loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map (B, 1, H_out, W_out).
+-            gt_y16: Target integer counts at 16x16 scale (B, H_16, W_16) or (B, 1, H_16, W_16).
+-            
+-        Returns:
+-            Scalar loss.
+-        """
+-        # Pool to 16x16 block mass mu^(16)
++        if self.top_fraction == 0.0:
++            return d_map.new_zeros(())
++
+         pred_mu16 = sum_pool(d_map, input_block_size=self.block_size, output_stride=4)
+-        if pred_mu16.dim() == 4 and pred_mu16.shape[1] == 1:
++        if pred_mu16.ndim == 4 and pred_mu16.shape[1] == 1:
+             pred_mu16 = pred_mu16.squeeze(1)
+-            
+-        if gt_y16.dim() == 4 and gt_y16.shape[1] == 1:
++
++        if gt_y16.ndim == 4 and gt_y16.shape[1] == 1:
+             gt_y16 = gt_y16.squeeze(1)
+-            
++        gt_y16 = gt_y16.to(device=pred_mu16.device)
++
++        if gt_y16.shape != pred_mu16.shape:
++            raise ValueError(
++                f"Hard-negative GT shape {tuple(gt_y16.shape)} != pred shape {tuple(pred_mu16.shape)}"
++            )
++
+         losses = []
+         for pred_i, gt_i in zip(pred_mu16, gt_y16):
+-            zero_mask = gt_i.eq(0)
+-            zero_vals = pred_i[zero_mask]
++            zero_vals = pred_i[gt_i.eq(0)]
+             if zero_vals.numel() == 0:
+                 continue
+             k = max(1, int(math.ceil(self.top_fraction * zero_vals.numel())))
+             hard_vals = zero_vals.topk(k, largest=True).values
+-            losses.append(F.smooth_l1_loss(hard_vals, torch.zeros_like(hard_vals)))
+-            
+-        if not losses:
+-            return d_map.new_zeros(())
+-        return torch.stack(losses).mean()
++            losses.append(F.smooth_l1_loss(hard_vals.float(), torch.zeros_like(hard_vals).float()))
++
++        return torch.stack(losses).mean() if losses else d_map.new_zeros(())
+ 
+ 
+ class WholeImageEmptyLoss(nn.Module):
+-    """Direct whole-image empty suppression loss for GT-empty images (C == 0)."""
++    """Directly suppress total predicted mass for GT-empty images."""
++
+     def __init__(self, use_warmup_log: bool = False):
+         super().__init__()
+-        self.use_warmup_log = use_warmup_log
++        self.use_warmup_log = bool(use_warmup_log)
+ 
+     def forward(self, d_map: torch.Tensor, gt_counts: torch.Tensor) -> torch.Tensor:
+-        """Compute empty image loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map (B, 1, H_out, W_out).
+-            gt_counts: Total GT image counts (B,).
+-            
+-        Returns:
+-            Scalar loss.
+-        """
+-        # Predicted image counts: sum(D)
+-        pred_counts = d_map.sum(dim=(-1, -2, -3))  # (B,)
+-        
++        pred_counts = d_map.sum(dim=(-1, -2, -3))
++        gt_counts = gt_counts.to(device=pred_counts.device).reshape(-1)
++        if gt_counts.numel() != pred_counts.numel():
++            raise ValueError("gt_counts batch size does not match d_map")
++
+         empty_mask = gt_counts.eq(0)
+         if not empty_mask.any():
+             return d_map.new_zeros(())
+-            
+         pred_empty = pred_counts[empty_mask]
+-        
+-        if self.use_warmup_log:
+-            return torch.log1p(pred_empty).mean()
+-        else:
+-            return pred_empty.mean()
++        return torch.log1p(pred_empty).mean() if self.use_warmup_log else pred_empty.mean()
+ 
+ 
+ class GlobalCountLoss(nn.Module):
+-    """Global image-level count loss for long-range conservation."""
++    """Global image-level count conservation loss."""
++
+     def __init__(self, mode: str = "log_smooth_l1"):
+         super().__init__()
+-        assert mode in ["log_smooth_l1", "l1", "sqrt_normalized"], f"Unknown mode {mode}"
++        if mode not in {"log_smooth_l1", "l1", "sqrt_normalized"}:
++            raise ValueError(f"Unknown mode {mode}")
+         self.mode = mode
+ 
+     def forward(self, d_map: torch.Tensor, gt_counts: torch.Tensor) -> torch.Tensor:
+-        """Compute global count loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map (B, 1, H_out, W_out).
+-            gt_counts: Total GT image counts (B,).
+-            
+-        Returns:
+-            Scalar loss.
+-        """
+-        pred_counts = d_map.sum(dim=(-1, -2, -3))  # (B,)
+-        gt_counts = gt_counts.to(pred_counts.device).float()
+-        
++        pred_counts = d_map.sum(dim=(-1, -2, -3)).float()
++        gt_counts = gt_counts.to(device=pred_counts.device, dtype=torch.float32).reshape(-1)
++        if gt_counts.shape != pred_counts.shape:
++            raise ValueError(f"gt_counts shape {tuple(gt_counts.shape)} != {tuple(pred_counts.shape)}")
++
+         if self.mode == "log_smooth_l1":
+             return F.smooth_l1_loss(torch.log1p(pred_counts), torch.log1p(gt_counts))
+-        elif self.mode == "l1":
++        if self.mode == "l1":
+             return F.l1_loss(pred_counts, gt_counts)
+-        elif self.mode == "sqrt_normalized":
+-            residual = (pred_counts - gt_counts) / torch.sqrt(gt_counts + 1.0)
+-            return F.smooth_l1_loss(residual, torch.zeros_like(residual))
+-        else:
+-            return F.smooth_l1_loss(torch.log1p(pred_counts), torch.log1p(gt_counts))
++
++        residual = (pred_counts - gt_counts) / torch.sqrt(gt_counts + 1.0)
++        return F.smooth_l1_loss(residual, torch.zeros_like(residual))
+--- a/hpc_lite.py
++++ b/hpc_lite.py
+@@ -2,28 +2,30 @@
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+-from typing import Tuple, Optional, Union, Dict, Any
++from typing import Tuple
+ 
+ from .backbone import MobileNetV4Backbone
+ from .neck import AdditiveFPNNeck
+ 
+ 
+ def inv_softplus(y: float) -> float:
+-    """Stable inverse softplus: b = log(exp(y) - 1)."""
+-    y = max(float(y), 1e-8)
+-    return math.log(math.expm1(y))
++    """Numerically stable inverse of softplus for y > 0.
++
++    softplus^{-1}(y) = log(exp(y) - 1)
++                       = y + log(1 - exp(-y)).
++    The second form avoids overflow for large y.
++    """
++    y = max(float(y), 1e-12)
++    return y + math.log(-math.expm1(-y))
+ 
+ 
+ class HPCLite(nn.Module):
+-    """HPC-Lite: Hierarchical Probabilistic Crowd Counter for Robust Lightweight Deployment.
+-    
+-    Architecture:
+-    Image (3xHxW)
+-      -> MobileNetV4 Backbone (reductions 4, 8, 16)
+-      -> 32-channel Additive Depthwise-Separable FPN Neck
+-      -> 1-channel Softplus count-mass map D at stride 4
+-      -> Count = sum(D)
++    """HPC-Lite lightweight crowd counter.
++
++    Image -> MobileNetV4 features at reductions 4/8/16 -> 32-ch additive FPN
++          -> 1-channel positive count-mass map D at stride 4 -> sum(D).
+     """
++
+     def __init__(
+         self,
+         backbone_name: str = "mobilenetv4_conv_small_050",
+@@ -32,27 +34,28 @@
+         context_dilations: Tuple[int, ...] = (1, 2, 3),
+         eps_d: float = 1e-6,
+         truncate_backbone: bool = True,
++        output_stride: int = 4,
+     ):
+         super().__init__()
+-        self.eps_d = eps_d
+-        self.neck_width = neck_width
+-        
+-        # Backbone
++        self.eps_d = float(eps_d)
++        self.neck_width = int(neck_width)
++        self.output_stride = int(output_stride)
++        if self.output_stride != 4:
++            raise ValueError("Current neck/targets assume output_stride=4")
++
+         self.backbone = MobileNetV4Backbone(
+             model_name=backbone_name,
+             pretrained=pretrained,
+             target_reductions=(4, 8, 16),
+             truncate=truncate_backbone,
+         )
+-        
+-        # Additive Neck
++
+         self.neck = AdditiveFPNNeck(
+             in_channels=self.backbone.out_channels,
+             width=neck_width,
+             context_dilations=context_dilations,
+         )
+-        
+-        # 1-channel mass head: DWConv 3x3 -> GN -> SiLU -> Conv 1x1 -> Softplus
++
+         self.head_dw = nn.Conv2d(
+             neck_width,
+             neck_width,
+@@ -67,68 +70,63 @@
+         self.head_norm = nn.GroupNorm(num_groups, neck_width)
+         self.head_act = nn.SiLU(inplace=True)
+         self.head_out = nn.Conv2d(neck_width, 1, kernel_size=1, bias=True)
+-        
+-        # Default fallback initialization for head bias (-6.0)
++
+         nn.init.constant_(self.head_out.bias, -6.0)
+         nn.init.normal_(self.head_out.weight, std=0.01)
+ 
+-    def init_head_bias_from_data(self, mean_crop_count: float, crop_size: int, output_stride: int = 4):
+-        """Initialize head output bias b_0 such that initial average mass per cell m_0 = mean_crop_count / M."""
+-        grid_h = crop_size // output_stride
+-        grid_w = crop_size // output_stride
+-        m = grid_h * grid_w
+-        m_0 = max(float(mean_crop_count) / max(m, 1), 1e-5)
+-        b_0 = inv_softplus(m_0)
++    def init_head_bias_from_data(
++        self,
++        mean_crop_count: float,
++        crop_size: int,
++        output_stride: int = 4,
++    ) -> None:
++        """Initialize output bias from the expected mean mass per output cell."""
++        grid_h = math.ceil(crop_size / output_stride)
++        grid_w = math.ceil(crop_size / output_stride)
++        n_cells = max(grid_h * grid_w, 1)
++        m0 = max(float(mean_crop_count) / n_cells, 1e-8)
+         with torch.no_grad():
+-            nn.init.constant_(self.head_out.bias, b_0)
++            nn.init.constant_(self.head_out.bias, inv_softplus(m0))
+ 
+     def forward(self, x: torch.Tensor) -> torch.Tensor:
+-        """Forward pass.
+-        
+-        Args:
+-            x: Input image tensor of shape (B, 3, H, W).
+-            
+-        Returns:
+-            D: Stride-4 positive mass map tensor of shape (B, 1, H/4, W/4).
+-        """
++        if x.ndim != 4 or x.shape[1] != 3:
++            raise ValueError(f"Expected input (B,3,H,W), got {tuple(x.shape)}")
+         c4, c8, c16 = self.backbone(x)
+         p4 = self.neck(c4, c8, c16)
+         h = self.head_act(self.head_norm(self.head_dw(p4)))
+         z = self.head_out(h)
+-        d = F.softplus(z) + self.eps_d
+-        return d
++        return F.softplus(z) + self.eps_d
+ 
+     @torch.no_grad()
+     def predict(self, x: torch.Tensor, pad_multiple: int = 16) -> Tuple[torch.Tensor, torch.Tensor]:
+         """Variable-resolution single-scale inference.
+-        
+-        Pads input to multiple of pad_multiple (default 16), executes forward pass,
+-        and crops valid output region corresponding to original H and W.
+-        
+-        Args:
+-            x: Image tensor (B, 3, H, W).
+-            pad_multiple: Multiple to pad H and W to.
+-            
+-        Returns:
+-            count: Total predicted crowd count tensor (B,).
+-            d_valid: Valid predicted mass map (B, 1, H//4, W//4).
++
++        Pads only on right/bottom, then keeps ceil(H/4) x ceil(W/4) output cells.
++        Using floor(H/4) drops valid border content for odd image dimensions.
+         """
+-        b, c, h, w = x.shape
++        if x.ndim != 4:
++            raise ValueError(f"Expected 4D input, got {tuple(x.shape)}")
++        if pad_multiple <= 0:
++            raise ValueError("pad_multiple must be > 0")
++
++        _, _, h, w = x.shape
+         pad_h = (pad_multiple - (h % pad_multiple)) % pad_multiple
+         pad_w = (pad_multiple - (w % pad_multiple)) % pad_multiple
+-        
++
+         if pad_h > 0 or pad_w > 0:
+-            x_padded = F.pad(x, (0, pad_w, 0, pad_h), mode="reflect")
+-        else:
+-            x_padded = x
+-            
+-        d_padded = self.forward(x_padded)
+-        
+-        # Valid output dimensions at stride 4
+-        out_h = h // 4
+-        out_w = w // 4
++            # reflect requires padding smaller than the corresponding input dimension.
++            mode = "reflect" if (pad_h < h and pad_w < w) else "replicate"
++            x = F.pad(x, (0, pad_w, 0, pad_h), mode=mode)
++
++        d_padded = self.forward(x)
++        out_h = math.ceil(h / self.output_stride)
++        out_w = math.ceil(w / self.output_stride)
++        if d_padded.shape[-2] < out_h or d_padded.shape[-1] < out_w:
++            raise RuntimeError(
++                f"Backbone output {tuple(d_padded.shape[-2:])} is smaller than required "
++                f"valid map {(out_h, out_w)}"
++            )
++
+         d_valid = d_padded[..., :out_h, :out_w]
+-        
+-        # Exact sum of valid mass cells
+         count = d_valid.sum(dim=(-1, -2, -3))
+         return count, d_valid
+--- a/logging.py
++++ b/logging.py
+@@ -1,34 +1,44 @@
+-import os
+ import csv
+-import sys
+-from typing import Dict, Any, List, Optional
++import os
++from typing import Any, Dict, List, Optional
+ 
+ 
+ class CSVLogger:
+-    """CSV metric logger."""
++    """CSV logger that expands the schema instead of silently dropping new metrics."""
++
+     def __init__(self, filepath: str, fieldnames: Optional[List[str]] = None):
+         self.filepath = filepath
+-        self.fieldnames = fieldnames
+-        self.file_initialized = os.path.exists(filepath)
++        self.fieldnames = list(fieldnames) if fieldnames else None
++        self.file_initialized = os.path.exists(filepath) and os.path.getsize(filepath) > 0
+         if self.file_initialized and self.fieldnames is None:
+-            try:
+-                with open(filepath, "r", newline="", encoding="utf-8") as f:
+-                    reader = csv.reader(f)
+-                    self.fieldnames = next(reader, None)
+-            except Exception:
+-                self.file_initialized = False
++            with open(filepath, "r", newline="", encoding="utf-8") as f:
++                self.fieldnames = next(csv.reader(f), None)
++
++    def _expand_schema(self, row: Dict[str, Any]) -> None:
++        missing = [k for k in row if k not in (self.fieldnames or [])]
++        if not missing:
++            return
++        old_rows = []
++        if self.file_initialized:
++            with open(self.filepath, "r", newline="", encoding="utf-8") as f:
++                old_rows = list(csv.DictReader(f))
++        self.fieldnames = list(self.fieldnames or []) + missing
++        os.makedirs(os.path.dirname(os.path.abspath(self.filepath)), exist_ok=True)
++        with open(self.filepath, "w", newline="", encoding="utf-8") as f:
++            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
++            writer.writeheader()
++            writer.writerows(old_rows)
++        self.file_initialized = True
+ 
+-    def log(self, row: Dict[str, Any]):
+-        if not self.file_initialized or not self.fieldnames:
+-            if self.fieldnames is None:
+-                self.fieldnames = list(row.keys())
++    def log(self, row: Dict[str, Any]) -> None:
++        if self.fieldnames is None:
++            self.fieldnames = list(row.keys())
++        if not self.file_initialized:
+             os.makedirs(os.path.dirname(os.path.abspath(self.filepath)), exist_ok=True)
+             with open(self.filepath, "w", newline="", encoding="utf-8") as f:
+-                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
+-                writer.writeheader()
++                csv.DictWriter(f, fieldnames=self.fieldnames).writeheader()
+             self.file_initialized = True
+-            
++        self._expand_schema(row)
+         with open(self.filepath, "a", newline="", encoding="utf-8") as f:
+-            writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction="ignore")
+-            writer.writerow(row)
++            csv.DictWriter(f, fieldnames=self.fieldnames).writerow(row)
+             f.flush()
+--- a/negative_binomial.py
++++ b/negative_binomial.py
+@@ -1,43 +1,44 @@
+ import math
++from typing import Dict, List, Optional, Tuple
++
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+-from typing import List, Tuple, Dict, Optional, Union
+-from ..models.hpc_lite import inv_softplus
++
++
++_MAX_DISPERSION = 1e4
++
++
++def _inv_softplus(y: float) -> float:
++    y = max(float(y), 1e-12)
++    return y + math.log(-math.expm1(-y))
+ 
+ 
+ def sum_pool(x: torch.Tensor, input_block_size: int, output_stride: int = 4) -> torch.Tensor:
+-    """Exact sum-pooling of stride-4 mass map over spatial blocks of size input_block_size.
+-    
+-    Args:
+-        x: Mass map tensor of shape (B, C, H_out, W_out).
+-        input_block_size: Input pixel block size B (e.g. 16, 32, 64, 96).
+-        output_stride: Output stride s_D (default 4).
+-        
+-    Returns:
+-        Pooled block mass map of shape (B, C, H_out // k, W_out // k).
+-    """
+-    assert input_block_size % output_stride == 0, (
+-        f"input_block_size ({input_block_size}) must be divisible by output_stride ({output_stride})"
+-    )
++    """Exact non-overlapping sum pooling over blocks measured in input pixels."""
++    if input_block_size % output_stride != 0:
++        raise ValueError(
++            f"input_block_size ({input_block_size}) must be divisible by output_stride ({output_stride})"
++        )
+     k = input_block_size // output_stride
+-    assert x.shape[-2] % k == 0, f"H_out ({x.shape[-2]}) must be divisible by k ({k})"
+-    assert x.shape[-1] % k == 0, f"W_out ({x.shape[-1]}) must be divisible by k ({k})"
+-    return F.avg_pool2d(x, kernel_size=k, stride=k) * (k * k)
++    if x.shape[-2] % k != 0 or x.shape[-1] % k != 0:
++        raise ValueError(
++            f"Output map {tuple(x.shape[-2:])} must be divisible by pooling kernel {k}"
++        )
++    return F.avg_pool2d(x, kernel_size=k, stride=k) * float(k * k)
+ 
+ 
+ def nb_nll(y: torch.Tensor, mu: torch.Tensor, r: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+-    """Stable float32 Negative Binomial negative log-likelihood.
+-    
+-    y: Non-negative integer-valued target count tensor (floats).
+-    mu: Positive predicted mean mass tensor.
+-    r: Positive dispersion scalar/tensor broadcastable to mu.
++    """Negative-Binomial NLL parameterized by mean mu and dispersion r.
++
++    Var(Y)=mu+mu^2/r. Computed in float32 even under autocast.
+     """
+-    # Enforce float32 even under AMP
+     y = y.float()
+     mu = mu.float().clamp_min(eps)
+-    r = r.float().clamp_min(eps)
+-    
++    r = r.float().clamp(min=eps, max=_MAX_DISPERSION)
++    if torch.any(y < 0):
++        raise ValueError("Negative-Binomial targets must be non-negative")
++
+     log_r_plus_mu = torch.log(r + mu)
+     log_prob = (
+         torch.lgamma(y + r)
+@@ -50,51 +51,69 @@
+ 
+ 
+ def poisson_nll(y: torch.Tensor, mu: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+-    """Stable float32 Poisson negative log-likelihood baseline for ablation."""
++    """Poisson NLL baseline, including the parameter-independent log(y!) term."""
+     y = y.float()
+     mu = mu.float().clamp_min(eps)
+-    log_prob = y * torch.log(mu) - mu - torch.lgamma(y + 1.0)
+-    return -log_prob
++    if torch.any(y < 0):
++        raise ValueError("Poisson targets must be non-negative")
++    return -(y * torch.log(mu) - mu - torch.lgamma(y + 1.0))
+ 
+ 
+ class HierarchicalNBLoss(nn.Module):
+-    """Hierarchical Negative Binomial Loss with density-stratified block risk reduction."""
++    """Hierarchical NB loss with optional density-stratified risk reduction."""
++
+     def __init__(
+         self,
+         block_sizes: List[int],
+         quantiles: Optional[Dict[int, Tuple[float, float]]] = None,
+         use_stratified: bool = True,
+         use_poisson: bool = False,
++        max_dispersion: float = _MAX_DISPERSION,
+     ):
+         super().__init__()
+-        self.block_sizes = list(block_sizes)
+-        self.use_stratified = use_stratified
+-        self.use_poisson = use_poisson
+-        
+-        # Quantiles per scale: {B: (q50_pos, q90_pos)}
+-        self.quantiles = quantiles or {}
+-        
+-        # Learnable dispersion parameter eta_B per scale: r_B = softplus(eta_B) + 1e-4
+-        if not use_poisson:
++        if not block_sizes:
++            raise ValueError("block_sizes cannot be empty")
++        self.block_sizes = [int(b) for b in block_sizes]
++        self.use_stratified = bool(use_stratified)
++        self.use_poisson = bool(use_poisson)
++        self.max_dispersion = float(max_dispersion)
++
++        # Config files often deserialize dictionary keys as strings.
++        self.quantiles: Dict[int, Tuple[float, float]] = {}
++        for k, q in (quantiles or {}).items():
++            q50, q90 = float(q[0]), float(q[1])
++            if q50 > q90:
++                raise ValueError(f"Invalid quantiles for block {k}: q50={q50} > q90={q90}")
++            self.quantiles[int(k)] = (q50, q90)
++
++        if not self.use_poisson:
+             self.raw_dispersions = nn.ParameterDict({
+-                str(b): nn.Parameter(torch.tensor(inv_softplus(10.0), dtype=torch.float32))
++                str(b): nn.Parameter(torch.tensor(_inv_softplus(10.0), dtype=torch.float32))
+                 for b in self.block_sizes
+             })
+-            
++
+     def get_dispersion(self, block_size: int) -> torch.Tensor:
+-        """Get positive dispersion scalar r_B for scale B."""
++        if self.use_poisson:
++            raise RuntimeError("Dispersion is undefined in Poisson mode")
+         raw = self.raw_dispersions[str(block_size)]
+-        return F.softplus(raw) + 1e-4
++        return (F.softplus(raw) + 1e-4).clamp_max(self.max_dispersion)
+ 
+-    def init_dispersion_from_stats(self, block_size: int, mean: float, var: float):
+-        """Initialize dispersion r_B via method of moments."""
++    def init_dispersion_from_stats(self, block_size: int, mean: float, var: float) -> None:
++        """Method-of-moments initialization with a finite Poisson-limit cap."""
+         if self.use_poisson:
+             return
+-        if var > mean and (var - mean) > 1e-6:
+-            r0 = max((mean * mean) / (var - mean), 1e-3)
++        mean, var = float(mean), float(var)
++        if mean < 0 or var < 0 or not math.isfinite(mean) or not math.isfinite(var):
++            raise ValueError(f"Invalid mean/var: mean={mean}, var={var}")
++
++        if var > mean and (var - mean) > 1e-8:
++            r0 = (mean * mean) / (var - mean)
+         else:
+-            r0 = 100.0  # Approx Poisson
+-        raw_val = inv_softplus(max(r0 - 1e-4, 1e-6))
++            # NB approaches Poisson as r -> infinity. A finite cap is enough numerically.
++            r0 = self.max_dispersion
++        r0 = min(max(r0, 1e-3), self.max_dispersion)
++
++        raw_val = _inv_softplus(max(r0 - 1e-4, 1e-8))
+         with torch.no_grad():
+             self.raw_dispersions[str(block_size)].fill_(raw_val)
+ 
+@@ -103,59 +122,51 @@
+         d_map: torch.Tensor,
+         gt_block_counts: Dict[int, torch.Tensor],
+     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+-        """Compute hierarchical NB loss.
+-        
+-        Args:
+-            d_map: Predicted stride-4 mass map (B, 1, H_out, W_out).
+-            gt_block_counts: Dict mapping scale B -> target count tensor (B, H_B, W_B) or (B, 1, H_B, W_B).
+-            
+-        Returns:
+-            total_hnb_loss: Scalar loss.
+-            loss_dict: Dictionary of per-scale losses and dispersions.
+-        """
+-        loss_dict = {}
++        loss_dict: Dict[str, torch.Tensor] = {}
+         scale_losses = []
+-        
++
+         for b in self.block_sizes:
+-            pred_mu = sum_pool(d_map, input_block_size=b, output_stride=4)  # (B, 1, H_B, W_B)
+-            if pred_mu.shape[1] == 1:
++            if b not in gt_block_counts:
++                raise KeyError(f"Missing GT block counts for scale {b}")
++
++            pred_mu = sum_pool(d_map, input_block_size=b, output_stride=4)
++            if pred_mu.ndim == 4 and pred_mu.shape[1] == 1:
+                 pred_mu = pred_mu.squeeze(1)
+-                
++
+             gt_y = gt_block_counts[b]
+-            if gt_y.dim() == 4 and gt_y.shape[1] == 1:
++            if gt_y.ndim == 4 and gt_y.shape[1] == 1:
+                 gt_y = gt_y.squeeze(1)
+-                
+-            gt_y = gt_y.to(pred_mu.device).float()
+-            
++            gt_y = gt_y.to(device=pred_mu.device, dtype=torch.float32)
++
++            if gt_y.shape != pred_mu.shape:
++                raise ValueError(
++                    f"Scale {b}: GT shape {tuple(gt_y.shape)} != prediction shape {tuple(pred_mu.shape)}"
++                )
++
+             if self.use_poisson:
+                 pointwise_loss = poisson_nll(gt_y, pred_mu)
+             else:
+                 r_b = self.get_dispersion(b)
+                 pointwise_loss = nb_nll(gt_y, pred_mu, r_b)
+                 loss_dict[f"dispersion_{b}"] = r_b.detach()
+-                
++
+             if self.use_stratified and b in self.quantiles:
+                 q50, q90 = self.quantiles[b]
+-                # Groups: G0 (y=0), G1 (0 < y <= q50), G2 (q50 < y <= q90), G3 (y > q90)
+-                g0_mask = (gt_y == 0)
+-                g1_mask = (gt_y > 0) & (gt_y <= q50)
+-                g2_mask = (gt_y > q50) & (gt_y <= q90)
+-                g3_mask = (gt_y > q90)
+-                
+-                group_losses = []
+-                for g_mask in [g0_mask, g1_mask, g2_mask, g3_mask]:
+-                    if g_mask.any():
+-                        group_losses.append(pointwise_loss[g_mask].mean())
+-                        
+-                if len(group_losses) > 0:
+-                    scale_loss = torch.stack(group_losses).mean()
+-                else:
+-                    scale_loss = pointwise_loss.mean()
++                masks = [
++                    gt_y == 0,
++                    (gt_y > 0) & (gt_y <= q50),
++                    (gt_y > q50) & (gt_y <= q90),
++                    gt_y > q90,
++                ]
++                group_losses = [pointwise_loss[m].mean() for m in masks if m.any()]
++                scale_loss = torch.stack(group_losses).mean() if group_losses else pointwise_loss.mean()
+             else:
+                 scale_loss = pointwise_loss.mean()
+-                
++
++            if not torch.isfinite(scale_loss):
++                raise FloatingPointError(f"Non-finite NB/Poisson loss at block scale {b}")
+             scale_losses.append(scale_loss)
+             loss_dict[f"hnb_scale_{b}"] = scale_loss.detach()
+-            
++
+         total_loss = torch.stack(scale_losses).mean() if scale_losses else d_map.new_zeros(())
+         return total_loss, loss_dict
+--- a/nwpu.py
++++ b/nwpu.py
+@@ -1,16 +1,38 @@
+-import os
+ import json
++import os
++from typing import Any, Dict, List, Optional, Tuple
++
+ import numpy as np
+ import scipy.io as sio
+-from typing import List, Tuple, Dict, Optional, Any
++
+ from .common import BaseCrowdDataset
+ 
+ 
++def _validate_points(points, source: str) -> np.ndarray:
++    arr = np.asarray(points)
++    if arr.dtype == object and arr.shape == ():
++        arr = arr.item()
++    if isinstance(arr, dict):
++        arr = arr.get("points", arr.get("annPoints", None))
++        if arr is None:
++            raise KeyError(f"No points/annPoints in {source}")
++    arr = np.asarray(arr, dtype=np.float32)
++    if arr.size == 0:
++        return np.empty((0, 2), dtype=np.float32)
++    arr = np.squeeze(arr)
++    if arr.ndim == 1 and arr.size == 2:
++        arr = arr.reshape(1, 2)
++    if arr.ndim != 2 or arr.shape[1] != 2:
++        raise ValueError(f"Invalid NWPU point array in {source}: shape={arr.shape}")
++    if not np.isfinite(arr).all():
++        raise ValueError(f"Non-finite NWPU coordinate in {source}")
++    return arr.astype(np.float32, copy=False)
++
++
+ def load_nwpu_points(ann_path: str) -> np.ndarray:
+-    """Load point coordinates from NWPU .mat, .npy, or .json file."""
++    """Strict NWPU loader. A valid empty annotation returns (0,2); missing/corrupt files raise."""
+     if not os.path.exists(ann_path):
+-        return np.zeros((0, 2), dtype=np.float32)
+-        
++        raise FileNotFoundError(f"NWPU annotation not found: {ann_path}")
+     ext = os.path.splitext(ann_path)[1].lower()
+     try:
+         if ext == ".mat":
+@@ -20,44 +42,48 @@
+             elif "points" in mat:
+                 pts = mat["points"]
+             else:
+-                pts = np.zeros((0, 2), dtype=np.float32)
+-                for k, v in mat.items():
+-                    if isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2:
+-                        pts = v
+-                        break
+-            return pts.astype(np.float32)
++                candidates = [
++                    v for k, v in mat.items()
++                    if not k.startswith("__") and isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2
++                ]
++                if len(candidates) != 1:
++                    raise KeyError("Could not uniquely locate point array")
++                pts = candidates[0]
+         elif ext == ".npy":
+             data = np.load(ann_path, allow_pickle=True)
+-            if isinstance(data, dict) and "points" in data:
+-                pts = data["points"]
+-            else:
+-                pts = data
+-            return np.array(pts, dtype=np.float32)
++            if isinstance(data, np.ndarray) and data.dtype == object and data.shape == ():
++                data = data.item()
++            pts = data
+         elif ext == ".json":
+-            with open(ann_path, "r") as f:
++            with open(ann_path, "r", encoding="utf-8") as f:
+                 data = json.load(f)
+-            if "points" in data:
+-                pts = np.array(data["points"], dtype=np.float32)
+-            else:
+-                pts = np.array(data, dtype=np.float32)
+-            return pts
++            pts = data.get("points", data.get("annPoints", data)) if isinstance(data, dict) else data
+         elif ext == ".txt":
+-            pts = np.loadtxt(ann_path)
+-            if pts.ndim == 1 and len(pts) == 2:
+-                pts = pts[None, :]
+-            return pts.astype(np.float32)
++            if os.path.getsize(ann_path) == 0:
++                pts = np.empty((0, 2), dtype=np.float32)
++            else:
++                pts = np.loadtxt(ann_path, dtype=np.float32)
+         else:
+-            return np.zeros((0, 2), dtype=np.float32)
+-    except Exception:
+-        return np.zeros((0, 2), dtype=np.float32)
++            raise ValueError(f"Unsupported NWPU annotation extension: {ext}")
++        return _validate_points(pts, ann_path)
++    except Exception as exc:
++        raise RuntimeError(f"Failed to parse NWPU annotation {ann_path}: {exc}") from exc
++
++
++def _find_annotation(stem: str, gt_dirs: List[str]) -> Optional[str]:
++    for d in gt_dirs:
++        for ext in (".mat", ".npy", ".json", ".txt"):
++            p = os.path.join(d, stem + ext)
++            if os.path.exists(p):
++                return p
++    return None
+ 
+ 
+ class NWPUDataset(BaseCrowdDataset):
+-    """NWPU-Crowd dataset loader with support for empty scenes, dense crowds, and splits."""
+     def __init__(
+         self,
+         root: str,
+-        split: str = "train",  # "train", "val", or "test"
++        split: str = "train",
+         crop_size: int = 672,
+         hnb_blocks: List[int] = (16, 32, 96),
+         allocation_block: int = 16,
+@@ -69,59 +95,66 @@
+         split_file: Optional[str] = None,
+     ):
+         img_dir = os.path.join(root, "images")
+-        gt_dir = os.path.join(root, "mats")
+-        if not os.path.exists(gt_dir):
+-            gt_dir = os.path.join(root, "ground_truth")
+-        if not os.path.exists(gt_dir):
+-            gt_dir = os.path.join(root, "jsons")
+-            
+-        # If split_file (e.g. train.txt, val.txt) is provided or exists
++        if not os.path.isdir(img_dir):
++            raise FileNotFoundError(f"NWPU image directory not found: {img_dir}")
++
++        gt_dirs = [
++            p for p in [
++                os.path.join(root, "mats"),
++                os.path.join(root, "ground_truth"),
++                os.path.join(root, "jsons"),
++                root,
++            ] if os.path.isdir(p)
++        ]
++
+         if split_file is None:
+             candidate = os.path.join(root, f"{split}.txt")
+             if os.path.exists(candidate):
+                 split_file = candidate
+-                
+-        image_paths = []
+-        points_list = []
+-        
+-        if split_file and os.path.exists(split_file):
+-            with open(split_file, "r") as f:
+-                lines = [line.strip() for line in f if line.strip()]
+-            for line in lines:
+-                parts = line.split()
+-                img_id = parts[0]
+-                if not img_id.lower().endswith((".jpg", ".png", ".jpeg")):
+-                    img_id = f"{img_id}.jpg"
+-                img_path = os.path.join(img_dir, img_id)
+-                stem = os.path.splitext(img_id)[0]
+-                
+-                # Check .mat, .npy, .json in gt_dir
+-                ann_path = os.path.join(gt_dir, f"{stem}.mat")
+-                if not os.path.exists(ann_path):
+-                    ann_path = os.path.join(gt_dir, f"{stem}.npy")
+-                if not os.path.exists(ann_path):
+-                    ann_path = os.path.join(gt_dir, f"{stem}.json")
+-                if not os.path.exists(ann_path):
+-                    ann_path = os.path.join(gt_dir, f"{stem}.txt")
+-                    
+-                pts = load_nwpu_points(ann_path)
+-                image_paths.append(img_path)
+-                points_list.append(pts)
+-        elif os.path.exists(img_dir):
+-            for img_name in sorted(os.listdir(img_dir)):
+-                if not img_name.lower().endswith((".jpg", ".png", ".jpeg")):
+-                    continue
+-                img_path = os.path.join(img_dir, img_name)
+-                stem = os.path.splitext(img_name)[0]
+-                ann_path = os.path.join(gt_dir, f"{stem}.mat")
+-                if not os.path.exists(ann_path):
+-                    ann_path = os.path.join(gt_dir, f"{stem}.npy")
+-                if not os.path.exists(ann_path):
+-                    ann_path = os.path.join(gt_dir, f"{stem}.json")
++
++        allow_missing_gt = split.lower() == "test" and not is_train
++        image_paths: List[str] = []
++        points_list: List[np.ndarray] = []
++        has_gt_list: List[bool] = []
++
++        if split_file is not None:
++            if not os.path.exists(split_file):
++                raise FileNotFoundError(f"NWPU split file not found: {split_file}")
++            with open(split_file, "r", encoding="utf-8") as f:
++                ids = [line.split()[0] for line in f if line.strip()]
++            image_names = [x if x.lower().endswith((".jpg", ".png", ".jpeg")) else f"{x}.jpg" for x in ids]
++        else:
++            # Do not silently treat the full image directory as a requested train/val split
++            # when a split file is expected.
++            if split.lower() not in {"all", "test"}:
++                raise FileNotFoundError(
++                    f"No split file for split='{split}'. Provide split_file explicitly to avoid split leakage."
++                )
++            image_names = sorted(
++                n for n in os.listdir(img_dir) if n.lower().endswith((".jpg", ".png", ".jpeg"))
++            )
++
++        for img_name in image_names:
++            img_path = os.path.join(img_dir, img_name)
++            if not os.path.exists(img_path):
++                raise FileNotFoundError(f"NWPU image listed but missing: {img_path}")
++            stem = os.path.splitext(img_name)[0]
++            ann_path = _find_annotation(stem, gt_dirs)
++            if ann_path is None:
++                if not allow_missing_gt:
++                    raise FileNotFoundError(f"Missing NWPU annotation for {img_path}")
++                pts = np.empty((0, 2), dtype=np.float32)
++                has_gt = False
++            else:
+                 pts = load_nwpu_points(ann_path)
+-                image_paths.append(img_path)
+-                points_list.append(pts)
+-                
++                has_gt = True
++            image_paths.append(img_path)
++            points_list.append(pts)
++            has_gt_list.append(has_gt)
++
++        if not image_paths:
++            raise RuntimeError("NWPU dataset resolved to zero images")
++
+         super().__init__(
+             image_paths=image_paths,
+             points_list=points_list,
+@@ -133,4 +166,5 @@
+             flip_prob=flip_prob,
+             second_view_prob=second_view_prob,
+             photometric_cfg=photometric_cfg,
++            has_ground_truth=has_gt_list,
+         )
+--- a/qnrf.py
++++ b/qnrf.py
+@@ -1,13 +1,29 @@
+ import os
+-import glob
++from typing import Any, Dict, List, Optional, Tuple
++
+ import numpy as np
+ import scipy.io as sio
+-from typing import List, Tuple, Dict, Optional, Any
++
+ from .common import BaseCrowdDataset
+ 
+ 
++def _validate_points(points, source: str) -> np.ndarray:
++    arr = np.asarray(points, dtype=np.float32)
++    if arr.size == 0:
++        return np.empty((0, 2), dtype=np.float32)
++    arr = np.squeeze(arr)
++    if arr.ndim == 1 and arr.size == 2:
++        arr = arr.reshape(1, 2)
++    if arr.ndim != 2 or arr.shape[1] != 2:
++        raise ValueError(f"Invalid point array in {source}: {arr.shape}")
++    if not np.isfinite(arr).all():
++        raise ValueError(f"Non-finite point coordinate in {source}")
++    return arr.astype(np.float32, copy=False)
++
++
+ def load_qnrf_mat_points(mat_path: str) -> np.ndarray:
+-    """Load point coordinates from UCF-QNRF _ann.mat file."""
++    if not os.path.exists(mat_path):
++        raise FileNotFoundError(f"UCF-QNRF annotation not found: {mat_path}")
+     try:
+         mat = sio.loadmat(mat_path)
+         if "annPoints" in mat:
+@@ -15,22 +31,23 @@
+         elif "points" in mat:
+             points = mat["points"]
+         else:
+-            points = np.zeros((0, 2), dtype=np.float32)
+-            for k, v in mat.items():
+-                if isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2:
+-                    points = v
+-                    break
+-        return points.astype(np.float32)
+-    except Exception:
+-        return np.zeros((0, 2), dtype=np.float32)
++            candidates = [
++                v for k, v in mat.items()
++                if not k.startswith("__") and isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2
++            ]
++            if len(candidates) != 1:
++                raise KeyError(f"Could not uniquely find point array in {mat_path}")
++            points = candidates[0]
++        return _validate_points(points, mat_path)
++    except Exception as exc:
++        raise RuntimeError(f"Failed to parse UCF-QNRF annotation {mat_path}: {exc}") from exc
+ 
+ 
+ class UCFQNRFDataset(BaseCrowdDataset):
+-    """UCF-QNRF crowd dataset loader."""
+     def __init__(
+         self,
+         root: str,
+-        split: str = "Train",  # "Train" or "Test"
++        split: str = "Train",
+         crop_size: int = 672,
+         hnb_blocks: List[int] = (16, 32, 96),
+         allocation_block: int = 16,
+@@ -41,28 +58,24 @@
+         photometric_cfg: Optional[Dict[str, Any]] = None,
+     ):
+         split_dir = os.path.join(root, split)
+-        image_paths = []
+-        points_list = []
+-        
+-        if os.path.exists(split_dir):
+-            for img_name in sorted(os.listdir(split_dir)):
+-                if not img_name.lower().endswith((".jpg", ".png", ".jpeg")):
+-                    continue
+-                if "_ann" in img_name:
+-                    continue
+-                img_path = os.path.join(split_dir, img_name)
+-                stem = os.path.splitext(img_name)[0]
+-                mat_name = f"{stem}_ann.mat"
+-                mat_path = os.path.join(split_dir, mat_name)
+-                
+-                if os.path.exists(mat_path):
+-                    pts = load_qnrf_mat_points(mat_path)
+-                else:
+-                    pts = np.zeros((0, 2), dtype=np.float32)
+-                    
+-                image_paths.append(img_path)
+-                points_list.append(pts)
+-                
++        if not os.path.isdir(split_dir):
++            raise FileNotFoundError(f"UCF-QNRF split directory not found: {split_dir}")
++
++        image_paths, points_list = [], []
++        for img_name in sorted(os.listdir(split_dir)):
++            if not img_name.lower().endswith((".jpg", ".png", ".jpeg")) or "_ann" in img_name:
++                continue
++            img_path = os.path.join(split_dir, img_name)
++            stem = os.path.splitext(img_name)[0]
++            mat_path = os.path.join(split_dir, f"{stem}_ann.mat")
++            if not os.path.exists(mat_path):
++                raise FileNotFoundError(f"Missing UCF-QNRF annotation for {img_path}: {mat_path}")
++            image_paths.append(img_path)
++            points_list.append(load_qnrf_mat_points(mat_path))
++
++        if not image_paths:
++            raise RuntimeError(f"No UCF-QNRF images found in {split_dir}")
++
+         super().__init__(
+             image_paths=image_paths,
+             points_list=points_list,
+--- a/robustness.py
++++ b/robustness.py
+@@ -1,41 +1,46 @@
++from typing import List, Optional
++
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+-from typing import List, Dict
++
+ from .negative_binomial import sum_pool
+ 
+ 
+ class RobustConsistencyLoss(nn.Module):
+-    """Clean -> degraded multi-scale consistency loss.
+-    Supervises degraded image predictions using the clean prediction as a detached teacher.
+-    """
++    """Clean -> degraded multi-scale count consistency with detached clean teacher."""
++
+     def __init__(self, block_sizes: List[int], output_stride: int = 4):
+         super().__init__()
+         self.block_sizes = list(block_sizes)
+-        self.output_stride = output_stride
++        self.output_stride = int(output_stride)
++
++    def forward(
++        self,
++        d_clean: torch.Tensor,
++        d_degraded: torch.Tensor,
++        valid_mask: Optional[torch.Tensor] = None,
++    ) -> torch.Tensor:
++        if d_clean.shape != d_degraded.shape:
++            raise ValueError(
++                f"clean/degraded map shapes differ: {tuple(d_clean.shape)} vs {tuple(d_degraded.shape)}"
++            )
++
++        if valid_mask is not None:
++            valid_mask = valid_mask.to(device=d_clean.device, dtype=torch.bool).reshape(-1)
++            if valid_mask.numel() != d_clean.shape[0]:
++                raise ValueError("valid_mask length must equal batch size")
++            if not valid_mask.any():
++                return d_clean.new_zeros(())
++            d_clean = d_clean[valid_mask]
++            d_degraded = d_degraded[valid_mask]
+ 
+-    def forward(self, d_clean: torch.Tensor, d_degraded: torch.Tensor) -> torch.Tensor:
+-        """Compute consistency loss.
+-        
+-        Args:
+-            d_clean: Predicted stride-4 mass map of clean image (B, 1, H_out, W_out).
+-            d_degraded: Predicted stride-4 mass map of degraded image (B, 1, H_out, W_out).
+-            
+-        Returns:
+-            Scalar loss.
+-        """
+         scale_losses = []
+         for b in self.block_sizes:
+             mu_clean = sum_pool(d_clean, input_block_size=b, output_stride=self.output_stride)
+             mu_deg = sum_pool(d_degraded, input_block_size=b, output_stride=self.output_stride)
+-            
+-            # Detach teacher (clean prediction)
+-            teacher_log = torch.log1p(mu_clean).detach()
+-            student_log = torch.log1p(mu_deg)
+-            
+-            loss_b = F.smooth_l1_loss(student_log, teacher_log)
+-            scale_losses.append(loss_b)
+-            
+-        if not scale_losses:
+-            return d_clean.new_zeros(())
+-        return torch.stack(scale_losses).mean()
++            teacher_log = torch.log1p(mu_clean.float()).detach()
++            student_log = torch.log1p(mu_deg.float())
++            scale_losses.append(F.smooth_l1_loss(student_log, teacher_log))
++
++        return torch.stack(scale_losses).mean() if scale_losses else d_clean.new_zeros(())
+--- a/sampler.py
++++ b/sampler.py
+@@ -1,31 +1,20 @@
+ import math
+-from typing import List, Tuple, Dict, Optional, Any
++from typing import Any, Dict, List, Optional, Tuple
++
+ import numpy as np
+-from PIL import Image
+ import torch
+-from torch.utils.data import Sampler, WeightedRandomSampler
++from PIL import Image
++from torch.utils.data import WeightedRandomSampler
+ 
+ 
+-def compute_image_density_and_luminance(
+-    image_path: str,
+-    points: np.ndarray,
+-) -> Tuple[float, float, int]:
+-    """Extract training-only density and luminance statistics for one image.
+-    
+-    Returns:
+-        density_scalar: log(1 + 10^6 * count / (H * W))
+-        luminance: Mean grayscale intensity in [0, 255]
+-        count: Total point count
+-    """
+-    count = len(points)
++def compute_image_density_and_luminance(image_path: str, points: np.ndarray) -> Tuple[float, float, int]:
++    count = int(len(points))
+     with Image.open(image_path) as img:
+         w, h = img.size
+-        # Fast luminance calculation: resize to 64x64 grayscale
+         gray = img.convert("L").resize((64, 64), Image.Resampling.BILINEAR)
+-        lum = float(np.mean(np.array(gray)))
+-        
++        lum = float(np.mean(np.asarray(gray)))
+     area = max(float(w * h), 1.0)
+-    density_scalar = math.log1p(1e6 * float(count) / area)
++    density_scalar = math.log1p(1e6 * count / area)
+     return density_scalar, lum, count
+ 
+ 
+@@ -37,63 +26,62 @@
+     power: float = 0.5,
+     num_samples: Optional[int] = None,
+ ) -> Tuple[WeightedRandomSampler, Dict[str, Any]]:
+-    """Construct a balanced WeightedRandomSampler based on 2D density and luminance quantiles.
+-    
+-    Formula:
+-        w_i = 1.0 / (n_{g(i), l(i)})^power   (default power=0.5 -> 1/sqrt(n))
+-    """
+-    n_images = len(image_paths)
+-    if n_images == 0:
+-        return WeightedRandomSampler([1.0], 1), {}
+-        
+-    densities = []
+-    luminances = []
+-    counts = []
+-    
+-    for path, pts in zip(image_paths, points_list):
+-        d_val, l_val, c_val = compute_image_density_and_luminance(path, pts)
+-        densities.append(d_val)
+-        luminances.append(l_val)
+-        counts.append(c_val)
+-        
+-    densities = np.array(densities, dtype=np.float64)
+-    luminances = np.array(luminances, dtype=np.float64)
+-    
+-    # Compute quantile bin edges using training data only
+-    d_quantiles = np.quantile(densities, np.linspace(0, 1, num_density_bins + 1)[1:-1]) if num_density_bins > 1 else np.array([])
+-    l_quantiles = np.quantile(luminances, np.linspace(0, 1, num_luminance_bins + 1)[1:-1]) if num_luminance_bins > 1 else np.array([])
+-    
+-    d_bins = np.digitize(densities, d_quantiles)  # in [0, num_density_bins - 1]
+-    l_bins = np.digitize(luminances, l_quantiles)  # in [0, num_luminance_bins - 1]
+-    
+-    # Compute 2D group counts n_{g, l}
++    """2D density/luminance sampler with a dedicated empty-scene density bin."""
++    if len(image_paths) != len(points_list):
++        raise ValueError("image_paths and points_list length mismatch")
++    if not image_paths:
++        raise ValueError("Cannot build sampler for an empty dataset")
++    if num_density_bins < 2:
++        raise ValueError("num_density_bins must be >=2 so bin 0 can be reserved for empty scenes")
++    if num_luminance_bins < 1:
++        raise ValueError("num_luminance_bins must be >=1")
++    if power < 0:
++        raise ValueError("power must be non-negative")
++
++    stats_rows = [compute_image_density_and_luminance(p, pts) for p, pts in zip(image_paths, points_list)]
++    densities = np.asarray([r[0] for r in stats_rows], dtype=np.float64)
++    luminances = np.asarray([r[1] for r in stats_rows], dtype=np.float64)
++    counts = np.asarray([r[2] for r in stats_rows], dtype=np.int64)
++
++    # Reserve density bin 0 for true empty images. Positive images use bins 1..K-1.
++    d_bins = np.zeros(len(counts), dtype=np.int64)
++    pos = counts > 0
++    n_pos_bins = num_density_bins - 1
++    if np.any(pos):
++        pos_density = densities[pos]
++        if n_pos_bins > 1:
++            d_quantiles = np.quantile(pos_density, np.linspace(0, 1, n_pos_bins + 1)[1:-1])
++            d_bins[pos] = 1 + np.digitize(pos_density, d_quantiles)
++        else:
++            d_quantiles = np.array([], dtype=np.float64)
++            d_bins[pos] = 1
++    else:
++        d_quantiles = np.array([], dtype=np.float64)
++
++    l_quantiles = (
++        np.quantile(luminances, np.linspace(0, 1, num_luminance_bins + 1)[1:-1])
++        if num_luminance_bins > 1
++        else np.array([], dtype=np.float64)
++    )
++    l_bins = np.digitize(luminances, l_quantiles)
++
+     group_counts: Dict[Tuple[int, int], int] = {}
+-    for d_b, l_b in zip(d_bins, l_bins):
+-        key = (int(d_b), int(l_b))
++    for db, lb in zip(d_bins, l_bins):
++        key = (int(db), int(lb))
+         group_counts[key] = group_counts.get(key, 0) + 1
+-        
+-    weights = []
+-    for d_b, l_b in zip(d_bins, l_bins):
+-        key = (int(d_b), int(l_b))
+-        n_gl = group_counts[key]
+-        w = 1.0 / (float(n_gl) ** power)
+-        weights.append(w)
+-        
++
++    weights = [1.0 / (group_counts[(int(db), int(lb))] ** power) for db, lb in zip(d_bins, l_bins)]
+     weights_tensor = torch.tensor(weights, dtype=torch.double)
+-    total_samples = num_samples if num_samples is not None else n_images
+-    
+-    sampler = WeightedRandomSampler(
+-        weights=weights_tensor,
+-        num_samples=total_samples,
+-        replacement=True,
+-    )
+-    
+-    stats = {
+-        "density_quantiles": d_quantiles.tolist(),
++    total_samples = int(num_samples) if num_samples is not None else len(image_paths)
++    if total_samples <= 0:
++        raise ValueError("num_samples must be positive")
++
++    sampler = WeightedRandomSampler(weights_tensor, num_samples=total_samples, replacement=True)
++    return sampler, {
++        "positive_density_quantiles": d_quantiles.tolist(),
+         "luminance_quantiles": l_quantiles.tolist(),
+         "group_counts": {f"{k[0]}_{k[1]}": v for k, v in group_counts.items()},
++        "empty_count": int(np.sum(counts == 0)),
+         "mean_count": float(np.mean(counts)),
+         "max_count": int(np.max(counts)),
+     }
+-    
+-    return sampler, stats
+--- a/seed.py
++++ b/seed.py
+@@ -1,17 +1,30 @@
+-import random
+ import os
++import random
++
+ import numpy as np
+ import torch
+ 
+ 
+-def seed_everything(seed: int = 42):
+-    """Set deterministic random seeds across all libraries."""
++def seed_everything(seed: int = 42, deterministic: bool = True):
+     random.seed(seed)
+     os.environ["PYTHONHASHSEED"] = str(seed)
+     np.random.seed(seed)
+     torch.manual_seed(seed)
+     if torch.cuda.is_available():
+-        torch.cuda.manual_seed(seed)
+         torch.cuda.manual_seed_all(seed)
++    if deterministic:
+         torch.backends.cudnn.deterministic = True
+         torch.backends.cudnn.benchmark = False
++
++
++def seed_worker(worker_id: int):
++    """Use as DataLoader(worker_init_fn=seed_worker)."""
++    worker_seed = torch.initial_seed() % (2**32)
++    np.random.seed(worker_seed)
++    random.seed(worker_seed)
++
++
++def make_generator(seed: int = 42) -> torch.Generator:
++    g = torch.Generator()
++    g.manual_seed(seed)
++    return g
+--- a/sha.py
++++ b/sha.py
+@@ -1,36 +1,52 @@
+ import os
+-import glob
++from typing import Any, Dict, List, Optional, Tuple
++
+ import numpy as np
+ import scipy.io as sio
+-from typing import List, Tuple, Dict, Optional, Any
++
+ from .common import BaseCrowdDataset
+ 
+ 
++def _validate_points(points, source: str) -> np.ndarray:
++    arr = np.asarray(points, dtype=np.float32)
++    if arr.size == 0:
++        return np.empty((0, 2), dtype=np.float32)
++    arr = np.squeeze(arr)
++    if arr.ndim == 1 and arr.size == 2:
++        arr = arr.reshape(1, 2)
++    if arr.ndim != 2 or arr.shape[1] != 2:
++        raise ValueError(f"Invalid point array in {source}: shape={arr.shape}")
++    if not np.isfinite(arr).all():
++        raise ValueError(f"Non-finite point coordinate in {source}")
++    return arr.astype(np.float32, copy=False)
++
++
+ def load_sha_mat_points(mat_path: str) -> np.ndarray:
+-    """Load point coordinates from ShanghaiTech .mat file."""
++    """Strict ShanghaiTech annotation loader; parse failures are never converted to negatives."""
++    if not os.path.exists(mat_path):
++        raise FileNotFoundError(f"ShanghaiTech annotation not found: {mat_path}")
+     try:
+         mat = sio.loadmat(mat_path)
+         if "image_info" in mat:
+-            # Standard ShanghaiTech format
+             points = mat["image_info"][0, 0][0, 0][0]
+         elif "annPoints" in mat:
+             points = mat["annPoints"]
+         elif "points" in mat:
+             points = mat["points"]
+         else:
+-            # Fallback search inside dict
+-            points = np.zeros((0, 2), dtype=np.float32)
+-            for k, v in mat.items():
+-                if isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2:
+-                    points = v
+-                    break
+-        return points.astype(np.float32)
+-    except Exception:
+-        return np.zeros((0, 2), dtype=np.float32)
++            candidates = [
++                v for k, v in mat.items()
++                if not k.startswith("__") and isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2
++            ]
++            if len(candidates) != 1:
++                raise KeyError(f"Could not uniquely find point array in {mat_path}")
++            points = candidates[0]
++        return _validate_points(points, mat_path)
++    except Exception as exc:
++        raise RuntimeError(f"Failed to parse ShanghaiTech annotation {mat_path}: {exc}") from exc
+ 
+ 
+ class ShanghaiTechDataset(BaseCrowdDataset):
+-    """ShanghaiTech Part A / Part B dataset loader."""
+     def __init__(
+         self,
+         root: str,
+@@ -45,42 +61,43 @@
+         second_view_prob: float = 0.30,
+         photometric_cfg: Optional[Dict[str, Any]] = None,
+     ):
+-        # Candidate data directories
+-        data_dir = os.path.join(root, part, split)
+-        if not os.path.exists(data_dir):
+-            data_dir = os.path.join(root, f"{part}_final", split)
+-        if not os.path.exists(data_dir):
+-            data_dir = os.path.join(root, split)
+-            
++        candidates = [
++            os.path.join(root, part, split),
++            os.path.join(root, f"{part}_final", split),
++            os.path.join(root, split),
++        ]
++        data_dir = next((p for p in candidates if os.path.isdir(p)), None)
++        if data_dir is None:
++            raise FileNotFoundError(f"ShanghaiTech split directory not found; tried: {candidates}")
++
+         img_dir = os.path.join(data_dir, "images")
+-        gt_dir = os.path.join(data_dir, "ground-truth")
+-        if not os.path.exists(gt_dir):
+-            gt_dir = os.path.join(data_dir, "ground_truth")
+-        if not os.path.exists(gt_dir):
+-            gt_dir = os.path.join(data_dir, "ground_truths")
+-            
+-        image_paths = []
+-        points_list = []
+-        
+-        if os.path.exists(img_dir):
+-            for img_name in sorted(os.listdir(img_dir)):
+-                if not img_name.lower().endswith((".jpg", ".png", ".jpeg")):
+-                    continue
+-                img_path = os.path.join(img_dir, img_name)
+-                stem = os.path.splitext(img_name)[0]
+-                mat_name = f"GT_{stem}.mat"
+-                mat_path = os.path.join(gt_dir, mat_name)
+-                if not os.path.exists(mat_path):
+-                    mat_path = os.path.join(gt_dir, f"{stem}.mat")
+-                
+-                if os.path.exists(mat_path):
+-                    pts = load_sha_mat_points(mat_path)
+-                else:
+-                    pts = np.zeros((0, 2), dtype=np.float32)
+-                    
+-                image_paths.append(img_path)
+-                points_list.append(pts)
+-                
++        gt_candidates = [
++            os.path.join(data_dir, "ground-truth"),
++            os.path.join(data_dir, "ground_truth"),
++            os.path.join(data_dir, "ground_truths"),
++        ]
++        gt_dir = next((p for p in gt_candidates if os.path.isdir(p)), None)
++        if not os.path.isdir(img_dir):
++            raise FileNotFoundError(f"ShanghaiTech image directory not found: {img_dir}")
++        if gt_dir is None:
++            raise FileNotFoundError(f"ShanghaiTech GT directory not found; tried: {gt_candidates}")
++
++        image_paths, points_list = [], []
++        for img_name in sorted(os.listdir(img_dir)):
++            if not img_name.lower().endswith((".jpg", ".png", ".jpeg")):
++                continue
++            img_path = os.path.join(img_dir, img_name)
++            stem = os.path.splitext(img_name)[0]
++            gt_paths = [os.path.join(gt_dir, f"GT_{stem}.mat"), os.path.join(gt_dir, f"{stem}.mat")]
++            mat_path = next((p for p in gt_paths if os.path.exists(p)), None)
++            if mat_path is None:
++                raise FileNotFoundError(f"Missing annotation for {img_path}; tried {gt_paths}")
++            image_paths.append(img_path)
++            points_list.append(load_sha_mat_points(mat_path))
++
++        if not image_paths:
++            raise RuntimeError(f"No images found in {img_dir}")
++
+         super().__init__(
+             image_paths=image_paths,
+             points_list=points_list,
+--- a/subgroup.py
++++ b/subgroup.py
+@@ -1,8 +1,15 @@
+-import math
+-from typing import List, Tuple, Dict, Union, Optional
++from typing import Dict, Optional, Union
++
+ import numpy as np
+ import torch
+-from .counting import compute_mae, compute_rmse
++
++from .counting import compute_mae, compute_rmse, compute_nae
++
++
++def _flat(x):
++    if isinstance(x, torch.Tensor):
++        x = x.detach().cpu().numpy()
++    return np.asarray(x).reshape(-1)
+ 
+ 
+ def evaluate_subgroup_diagnostics(
+@@ -10,82 +17,91 @@
+     targets: Union[np.ndarray, torch.Tensor],
+     luminances: Optional[Union[np.ndarray, torch.Tensor]] = None,
+ ) -> Dict[str, float]:
+-    """Compute NWPU-style and robustness diagnostic subgroup metrics.
+-    
+-    Diagnostic bins:
+-      - C == 0 (Empty scenes)
+-      - 1 <= C <= 10 (Low density)
+-      - 11 <= C <= 100 (Medium density)
+-      - 101 <= C <= 1000 (High density)
+-      - C > 1000 (Extreme density)
+-      - Top-10% densest images
+-      - Luminance quartiles
+-    """
+-    if isinstance(predictions, torch.Tensor):
+-        predictions = predictions.detach().cpu().numpy()
+-    if isinstance(targets, torch.Tensor):
+-        targets = targets.detach().cpu().numpy()
+-    if isinstance(luminances, torch.Tensor):
+-        luminances = luminances.detach().cpu().numpy()
+-        
+-    preds = np.asarray(predictions).flatten()
+-    gts = np.asarray(targets).flatten()
+-    n = len(preds)
+-    if n == 0:
++    """Custom robustness diagnostics; these are NOT official NWPU scene/illumination groups."""
++    preds, gts = _flat(predictions), _flat(targets)
++    if preds.shape != gts.shape:
++        raise ValueError("predictions and targets must have the same shape")
++    if len(preds) == 0:
+         return {}
+-        
++
+     results: Dict[str, float] = {}
+-    
+-    # 1. Empty scenes: C == 0
+-    empty_mask = (gts == 0)
+-    if np.any(empty_mask):
+-        empty_preds = preds[empty_mask]
+-        results["empty_count"] = int(np.sum(empty_mask))
+-        results["empty_mae"] = float(np.mean(np.abs(empty_preds)))
+-        results["empty_pred_mean"] = float(np.mean(empty_preds))
+-        results["empty_pred_p95"] = float(np.percentile(empty_preds, 95))
++    empty = gts == 0
++    if np.any(empty):
++        e = preds[empty]
++        results.update(
++            empty_count=int(empty.sum()),
++            empty_mae=float(np.mean(np.abs(e))),
++            empty_pred_mean=float(np.mean(e)),
++            empty_pred_p95=float(np.percentile(e, 95)),
++        )
+     else:
+-        results["empty_count"] = 0
+-        results["empty_mae"] = 0.0
+-        results["empty_pred_mean"] = 0.0
+-        results["empty_pred_p95"] = 0.0
+-        
+-    # 2. Density bins
+-    bin_defs = [
++        results.update(empty_count=0, empty_mae=0.0, empty_pred_mean=0.0, empty_pred_p95=0.0)
++
++    for name, mask in [
+         ("bin_0", gts == 0),
+         ("bin_1_10", (gts >= 1) & (gts <= 10)),
+         ("bin_11_100", (gts >= 11) & (gts <= 100)),
+         ("bin_101_1000", (gts >= 101) & (gts <= 1000)),
+         ("bin_gt1000", gts > 1000),
+-    ]
+-    for name, mask in bin_defs:
++    ]:
+         if np.any(mask):
+             results[f"{name}_mae"] = compute_mae(preds[mask], gts[mask])
+             results[f"{name}_rmse"] = compute_rmse(preds[mask], gts[mask])
+-            results[f"{name}_count"] = int(np.sum(mask))
+-            
+-    # 3. Top-10% densest images
+-    top10_threshold = np.percentile(gts, 90)
+-    top10_mask = (gts >= top10_threshold)
+-    if np.any(top10_mask):
+-        results["top10_dense_mae"] = compute_mae(preds[top10_mask], gts[top10_mask])
+-        results["top10_dense_rmse"] = compute_rmse(preds[top10_mask], gts[top10_mask])
+-        
+-    # 4. Luminance quantile analysis
+-    if luminances is not None and len(luminances) == n:
+-        lums = np.asarray(luminances).flatten()
+-        q25 = np.percentile(lums, 25)
+-        q50 = np.percentile(lums, 50)
+-        q75 = np.percentile(lums, 75)
+-        
+-        dark_mask = (lums <= q25)
+-        med_low_mask = (lums > q25) & (lums <= q50)
+-        med_high_mask = (lums > q50) & (lums <= q75)
+-        bright_mask = (lums > q75)
+-        
+-        if np.any(dark_mask):
+-            results["dark_q25_mae"] = compute_mae(preds[dark_mask], gts[dark_mask])
+-        if np.any(bright_mask):
+-            results["bright_q75_mae"] = compute_mae(preds[bright_mask], gts[bright_mask])
+-            
++            results[f"{name}_count"] = int(mask.sum())
++
++    threshold = np.percentile(gts, 90)
++    top = gts >= threshold
++    if np.any(top):
++        results["top10_dense_mae"] = compute_mae(preds[top], gts[top])
++        results["top10_dense_rmse"] = compute_rmse(preds[top], gts[top])
++
++    if luminances is not None:
++        lums = _flat(luminances)
++        if len(lums) != len(gts):
++            raise ValueError("luminances length must match predictions")
++        q25, q50, q75 = np.percentile(lums, [25, 50, 75])
++        masks = {
++            "lum_q1_dark": lums <= q25,
++            "lum_q2": (lums > q25) & (lums <= q50),
++            "lum_q3": (lums > q50) & (lums <= q75),
++            "lum_q4_bright": lums > q75,
++        }
++        for name, mask in masks.items():
++            if np.any(mask):
++                results[f"{name}_mae"] = compute_mae(preds[mask], gts[mask])
+     return results
++
++
++def evaluate_nwpu_official_groups(
++    predictions: Union[np.ndarray, torch.Tensor],
++    targets: Union[np.ndarray, torch.Tensor],
++    levels: Union[np.ndarray, torch.Tensor],
++    illuminations: Union[np.ndarray, torch.Tensor],
++) -> Dict[str, object]:
++    """Reproduce NWPU official aggregation when official level/illum labels are available."""
++    preds, gts = _flat(predictions), _flat(targets)
++    levels, illuminations = _flat(levels).astype(int), _flat(illuminations).astype(int)
++    if not (len(preds) == len(gts) == len(levels) == len(illuminations)):
++        raise ValueError("All NWPU arrays must have equal length")
++
++    def meter(mask):
++        if not np.any(mask):
++            return {"mae": float("nan"), "rmse": float("nan"), "nae": float("nan")}
++        return {
++            "mae": compute_mae(preds[mask], gts[mask]),
++            "rmse": compute_rmse(preds[mask], gts[mask]),
++            "nae": compute_nae(preds[mask], gts[mask], ignore_zero=True),
++        }
++
++    overall = meter(np.ones(len(gts), dtype=bool))
++    level_stats = [meter(levels == i) for i in range(5)]
++    illum_stats = [meter(illuminations == i) for i in range(4)]
++    return {
++        "overall": overall,
++        "levels": level_stats,
++        "illums": illum_stats,
++        "mmae": {
++            "mmae_level": float(np.nanmean([x["mae"] for x in level_stats])),
++            "mmae_illum": float(np.nanmean([x["mae"] for x in illum_stats])),
++        },
++    }
+--- a/transforms.py
++++ b/transforms.py
+@@ -1,64 +1,61 @@
+-import random
+-import math
+ import io
+-import torch
+-import torchvision.transforms.functional as TF
+-from PIL import Image, ImageFilter, ImageEnhance
++import random
++from typing import Tuple
++
+ import numpy as np
+-from typing import Tuple, List, Optional, Union, Dict
++from PIL import Image, ImageEnhance, ImageFilter
+ 
+ 
+ class GeometricTransforms:
+-    """Exact geometry transformations updating point coordinates synchronously."""
++    """Geometry-preserving random isotropic scale, crop and horizontal flip."""
++
+     def __init__(
+         self,
+         crop_size: int = 448,
+         scale_range: Tuple[float, float] = (0.75, 2.0),
+         flip_prob: float = 0.5,
+     ):
+-        self.crop_size = crop_size
+-        self.scale_range = scale_range
+-        self.flip_prob = flip_prob
++        if crop_size <= 0:
++            raise ValueError("crop_size must be > 0")
++        if scale_range[0] <= 0 or scale_range[0] > scale_range[1]:
++            raise ValueError(f"Invalid scale_range={scale_range}")
++        if not 0.0 <= flip_prob <= 1.0:
++            raise ValueError("flip_prob must be in [0,1]")
++        self.crop_size = int(crop_size)
++        self.scale_range = tuple(float(v) for v in scale_range)
++        self.flip_prob = float(flip_prob)
+ 
+-    def __call__(
+-        self,
+-        image: Image.Image,
+-        points: np.ndarray,
+-    ) -> Tuple[Image.Image, np.ndarray]:
+-        """Apply random scale, crop, and horizontal flip.
+-        
+-        Args:
+-            image: PIL Image (W, H).
+-            points: (N, 2) numpy array of (x, y) coordinates.
+-            
+-        Returns:
+-            cropped_image: PIL Image of size (crop_size, crop_size).
+-            cropped_points: (M, 2) numpy array of valid points inside crop.
+-        """
++    def __call__(self, image: Image.Image, points: np.ndarray):
+         w, h = image.size
+-        scale = random.uniform(self.scale_range[0], self.scale_range[1])
+-        new_w = max(int(round(w * scale)), self.crop_size)
+-        new_h = max(int(round(h * scale)), self.crop_size)
+-        
+-        # Resize image with bilinear filter
++        if w <= 0 or h <= 0:
++            raise ValueError(f"Invalid image size {(w, h)}")
++
++        points = np.asarray(points, dtype=np.float32).reshape(-1, 2)
++        sampled_scale = random.uniform(*self.scale_range)
++
++        # Use ONE isotropic scale factor. The old independent max(new_w,crop),
++        # max(new_h,crop) can distort aspect ratio when only one side is too small.
++        min_scale_to_fit = max(self.crop_size / float(w), self.crop_size / float(h))
++        scale = max(sampled_scale, min_scale_to_fit)
++        new_w = max(1, int(round(w * scale)))
++        new_h = max(1, int(round(h * scale)))
++
+         image = image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+-        scaled_points = points.copy().astype(np.float32)
+-        if len(scaled_points) > 0:
+-            scaled_points[:, 0] *= (float(new_w) / float(w))
+-            scaled_points[:, 1] *= (float(new_h) / float(h))
+-            
+-        # Random crop
++        scaled_points = points.copy()
++        if len(scaled_points):
++            # Use realized resize ratios after integer rounding.
++            scaled_points[:, 0] *= new_w / float(w)
++            scaled_points[:, 1] *= new_h / float(h)
++
+         max_x = new_w - self.crop_size
+         max_y = new_h - self.crop_size
+         crop_x = random.randint(0, max_x) if max_x > 0 else 0
+         crop_y = random.randint(0, max_y) if max_y > 0 else 0
+-        
+         image = image.crop((crop_x, crop_y, crop_x + self.crop_size, crop_y + self.crop_size))
+-        
+-        if len(scaled_points) > 0:
++
++        if len(scaled_points):
+             scaled_points[:, 0] -= crop_x
+             scaled_points[:, 1] -= crop_y
+-            # Filter valid points
+             valid = (
+                 (scaled_points[:, 0] >= 0)
+                 & (scaled_points[:, 0] < self.crop_size)
+@@ -67,21 +64,19 @@
+             )
+             cropped_points = scaled_points[valid]
+         else:
+-            cropped_points = np.zeros((0, 2), dtype=np.float32)
+-            
+-        # Random horizontal flip
++            cropped_points = np.empty((0, 2), dtype=np.float32)
++
+         if random.random() < self.flip_prob:
+             image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+-            if len(cropped_points) > 0:
++            if len(cropped_points):
+                 cropped_points[:, 0] = (self.crop_size - 1.0) - cropped_points[:, 0]
+-                
+-        return image, cropped_points
++
++        return image, cropped_points.astype(np.float32, copy=False)
+ 
+ 
+ class PhotometricTransforms:
+-    """Adverse condition photometric degradations family T_photo.
+-    Strictly preserves image geometry and point coordinates.
+-    """
++    """Geometry-preserving adverse-condition photometric degradations."""
++
+     def __init__(
+         self,
+         brightness: float = 0.20,
+@@ -95,71 +90,65 @@
+         noise_prob: float = 0.20,
+         **kwargs,
+     ):
+-        self.brightness = brightness
+-        self.contrast = contrast
+-        self.saturation = saturation
+-        self.blur_prob = blur_prob
+-        self.gamma_min = gamma_min
+-        self.gamma_max = gamma_max
+-        self.salt_pepper_prob = salt_pepper_prob
+-        self.jpeg_prob = jpeg_prob
+-        self.noise_prob = noise_prob
++        self.brightness = float(brightness)
++        self.contrast = float(contrast)
++        self.saturation = float(saturation)
++        self.blur_prob = float(blur_prob)
++        self.gamma_min = float(gamma_min)
++        self.gamma_max = float(gamma_max)
++        self.salt_pepper_prob = float(salt_pepper_prob)
++        self.jpeg_prob = float(jpeg_prob)
++        self.noise_prob = float(noise_prob)
++        if not 0 < self.gamma_min <= self.gamma_max:
++            raise ValueError("Invalid gamma range")
++        for name in ("blur_prob", "salt_pepper_prob", "jpeg_prob", "noise_prob"):
++            v = getattr(self, name)
++            if not 0.0 <= v <= 1.0:
++                raise ValueError(f"{name} must be in [0,1]")
+ 
+     def __call__(self, image: Image.Image) -> Image.Image:
+-        """Apply random photometric degradation preserving geometry."""
+-        # 1. Random Brightness
++        image = image.copy()
+         if self.brightness > 0 and random.random() < 0.5:
+-            factor = 1.0 + random.uniform(-self.brightness, self.brightness)
+-            image = ImageEnhance.Brightness(image).enhance(max(factor, 0.1))
+-            
+-        # 2. Random Contrast
++            image = ImageEnhance.Brightness(image).enhance(
++                max(1.0 + random.uniform(-self.brightness, self.brightness), 0.1)
++            )
+         if self.contrast > 0 and random.random() < 0.5:
+-            factor = 1.0 + random.uniform(-self.contrast, self.contrast)
+-            image = ImageEnhance.Contrast(image).enhance(max(factor, 0.1))
+-            
+-        # 3. Random Saturation / Color
++            image = ImageEnhance.Contrast(image).enhance(
++                max(1.0 + random.uniform(-self.contrast, self.contrast), 0.1)
++            )
+         if self.saturation > 0 and random.random() < 0.5:
+-            factor = 1.0 + random.uniform(-self.saturation, self.saturation)
+-            image = ImageEnhance.Color(image).enhance(max(factor, 0.0))
+-            
+-        # 4. Random Gamma
++            image = ImageEnhance.Color(image).enhance(
++                max(1.0 + random.uniform(-self.saturation, self.saturation), 0.0)
++            )
+         if random.random() < 0.3:
+             gamma = random.uniform(self.gamma_min, self.gamma_max)
+-            img_np = np.array(image, dtype=np.float32) / 255.0
+-            img_np = np.power(np.clip(img_np, 1e-6, 1.0), gamma) * 255.0
+-            image = Image.fromarray(np.uint8(np.clip(img_np, 0, 255)))
+-            
+-        # 5. Random Blur (Gaussian or Box)
++            arr = np.asarray(image, dtype=np.float32) / 255.0
++            arr = np.power(np.clip(arr, 1e-6, 1.0), gamma)
++            image = Image.fromarray(np.uint8(np.clip(arr * 255.0, 0, 255)))
+         if random.random() < self.blur_prob:
+-            radius = random.uniform(0.5, 2.0)
+-            image = image.filter(ImageFilter.GaussianBlur(radius=radius))
+-            
+-        # 6. Random Gaussian Noise
++            image = image.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.5, 2.0)))
+         if random.random() < self.noise_prob:
+-            img_np = np.array(image, dtype=np.float32)
+-            noise = np.random.normal(0, random.uniform(5, 20), img_np.shape)
+-            img_np = np.clip(img_np + noise, 0, 255).astype(np.uint8)
+-            image = Image.fromarray(img_np)
+-            
+-        # 7. Random Salt & Pepper Noise
++            arr = np.asarray(image, dtype=np.float32)
++            arr += np.random.normal(0.0, random.uniform(5.0, 20.0), arr.shape)
++            image = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+         if random.random() < self.salt_pepper_prob:
+-            img_np = np.array(image)
++            arr = np.array(image, copy=True)
++            h, w = arr.shape[:2]
+             amount = random.uniform(0.0005, 0.003)
+-            num_salt = int(amount * img_np.size * 0.5)
+-            # Salt
+-            coords = [np.random.randint(0, i - 1, num_salt) for i in img_np.shape[:2]]
+-            img_np[coords[0], coords[1]] = 255
+-            # Pepper
+-            coords = [np.random.randint(0, i - 1, num_salt) for i in img_np.shape[:2]]
+-            img_np[coords[0], coords[1]] = 0
+-            image = Image.fromarray(img_np)
+-            
+-        # 8. Random JPEG Compression artifacts
++            # amount is a fraction of spatial pixels, not RGB scalar elements.
++            n_each = int(amount * h * w * 0.5)
++            if n_each > 0:
++                ys = np.random.randint(0, h, n_each)
++                xs = np.random.randint(0, w, n_each)
++                arr[ys, xs] = 255
++                ys = np.random.randint(0, h, n_each)
++                xs = np.random.randint(0, w, n_each)
++                arr[ys, xs] = 0
++            image = Image.fromarray(arr)
+         if random.random() < self.jpeg_prob:
+-            quality = random.randint(30, 80)
+             buffer = io.BytesIO()
+-            image.save(buffer, format="JPEG", quality=quality)
++            image.save(buffer, format="JPEG", quality=random.randint(30, 80))
+             buffer.seek(0)
+-            image = Image.open(buffer).copy()
+-            
++            with Image.open(buffer) as compressed:
++                image = compressed.convert("RGB").copy()
+         return image

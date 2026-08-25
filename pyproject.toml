@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hpc-lite"
+version = "0.1.0"
+description = "Hierarchical Probabilistic Crowd Counting for Robust Lightweight Deployment"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "timm>=0.9.16",
+    "scipy>=1.11.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hpc*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

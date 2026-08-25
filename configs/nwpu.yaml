@@ -1,0 +1,75 @@
+experiment:
+  name: hpc_lite_nwpu
+  seed: 42
+  save_dir: ./runs/nwpu
+
+dataset:
+  name: nwpu
+  root: ./data/nwpu_crowd
+  crop_size: 672
+  output_stride: 4
+  hnb_blocks: [16, 32, 96]
+  allocation_block: 16
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+
+model:
+  backbone: mobilenetv4_conv_small_050
+  pretrained: true
+  feature_reductions: [4, 8, 16]
+  neck_width: 32
+  context_dilations: [1, 2, 3]
+  eps_d: 1.0e-6
+  truncate_backbone: true
+  data_driven_head_bias: true
+
+loss:
+  hnb: 1.0
+  allocation: 0.5
+  hard_negative: 0.25
+  empty: 0.5
+  global_count: 1.0
+  robust: 0.1
+  hard_negative_fraction: 0.10
+  density_stratified_nb: true
+  global_count_mode: log_smooth_l1
+  enable_curriculum: true
+
+robustness:
+  second_view_prob: 0.30
+  brightness: 0.20
+  contrast: 0.20
+  saturation: 0.15
+  blur_prob: 0.20
+  gamma_min: 0.35
+  gamma_max: 1.80
+  salt_pepper_prob: 0.15
+  jpeg_prob: 0.20
+  noise_prob: 0.20
+
+sampler:
+  weighted: true
+  density_bins: 5
+  luminance_bins: 4
+  power: 0.5
+
+optimizer:
+  name: adamw
+  backbone_lr: 2.5e-5
+  head_lr: 1.0e-4
+  dispersion_lr: 1.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+
+schedule:
+  epochs: 300
+  warmup_fraction: 0.05
+  cosine: true
+
+training:
+  effective_batch_size: 16
+  batch_size: 8
+  accum_steps: 2
+  amp: true
+  num_workers: 0
+  save_best_by: mae
