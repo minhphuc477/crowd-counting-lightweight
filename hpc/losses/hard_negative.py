@@ -10,19 +10,15 @@ class HardNegativeMassLoss(nn.Module):
 
     def __init__(self, top_fraction: float = 0.10, block_size: int = 16):
         super().__init__()
-        if not 0.0 <= top_fraction <= 1.0:
-            raise ValueError("top_fraction must be in [0, 1]")
+        if not 0.0 < top_fraction <= 1.0:
+            raise ValueError("top_fraction must be in (0, 1]")
         self.top_fraction = float(top_fraction)
         self.block_size = int(block_size)
 
     def forward(self, d_map: torch.Tensor, gt_y16: torch.Tensor) -> torch.Tensor:
-        if self.top_fraction == 0.0:
-            return d_map.new_zeros(())
-
         pred_mu16 = sum_pool(d_map, input_block_size=self.block_size, output_stride=4)
         if pred_mu16.ndim == 4 and pred_mu16.shape[1] == 1:
             pred_mu16 = pred_mu16.squeeze(1)
-
         if gt_y16.ndim == 4 and gt_y16.shape[1] == 1:
             gt_y16 = gt_y16.squeeze(1)
         gt_y16 = gt_y16.to(device=pred_mu16.device)
@@ -56,7 +52,6 @@ class WholeImageEmptyLoss(nn.Module):
         gt_counts = gt_counts.to(device=pred_counts.device).reshape(-1)
         if gt_counts.numel() != pred_counts.numel():
             raise ValueError("gt_counts batch size does not match d_map")
-
         empty_mask = gt_counts.eq(0)
         if not empty_mask.any():
             return d_map.new_zeros(())
@@ -78,11 +73,57 @@ class GlobalCountLoss(nn.Module):
         gt_counts = gt_counts.to(device=pred_counts.device, dtype=torch.float32).reshape(-1)
         if gt_counts.shape != pred_counts.shape:
             raise ValueError(f"gt_counts shape {tuple(gt_counts.shape)} != {tuple(pred_counts.shape)}")
-
         if self.mode == "log_smooth_l1":
             return F.smooth_l1_loss(torch.log1p(pred_counts), torch.log1p(gt_counts))
         if self.mode == "l1":
             return F.l1_loss(pred_counts, gt_counts)
-
         residual = (pred_counts - gt_counts) / torch.sqrt(gt_counts + 1.0)
         return F.smooth_l1_loss(residual, torch.zeros_like(residual))
+
+
+class SpecialBlockCountLoss(nn.Module):
+    """Count supervision focused on special (large/border) blocks.
+
+    Computes SmoothL1 between predicted block mass and GT block count
+    only at blocks flagged by gt_special_mask16.
+
+    If no special blocks exist in the batch, returns exact zero scalar
+    on the prediction device (no gradient contribution).
+    """
+
+    def __init__(self, block_size: int = 16, output_stride: int = 4):
+        super().__init__()
+        self.block_size = int(block_size)
+        self.output_stride = int(output_stride)
+
+    def forward(
+        self,
+        d_map: torch.Tensor,
+        gt_y16: torch.Tensor,
+        special_mask16: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            d_map: (B, 1, H/4, W/4) predicted count-mass map.
+            gt_y16: (B, H/16, W/16) exact integer block counts.
+            special_mask16: (B, H/16, W/16) bool/float mask (1 = special block).
+
+        Returns:
+            Scalar loss on d_map.device.
+        """
+        mu = sum_pool(d_map, input_block_size=self.block_size, output_stride=self.output_stride)
+        if mu.ndim == 4 and mu.shape[1] == 1:
+            mu = mu.squeeze(1)
+
+        y = gt_y16.to(device=mu.device, dtype=torch.float32)
+        if y.ndim == 4 and y.shape[1] == 1:
+            y = y.squeeze(1)
+
+        mask = special_mask16.to(device=mu.device).bool()
+        if mask.ndim == 4 and mask.shape[1] == 1:
+            mask = mask.squeeze(1)
+
+        if not mask.any():
+            return d_map.new_zeros(())
+
+        return F.smooth_l1_loss(mu[mask].float(), y[mask])

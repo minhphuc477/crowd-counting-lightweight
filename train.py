@@ -22,7 +22,7 @@ import torchvision.transforms.functional as TF
 from hpc.utils.seed import seed_everything
 from hpc.utils.logging import CSVLogger
 from hpc.utils.checkpoint import build_checkpoint_state, save_checkpoint, load_checkpoint
-from hpc.models.hpc_lite import HPCLite
+from hpc.models.hpc_lite import HPCLiteSR48
 from hpc.losses.criterion import HPCLossCriterion
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.data.qnrf import UCFQNRFDataset
@@ -189,7 +189,7 @@ def validate(model: nn.Module, val_dataset, device: torch.device) -> dict:
             img = sample["image"].unsqueeze(0).to(device)  # (1, 3, H, W)
             gt_cnt = float(sample["gt_count"])
             
-            pred_cnt, _ = model.predict(img, pad_multiple=16)
+            pred_cnt, _ = model.predict(img, pad_multiple=32)
             predictions.append(float(pred_cnt.item()))
             ground_truths.append(gt_cnt)
             
@@ -264,13 +264,14 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
     
     # 2. Model Initialization
     m_cfg = cfg["model"]
-    model = HPCLite(
-        backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
+    model = HPCLiteSR48(
         pretrained=m_cfg.get("pretrained", True),
-        neck_width=m_cfg.get("neck_width", 32),
-        context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
+        neck_width=m_cfg.get("neck_width", 48),
         eps_d=float(m_cfg.get("eps_d", 1e-6)),
-        truncate_backbone=m_cfg.get("truncate_backbone", True),
+        route_temperature=float(m_cfg.get("route_temperature", 1.0)),
+        pool_kernels=tuple(m_cfg.get("pool_kernels", [3, 5, 7])),
+        pool_residual_mix=float(m_cfg.get("pool_residual_mix", 0.5)),
+        simam_lambda=float(m_cfg.get("simam_lambda", 1e-4)),
     ).to(device)
 
     # 3. Loss Criterion
@@ -278,15 +279,19 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
     criterion = HPCLossCriterion(
         block_sizes=cfg["dataset"]["hnb_blocks"],
         allocation_block=cfg["dataset"].get("allocation_block", 16),
-        lambda_hnb=float(l_cfg.get("hnb", 1.0)),
-        lambda_alloc=float(l_cfg.get("allocation", 0.5)),
-        lambda_hn=float(l_cfg.get("hard_negative", 0.25)),
-        lambda_empty=float(l_cfg.get("empty", 0.5)),
-        lambda_global=float(l_cfg.get("global_count", 1.0)),
-        lambda_rob=float(l_cfg.get("robust", 0.1)),
+        lambda_hnb=float(l_cfg.get("lambda_hnb", 1.0)),
+        lambda_alloc=float(l_cfg.get("lambda_alloc", 0.5)),
+        lambda_hn=float(l_cfg.get("lambda_hn", 0.25)),
+        lambda_empty=float(l_cfg.get("lambda_empty", 0.5)),
+        lambda_global=float(l_cfg.get("lambda_global", 0.5)),
+        lambda_direct=float(l_cfg.get("lambda_direct", 0.5)),
+        lambda_special=float(l_cfg.get("lambda_special", 0.25)),
+        lambda_rob=float(l_cfg.get("lambda_rob", 0.1)),
+        lambda_kd=float(l_cfg.get("lambda_kd", 0.0)),
         hard_negative_fraction=float(l_cfg.get("hard_negative_fraction", 0.10)),
         use_stratified_nb=l_cfg.get("density_stratified_nb", True),
         global_count_mode=l_cfg.get("global_count_mode", "log_smooth_l1"),
+        special_alloc_beta=float(l_cfg.get("special_alloc_beta", 1.0)),
         enable_curriculum=l_cfg.get("enable_curriculum", True),
     ).to(device)
     
@@ -373,10 +378,14 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
             images = batch["image"].to(device)
             gt_blocks = {b: batch["gt_blocks"][b].to(device) for b in batch["gt_blocks"]}
             gt_z_alloc = batch["gt_z_alloc"].to(device)
-            gt_counts = batch["gt_counts"].to(device)
-            
+            gt_counts = batch["gt_count"].to(device)
+
+            # Special block masks for SR48 large/border emphasis
+            gt_special_mask16 = None
+            if "gt_special_mask16" in batch:
+                gt_special_mask16 = batch["gt_special_mask16"].to(device)
+
             img_deg = batch.get("image_degraded", None)
-            # degraded_mask=True only for samples where a real augmentation was drawn.
             degraded_mask = batch.get("has_degraded", None)
             if img_deg is not None:
                 img_deg = img_deg.to(device)
@@ -390,6 +399,7 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                     d_deg = model(img_deg) if img_deg is not None else None
                     loss, loss_dict = criterion(
                         d_clean, gt_blocks, gt_z_alloc, gt_counts,
+                        gt_special_mask16=gt_special_mask16,
                         d_degraded=d_deg, degraded_mask=degraded_mask,
                         progress=progress,
                     )
@@ -400,6 +410,7 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                 d_deg = model(img_deg) if img_deg is not None else None
                 loss, loss_dict = criterion(
                     d_clean, gt_blocks, gt_z_alloc, gt_counts,
+                    gt_special_mask16=gt_special_mask16,
                     d_degraded=d_deg, degraded_mask=degraded_mask,
                     progress=progress,
                 )

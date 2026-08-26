@@ -1,5 +1,5 @@
 experiment:
-  name: hpc_lite_sha
+  name: hpc_s_sr48_sha
   seed: 42
   save_dir: ./runs/sha
 
@@ -11,30 +11,50 @@ dataset:
   output_stride: 4
   hnb_blocks: [16, 32, 64]
   allocation_block: 16
-  scale_range: [0.75, 2.0]
-  flip_prob: 0.5
 
 model:
-  backbone: mobilenetv4_conv_small_050
+  name: hpc_lite_sr48
+  backbone: shufflenet_v2_x0_5
   pretrained: true
-  feature_reductions: [4, 8, 16]
-  neck_width: 32
-  context_dilations: [1, 2, 3]
+  neck_width: 48
+  route_temperature: 1.0
+  pool_kernels: [3, 5, 7]
+  pool_residual_mix: 0.5
+  simam_lambda: 1.0e-4
+  head_kernel: 5
+  output_stride: 4
   eps_d: 1.0e-6
-  truncate_backbone: true
   data_driven_head_bias: true
 
 loss:
-  hnb: 1.0
-  allocation: 0.5
-  hard_negative: 0.25
-  empty: 0.5
-  global_count: 1.0
-  robust: 0.1
+  lambda_hnb: 1.0
+  lambda_alloc: 0.5
+  lambda_hn: 0.25
+  lambda_empty: 0.5
+  lambda_global: 0.5
+  lambda_direct: 0.5
+  lambda_special: 0.25
+  lambda_rob: 0.1
+  lambda_kd: 0.0
   hard_negative_fraction: 0.10
+  special_alloc_beta: 1.0
   density_stratified_nb: true
   global_count_mode: log_smooth_l1
   enable_curriculum: true
+
+augmentation:
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+  safe_crop: true
+  max_crop_attempts: 20
+  crop_guard_nn_factor: 0.20
+  crop_guard_min_px: 8
+  crop_guard_max_px: 48
+  large_nn_threshold_px: 48
+  true_border_threshold_px: 32
+  random_crop_prob: 0.75
+  large_center_crop_prob: 0.15
+  border_center_crop_prob: 0.10
 
 robustness:
   second_view_prob: 0.30
@@ -63,7 +83,7 @@ optimizer:
   grad_clip: 1.0
 
 schedule:
-  epochs: 2000
+  epochs: 500
   warmup_fraction: 0.05
   cosine: true
 
