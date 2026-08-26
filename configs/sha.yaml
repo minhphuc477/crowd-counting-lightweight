@@ -84,7 +84,7 @@ optimizer:
   grad_clip: 1.0
 
 schedule:
-  epochs: 500
+  epochs: 2000
   warmup_fraction: 0.05
   cosine: true
 

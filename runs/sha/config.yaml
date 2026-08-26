@@ -1,7 +1,21 @@
+augmentation:
+  border_center_crop_prob: 0.1
+  crop_guard_max_px: 48
+  crop_guard_min_px: 8
+  crop_guard_nn_factor: 0.2
+  flip_prob: 0.5
+  large_center_crop_prob: 0.15
+  large_nn_threshold_px: 48
+  max_crop_attempts: 20
+  random_crop_prob: 0.75
+  safe_crop: true
+  scale_range:
+  - 0.75
+  - 2.0
+  true_border_threshold_px: 32
 dataset:
   allocation_block: 16
   crop_size: 448
-  flip_prob: 0.5
   hnb_blocks:
   - 16
   - 32
@@ -10,39 +24,42 @@ dataset:
   output_stride: 4
   part: part_A
   root: ./data/ShanghaiTech
-  scale_range:
-  - 0.75
-  - 2.0
 experiment:
-  name: hpc_lite_sha
+  name: hpc_s_sr48_sha
   save_dir: ./runs/sha
   seed: 42
 loss:
-  allocation: 0.5
   density_stratified_nb: true
-  empty: 0.5
   enable_curriculum: true
-  global_count: 1.0
   global_count_mode: log_smooth_l1
-  hard_negative: 0.25
   hard_negative_fraction: 0.1
-  hnb: 1.0
-  robust: 0.1
+  lambda_alloc: 0.5
+  lambda_direct: 0.5
+  lambda_empty: 0.5
+  lambda_global: 0.5
+  lambda_hn: 0.25
+  lambda_hnb: 1.0
+  lambda_kd: 0.0
+  lambda_rob: 0.1
+  lambda_route: 0.1
+  lambda_special: 0.25
+  special_alloc_beta: 1.0
 model:
-  backbone: mobilenetv4_conv_small_050
-  context_dilations:
-  - 1
-  - 2
-  - 3
+  backbone: shufflenet_v2_x0_5
   data_driven_head_bias: true
   eps_d: 1.0e-06
-  feature_reductions:
-  - 4
-  - 8
-  - 16
-  neck_width: 32
+  head_kernel: 5
+  name: hpc_lite_sr48
+  neck_width: 48
+  output_stride: 4
+  pool_kernels:
+  - 3
+  - 5
+  - 7
+  pool_residual_mix: 0.5
   pretrained: true
-  truncate_backbone: true
+  route_temperature: 1.0
+  simam_lambda: 0.0001
 optimizer:
   backbone_lr: 2.5e-05
   dispersion_lr: 0.0001

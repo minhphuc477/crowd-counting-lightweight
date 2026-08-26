@@ -79,38 +79,45 @@ def build_optimizer_and_scheduler(
 
 
 def custom_collate_fn(batch):
-    """Collate function supporting dictionary of hierarchical blocks."""
-    images = torch.stack([item["image"] for item in batch])
-    gt_counts = torch.stack([item["gt_count"] for item in batch])
-    gt_z_allocs = torch.stack([item["gt_z_alloc"] for item in batch])
-    
-    # Collect block counts per scale
+    """Collate function supporting the full SR48 training schema.
+
+    Keys in each sample (from BaseCrowdDataset.__getitem__ train path):
+        image, image_degraded, has_degraded,
+        gt_blocks (dict), gt_z_alloc, gt_count,
+        gt_large_mask16, gt_true_border_mask16, gt_special_mask16,
+        gt_route_q, gt_route_mask, has_gt, img_path
+    """
+    images = torch.stack([s["image"] for s in batch])
+
+    # Hierarchical block counts: dict[int -> Tensor]
     scales = list(batch[0]["gt_blocks"].keys())
-    gt_blocks = {
-        b: torch.stack([item["gt_blocks"][b] for item in batch])
-        for b in scales
-    }
-    
+    gt_blocks = {b: torch.stack([s["gt_blocks"][b] for s in batch]) for b in scales}
+
+    gt_z_alloc = torch.stack([s["gt_z_alloc"] for s in batch])
+    gt_count   = torch.stack([s["gt_count"]   for s in batch])   # (B,) float
+
     res = {
-        "image": images,
-        "gt_counts": gt_counts,
-        "gt_z_alloc": gt_z_allocs,
-        "gt_blocks": gt_blocks,
-        "img_paths": [item["img_path"] for item in batch],
+        "image":      images,
+        "gt_blocks":  gt_blocks,
+        "gt_z_alloc": gt_z_alloc,
+        "gt_count":   gt_count,          # singular — matches training loop
+        "img_path":  [s["img_path"] for s in batch],
     }
-    
-    # Optional degraded image view with a per-sample validity mask.
-    # has_degraded=True only when the dataset actually drew a random augmentation;
-    # otherwise the placeholder is a clean clone and must NOT contribute to L_rob.
+
+    # Special block masks (always present in train samples)
+    for key in ("gt_large_mask16", "gt_true_border_mask16", "gt_special_mask16"):
+        if key in batch[0]:
+            res[key] = torch.stack([s[key] for s in batch])
+
+    # SSER routing supervision targets (always present in train samples)
+    if "gt_route_q" in batch[0]:
+        res["gt_route_q"]    = torch.stack([s["gt_route_q"]    for s in batch])
+        res["gt_route_mask"] = torch.stack([s["gt_route_mask"] for s in batch])
+
+    # Photometric second view (always present in train samples)
     if "image_degraded" in batch[0]:
-        degraded = []
-        has_degraded_flags = []
-        for item in batch:
-            deg = item.get("image_degraded")
-            degraded.append(deg if deg is not None else item["image"])
-            has_degraded_flags.append(bool(item.get("has_degraded", False)))
-        res["image_degraded"] = torch.stack(degraded)
-        res["has_degraded"] = torch.tensor(has_degraded_flags, dtype=torch.bool)
+        res["image_degraded"] = torch.stack([s["image_degraded"] for s in batch])
+        res["has_degraded"]   = torch.stack([s["has_degraded"]   for s in batch])
 
     return res
 
