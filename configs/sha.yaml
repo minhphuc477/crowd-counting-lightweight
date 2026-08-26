@@ -36,6 +36,7 @@ loss:
   lambda_special: 0.25
   lambda_rob: 0.1
   lambda_kd: 0.0
+  lambda_route: 0.1
   hard_negative_fraction: 0.10
   special_alloc_beta: 1.0
   density_stratified_nb: true

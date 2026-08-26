@@ -7,6 +7,7 @@ from .negative_binomial import HierarchicalNBLoss
 from .allocation import LocalAllocationLoss
 from .hard_negative import HardNegativeMassLoss, WholeImageEmptyLoss, GlobalCountLoss, SpecialBlockCountLoss
 from .robustness import RobustConsistencyLoss
+from .routing import RoutingSupervisionLoss
 
 
 class HPCLossCriterion(nn.Module):
@@ -40,6 +41,7 @@ class HPCLossCriterion(nn.Module):
         lambda_special: float = 0.25,
         lambda_rob: float = 0.1,
         lambda_kd: float = 0.0,
+        lambda_route: float = 0.1,   # ← SSER geometry supervision
         # Config
         hard_negative_fraction: float = 0.10,
         use_stratified_nb: bool = True,
@@ -63,6 +65,7 @@ class HPCLossCriterion(nn.Module):
         self.lambda_special = float(lambda_special)
         self.lambda_rob = float(lambda_rob)
         self.lambda_kd = float(lambda_kd)
+        self.lambda_route = float(lambda_route)
         self.special_alloc_beta = float(special_alloc_beta)
         self.enable_curriculum = bool(enable_curriculum)
 
@@ -88,18 +91,19 @@ class HPCLossCriterion(nn.Module):
             output_stride=4,
         )
         self.rob_loss = RobustConsistencyLoss(block_sizes=self.block_sizes, output_stride=4)
+        self.routing_loss = RoutingSupervisionLoss()
 
     def _effective_weights(self, progress: float) -> Dict[str, float]:
         progress = min(max(float(progress), 0.0), 1.0)
         if not self.enable_curriculum or progress >= 0.30:
             f = dict(hnb=1.0, alloc=1.0, hn=1.0, empty=1.0, global_=1.0,
-                     direct=1.0, special=1.0, rob=1.0, kd=1.0)
+                     direct=1.0, special=1.0, rob=1.0, kd=1.0, route=1.0)
         elif progress < 0.10:
             f = dict(hnb=1.0, alloc=0.5, hn=0.0, empty=0.0, global_=1.0,
-                     direct=0.5, special=0.0, rob=0.0, kd=0.0)
+                     direct=0.5, special=0.0, rob=0.0, kd=0.0, route=0.0)
         else:  # 10–30%
             f = dict(hnb=1.0, alloc=1.0, hn=0.4, empty=0.5, global_=1.0,
-                     direct=1.0, special=0.5, rob=0.0, kd=0.5)
+                     direct=1.0, special=0.5, rob=0.0, kd=0.5, route=1.0)
         return {
             "hnb":     self.lambda_hnb     * f["hnb"],
             "alloc":   self.lambda_alloc   * f["alloc"],
@@ -110,6 +114,7 @@ class HPCLossCriterion(nn.Module):
             "special": self.lambda_special * f["special"],
             "rob":     self.lambda_rob     * f["rob"],
             "kd":      self.lambda_kd      * f["kd"],
+            "route":   self.lambda_route   * f["route"],
         }
 
     def forward(
@@ -122,6 +127,9 @@ class HPCLossCriterion(nn.Module):
         d_degraded: Optional[torch.Tensor] = None,
         degraded_mask: Optional[torch.Tensor] = None,
         teacher_map: Optional[torch.Tensor] = None,
+        routes8: Optional[torch.Tensor] = None,
+        gt_route_q: Optional[torch.Tensor] = None,
+        gt_route_mask: Optional[torch.Tensor] = None,
         progress: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         loss_dict: Dict[str, torch.Tensor] = {}
@@ -161,17 +169,22 @@ class HPCLossCriterion(nn.Module):
         else:
             l_rob = d_map.new_zeros(())
 
+        # --- SSER geometry routing supervision (training-only) ---
+        if routes8 is not None and gt_route_q is not None and gt_route_mask is not None:
+            l_route = self.routing_loss(routes8, gt_route_q, gt_route_mask)
+        else:
+            l_route = d_map.new_zeros(())
+
         # --- Knowledge distillation (optional, training-only) ---
         if teacher_map is not None and self.lambda_kd > 0:
-            # Hierarchical output-map distillation: SmoothL1 on log(1+block_mass)
             with torch.no_grad():
                 teacher_map_detach = teacher_map.detach()
             l_kd_terms = []
             from .negative_binomial import sum_pool
+            import torch.nn.functional as F
             for B in self.block_sizes:
                 mu_s = sum_pool(d_map, B, output_stride=4)
                 mu_t = sum_pool(teacher_map_detach, B, output_stride=4)
-                import torch.nn.functional as F
                 l_kd_terms.append(F.smooth_l1_loss(
                     torch.log1p(mu_s.float()),
                     torch.log1p(mu_t.float()),
@@ -192,6 +205,7 @@ class HPCLossCriterion(nn.Module):
             + weights["special"]* l_special
             + weights["rob"]   * l_rob
             + weights["kd"]    * l_kd
+            + weights["route"] * l_route
         )
 
         for name, value in {
@@ -204,6 +218,7 @@ class HPCLossCriterion(nn.Module):
             "loss_special": l_special,
             "loss_rob": l_rob,
             "loss_kd": l_kd,
+            "loss_route": l_route,
             "loss_total": total_loss,
         }.items():
             loss_dict[name] = value.detach()

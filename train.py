@@ -288,6 +288,7 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
         lambda_special=float(l_cfg.get("lambda_special", 0.25)),
         lambda_rob=float(l_cfg.get("lambda_rob", 0.1)),
         lambda_kd=float(l_cfg.get("lambda_kd", 0.0)),
+        lambda_route=float(l_cfg.get("lambda_route", 0.1)),
         hard_negative_fraction=float(l_cfg.get("hard_negative_fraction", 0.10)),
         use_stratified_nb=l_cfg.get("density_stratified_nb", True),
         global_count_mode=l_cfg.get("global_count_mode", "log_smooth_l1"),
@@ -380,10 +381,14 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
             gt_z_alloc = batch["gt_z_alloc"].to(device)
             gt_counts = batch["gt_count"].to(device)
 
-            # Special block masks for SR48 large/border emphasis
+            # Special block masks for large/border emphasis
             gt_special_mask16 = None
             if "gt_special_mask16" in batch:
                 gt_special_mask16 = batch["gt_special_mask16"].to(device)
+
+            # SSER routing supervision targets
+            gt_route_q    = batch["gt_route_q"].to(device)    if "gt_route_q"    in batch else None
+            gt_route_mask = batch["gt_route_mask"].to(device) if "gt_route_mask" in batch else None
 
             img_deg = batch.get("image_degraded", None)
             degraded_mask = batch.get("has_degraded", None)
@@ -392,26 +397,32 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
             if degraded_mask is not None:
                 degraded_mask = degraded_mask.to(device)
 
-            # Forward pass under AMP
+            # Forward pass — use return_aux=True to get routes8 for routing loss
             if use_amp:
                 with torch.amp.autocast("cuda"):
-                    d_clean = model(images)
+                    d_clean, aux = model(images, return_aux=True)
+                    routes8 = aux["routes8"]
                     d_deg = model(img_deg) if img_deg is not None else None
                     loss, loss_dict = criterion(
                         d_clean, gt_blocks, gt_z_alloc, gt_counts,
                         gt_special_mask16=gt_special_mask16,
                         d_degraded=d_deg, degraded_mask=degraded_mask,
+                        routes8=routes8,
+                        gt_route_q=gt_route_q, gt_route_mask=gt_route_mask,
                         progress=progress,
                     )
                     loss = loss / accum_steps
                 scaler.scale(loss).backward()
             else:
-                d_clean = model(images)
+                d_clean, aux = model(images, return_aux=True)
+                routes8 = aux["routes8"]
                 d_deg = model(img_deg) if img_deg is not None else None
                 loss, loss_dict = criterion(
                     d_clean, gt_blocks, gt_z_alloc, gt_counts,
                     gt_special_mask16=gt_special_mask16,
                     d_degraded=d_deg, degraded_mask=degraded_mask,
+                    routes8=routes8,
+                    gt_route_q=gt_route_q, gt_route_mask=gt_route_mask,
                     progress=progress,
                 )
                 loss = loss / accum_steps
