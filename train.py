@@ -74,7 +74,14 @@ def build_optimizer_and_scheduler(
         progress = float(step - warmup_steps) / max(total_steps - warmup_steps, 1)
         return 0.5 * (1.0 + math.cos(math.pi * progress))
         
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    import warnings
+    with warnings.catch_warnings():
+        # PyTorch's LambdaLR calls step() once during __init__, before the
+        # optimizer has been stepped. This triggers a spurious UserWarning.
+        # In our training loop the order is always correct: optimizer.step()
+        # then scheduler.step(). Suppress only this harmless init-time warning.
+        warnings.filterwarnings("ignore", message=".*lr_scheduler.step.*before.*optimizer.step.*")
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     return optimizer, scheduler
 
 
