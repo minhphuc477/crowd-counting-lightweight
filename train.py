@@ -492,7 +492,7 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                 )
 
         # Epoch-level LR step (epoch-based schedule)
-        scheduler.step(epoch)
+        scheduler.step()
 
         epoch_time = time.time() - t0
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else 0.0
