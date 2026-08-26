@@ -10,8 +10,8 @@
   "gmacs": 0.2082,
   "latency_device": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
   "latency_batch": 1,
-  "latency_median_ms": 11.526,
-  "latency_p90_ms": 16.205,
-  "fps": 86.76,
+  "latency_median_ms": 10.677,
+  "latency_p90_ms": 13.859,
+  "fps": 93.66,
   "peak_memory_mb": 29.21
 }

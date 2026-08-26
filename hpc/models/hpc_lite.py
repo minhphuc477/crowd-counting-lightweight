@@ -164,3 +164,91 @@ class HPCLiteSR48(nn.Module):
         d_valid = d_padded[..., :out_h, :out_w]
         count = d_valid.sum(dim=(-1, -2, -3))
         return count, d_valid
+
+    def predict_sliding_window(
+        self,
+        x: torch.Tensor,
+        crop_size: int = 448,
+        stride: int = 224,
+        use_tta: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Sliding-window inference with 2D Gaussian blending and Test-Time Augmentation (TTA).
+
+        Solves out-of-distribution scaling and boundary artifacts on large test images.
+
+        Args:
+            x: (1, 3, H, W) input image tensor.
+            crop_size: window size (matches training crop resolution).
+            stride: sliding step size (overlap = crop_size - stride).
+            use_tta: if True, averages predictions across original and horizontally flipped views.
+
+        Returns:
+            count: (1,) scalar count.
+            d_global: (1, 1, ceil(H/4), ceil(W/4)) seamlessly blended density map.
+        """
+        if x.ndim != 4 or x.shape[0] != 1:
+            raise ValueError(f"Expected single image (1, 3, H, W), got {tuple(x.shape)}")
+
+        _, _, H, W = x.shape
+        out_h = math.ceil(H / self.output_stride)
+        out_w = math.ceil(W / self.output_stride)
+
+        if H <= crop_size and W <= crop_size:
+            if use_tta:
+                c1, d1 = self.predict(x)
+                x_flip = torch.flip(x, dims=[-1])
+                c2, d2 = self.predict(x_flip)
+                d2 = torch.flip(d2, dims=[-1])
+                d_avg = 0.5 * (d1 + d2)
+                return d_avg.sum(dim=(-1, -2, -3)), d_avg
+            return self.predict(x)
+
+        # 2D Gaussian blending window for smooth overlap transitions
+        cw4 = crop_size // self.output_stride
+        sigma = cw4 / 4.0
+        y_axis = torch.arange(cw4, dtype=torch.float32, device=x.device) - (cw4 - 1) / 2.0
+        x_axis = torch.arange(cw4, dtype=torch.float32, device=x.device) - (cw4 - 1) / 2.0
+        gy, gx = torch.meshgrid(y_axis, x_axis, indexing="ij")
+        kernel = torch.exp(-(gx**2 + gy**2) / (2 * sigma**2)).unsqueeze(0).unsqueeze(0)  # (1, 1, cw4, cw4)
+
+        d_accum = torch.zeros(1, 1, out_h, out_w, dtype=torch.float32, device=x.device)
+        w_accum = torch.zeros(1, 1, out_h, out_w, dtype=torch.float32, device=x.device)
+
+        y_steps = list(range(0, max(1, H - crop_size + 1), stride))
+        if y_steps[-1] != H - crop_size and H > crop_size:
+            y_steps.append(H - crop_size)
+
+        x_steps = list(range(0, max(1, W - crop_size + 1), stride))
+        if x_steps[-1] != W - crop_size and W > crop_size:
+            x_steps.append(W - crop_size)
+
+        for y0 in y_steps:
+            for x0 in x_steps:
+                y1 = min(H, y0 + crop_size)
+                x1 = min(W, x0 + crop_size)
+                y0_adj = max(0, y1 - crop_size)
+                x0_adj = max(0, x1 - crop_size)
+
+                patch = x[:, :, y0_adj:y1, x0_adj:x1]
+
+                if use_tta:
+                    _, dp1 = self.predict(patch)
+                    patch_flip = torch.flip(patch, dims=[-1])
+                    _, dp2 = self.predict(patch_flip)
+                    dp2 = torch.flip(dp2, dims=[-1])
+                    dp = 0.5 * (dp1 + dp2)
+                else:
+                    _, dp = self.predict(patch)
+
+                # Output grid coordinates
+                out_y0 = y0_adj // self.output_stride
+                out_x0 = x0_adj // self.output_stride
+                ph, pw = dp.shape[-2], dp.shape[-1]
+
+                k = kernel[:, :, :ph, :pw]
+                d_accum[:, :, out_y0:out_y0+ph, out_x0:out_x0+pw] += dp * k
+                w_accum[:, :, out_y0:out_y0+ph, out_x0:out_x0+pw] += k
+
+        d_global = d_accum / (w_accum + 1e-8)
+        count = d_global.sum(dim=(-1, -2, -3))
+        return count, d_global

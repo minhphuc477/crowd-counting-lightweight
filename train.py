@@ -137,6 +137,10 @@ def custom_collate_fn(batch):
         res["image_degraded"] = torch.stack([s["image_degraded"] for s in batch])
         res["has_degraded"]   = torch.stack([s["has_degraded"]   for s in batch])
 
+    # Per-crop annotated points for PointMassDecompositionLoss
+    if "gt_points" in batch[0]:
+        res["gt_points"] = [s["gt_points"] for s in batch]
+
     return res
 
 
@@ -306,8 +310,9 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
         allocation_block=cfg["dataset"].get("allocation_block", 16),
         lambda_count=float(l_cfg.get("lambda_count", 1.0)),
         count_scale=float(l_cfg.get("count_scale", 100.0)),
-        lambda_hnb=float(l_cfg.get("lambda_hnb", 0.35)),
-        lambda_alloc=float(l_cfg.get("lambda_alloc", 0.15)),
+        lambda_point=float(l_cfg.get("lambda_point", 1.0)),
+        lambda_hnb=float(l_cfg.get("lambda_hnb", 0.25)),
+        lambda_alloc=float(l_cfg.get("lambda_alloc", 0.0)),
         lambda_hn=float(l_cfg.get("lambda_hn", 0.10)),
         lambda_empty=float(l_cfg.get("lambda_empty", 0.25)),
         lambda_global=float(l_cfg.get("lambda_global", 0.10)),
@@ -317,7 +322,6 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
         hard_negative_fraction=float(l_cfg.get("hard_negative_fraction", 0.10)),
         use_stratified_nb=l_cfg.get("density_stratified_nb", True),
         global_count_mode=l_cfg.get("global_count_mode", "log_smooth_l1"),
-        special_alloc_beta=float(l_cfg.get("special_alloc_beta", 1.0)),
         learn_dispersion=bool(l_cfg.get("learn_dispersion", False)),
         enable_curriculum=l_cfg.get("enable_curriculum", True),
     ).to(device)
@@ -433,6 +437,8 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
 
             optimizer.zero_grad(set_to_none=True)
 
+            gt_points = batch.get("gt_points", None)
+
             # Forward pass — return_aux=True to get routes8 for routing loss
             if use_amp:
                 with torch.amp.autocast("cuda"):
@@ -440,7 +446,8 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                     routes8 = aux["routes8"]
                     d_deg = model(img_deg) if img_deg is not None else None
                     loss, loss_dict = criterion(
-                        d_clean, gt_blocks, gt_z_alloc, gt_counts,
+                        d_clean, gt_blocks, gt_counts,
+                        gt_points=gt_points,
                         gt_special_mask16=gt_special_mask16,
                         d_degraded=d_deg, degraded_mask=degraded_mask,
                         routes8=routes8,
@@ -454,7 +461,8 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                 routes8 = aux["routes8"]
                 d_deg = model(img_deg) if img_deg is not None else None
                 loss, loss_dict = criterion(
-                    d_clean, gt_blocks, gt_z_alloc, gt_counts,
+                    d_clean, gt_blocks, gt_counts,
+                    gt_points=gt_points,
                     gt_special_mask16=gt_special_mask16,
                     d_degraded=d_deg, degraded_mask=degraded_mask,
                     routes8=routes8,
@@ -485,6 +493,7 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                     f"Epoch [{epoch:03d}/{total_epochs:03d}] Step [{step+1:02d}/{len(train_loader):02d}] "
                     f"Loss: {step_loss:.4f} "
                     f"(Count: {loss_dict.get('loss_count', 0):.3f}, "
+                    f"Point: {loss_dict.get('loss_point', 0):.3f}, "
                     f"BatchMAE: {loss_dict.get('batch_count_mae', 0):.1f}, "
                     f"Bias: {loss_dict.get('mean_signed_count_error', 0):+.1f}, "
                     f"HNB: {loss_dict.get('loss_hnb', 0):.3f})",

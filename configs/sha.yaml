@@ -1,5 +1,5 @@
 experiment:
-  name: hpc_s_sr48_sha_exp1_direct_count
+  name: hpc_s_sr48_sha_point_mass
   seed: 42
   save_dir: ./runs/sha
 
@@ -26,31 +26,28 @@ model:
   eps_d: 1.0e-6
   data_driven_head_bias: true
 
-# Experiment 1: Direct Count Loss revision
-# DirectCountL1Loss (lambda_count=1.0) is now the primary objective.
-# HNB demoted to probabilistic regularizer (0.35).
-# Allocation reduced to spatial regularizer (0.15).
-# NB dispersion frozen (learn_dispersion=false) to force mean prediction to absorb error.
+# Refined Point-Neighbor Mass Decomposition Objective
 loss:
   lambda_count: 1.0
   count_scale: 100.0
-  lambda_hnb: 0.35
-  lambda_alloc: 0.15
-  lambda_hn: 0.10
-  lambda_empty: 0.25
-  lambda_global: 0.10
+  lambda_point: 1.0               # Voronoi person-level unit mass conservation
+  lambda_hnb: 0.25                 # Multi-scale probabilistic regularizer
+  lambda_alloc: 0.0               # Deprecated in favor of point loss
+  lambda_hn: 0.10                 # Hard negative suppression on false blocks
+  lambda_empty: 0.25              # Whole-image empty suppression
+  lambda_global: 0.10             # Smooth L1 log-count stability
   lambda_rob: 0.05
   lambda_kd: 0.0
-  lambda_route: 0.1
+  lambda_route: 0.10              # SSER pyramid routing supervision
   hard_negative_fraction: 0.10
-  special_alloc_beta: 1.0
   density_stratified_nb: true
   global_count_mode: log_smooth_l1
   learn_dispersion: false
   enable_curriculum: true
 
+# Clean data scaling (aspect-ratio preserving, [0.8, 1.25])
 augmentation:
-  scale_range: [0.75, 2.0]
+  scale_range: [0.80, 1.25]
   flip_prob: 0.5
   safe_crop: true
   max_crop_attempts: 20
@@ -64,16 +61,16 @@ augmentation:
   border_center_crop_prob: 0.10
 
 robustness:
-  second_view_prob: 0.30
-  brightness: 0.20
-  contrast: 0.20
-  saturation: 0.15
-  blur_prob: 0.20
-  gamma_min: 0.35
-  gamma_max: 1.80
-  salt_pepper_prob: 0.15
-  jpeg_prob: 0.20
-  noise_prob: 0.20
+  second_view_prob: 0.20
+  brightness: 0.15
+  contrast: 0.15
+  saturation: 0.10
+  blur_prob: 0.15
+  gamma_min: 0.50
+  gamma_max: 1.50
+  salt_pepper_prob: 0.0
+  jpeg_prob: 0.0
+  noise_prob: 0.0
 
 sampler:
   weighted: true
@@ -81,19 +78,18 @@ sampler:
   luminance_bins: 4
   power: 0.5
 
-# Experiment 1: uniform LR=1e-4 for all model params (no backbone split)
 optimizer:
   name: adamw
-  lr: 1.0e-4
+  lr: 5.0e-5                      # Clean restarted LR for fine-tuning from best.pt
   lr_start: 1.0e-5
   lr_min: 1.0e-6
   weight_decay: 1.0e-4
   grad_clip: 1.0
 
 schedule:
-  epochs: 2000
-  warmup_epochs: 50   # 50-epoch linear warmup: 1e-5 -> 1e-4
-  cosine: true        # cosine decay: 1e-4 -> 1e-6 over epochs 50-2000
+  epochs: 150                     # 150 epochs continuation
+  warmup_epochs: 10               # 10 epochs quick warmup
+  cosine: true
 
 training:
   effective_batch_size: 16
