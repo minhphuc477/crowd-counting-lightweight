@@ -35,54 +35,65 @@ from tools.profile_model import profile_model_efficiency
 
 def build_optimizer_and_scheduler(
     model: nn.Module,
-    criterion: nn.Module,
     opt_cfg: dict,
-    total_steps: int,
-    warmup_steps: int,
+    total_epochs: int,
+    warmup_epochs: int = 50,
 ):
-    """Build AdamW optimizer with separate parameter groups and cosine warm-up scheduler."""
-    backbone_params = []
-    head_neck_params = []
-    
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
+    """Build AdamW + warmup-cosine scheduler.
+
+    Experiment-1 specification:
+    - Uniform LR=1e-4 for all trainable model params (no backbone LR penalty).
+    - No weight decay on bias / norm / 1-D params.
+    - Dispersion frozen => criterion has no trainable params => not included.
+    - 50-epoch warmup: 1e-5 -> 1e-4.
+    - Cosine decay: 1e-4 -> 1e-6 over remaining epochs.
+    """
+    lr_max = float(opt_cfg.get("lr", 1.0e-4))
+    lr_start = float(opt_cfg.get("lr_start", 1.0e-5))
+    lr_min = float(opt_cfg.get("lr_min", 1.0e-6))
+    wd = float(opt_cfg.get("weight_decay", 1.0e-4))
+
+    decay_params, no_decay_params = [], []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
             continue
-        if "backbone" in name:
-            backbone_params.append(param)
+        lname = name.lower()
+        if (
+            p.ndim == 1
+            or name.endswith(".bias")
+            or "bn" in lname
+            or "norm" in lname
+        ):
+            no_decay_params.append(p)
         else:
-            head_neck_params.append(param)
-            
-    dispersion_params = [p for p in criterion.parameters() if p.requires_grad]
-    
+            decay_params.append(p)
+
     param_groups = [
-        {"params": backbone_params, "lr": float(opt_cfg.get("backbone_lr", 2.5e-5))},
-        {"params": head_neck_params, "lr": float(opt_cfg.get("head_lr", 1.0e-4))},
+        {"params": decay_params,    "weight_decay": wd},
+        {"params": no_decay_params, "weight_decay": 0.0},
     ]
-    if dispersion_params:
-        param_groups.append(
-            {"params": dispersion_params, "lr": float(opt_cfg.get("dispersion_lr", 1.0e-4))}
-        )
-        
-    optimizer = torch.optim.AdamW(
-        param_groups,
-        weight_decay=float(opt_cfg.get("weight_decay", 1.0e-4)),
-    )
-    
-    def lr_lambda(step: int) -> float:
-        if step < warmup_steps:
-            return max(float(step + 1) / max(warmup_steps, 1), 1e-4)
-        progress = float(step - warmup_steps) / max(total_steps - warmup_steps, 1)
-        return 0.5 * (1.0 + math.cos(math.pi * progress))
-        
+
+    optimizer = torch.optim.AdamW(param_groups, lr=lr_max)
+
+    def lr_lambda(epoch: int) -> float:
+        # epoch is 0-indexed here (LambdaLR calls with last_epoch)
+        if epoch < warmup_epochs:
+            alpha = (epoch + 1) / max(warmup_epochs, 1)
+            lr = lr_start + alpha * (lr_max - lr_start)
+            return lr / lr_max
+        t = (epoch - warmup_epochs) / max(total_epochs - warmup_epochs, 1)
+        t = min(t, 1.0)
+        lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + math.cos(math.pi * t))
+        return lr / lr_max
+
     import warnings
     with warnings.catch_warnings():
-        # PyTorch's LambdaLR calls step() once during __init__, before the
-        # optimizer has been stepped. This triggers a spurious UserWarning.
-        # In our training loop the order is always correct: optimizer.step()
-        # then scheduler.step(). Suppress only this harmless init-time warning.
         warnings.filterwarnings("ignore", message=".*lr_scheduler.step.*before.*optimizer.step.*")
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     return optimizer, scheduler
+
+
+
 
 
 def custom_collate_fn(batch):
@@ -293,31 +304,37 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
     criterion = HPCLossCriterion(
         block_sizes=cfg["dataset"]["hnb_blocks"],
         allocation_block=cfg["dataset"].get("allocation_block", 16),
-        lambda_hnb=float(l_cfg.get("lambda_hnb", 1.0)),
-        lambda_alloc=float(l_cfg.get("lambda_alloc", 0.5)),
-        lambda_hn=float(l_cfg.get("lambda_hn", 0.25)),
-        lambda_empty=float(l_cfg.get("lambda_empty", 0.5)),
-        lambda_global=float(l_cfg.get("lambda_global", 0.5)),
-        lambda_direct=float(l_cfg.get("lambda_direct", 0.5)),
-        lambda_special=float(l_cfg.get("lambda_special", 0.25)),
-        lambda_rob=float(l_cfg.get("lambda_rob", 0.1)),
+        lambda_count=float(l_cfg.get("lambda_count", 1.0)),
+        count_scale=float(l_cfg.get("count_scale", 100.0)),
+        lambda_hnb=float(l_cfg.get("lambda_hnb", 0.35)),
+        lambda_alloc=float(l_cfg.get("lambda_alloc", 0.15)),
+        lambda_hn=float(l_cfg.get("lambda_hn", 0.10)),
+        lambda_empty=float(l_cfg.get("lambda_empty", 0.25)),
+        lambda_global=float(l_cfg.get("lambda_global", 0.10)),
+        lambda_rob=float(l_cfg.get("lambda_rob", 0.05)),
         lambda_kd=float(l_cfg.get("lambda_kd", 0.0)),
         lambda_route=float(l_cfg.get("lambda_route", 0.1)),
         hard_negative_fraction=float(l_cfg.get("hard_negative_fraction", 0.10)),
         use_stratified_nb=l_cfg.get("density_stratified_nb", True),
         global_count_mode=l_cfg.get("global_count_mode", "log_smooth_l1"),
         special_alloc_beta=float(l_cfg.get("special_alloc_beta", 1.0)),
+        learn_dispersion=bool(l_cfg.get("learn_dispersion", False)),
         enable_curriculum=l_cfg.get("enable_curriculum", True),
     ).to(device)
-    
-    # 4. Optimizer and LR Scheduler
-    total_epochs = cfg.get("schedule", {}).get("epochs", 300)
-    total_steps = max(len(train_loader) * total_epochs, 1)
-    warmup_frac = cfg.get("schedule", {}).get("warmup_fraction", 0.05)
-    warmup_steps = int(total_steps * warmup_frac)
-    
+
+    # 4. Optimizer and LR Scheduler (epoch-based, uniform LR, no-decay grouping)
+    total_epochs = cfg.get("schedule", {}).get("epochs", 2000)
+    sched_cfg = cfg.get("schedule", {})
+    warmup_epochs = int(sched_cfg.get("warmup_epochs", 50))
+
+    opt_cfg_full = dict(cfg.get("optimizer", {}))
+    opt_cfg_full.setdefault("lr", 1.0e-4)
+    opt_cfg_full.setdefault("lr_start", 1.0e-5)
+    opt_cfg_full.setdefault("lr_min", 1.0e-6)
+    opt_cfg_full.setdefault("weight_decay", 1.0e-4)
+
     optimizer, scheduler = build_optimizer_and_scheduler(
-        model, criterion, cfg.get("optimizer", {}), total_steps, warmup_steps
+        model, opt_cfg_full, total_epochs, warmup_epochs
     )
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
     
@@ -376,9 +393,9 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                 output_stride=cfg["dataset"].get("output_stride", 4),
             )
 
-    # global_step must reflect steps already taken in previous runs so the LR
-    # schedule and curriculum progress factor continue correctly.
+    # global_step used only for counting; curriculum is now epoch-based
     global_step = (start_epoch - 1) * len(train_loader)
+    total_steps = max(len(train_loader) * total_epochs, 1)
 
     print(f"Starting training from epoch {start_epoch}/{total_epochs} "
           f"(global_step={global_step})...")
@@ -386,10 +403,13 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
         model.train()
         criterion.train()
         epoch_losses = []
+        epoch_count_maes = []
+
+        # Curriculum progress: epoch-based fraction
+        progress = float(epoch - 1) / float(max(total_epochs - 1, 1))
 
         t0 = time.time()
         for step, batch in enumerate(train_loader):
-            progress = float(global_step) / float(max(total_steps, 1))
             images = batch["image"].to(device)
             gt_blocks = {b: batch["gt_blocks"][b].to(device) for b in batch["gt_blocks"]}
             gt_z_alloc = batch["gt_z_alloc"].to(device)
@@ -411,7 +431,9 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
             if degraded_mask is not None:
                 degraded_mask = degraded_mask.to(device)
 
-            # Forward pass — use return_aux=True to get routes8 for routing loss
+            optimizer.zero_grad(set_to_none=True)
+
+            # Forward pass — return_aux=True to get routes8 for routing loss
             if use_amp:
                 with torch.amp.autocast("cuda"):
                     d_clean, aux = model(images, return_aux=True)
@@ -441,36 +463,41 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
                 )
                 loss = loss / accum_steps
                 loss.backward()
-                
+
             if (step + 1) % accum_steps == 0 or (step + 1) == len(train_loader):
                 if use_amp:
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                    torch.nn.utils.clip_grad_norm_(criterion.parameters(), grad_clip)
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                    torch.nn.utils.clip_grad_norm_(criterion.parameters(), grad_clip)
                     optimizer.step()
-                optimizer.zero_grad()
-                scheduler.step()
-                
+
             global_step += 1
-            epoch_losses.append(loss.item() * accum_steps)
-            
-            # Print batch progress periodically
+            step_loss = loss.item() * accum_steps
+            epoch_losses.append(step_loss)
+            epoch_count_maes.append(float(loss_dict.get("batch_count_mae", 0.0)))
+
+            # Print batch progress with count diagnostics
             if (step + 1) % max(len(train_loader) // 4, 1) == 0 or (step + 1) == len(train_loader):
                 print(
                     f"Epoch [{epoch:03d}/{total_epochs:03d}] Step [{step+1:02d}/{len(train_loader):02d}] "
-                    f"Loss: {loss.item() * accum_steps:.4f} (HNB: {loss_dict.get('loss_hnb', 0):.3f}, "
-                    f"Alloc: {loss_dict.get('loss_alloc', 0):.3f}, HN: {loss_dict.get('loss_hn', 0):.3f})",
+                    f"Loss: {step_loss:.4f} "
+                    f"(Count: {loss_dict.get('loss_count', 0):.3f}, "
+                    f"BatchMAE: {loss_dict.get('batch_count_mae', 0):.1f}, "
+                    f"Bias: {loss_dict.get('mean_signed_count_error', 0):+.1f}, "
+                    f"HNB: {loss_dict.get('loss_hnb', 0):.3f})",
                     flush=True,
                 )
-            
+
+        # Epoch-level LR step (epoch-based schedule)
+        scheduler.step(epoch)
+
         epoch_time = time.time() - t0
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else 0.0
-        
+        mean_count_mae = float(np.mean(epoch_count_maes)) if epoch_count_maes else 0.0
+
         # Log train epoch
         current_lr = optimizer.param_groups[1]["lr"]
         train_logger.log({"epoch": epoch, "loss": mean_loss, "lr": current_lr, "time_s": round(epoch_time, 2)})

@@ -69,6 +69,7 @@ class HierarchicalNBLoss(nn.Module):
         use_stratified: bool = True,
         use_poisson: bool = False,
         max_dispersion: float = _MAX_DISPERSION,
+        learn_dispersion: bool = False,   # Experiment 1: freeze r_B
     ):
         super().__init__()
         if not block_sizes:
@@ -77,6 +78,7 @@ class HierarchicalNBLoss(nn.Module):
         self.use_stratified = bool(use_stratified)
         self.use_poisson = bool(use_poisson)
         self.max_dispersion = float(max_dispersion)
+        self.learn_dispersion = bool(learn_dispersion)
 
         # Config files often deserialize dictionary keys as strings.
         self.quantiles: Dict[int, Tuple[float, float]] = {}
@@ -88,7 +90,10 @@ class HierarchicalNBLoss(nn.Module):
 
         if not self.use_poisson:
             self.raw_dispersions = nn.ParameterDict({
-                str(b): nn.Parameter(torch.tensor(_inv_softplus(10.0), dtype=torch.float32))
+                str(b): nn.Parameter(
+                    torch.tensor(_inv_softplus(10.0), dtype=torch.float32),
+                    requires_grad=self.learn_dispersion,   # frozen when False
+                )
                 for b in self.block_sizes
             })
 
@@ -109,9 +114,9 @@ class HierarchicalNBLoss(nn.Module):
         if var > mean and (var - mean) > 1e-8:
             r0 = (mean * mean) / (var - mean)
         else:
-            # NB approaches Poisson as r -> infinity. A finite cap is enough numerically.
             r0 = self.max_dispersion
-        r0 = min(max(r0, 1e-3), self.max_dispersion)
+        # Clamp to [1e-3, 100] — avoids pathological dispersion (§6.3)
+        r0 = min(max(r0, 1e-3), 100.0)
 
         raw_val = _inv_softplus(max(r0 - 1e-4, 1e-8))
         with torch.no_grad():

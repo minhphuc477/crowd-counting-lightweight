@@ -127,3 +127,54 @@ class SpecialBlockCountLoss(nn.Module):
             return d_map.new_zeros(())
 
         return F.smooth_l1_loss(mu[mask].float(), y[mask])
+
+
+class DirectCountL1Loss(nn.Module):
+    """Direct image-level count objective aligned with benchmark MAE.
+
+    L_count = mean_i(|sum(D_i) - GT_i|) / count_scale
+
+    Gradient per density cell: sign(pred_count - gt_count) / (count_scale * B)
+    — constant magnitude, unaffected by crowd density.
+
+    Args:
+        count_scale: denominator to keep loss ~O(1) when MAE ~100.
+            Default 100 means L_count ≈ 0.8 when MAE = 80.
+    """
+
+    def __init__(self, count_scale: float = 100.0):
+        super().__init__()
+        if count_scale <= 0:
+            raise ValueError("count_scale must be > 0")
+        self.count_scale = float(count_scale)
+
+    def forward(self, d_map: torch.Tensor, gt_counts: torch.Tensor) -> torch.Tensor:
+        pred_counts = d_map.sum(dim=(-1, -2, -3)).float()
+        gt_counts = gt_counts.to(pred_counts.device, dtype=torch.float32).reshape(-1)
+        if gt_counts.shape != pred_counts.shape:
+            raise ValueError(
+                f"gt_counts shape {tuple(gt_counts.shape)} != pred shape {tuple(pred_counts.shape)}"
+            )
+        return torch.mean(torch.abs(pred_counts - gt_counts)) / self.count_scale
+
+
+class DirectCountHuberLoss(nn.Module):
+    """Huber (smooth L1) variant of DirectCountL1Loss for robustness to extreme outlier counts.
+
+    Use only if raw L1 causes instability. Prefer DirectCountL1Loss for MAE-aligned training.
+
+    L = SmoothL1((pred_count - gt_count) / count_scale, 0)
+    """
+
+    def __init__(self, count_scale: float = 100.0, beta: float = 1.0):
+        super().__init__()
+        if count_scale <= 0:
+            raise ValueError("count_scale must be > 0")
+        self.count_scale = float(count_scale)
+        self.beta = float(beta)
+
+    def forward(self, d_map: torch.Tensor, gt_counts: torch.Tensor) -> torch.Tensor:
+        pred_counts = d_map.sum(dim=(-1, -2, -3)).float()
+        gt_counts = gt_counts.to(pred_counts.device, dtype=torch.float32).reshape(-1)
+        residual = (pred_counts - gt_counts) / self.count_scale
+        return F.smooth_l1_loss(residual, torch.zeros_like(residual), beta=self.beta)
