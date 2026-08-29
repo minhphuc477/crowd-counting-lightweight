@@ -219,6 +219,7 @@ def main():
         running_32_16 = 0.0
         running_16_8 = 0.0
         running_flat = 0.0
+        running_multi = 0.0
         running_det = 0.0
         running_exact = 0.0
 
@@ -254,6 +255,7 @@ def main():
             running_32_16 += logs["32_to_16"].item()
             running_16_8 += logs["16_to_8_dense"].item()
             running_flat += logs["flat_16"].item()
+            running_multi += logs["multinomial_tree"].item()
             running_det += logs["deterministic_alloc"].item()
             running_exact += logs["exact_regression"].item()
 
@@ -299,7 +301,9 @@ def main():
                 pieces = f"Root: {running_root/n_steps:.2f}, DetAlloc: {running_det/n_steps:.2f}"
             elif ntpc_cfg.mode == "r2_flat_dm":
                 pieces = f"Root: {running_root/n_steps:.2f}, Flat16: {running_flat/n_steps:.2f}"
-            elif ntpc_cfg.mode == "r3_tree_dtm":
+            elif ntpc_cfg.mode == "r3_multinomial_tree":
+                pieces = f"Root: {running_root/n_steps:.2f}, MultiTree: {running_multi/n_steps:.2f}"
+            elif ntpc_cfg.mode in ("r4_dtm_tree", "r3_tree_dtm"):
                 pieces = f"Root: {running_root/n_steps:.2f}, R64: {running_r64/n_steps:.2f}, 64->32: {running_64_32/n_steps:.2f}, 32->16: {running_32_16/n_steps:.2f}"
             else:
                 pieces = f"Root: {running_root/n_steps:.2f}, R64: {running_r64/n_steps:.2f}, 64->32: {running_64_32/n_steps:.2f}, 32->16: {running_32_16/n_steps:.2f}, 16->8: {running_16_8/n_steps:.2f}"
