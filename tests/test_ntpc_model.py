@@ -1,7 +1,9 @@
+import copy
+from pathlib import Path
+
 import pytest
 import torch
 import yaml
-from pathlib import Path
 
 from hpc.models.backbone import MobileNetV4Backbone
 from hpc.models.factory import (
@@ -79,6 +81,92 @@ def test_truncated_backbone_is_exactly_equal_to_full_timm_features():
         actual = truncated(image)
     for expected_level, actual_level in zip(expected, actual):
         torch.testing.assert_close(actual_level, expected_level, rtol=0, atol=0)
+
+
+def test_truncated_whole_ntpc_forward_and_backward_exact_parity():
+    """Removing downstream C32 stages must not change D, count, or retained gradients."""
+    import timm
+
+    torch.manual_seed(11)
+    truncated = HPCLite(pretrained=False, neck_width=32).eval()
+    full = copy.deepcopy(truncated)
+    full_feature_extractor = timm.create_model(
+        "mobilenetv4_conv_small_050",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3),
+    )
+    incompatible = full_feature_extractor.load_state_dict(
+        truncated.backbone.backbone.state_dict(), strict=False
+    )
+    assert not incompatible.unexpected_keys
+    assert incompatible.missing_keys
+    assert all(
+        key.startswith("blocks.3.") or key.startswith("blocks.4.")
+        for key in incompatible.missing_keys
+    )
+    full.backbone.backbone = full_feature_extractor
+    full.eval()
+
+    image = torch.randn(2, 3, 64, 64)
+    mass_full = full(image)
+    mass_truncated = truncated(image)
+    torch.testing.assert_close(mass_truncated, mass_full, rtol=0, atol=0)
+    torch.testing.assert_close(
+        mass_truncated.sum(dim=(-1, -2, -3)),
+        mass_full.sum(dim=(-1, -2, -3)),
+        rtol=0,
+        atol=0,
+    )
+
+    mass_full.square().mean().backward()
+    mass_truncated.square().mean().backward()
+    full_parameters = dict(full.named_parameters())
+    for name, parameter in truncated.named_parameters():
+        assert parameter.grad is not None, f"Retained parameter {name} has no gradient"
+        assert full_parameters[name].grad is not None
+        torch.testing.assert_close(parameter.grad, full_parameters[name].grad, rtol=0, atol=0)
+    discarded = [
+        parameter
+        for name, parameter in full.named_parameters()
+        if ".blocks.3." in name or ".blocks.4." in name
+    ]
+    assert discarded
+    assert all(parameter.grad is None for parameter in discarded)
+
+
+def test_truncation_preserves_weights_returned_by_pretrained_factory(monkeypatch):
+    """Simulate pretrained creation offline and prove truncation never rewrites retained tensors."""
+    import timm
+
+    model_name = "mobilenetv4_conv_small_050"
+    original_create_model = timm.create_model
+    probe = original_create_model(model_name, pretrained=False, features_only=True)
+    loaded = original_create_model(
+        model_name,
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3),
+    )
+    loaded_state_before = {
+        key: tensor.detach().clone() for key, tensor in loaded.state_dict().items()
+    }
+    calls = []
+
+    def fake_create_model(_name, *, pretrained, features_only, out_indices=None):
+        calls.append({"pretrained": pretrained, "out_indices": out_indices})
+        return probe if len(calls) == 1 else loaded
+
+    monkeypatch.setattr(timm, "create_model", fake_create_model)
+    backbone = MobileNetV4Backbone(model_name, pretrained=True)
+    assert calls == [
+        {"pretrained": False, "out_indices": None},
+        {"pretrained": True, "out_indices": (1, 2, 3)},
+    ]
+    retained_state = backbone.backbone.state_dict()
+    assert retained_state
+    for key, tensor in retained_state.items():
+        torch.testing.assert_close(tensor, loaded_state_before[key], rtol=0, atol=0)
 
 
 def test_pretrained_contract_and_offline_checkpoint_construction():

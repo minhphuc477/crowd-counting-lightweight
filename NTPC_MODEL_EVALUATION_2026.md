@@ -30,7 +30,7 @@ Exa Search reviewed 106 search hits across three workstreams: ultra-lightweight 
 | Conv FLOPs, MAC=2 ops | 4.80281 GFLOPs | Convolution only; GN/interpolation/activations excluded |
 | 1920x1080 latency | 15.95 ms median, 16.89 ms p95 | 62.7 FPS, batch 1, FP32, RTX 3050 Ti Laptop |
 | 1920x1080 peak allocation | 160.34 MiB | PyTorch CUDA allocator, inference without profiling hooks |
-| Automated verification | 85 tests passed | Includes exact pretrained truncation parity, conservation, gradients, 10k localization matching, OT-M and tiled inference |
+| Automated verification | 87 tests passed | Includes exact pretrained/whole-graph forward-backward truncation parity, conservation, gradients, 10k localization matching, OT-M and tiled inference |
 
 The nearest efficiency competitor found is ZIP-P, which also uses a MobileNetV4-Small 0.5x family backbone and probabilistic discrete-count modeling. ZIP-P reports 0.81M parameters and 6.46 GFLOPs at 1920x1080, with MAE 71.18/8.23/96.29 on SHA/SHB/QNRF. FLOP definitions must be re-measured in the same profiler before claiming NTPC is cheaper, but NTPC uses approximately 88% fewer parameters.
 

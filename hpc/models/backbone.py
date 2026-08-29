@@ -9,8 +9,8 @@ import torch.nn as nn
 class MobileNetV4Backbone(nn.Module):
     """MobileNetV4 feature backbone returning features at reductions 4, 8, 16.
 
-    Uses timm's ``features_only=True`` with explicit ``out_indices`` to instantiate
-    and execute only the required feature stages.
+    Uses timm's ``features_only=True`` with explicit ``out_indices``, then
+    physically removes stages downstream of the last consumed C16 feature.
     """
 
     def __init__(
