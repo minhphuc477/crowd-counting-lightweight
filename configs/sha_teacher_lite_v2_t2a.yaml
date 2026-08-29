@@ -1,0 +1,70 @@
+# Experiment T2-A: Teacher-Lite v2 with DM-Count OT + TV + Density-Balanced 4-Quantile Sampling
+experiment:
+  name: sha_teacher_lite_v2_t2a
+  seed: 42
+  save_dir: ./runs/sha_teacher_lite_v2_t2a
+
+model:
+  teacher:
+    name: teacher_lite
+    backbone: efficientnet_b0
+    fpn_width: 96
+    pretrained: true
+    eps_d: 1.0e-6
+
+data:
+  name: sha
+  part: part_A
+  root: ./data/ShanghaiTech
+  crop_size: 448
+  output_stride: 4
+  hnb_blocks: [16, 32, 64]
+  allocation_block: 16
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+  density_balanced_sampling: true
+  density_bins: quantile
+  num_bins: 4
+
+augmentation:
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+
+loss:
+  count_map: 1.0
+  count_reg: 0.5
+  multiscale_mae:
+    weight: 1.0
+    blocks: [16, 32, 64]
+  optimal_transport:
+    enabled: true
+    weight: 0.10
+    reg: 10.0
+    iterations: 100
+  total_variation:
+    enabled: true
+    weight: 0.01
+  map_reg_consistency:
+    weight: 0.10
+
+optimizer:
+  type: adamw
+  backbone_lr: 1.0e-5
+  head_lr: 5.0e-5
+  weight_decay: 1.0e-4
+  grad_clip: 5.0
+
+schedule:
+  epochs: 400
+  warmup_epochs: 20
+
+train:
+  init_checkpoint: ./runs/sha_teacher_lite/best.pt
+  epochs: 400
+  backbone_lr: 1.0e-5
+  head_lr: 5.0e-5
+  batch_size: 1
+  grad_accum: 16
+  amp: true
+  validate_every: 5
+  num_workers: 0

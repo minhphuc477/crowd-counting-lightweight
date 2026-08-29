@@ -20,7 +20,7 @@ from hpc.targets.block_counts import build_hierarchical_block_counts
 from hpc.losses.negative_binomial import HierarchicalNBLoss, nb_nll
 from hpc.losses.criterion import HPCLossCriterion
 from hpc.losses.robustness import RobustConsistencyLoss
-from hpc.data.common import BaseCrowdDataset
+from hpc.data.common import BaseCrowdDataset, custom_collate_fn
 from hpc.data.transforms import GeometricTransforms
 from hpc.data.sampler import build_density_luminance_sampler
 from hpc.metrics.counting import compute_nae
@@ -97,6 +97,7 @@ def test_patch_criterion_zero_lambda_ablation():
     c = torch.zeros(2)
     crit = HPCLossCriterion(
         [16, 32, 96],
+        lambda_count=0,
         lambda_hnb=0,
         lambda_alloc=0,
         lambda_hn=0,
@@ -148,7 +149,10 @@ def test_patch_dataset_schema():
             second_view_prob=0.5,
             is_train=True,
         )
-        loader = DataLoader(ds, batch_size=4, shuffle=False, num_workers=0)
+        loader = DataLoader(
+            ds, batch_size=4, shuffle=False, num_workers=0,
+            collate_fn=custom_collate_fn,
+        )
         for batch in loader:
             assert "image_degraded" in batch
             assert "has_degraded" in batch

@@ -22,7 +22,7 @@ import torchvision.transforms.functional as TF
 from hpc.utils.seed import seed_everything
 from hpc.utils.logging import CSVLogger
 from hpc.utils.checkpoint import build_checkpoint_state, save_checkpoint, load_checkpoint
-from hpc.models.hpc_lite import HPCLiteSR48
+from hpc.models.hpc_lite import HPCLite, HPCLiteSR48
 from hpc.losses.criterion import HPCLossCriterion
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.data.qnrf import UCFQNRFDataset
@@ -39,45 +39,57 @@ def build_optimizer_and_scheduler(
     total_epochs: int,
     warmup_epochs: int = 50,
 ):
-    """Build AdamW + warmup-cosine scheduler.
-
-    Experiment-1 specification:
-    - Uniform LR=1e-4 for all trainable model params (no backbone LR penalty).
-    - No weight decay on bias / norm / 1-D params.
-    - Dispersion frozen => criterion has no trainable params => not included.
-    - 50-epoch warmup: 1e-5 -> 1e-4.
-    - Cosine decay: 1e-4 -> 1e-6 over remaining epochs.
-    """
+    """Build AdamW + warmup-cosine scheduler with optional differential learning rates."""
     lr_max = float(opt_cfg.get("lr", 1.0e-4))
     lr_start = float(opt_cfg.get("lr_start", 1.0e-5))
     lr_min = float(opt_cfg.get("lr_min", 1.0e-6))
     wd = float(opt_cfg.get("weight_decay", 1.0e-4))
 
-    decay_params, no_decay_params = [], []
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
-            continue
-        lname = name.lower()
-        if (
-            p.ndim == 1
-            or name.endswith(".bias")
-            or "bn" in lname
-            or "norm" in lname
-        ):
-            no_decay_params.append(p)
-        else:
-            decay_params.append(p)
+    lr_new = opt_cfg.get("lr_new_layers")
+    lr_exist = opt_cfg.get("lr_existing")
 
-    param_groups = [
-        {"params": decay_params,    "weight_decay": wd},
-        {"params": no_decay_params, "weight_decay": 0.0},
-    ]
+    if lr_new is not None and lr_exist is not None:
+        lr_new = float(lr_new)
+        lr_exist = float(lr_exist)
+        new_params = []
+        exist_params = []
+        for name, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if "context_p8" in name:
+                new_params.append(p)
+            else:
+                exist_params.append(p)
 
-    optimizer = torch.optim.AdamW(param_groups, lr=lr_max)
+        param_groups = [
+            {"params": exist_params, "lr": lr_exist, "weight_decay": wd, "base_lr": lr_exist},
+            {"params": new_params, "lr": lr_new, "weight_decay": wd, "base_lr": lr_new},
+        ]
+        optimizer = torch.optim.AdamW(param_groups)
+    else:
+        decay_params, no_decay_params = [], []
+        for name, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            lname = name.lower()
+            if (
+                p.ndim == 1
+                or name.endswith(".bias")
+                or "bn" in lname
+                or "norm" in lname
+            ):
+                no_decay_params.append(p)
+            else:
+                decay_params.append(p)
+
+        param_groups = [
+            {"params": decay_params, "lr": lr_max, "weight_decay": wd, "base_lr": lr_max},
+            {"params": no_decay_params, "lr": lr_max, "weight_decay": 0.0, "base_lr": lr_max},
+        ]
+        optimizer = torch.optim.AdamW(param_groups, lr=lr_max)
 
     def lr_lambda(epoch: int) -> float:
-        # epoch is 0-indexed here (LambdaLR calls with last_epoch)
-        if epoch < warmup_epochs:
+        if epoch < warmup_epochs and warmup_epochs > 0:
             alpha = (epoch + 1) / max(warmup_epochs, 1)
             lr = lr_start + alpha * (lr_max - lr_start)
             return lr / lr_max
@@ -154,6 +166,8 @@ def build_dataset(cfg: dict, is_train: bool):
     alloc_block = ds_cfg.get("allocation_block", 16)
     scale_range = tuple(ds_cfg.get("scale_range", [0.75, 2.0]))
     flip_prob = float(ds_cfg.get("flip_prob", 0.5))
+    image_mean = ds_cfg.get("image_mean", None)
+    image_std = ds_cfg.get("image_std", None)
     
     rob_cfg = cfg.get("robustness", {})
     second_view_prob = float(rob_cfg.get("second_view_prob", 0.30)) if is_train else 0.0
@@ -173,6 +187,8 @@ def build_dataset(cfg: dict, is_train: bool):
             flip_prob=flip_prob,
             second_view_prob=second_view_prob,
             photometric_cfg=rob_cfg,
+            image_mean=image_mean,
+            image_std=image_std,
         )
     elif "qnrf" in ds_name:
         split = "Train" if is_train else "Test"
@@ -293,15 +309,40 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
     
     # 2. Model Initialization
     m_cfg = cfg["model"]
-    model = HPCLiteSR48(
-        pretrained=m_cfg.get("pretrained", True),
-        neck_width=m_cfg.get("neck_width", 48),
-        eps_d=float(m_cfg.get("eps_d", 1e-6)),
-        route_temperature=float(m_cfg.get("route_temperature", 1.0)),
-        pool_kernels=tuple(m_cfg.get("pool_kernels", [3, 5, 7])),
-        pool_residual_mix=float(m_cfg.get("pool_residual_mix", 0.5)),
-        simam_lambda=float(m_cfg.get("simam_lambda", 1e-4)),
-    ).to(device)
+    backbone_str = str(m_cfg.get("backbone", "")).lower()
+    if "mobilenetv4" in backbone_str or m_cfg.get("name") == "hpc_lite":
+        model = HPCLite(
+            backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
+            pretrained=m_cfg.get("pretrained", True),
+            neck_width=m_cfg.get("neck_width", 32),
+            context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
+            use_p8_context=bool(m_cfg.get("use_p8_context", False)),
+            eps_d=float(m_cfg.get("eps_d", 1e-6)),
+            truncate_backbone=bool(m_cfg.get("truncate_backbone", True)),
+        ).to(device)
+    else:
+        model = HPCLiteSR48(
+            pretrained=m_cfg.get("pretrained", True),
+            neck_width=m_cfg.get("neck_width", 48),
+            eps_d=float(m_cfg.get("eps_d", 1e-6)),
+            route_temperature=float(m_cfg.get("route_temperature", 1.0)),
+            pool_kernels=tuple(m_cfg.get("pool_kernels", [3, 5, 7])),
+            pool_residual_mix=float(m_cfg.get("pool_residual_mix", 0.5)),
+            simam_lambda=float(m_cfg.get("simam_lambda", 1e-4)),
+        ).to(device)
+
+    # Load initial checkpoint if provided
+    init_ckpt = m_cfg.get("init_checkpoint", cfg.get("training", {}).get("init_checkpoint"))
+    if init_ckpt and os.path.exists(init_ckpt):
+        print(f"Loading initial student weights from {init_ckpt} (strict=False)...")
+        ckpt = torch.load(init_ckpt, map_location=device)
+        state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        print(f"  Missing keys: {len(missing)} (expected for new P8 layers: {missing})")
+        print(f"  Unexpected keys: {len(unexpected)}")
+
+    deployed_params = sum(p.numel() for p in model.parameters())
+    print(f"Student Deployed Parameters: {deployed_params:,} ({deployed_params/1e6:.3f}M)")
 
     # 3. Loss Criterion
     l_cfg = cfg["loss"]
@@ -310,7 +351,8 @@ def train_hpc_lite(config_path: str, resume: Optional[str] = None):
         allocation_block=cfg["dataset"].get("allocation_block", 16),
         lambda_count=float(l_cfg.get("lambda_count", 1.0)),
         count_scale=float(l_cfg.get("count_scale", 100.0)),
-        lambda_point=float(l_cfg.get("lambda_point", 1.0)),
+        lambda_point=float(l_cfg.get("lambda_point", 0.0)),
+        lambda_ms_mae=float(l_cfg.get("lambda_ms_mae", 0.0)),
         lambda_hnb=float(l_cfg.get("lambda_hnb", 0.25)),
         lambda_alloc=float(l_cfg.get("lambda_alloc", 0.0)),
         lambda_hn=float(l_cfg.get("lambda_hn", 0.10)),

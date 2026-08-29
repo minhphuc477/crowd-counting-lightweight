@@ -38,6 +38,15 @@ def test_localization_matching():
     print("  [✓] Single-image Hungarian matching & F1 metric: PASS")
 
 
+def test_hungarian_maximizes_valid_matches_not_greedy_order():
+    # Greedy nearest-pair matching consumes the shared GT with pred[0] and
+    # returns one match. Global one-to-one assignment returns both matches.
+    pred_pts = np.array([[1.0, 0.0], [-1.1, 0.0]], dtype=np.float32)
+    gt_pts = np.array([[0.0, 0.0], [3.0, 0.0]], dtype=np.float32)
+    tp, fp, fn = match_points(pred_pts, gt_pts, threshold=2.1)
+    assert (tp, fp, fn) == (2, 0, 0)
+
+
 def test_dataset_localization():
     preds_list = [np.array([[10.0, 10.0]]), np.array([[50.0, 50.0], [60.0, 60.0]])]
     gts_list = [np.array([[10.0, 10.0]]), np.array([[50.0, 50.0], [60.0, 60.0]])]

@@ -1061,7 +1061,57 @@ Report:
 - FLOPs at fixed resolution;
 - latency on fixed hardware.
 
-For key runs use at least 3 random seeds:
+The first formulation/depth study uses one fixed seed:
+
+```text
+seed = 42
+```
+
+Do not launch multi-seed runs until R0--R5 and the localization depth study
+have produced a complete first-pass table. Multi-seed verification is a later
+confirmation phase for the surviving baseline and proposed model only.
+
+---
+
+## 20.1 Secondary parameter-free localization
+
+Localization is an analysis capability of the conserved mass field, not a
+learned branch of the core architecture:
+
+\[
+D \rightarrow \mathrm{OT\text{-}M} \rightarrow \{\hat p_i\}.
+\]
+
+Evaluate the same one-seed checkpoints trained with three hierarchy depths:
+
+```text
+R4 / DTM16 -> OT-M
+T1 / DTM8  -> OT-M
+T2 / DTM4  -> OT-M
+```
+
+For each checkpoint report a local-maximum baseline and OT-M with:
+
+```text
+Precision / Recall / F1 at sigma = 4, 8 pixels
+distance-gated Hungarian one-to-one matching
+micro aggregation over the evaluation split
+|number of localized points - sum(D)|
+model latency and OT-M post-processing latency separately
+```
+
+OT-M uses `m = floor(sum(D) + 0.5)`, epsilon-scaling `0.75`, blur `0.01`,
+at most 16 alternating OT/M iterations, and density-weighted initialization.
+Because Softplus makes every cell positive, large maps may use deterministic
+mass-preserving grid aggregation before OT; the retained mass ratio and source
+size must be logged. Localization hyperparameters are fixed before evaluation
+and are never tuned on `test_data`.
+
+The localization claim is retained only when deeper hierarchy improves F1
+without unacceptable counting degradation. No localization head is added in
+this first study.
+
+For later key confirmation runs use at least 3 random seeds:
 
 \[
 mean\pm std.
@@ -2422,10 +2472,15 @@ experiment:
 
 data:
   dataset: ShanghaiTechA
+  train_split: train_data
+  selection_split: test_data
+  no_custom_train_val_split: true
 
-  crop_size:
-    - 512
-    - 512
+  crop_size: 256
+  augmentation:
+    scale_range: [0.7, 1.3]
+    crop_sampling: uniform
+    horizontal_flip_probability: 0.5
 
   pad_multiple: 64
 
@@ -2451,8 +2506,8 @@ loss:
 
   root:
     distribution: negative_binomial
-    dispersion: null
-    # estimate from training counts
+    dispersion: 50.0
+    # fixed baseline; compare against L1 and Poisson with all else matched
 
   tree:
     root_to_64:
@@ -2495,7 +2550,7 @@ training:
   amp: true
   grad_clip_norm: 5.0
 
-  evaluate_every_epoch: true
+  evaluate_every: 5
   save_best_by: mae
 
 evaluation:
@@ -2515,6 +2570,19 @@ evaluation:
     dense:
       min_count: 1000
 ```
+
+Benchmark selection protocol used by every matched R0--R5 run:
+
+```text
+ShanghaiTech A: 300 train_data -> train; 182 test_data -> periodic evaluation/best MAE
+ShanghaiTech B: 400 train_data -> train; 316 test_data -> periodic evaluation/best MAE
+UCF-QNRF:       1201 Train -> train; 334 Test -> periodic evaluation/best MAE
+NWPU/JHU:       use the official train/val/test files
+UCF-CC50:       official 5-fold cross-validation
+```
+
+No custom split is carved out of the ShanghaiTech or UCF-QNRF training set. All
+R0--R5 comparisons must use the same evaluation interval and checkpoint rule.
 
 ---
 
@@ -2796,6 +2864,9 @@ The formulation comparison must remain controlled.
 
 ## Phase 3: multi-seed verification
 
+This phase is deferred until the one-seed formulation and localization tables
+are complete. It is not part of the first experiment launch.
+
 Run best baseline and proposed model on:
 
 ```text
@@ -3058,8 +3129,10 @@ Before claiming success:
 [ ] hierarchical Multinomial baseline implemented
 [ ] DTM beats flat DM
 [ ] dense8 improves dense metrics
-[ ] key results repeated with >=3 seeds
-[ ] mean ± std reported
+[ ] complete one-seed (seed 42) R0-R5 table first
+[ ] complete one-seed DTM16/DTM8/DTM4 localization table first
+[ ] surviving key results later repeated with >=3 seeds
+[ ] mean +/- std reported only in the later confirmation phase
 [ ] params/FLOPs measured consistently
 [ ] no validation/test statistics used to choose train thresholds
 [ ] negative results retained
@@ -3118,7 +3191,8 @@ Implement in exactly this order:
 7. hierarchical Multinomial
 8. hierarchical DTM
 9. dense-only 16→8
-10. multi-seed evaluation
+10. one-seed OT-M localization depth study
+11. later multi-seed confirmation of surviving methods
 ```
 
 Do not add extra modules before step 8 produces a clear result.

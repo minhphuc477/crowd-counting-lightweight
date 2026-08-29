@@ -23,7 +23,7 @@ from hpc.losses.criterion import HPCLossCriterion
 from hpc.models.hpc_lite import HPCLiteSR48
 from hpc.utils.seed import seed_everything
 from hpc.utils.logging import CSVLogger
-from hpc.utils.checkpoint import save_checkpoint
+from hpc.utils.checkpoint import build_checkpoint_state, save_checkpoint
 from hpc.metrics.counting import evaluate_counting_metrics
 from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
 from train import custom_collate_fn, build_optimizer_and_scheduler, build_dataset
@@ -297,13 +297,18 @@ def train_continuation(
         is_best = val_mae < best_mae
         if is_best:
             best_mae = val_mae
-            save_checkpoint(
-                os.path.join(save_dir, "best.pt"),
-                model,
-                epoch=epoch,
-                best_mae=best_mae,
-                config=cfg,
-            )
+
+        ckpt_state = build_checkpoint_state(
+            model,
+            criterion=criterion,
+            optimizer=optimizer,
+            lr_scheduler=scheduler,
+            scaler=scaler,
+            epoch=epoch,
+            best_mae=best_mae,
+            config=cfg,
+        )
+        save_checkpoint(ckpt_state, save_dir, filename="last.pt", is_best=is_best)
 
         print(
             f"Epoch [{epoch:03d}/{total_epochs:03d}] "
@@ -314,18 +319,25 @@ def train_continuation(
             flush=True,
         )
 
-        save_checkpoint(
-            os.path.join(save_dir, "last.pt"),
-            model,
-            epoch=epoch,
-            best_mae=best_mae,
-            config=cfg,
-        )
-
     print(f"\n{'='*60}")
     print(f"  TRAINING COMPLETE! Best Validation MAE = {best_mae:.2f}")
     print(f"{'='*60}\n")
 
 
 if __name__ == "__main__":
-    train_continuation()
+    import argparse
+    parser = argparse.ArgumentParser(description="Continuation training from checkpoint")
+    parser.add_argument("--config", type=str, default="configs/sha.yaml", help="Path to config YAML")
+    parser.add_argument("--init_ckpt", type=str, default="runs/sha/best.pt", help="Path to initial checkpoint")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save runs (defaults to config)")
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        _cfg = yaml.safe_load(f)
+    _save_dir = args.save_dir or _cfg.get("experiment", {}).get("save_dir", "./runs/continuation")
+
+    train_continuation(
+        config_path=args.config,
+        init_ckpt_path=args.init_ckpt,
+        save_dir=_save_dir,
+    )

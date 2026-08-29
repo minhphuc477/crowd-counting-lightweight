@@ -21,6 +21,7 @@ def check(name: str, cond: bool, msg: str = ""):
         print(f"  [✓] {name}: PASS {msg}")
     else:
         failed += 1
+        raise AssertionError(f"{name}: {msg}")
         print(f"  [✗] {name}: FAIL {msg}")
 
 
@@ -60,7 +61,7 @@ def test_ntpc_modes():
     mass = (torch.rand(2, 1, 112, 112, device=device) * 0.1).requires_grad_(True)
     
     # Create synthetic point pyramid target
-    pts = [torch.rand(50, 2, device=device) * 448 for _ in range(2)]
+    pts = [torch.rand(500, 2, device=device) * 448 for _ in range(2)]
     target_pyramid = build_exact_count_pyramid(pts, 448, 448, (8, 16, 32, 64), device=device)
 
     # 1. R0: Exact Regional L1 Regression
@@ -100,21 +101,24 @@ def test_ntpc_modes():
 
     # 5. R4: Neural DTM Tree (Proposed Core)
     mass.grad = None
-    crit_r4 = NTPCLoss(NTPCConfig(mode="r4_dtm_tree")).to(device)
+    crit_r4 = NTPCLoss(NTPCConfig(mode="r4_dtm_tree16")).to(device)
     loss_r4, logs_r4 = crit_r4(mass, target_pyramid)
     loss_r4.backward()
     check("R4 loss is finite scalar", torch.isfinite(loss_r4) and loss_r4.ndim == 0, f"loss={loss_r4.item():.4f}")
     check("R4 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
     check("R4 logs has root_to_64, 64_to_32, 32_to_16", all(k in logs_r4 for k in ["root_to_64", "64_to_32", "32_to_16"]))
+    check("R4 has no fine-tree term", logs_r4["16_to_8"].item() == 0.0 and logs_r4["16_to_8_dense"].item() == 0.0)
 
     # 6. R5: Full NTPC (DTM Tree + Dense 16->8)
     mass.grad = None
-    crit_r5 = NTPCLoss(NTPCConfig(mode="r5_full_ntpc", dense_threshold_16=2.0)).to(device)
+    crit_r5 = NTPCLoss(NTPCConfig(mode="r5_full_ntpc", dense_threshold_16=1.0)).to(device)
     loss_r5, logs_r5 = crit_r5(mass, target_pyramid)
     loss_r5.backward()
     check("R5 loss is finite scalar", torch.isfinite(loss_r5) and loss_r5.ndim == 0, f"loss={loss_r5.item():.4f}")
     check("R5 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
-    check("R5 logs has 16_to_8_dense key", "16_to_8_dense" in logs_r5)
+    check("R5 dense extension is active", logs_r5["16_to_8_dense"].item() > 0.0)
+    check("R5 does not supervise stride 4", logs_r5["8_to_4"].item() == 0.0)
+    check("R5 objective differs from R4", loss_r5.item() > loss_r4.item())
 
 
 def test_full_model_integration_and_amp():
@@ -123,7 +127,7 @@ def test_full_model_integration_and_amp():
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
     crit = NTPCLoss(NTPCConfig(mode="r5_full_ntpc")).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     scaler = torch.amp.GradScaler("cuda", init_scale=256.0, enabled=(device.type == "cuda"))

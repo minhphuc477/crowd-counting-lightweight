@@ -77,10 +77,21 @@ def test_otm_cardinality_and_localization():
     # Head 3 at (200, 200) in image px -> (50, 50) in grid
     mass[0, 50, 50] = 1.0
 
-    points = otm_localize(mass, output_stride=4, outer_iterations=10, epsilon=0.01)
+    points, diagnostics = otm_localize(
+        mass,
+        output_stride=4,
+        outer_iterations=16,
+        ot_scaling=0.75,
+        blur=0.01,
+        seed=42,
+        max_source_points=None,
+        return_diagnostics=True,
+    )
     
     # 1. Cardinality check: must be exactly 3 points
     assert len(points) == 3, f"Expected 3 points, got {len(points)}"
+    assert diagnostics["source_retained_mass_ratio"] == 1.0
+    assert diagnostics["transport_elements"] == 9
 
     # 2. Accuracy check: compare with ground truth heads
     gt_pts = np.array([[42.0, 42.0], [122.0, 122.0], [202.0, 202.0]], dtype=np.float32)
@@ -94,7 +105,7 @@ def test_otm_cardinality_and_localization():
 
 def test_full_ntpc_loss_stride4_backward():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
     crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree4")).to(device)
 
     img = torch.rand(2, 3, 256, 256, device=device)

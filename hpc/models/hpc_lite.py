@@ -36,9 +36,9 @@ class HPCLite(nn.Module):
         pretrained: bool = False,
         neck_width: int = 32,
         context_dilations: Tuple[int, ...] = (1, 2, 3),
-        use_p8_context: bool = True,
+        use_p8_context: bool = False,
         use_repblock: bool = False,
-        eps_d: float = 1e-6,
+        eps_d: float = 1e-8,
         truncate_backbone: bool = True,
         output_stride: int = 4,
     ):
@@ -52,6 +52,8 @@ class HPCLite(nn.Module):
 
         if self.output_stride != 4:
             raise ValueError("Target and loss formulations assume output_stride=4")
+        if self.eps_d < 1e-8:
+            raise ValueError("eps_d must be at least 1e-8 for stable FP32 mass")
 
         self.backbone = MobileNetV4Backbone(
             model_name=backbone_name,
@@ -132,7 +134,7 @@ class HPCLite(nn.Module):
 
         z = self.head_out(h)
         # Forced float32 under AMP autocast to prevent float16 underflow
-        d_map = F.softplus(z.float()).clamp_min(1e-12)
+        d_map = F.softplus(z.float()).clamp_min(self.eps_d)
 
         if return_aux:
             return d_map, aux

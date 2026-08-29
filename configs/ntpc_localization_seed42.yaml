@@ -1,0 +1,31 @@
+seed: 42
+output_dir: ./runs/ntpc_localization_seed42
+
+experiments:
+  r4_dtm16:
+    config: ./configs/ntpc_r4_neural_dtm_tree.yaml
+    checkpoint: ./runs/ntpc_r4_neural_dtm_tree/best.pt
+  t1_dtm8:
+    config: ./configs/ntpc_t1_dtm_tree8.yaml
+    checkpoint: ./runs/ntpc_t1_dtm_tree8/best.pt
+  t2_dtm4:
+    config: ./configs/ntpc_t2_dtm_tree4.yaml
+    checkpoint: ./runs/ntpc_t2_dtm_tree4/best.pt
+
+evaluation:
+  methods: [local_max, otm]
+  radii: [4, 8]
+  max_samples: null
+
+  # Fixed once from train-only development; never tune on SHA test_data.
+  local_threshold_rel: 0.05
+  local_threshold_abs: 0.01
+  local_min_distance_px: 4
+
+  # Official OT-M defaults, adapted only with deterministic mass-preserving
+  # source-grid compaction for the everywhere-positive Softplus map.
+  otm_max_iterations: 16
+  otm_scaling: 0.75
+  otm_blur: 0.01
+  otm_max_source_points: 8192
+  otm_max_transport_elements: 50000000

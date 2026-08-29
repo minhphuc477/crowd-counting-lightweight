@@ -1,0 +1,91 @@
+# HPC-Lite: Adaptive Hierarchical Probabilistic Count Tree (Train from scratch)
+experiment:
+  name: sha_hpc_lite_probabilistic
+  seed: 42
+  save_dir: ./runs/sha_hpc_lite_probabilistic
+
+dataset:
+  name: sha
+  part: part_A
+  root: ./data/ShanghaiTech
+  crop_size: 448
+  output_stride: 4
+  hnb_blocks: [8, 16, 32, 64]
+  allocation_block: 16
+  image_mean: [0.5, 0.5, 0.5]
+  image_std: [0.5, 0.5, 0.5]
+
+model:
+  name: hpc_lite
+  backbone: mobilenetv4_conv_small_050
+  pretrained: true
+  neck_width: 32
+  context_dilations: [1, 2, 3]
+  use_p8_context: true
+  use_repblock: false
+  eps_d: 1.0e-6
+  truncate_backbone: true
+  init_checkpoint: null
+
+statistics:
+  root_dispersion: 50.0
+  local_t1: 1
+  local_t2: 2
+  dense_threshold_16: 2
+
+prob_tree:
+  distribution: dirichlet_multinomial
+  kappa_root64: 20.0
+  kappa_64_32: 20.0
+  kappa_32_16: 20.0
+  kappa_16_8: 20.0
+  weights:
+    root_nb: 1.0
+    root_to_64: 1.0
+    64_to_32: 1.0
+    32_to_16: 1.0
+    16_to_8_dense: 1.0
+
+hard_zero:
+  enabled: true
+  block_size: 16
+  top_fraction: 0.10
+  weight: 0.10
+  loss: smooth_l1
+
+local_contrast:
+  enabled: true
+  block_size: 16
+  hidden_dim: 64
+  projection_dim: 32
+  temperature: 0.10
+  max_samples: 256
+  weight: 0.05
+
+augmentation:
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+
+sampler:
+  weighted: true
+  density_bins: 5
+  luminance_bins: 4
+  power: 0.5
+
+optimizer:
+  differential_lr:
+    existing: 5.0e-5
+    new_training_modules: 1.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 5.0
+
+schedule:
+  epochs: 300
+  warmup_epochs: 15
+
+training:
+  batch_size: 16
+  amp: true
+  init_scale: 256.0
+  num_workers: 0
+  validate_every: 5

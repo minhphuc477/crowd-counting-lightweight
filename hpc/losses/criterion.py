@@ -153,6 +153,23 @@ class HPCLossCriterion(nn.Module):
         gt_route_mask: Optional[torch.Tensor] = None,
         progress: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        # Compatibility with the original positional API:
+        # criterion(d_map, gt_blocks, gt_z_alloc, gt_counts, ...).
+        # New code should pass gt_counts by keyword, but old trainers/tests must
+        # not silently reinterpret a spatial allocation map as image counts.
+        if (
+            isinstance(gt_counts, torch.Tensor)
+            and gt_counts.ndim > 1
+            and isinstance(gt_points, torch.Tensor)
+            and gt_points.ndim == 1
+            and gt_points.shape[0] == d_map.shape[0]
+        ):
+            legacy_gt_z_alloc = gt_counts
+            gt_counts = gt_points
+            gt_points = None
+            if gt_z_alloc is None:
+                gt_z_alloc = legacy_gt_z_alloc
+
         loss_dict: Dict[str, torch.Tensor] = {}
 
         # 1. Direct count loss (main global constraint)
@@ -233,6 +250,7 @@ class HPCLossCriterion(nn.Module):
             "loss_rob":    l_rob.detach(),
             "loss_route":  l_route.detach(),
             "loss_total":  total_loss.detach(),
+            "loss_alloc":  d_map.new_zeros(()),  # deprecated compatibility key
         })
 
         for name, val in weights.items():

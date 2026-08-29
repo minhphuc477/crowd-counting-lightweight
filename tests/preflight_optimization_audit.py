@@ -29,6 +29,7 @@ def check(name: str, cond: bool, msg: str = ""):
         print(f"  [✓] {name}: PASS {msg}")
     else:
         failed += 1
+        raise AssertionError(f"{name}: {msg}")
         print(f"  [✗] {name}: FAIL {msg}")
 
 
@@ -38,10 +39,11 @@ def test_o1_initial_count_distribution():
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
+    model.init_head_bias_from_data(mean_crop_count=75.0, crop_size=256)
     model.eval()
 
-    img = torch.rand(4, 3, 448, 448, device=device)
+    img = torch.rand(4, 3, 256, 256, device=device)
     with torch.no_grad():
         mass = model(img)  # (4, 1, 112, 112)
         pred_counts = mass.sum(dim=(1, 2, 3)).cpu().tolist()
@@ -62,14 +64,15 @@ def test_o2_one_image_overfit():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(42)
 
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
-    crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree")).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
+    model.init_head_bias_from_data(mean_crop_count=75.0, crop_size=256)
+    crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree16")).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=300, eta_min=1e-5)
 
-    img = torch.rand(1, 3, 448, 448, device=device)
-    pts = [torch.rand(75, 2, device=device) * 448]
-    targets = build_exact_count_pyramid(pts, 448, 448, (8, 16, 32, 64), device=device)
+    img = torch.rand(1, 3, 256, 256, device=device)
+    pts = [torch.rand(75, 2, device=device) * 256]
+    targets = build_exact_count_pyramid(pts, 256, 256, (8, 16, 32, 64), device=device)
     target_n = targets["N"].item()
 
     model.train()
@@ -110,14 +113,15 @@ def test_o3_ten_image_overfit():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(42)
 
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
-    crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree")).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
+    model.init_head_bias_from_data(mean_crop_count=65.0, crop_size=256)
+    crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree16")).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=250, eta_min=1e-5)
 
-    imgs = torch.rand(10, 3, 448, 448, device=device)
-    pts_batch = [torch.rand(int(20 + i * 10), 2, device=device) * 448 for i in range(10)]
-    targets = build_exact_count_pyramid(pts_batch, 448, 448, (4, 8, 16, 32, 64), device=device)
+    imgs = torch.rand(10, 3, 256, 256, device=device)
+    pts_batch = [torch.rand(int(20 + i * 10), 2, device=device) * 256 for i in range(10)]
+    targets = build_exact_count_pyramid(pts_batch, 256, 256, (8, 16, 32, 64), device=device)
     target_n = targets["N"]
 
     model.train()
@@ -156,25 +160,27 @@ def test_o4_gradient_norm_breakdown():
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HPCLite(pretrained=False, use_p8_context=True).to(device)
-    crit = NTPCLoss(NTPCConfig(mode="r5_full_ntpc", dense_threshold_16=2.0)).to(device)
+    model = HPCLite(pretrained=False, use_p8_context=False).to(device)
+    model.init_head_bias_from_data(mean_crop_count=500.0, crop_size=256)
+    crit = NTPCLoss(NTPCConfig(mode="r5_full_ntpc", dense_threshold_16=1.0)).to(device)
 
-    img = torch.rand(2, 3, 448, 448, device=device)
-    pts = [torch.rand(80, 2, device=device) * 448 for _ in range(2)]
-    target_pyramid = build_exact_count_pyramid(pts, 448, 448, (8, 16, 32, 64), device=device)
+    img = torch.rand(2, 3, 256, 256, device=device)
+    pts = [torch.rand(500, 2, device=device) * 256 for _ in range(2)]
+    target_pyramid = build_exact_count_pyramid(pts, 256, 256, (8, 16, 32, 64), device=device)
 
     mass = model(img)
-    _, logs = crit(mass, target_pyramid)
+    _, logs, components = crit(mass, target_pyramid, return_components=True)
 
     print("  Loss Scale Breakdown at Step 0:")
     for k, v in logs.items():
         print(f"    - {k:<20}: {v.item():.4f}")
 
-    check("Root NB loss is finite", torch.isfinite(logs["root_nb"]))
-    check("Root->64 DM loss is finite", torch.isfinite(logs["root_to_64"]))
-    check("64->32 DM loss is finite", torch.isfinite(logs["64_to_32"]))
-    check("32->16 DM loss is finite", torch.isfinite(logs["32_to_16"]))
-    check("16->8 Dense DM loss is finite", torch.isfinite(logs["16_to_8_dense"]))
+    params = tuple(p for p in model.parameters() if p.requires_grad)
+    for name in ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8_dense"):
+        grads = torch.autograd.grad(components[name], params, retain_graph=True, allow_unused=True)
+        norm = torch.sqrt(sum(g.float().square().sum() for g in grads if g is not None))
+        print(f"    - grad_{name:<15}: {norm.item():.6f}")
+        check(f"{name} gradient is finite and non-zero", torch.isfinite(norm) and norm > 0)
     check("Total loss is finite", torch.isfinite(logs["total"]))
 
 

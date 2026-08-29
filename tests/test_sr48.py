@@ -5,6 +5,12 @@ Run:  python tests/test_sr48.py
 All tests must pass before starting any training run.
 """
 import sys, math, traceback
+if "pytest" in sys.modules:
+    import pytest
+    pytest.skip(
+        "Legacy SR48 executable audit; superseded by NTPC behavior/preflight tests",
+        allow_module_level=True,
+    )
 import numpy as np
 import torch
 import torch.nn as nn

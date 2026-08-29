@@ -49,6 +49,20 @@ def evaluate_subgroup_diagnostics(
             results[f"{name}_rmse"] = compute_rmse(preds[mask], gts[mask])
             results[f"{name}_count"] = int(mask.sum())
 
+    # NTPC paper diagnostics.  Boundaries are disjoint by construction:
+    # sparse < 300, medium 300--999, dense >= 1000.
+    for name, mask in [
+        ("bin_sparse", gts < 300),
+        ("bin_medium", (gts >= 300) & (gts < 1000)),
+        ("bin_dense", gts >= 1000),
+    ]:
+        if np.any(mask):
+            error = preds[mask] - gts[mask]
+            results[f"{name}_mae"] = compute_mae(preds[mask], gts[mask])
+            results[f"{name}_rmse"] = compute_rmse(preds[mask], gts[mask])
+            results[f"{name}_bias"] = float(np.mean(error))
+            results[f"{name}_count"] = int(mask.sum())
+
     threshold = np.percentile(gts, 90)
     top = gts >= threshold
     if np.any(top):

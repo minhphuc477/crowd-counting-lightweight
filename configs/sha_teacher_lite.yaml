@@ -1,0 +1,78 @@
+# Teacher-Lite Training Configuration (EfficientNet-B0 + 96ch FPN + Dilated Context)
+experiment:
+  name: sha_teacher_lite_effb0_96
+  seed: 42
+  save_dir: ./runs/sha_teacher_lite
+
+dataset:
+  name: sha
+  part: part_A
+  root: ./data/ShanghaiTech
+  crop_size: 448
+  output_stride: 4
+  hnb_blocks: [16, 32, 64]
+  allocation_block: 16
+  # EfficientNet-B0 uses standard ImageNet normalization
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
+
+model:
+  type: teacher_lite
+  backbone: efficientnet_b0
+  pretrained: true
+  width: 96
+  eps_d: 1.0e-6
+
+loss:
+  positive_cell_weight: 3.0
+  lambda_map: 1.0
+  lambda_ms: 0.5
+  lambda_count_map: 0.02
+  lambda_count_reg: 0.02
+  lambda_consistency: 0.10
+  lambda_hn: 0.10
+  hard_negative_fraction: 0.10
+
+augmentation:
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+  safe_crop: true
+  max_crop_attempts: 20
+  crop_guard_nn_factor: 0.20
+  crop_guard_min_px: 8
+  crop_guard_max_px: 48
+  large_nn_threshold_px: 48
+  true_border_threshold_px: 32
+  random_crop_prob: 0.75
+  large_center_crop_prob: 0.15
+  border_center_crop_prob: 0.10
+
+sampler:
+  weighted: true
+  density_bins: 5
+  luminance_bins: 4
+  power: 0.5
+
+optimizer:
+  name: adamw
+  backbone_lr: 5.0e-5
+  task_lr: 2.0e-4
+  weight_decay: 1.0e-4
+  betas: [0.9, 0.999]
+  grad_clip: 5.0
+
+schedule:
+  epochs: 1000
+  warmup_epochs: 50
+  cosine: true
+  min_lr: 1.0e-6
+
+training:
+  effective_batch_size: 16
+  batch_size: 8
+  accum_steps: 2
+  amp: true
+  num_workers: 0
+  validate_every: 5
+  early_stop_patience: 150
+  save_best_by: mae_map

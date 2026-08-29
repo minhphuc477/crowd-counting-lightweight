@@ -1,0 +1,91 @@
+augmentation:
+  border_center_crop_prob: 0.1
+  crop_guard_max_px: 48
+  crop_guard_min_px: 8
+  crop_guard_nn_factor: 0.2
+  flip_prob: 0.5
+  large_center_crop_prob: 0.15
+  large_nn_threshold_px: 48
+  max_crop_attempts: 20
+  random_crop_prob: 0.75
+  safe_crop: true
+  scale_range:
+  - 0.75
+  - 2.0
+  true_border_threshold_px: 32
+dataset:
+  allocation_block: 16
+  crop_size: 448
+  hnb_blocks:
+  - 16
+  - 32
+  - 64
+  image_mean:
+  - 0.5
+  - 0.5
+  - 0.5
+  image_std:
+  - 0.5
+  - 0.5
+  - 0.5
+  name: sha
+  output_stride: 4
+  part: part_A
+  root: ./data/ShanghaiTech
+experiment:
+  name: mobilenetv4_correct_norm_proven
+  save_dir: ./runs/mobilenetv4_correct_norm_proven
+  seed: 42
+loss:
+  count_scale: 100.0
+  density_stratified_nb: true
+  enable_curriculum: false
+  global_count_mode: log_smooth_l1
+  hard_negative_fraction: 0.1
+  lambda_alloc: 0.5
+  lambda_count: 1.0
+  lambda_empty: 0.5
+  lambda_global: 0.5
+  lambda_hn: 0.25
+  lambda_hnb: 1.0
+  lambda_point: 0.0
+  lambda_rob: 0.1
+  lambda_route: 0.0
+  learn_dispersion: false
+model:
+  backbone: mobilenetv4_conv_small_050
+  context_dilations:
+  - 1
+  - 2
+  - 3
+  data_driven_head_bias: true
+  eps_d: 1.0e-06
+  name: hpc_lite
+  neck_width: 32
+  pretrained: true
+  truncate_backbone: true
+optimizer:
+  grad_clip: 1.0
+  lr: 0.0001
+  lr_min: 1.0e-06
+  lr_start: 1.0e-05
+  name: adamw
+  weight_decay: 0.0001
+robustness:
+  second_view_prob: 0.2
+sampler:
+  density_bins: 5
+  luminance_bins: 4
+  power: 0.5
+  weighted: true
+schedule:
+  cosine: true
+  epochs: 2000
+  warmup_epochs: 50
+training:
+  accum_steps: 1
+  amp: true
+  batch_size: 16
+  effective_batch_size: 16
+  num_workers: 0
+  save_best_by: mae

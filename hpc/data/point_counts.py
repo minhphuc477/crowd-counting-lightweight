@@ -234,12 +234,20 @@ def build_exact_count_pyramid(
     pad_multiple: int = 64,
     device: torch.device | None = None,
 ) -> Dict[int | str, torch.Tensor]:
-    """Batch target builder for training DataLoader collate."""
+    """Build only the requested exact block-count levels plus ``N``."""
     if device is None:
         device = torch.device("cpu")
 
     hp = ((height + pad_multiple - 1) // pad_multiple) * pad_multiple
     wp = ((width + pad_multiple - 1) // pad_multiple) * pad_multiple
+
+    requested = tuple(dict.fromkeys(int(b) for b in block_sizes))
+    valid_levels = {4, 8, 16, 32, 64}
+    invalid = [b for b in requested if b not in valid_levels]
+    if invalid:
+        raise ValueError(f"Unsupported block sizes: {invalid}; expected subset of {sorted(valid_levels)}")
+    if not requested:
+        raise ValueError("block_sizes cannot be empty")
 
     y4_list = []
     for pts in points_batch:
@@ -260,16 +268,9 @@ def build_exact_count_pyramid(
     assert torch.allclose(y32_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
     assert torch.allclose(y64_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
 
-    return {
-        4: y4_batch,
-        8: y8_batch,
-        16: y16_batch,
-        32: y32_batch,
-        64: y64_batch,
-        "y4": y4_batch,
-        "y8": y8_batch,
-        "y16": y16_batch,
-        "y32": y32_batch,
-        "y64": y64_batch,
-        "N": n_batch,
-    }
+    all_levels = {4: y4_batch, 8: y8_batch, 16: y16_batch, 32: y32_batch, 64: y64_batch}
+    result: Dict[int | str, torch.Tensor] = {"N": n_batch}
+    for block_size in requested:
+        result[block_size] = all_levels[block_size]
+        result[f"y{block_size}"] = all_levels[block_size]
+    return result

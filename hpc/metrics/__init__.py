@@ -4,7 +4,7 @@ from .localization import (
     localization_metrics,
     match_points,
 )
-from .otm import infer_count_and_localization, otm_localize, sinkhorn_log
+from .otm import OTMConfig, infer_count_and_localization, otm_localize, sinkhorn_log
 from .subgroup import evaluate_subgroup_diagnostics
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     "localization_metrics",
     "evaluate_dataset_localization",
     "sinkhorn_log",
+    "OTMConfig",
     "otm_localize",
     "infer_count_and_localization",
 ]

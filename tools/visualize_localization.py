@@ -1,21 +1,27 @@
-"""Visualize crowd localization (Density Map heatmap & extracted point coordinates).
+"""Visualize the mass map with either local-max or OT-M point decoding.
 
 Generates side-by-side comparisons:
 - Left: Original Image + Ground Truth Point Annotations (Red)
 - Middle: Predicted Stride-4 Density Heatmap Overlay
-- Right: Extracted Predicted Peak Locations (Green) + Count Comparison
+- Right: Parameter-free predicted locations (Green) + count comparison
 """
 import os
+import sys
 import argparse
 import yaml
 import numpy as np
-import scipy.ndimage as ndimage
 import torch
 import torchvision.transforms.functional as TF
 from PIL import Image, ImageDraw, ImageFont
 
+_REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
+
 from hpc.models.hpc_lite import HPCLite
-from hpc.data.sha import ShanghaiTechDataset, load_sha_mat_points
+from hpc.data.sha import ShanghaiTechDataset
+from hpc.metrics.localization import extract_points_from_mass_map
+from hpc.metrics.otm import otm_localize
 
 
 def apply_colormap_jet(density_norm: np.ndarray) -> np.ndarray:
@@ -28,27 +34,13 @@ def apply_colormap_jet(density_norm: np.ndarray) -> np.ndarray:
     return (rgb * 255.0).astype(np.uint8)
 
 
-def extract_local_maxima(d_map: np.ndarray, threshold_rel: float = 0.08, min_distance: int = 2) -> np.ndarray:
-    """Extract discrete (x, y) peak locations from 2D continuous density map."""
-    # Local maximum filter
-    neighborhood = ndimage.generate_binary_structure(2, 2)
-    local_max = ndimage.maximum_filter(d_map, footprint=neighborhood) == d_map
-    
-    # Thresholding
-    threshold = float(np.max(d_map)) * threshold_rel if np.max(d_map) > 0 else 0.0
-    detected_mask = local_max & (d_map > max(threshold, 1e-4))
-    
-    y_coords, x_coords = np.where(detected_mask)
-    # Scale from stride-4 density coordinates back to input image pixel space
-    coords = np.column_stack([x_coords * 4 + 2, y_coords * 4 + 2]).astype(np.float32)
-    return coords
-
-
 def visualize_crowd_localization(
     config_path: str,
     checkpoint_path: str,
     output_dir: str = "runs/sha/visualizations",
     num_samples: int = 5,
+    method: str = "otm",
+    seed: int = 42,
 ):
     with open(config_path, "r") as f:
         cfg = yaml.safe_load(f)
@@ -63,12 +55,15 @@ def visualize_crowd_localization(
         pretrained=False,
         neck_width=m_cfg.get("neck_width", 32),
         context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
+        use_p8_context=bool(m_cfg.get("use_p8_context", False)),
+        use_repblock=bool(m_cfg.get("use_repblock", False)),
+        eps_d=float(m_cfg.get("eps_d", 1e-8)),
         truncate_backbone=m_cfg.get("truncate_backbone", True),
     ).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
     state_dict = ckpt.get("model_state_dict", ckpt)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=True)
     model.eval()
     print(f"Loaded model from: {checkpoint_path}")
 
@@ -77,8 +72,11 @@ def visualize_crowd_localization(
     dataset = ShanghaiTechDataset(
         root=d_cfg["root"],
         part=d_cfg.get("part", "part_A"),
+        split="test_data",
         is_train=False,
         crop_size=d_cfg["crop_size"],
+        image_mean=d_cfg.get("image_mean", [0.485, 0.456, 0.406]),
+        image_std=d_cfg.get("image_std", [0.229, 0.224, 0.225]),
     )
     print(f"Loaded {len(dataset)} test samples. Visualizing {num_samples} samples...")
 
@@ -102,11 +100,8 @@ def visualize_crowd_localization(
         # 1. Ground Truth Canvas
         gt_canvas = raw_img.copy()
         draw_gt = ImageDraw.Draw(gt_canvas)
-        # Load GT points from mat file
         stem = os.path.splitext(os.path.basename(img_path))[0]
-        # In ShanghaiTech test_data, GT is in ground_truth/GT_IMG_x.mat
-        mat_path = os.path.join(os.path.dirname(os.path.dirname(img_path)), "ground_truth", f"GT_{stem}.mat")
-        gt_pts = load_sha_mat_points(mat_path) if os.path.exists(mat_path) else np.zeros((0, 2))
+        gt_pts = np.asarray(sample["gt_points"], dtype=np.float32).reshape(-1, 2)
         for pt in gt_pts:
             px, py = float(pt[0]), float(pt[1])
             draw_gt.ellipse([px - 3, py - 3, px + 3, py + 3], fill="red", outline="black")
@@ -121,7 +116,14 @@ def visualize_crowd_localization(
         # 3. Predicted Localization Points Canvas
         pred_canvas = raw_img.copy()
         draw_pred = ImageDraw.Draw(pred_canvas)
-        pred_pts = extract_local_maxima(d_np)
+        if method == "otm":
+            pred_pts = otm_localize(
+                d_map[0, 0], output_stride=4, image_hw=(h, w), seed=seed + int(idx)
+            ).cpu().numpy()
+        elif method == "local_max":
+            pred_pts = extract_points_from_mass_map(d_np, stride=4)
+        else:
+            raise ValueError("method must be 'otm' or 'local_max'")
         for pt in pred_pts:
             px, py = float(pt[0]), float(pt[1])
             draw_pred.ellipse([px - 3, py - 3, px + 3, py + 3], fill="lime", outline="black")
@@ -136,7 +138,7 @@ def visualize_crowd_localization(
         draw_combined = ImageDraw.Draw(combined)
         title_gt = f"GT: {int(gt_cnt)} people (Red dots)"
         title_heat = f"Predicted Heatmap (Stride-4 Density Map)"
-        title_pred = f"Pred: {pred_val:.1f} people (Detected peaks: {len(pred_pts)})"
+        title_pred = f"Pred: {pred_val:.1f} people ({method}: {len(pred_pts)} points)"
         
         draw_combined.text((20, 15), title_gt, fill="white")
         draw_combined.text((w + 20, 15), title_heat, fill="white")
@@ -155,6 +157,10 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, default="runs/sha/best.pt", help="Path to checkpoint")
     parser.add_argument("--output_dir", type=str, default="runs/sha/visualizations", help="Output directory")
     parser.add_argument("--num_samples", type=int, default=5, help="Number of test images to visualize")
+    parser.add_argument("--method", choices=["local_max", "otm"], default="otm")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    visualize_crowd_localization(args.config, args.checkpoint, args.output_dir, args.num_samples)
+    visualize_crowd_localization(
+        args.config, args.checkpoint, args.output_dir, args.num_samples, args.method, args.seed
+    )

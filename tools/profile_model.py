@@ -1,304 +1,140 @@
-import os
-import time
-import json
+"""Profile current HPCLite parameters, Conv2d MACs, latency and peak memory."""
+
+from __future__ import annotations
+
 import argparse
-import yaml
+import json
+import os
+import sys
+import time
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
+import yaml
 
-from hpc.models.hpc_lite import HPCLiteSR48
+_REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
+
+from hpc.models.hpc_lite import HPCLite
 
 
 def count_parameters(model: nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters())
+    return sum(parameter.numel() for parameter in model.parameters())
 
 
 def count_trainable_parameters(model: nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
 
 
 def profile_model_efficiency(
     model: nn.Module,
-    input_resolution: int = 448,
+    input_resolution: int = 256,
     batch_size: int = 1,
-    device_name: str = "cuda" if torch.cuda.is_available() else "cpu",
-    warmup_iters: int = 50,
-    measure_iters: int = 200,
+    device_name: str | None = None,
+    warmup_iters: int = 20,
+    measure_iters: int = 100,
 ) -> dict:
-    """Compute detailed model efficiency profile."""
-    device = torch.device(device_name)
-    model = model.to(device)
-    model.eval()
+    if input_resolution <= 0 or batch_size <= 0:
+        raise ValueError("input_resolution and batch_size must be positive")
+    device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
+    model = model.to(device).eval()
+    sample = torch.randn(batch_size, 3, input_resolution, input_resolution, device=device)
+    convolution_macs: list[int] = []
+    handles = []
 
-    # 1. Parameter Breakdown
-    total_params = count_parameters(model)
-    trainable_params = count_trainable_parameters(model)
-    backbone_params = count_parameters(model.backbone) if hasattr(model, "backbone") else 0
-    neck_params = count_parameters(model.neck) if hasattr(model, "neck") else 0
-    head_params = (
-        count_parameters(model.head_dw)
-        + count_parameters(model.head_norm)
-        + count_parameters(model.head_out)
-        if hasattr(model, "head_out")
-        else 0
-    )
+    def convolution_hook(module: nn.Conv2d, _inputs, output):
+        out_height, out_width = output.shape[-2:]
+        convolution_macs.append(int(
+            batch_size * out_height * out_width * module.out_channels
+            * (module.in_channels // module.groups)
+            * module.kernel_size[0] * module.kernel_size[1]
+        ))
 
-    # 2. FLOPs / MACs estimation via forward hooks
-    x = torch.randn(batch_size, 3, input_resolution, input_resolution, device=device)
-    macs_est = 0
-    try:
-        conv_macs = []
-        def conv_hook(m, inp, out):
-            if isinstance(m, nn.Conv2d):
-                cin = m.in_channels
-                cout = m.out_channels
-                kh, kw = m.kernel_size
-                groups = m.groups
-                oh, ow = out.shape[-2:]
-                mac = (cin // groups) * kh * kw * cout * oh * ow * batch_size
-                conv_macs.append(mac)
+    for module in model.modules():
+        if isinstance(module, nn.Conv2d):
+            handles.append(module.register_forward_hook(convolution_hook))
+    with torch.no_grad():
+        model(sample)
+    for handle in handles:
+        handle.remove()
+    total_macs = int(sum(convolution_macs))
 
-        hooks = []
-        for mod in model.modules():
-            if isinstance(mod, nn.Conv2d):
-                hooks.append(mod.register_forward_hook(conv_hook))
-
-        with torch.no_grad():
-            _ = model(x)
-
-        for h in hooks:
-            h.remove()
-        macs_est = sum(conv_macs)
-    except Exception as e:
-        print(f"Hook profiling note: {e}")
-
-    # 3. Peak memory & Latency benchmark
     if device.type == "cuda":
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device)
-
     with torch.no_grad():
         for _ in range(warmup_iters):
-            _ = model(x)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
-
-    latencies = []
-    with torch.no_grad():
+            model(sample)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        latency = []
         for _ in range(measure_iters):
             if device.type == "cuda":
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            _ = model(x)
+                torch.cuda.synchronize(device)
+            start = time.perf_counter()
+            model(sample)
             if device.type == "cuda":
-                torch.cuda.synchronize()
-            t1 = time.perf_counter()
-            latencies.append((t1 - t0) * 1000.0)  # ms
-
-    latencies = np.array(latencies)
-    median_latency = float(np.median(latencies))
-    p90_latency = float(np.percentile(latencies, 90))
-    fps = float(1000.0 / median_latency) * batch_size if median_latency > 0 else 0.0
-
-    peak_mem_mb = 0.0
-    if device.type == "cuda":
-        peak_mem_mb = float(torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0))
-
-    device_desc = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
-
-    profile = {
-        "params_total": total_params,
-        "params_trainable": trainable_params,
-        "params_deploy": total_params,
-        "params_backbone": backbone_params,
-        "params_neck": neck_params,
-        "params_head": head_params,
-        "macs_resolution": f"{input_resolution}x{input_resolution}",
-        "macs": macs_est,
-        "gmacs": round(macs_est / 1e9, 4),
-        "latency_device": device_desc,
-        "latency_batch": batch_size,
-        "latency_median_ms": round(median_latency, 3),
-        "latency_p90_ms": round(p90_latency, 3),
-        "fps": round(fps, 2),
-        "peak_memory_mb": round(peak_mem_mb, 2),
-    }
-    return profile
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/sha.yaml")
-    parser.add_argument("--resolution", type=int, default=448)
-    parser.add_argument("--output", type=str, default="profile.json")
-    args = parser.parse_args()
-
-    with open(args.config, "r") as f:
-        cfg = yaml.safe_load(f)
-
-    m_cfg = cfg.get("model", {})
-    model = HPCLiteSR48(
-        pretrained=False,
-        neck_width=m_cfg.get("neck_width", 48),
-        eps_d=float(m_cfg.get("eps_d", 1e-6)),
-        route_temperature=float(m_cfg.get("route_temperature", 1.0)),
-        pool_kernels=tuple(m_cfg.get("pool_kernels", [3, 5, 7])),
-        pool_residual_mix=float(m_cfg.get("pool_residual_mix", 0.5)),
-        simam_lambda=float(m_cfg.get("simam_lambda", 1e-4)),
+                torch.cuda.synchronize(device)
+            latency.append((time.perf_counter() - start) * 1000.0)
+    data = np.asarray(latency)
+    peak_memory = (
+        float(torch.cuda.max_memory_allocated(device) / 1024**2)
+        if device.type == "cuda" else 0.0
     )
-
-    prof = profile_model_efficiency(model, input_resolution=args.resolution)
-    print(json.dumps(prof, indent=2))
-
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, "w") as f:
-        json.dump(prof, f, indent=2)
-
-
-def count_parameters(model: nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters())
-
-
-def count_trainable_parameters(model: nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
-def profile_model_efficiency(
-    model: nn.Module,
-    input_resolution: int = 448,
-    batch_size: int = 1,
-    device_name: str = "cuda" if torch.cuda.is_available() else "cpu",
-    warmup_iters: int = 50,
-    measure_iters: int = 200,
-) -> dict:
-    """Compute detailed model efficiency profile."""
-    device = torch.device(device_name)
-    model = model.to(device)
-    model.eval()
-    
-    # 1. Parameter Breakdown
-    total_params = count_parameters(model)
-    trainable_params = count_trainable_parameters(model)
-    backbone_params = count_parameters(model.backbone) if hasattr(model, "backbone") else 0
-    neck_params = count_parameters(model.neck) if hasattr(model, "neck") else 0
-    head_params = (
-        count_parameters(model.head_dw)
-        + count_parameters(model.head_norm)
-        + count_parameters(model.head_out)
-        if hasattr(model, "head_out")
-        else 0
-    )
-    
-    # 2. FLOPs / MACs estimation (analytical or forward hooks)
-    x = torch.randn(batch_size, 3, input_resolution, input_resolution, device=device)
-    
-    # Use torchinfo / thop or direct forward pass
-    macs_est = 0
-    try:
-        # Approximate MACs for conv layers via hooks
-        conv_macs = []
-        def conv_hook(m, inp, out):
-            if isinstance(m, nn.Conv2d):
-                cin = m.in_channels
-                cout = m.out_channels
-                kh, kw = m.kernel_size
-                groups = m.groups
-                oh, ow = out.shape[-2:]
-                mac = (cin // groups) * kh * kw * cout * oh * ow * batch_size
-                conv_macs.append(mac)
-        
-        hooks = []
-        for mod in model.modules():
-            if isinstance(mod, nn.Conv2d):
-                hooks.append(mod.register_forward_hook(conv_hook))
-                
-        with torch.no_grad():
-            _ = model(x)
-            
-        for h in hooks:
-            h.remove()
-        macs_est = sum(conv_macs)
-    except Exception as e:
-        print(f"Hook profiling note: {e}")
-        
-    # 3. Peak memory & Latency benchmark
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(device)
-        
-    # Warmup
-    with torch.no_grad():
-        for _ in range(warmup_iters):
-            _ = model(x)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
-                
-    latencies = []
-    with torch.no_grad():
-        for _ in range(measure_iters):
-            if device.type == "cuda":
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            _ = model(x)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
-            t1 = time.perf_counter()
-            latencies.append((t1 - t0) * 1000.0)  # ms
-            
-    latencies = np.array(latencies)
-    median_latency = float(np.median(latencies))
-    p90_latency = float(np.percentile(latencies, 90))
-    fps = float(1000.0 / median_latency) * batch_size if median_latency > 0 else 0.0
-    
-    peak_mem_mb = 0.0
-    if device.type == "cuda":
-        peak_mem_mb = float(torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0))
-        
-    device_desc = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
-    
-    profile = {
-        "params_total": total_params,
-        "params_trainable": trainable_params,
-        "params_deploy": total_params,
-        "params_backbone": backbone_params,
-        "params_neck": neck_params,
-        "params_head": head_params,
-        "macs_resolution": f"{input_resolution}x{input_resolution}",
-        "macs": macs_est,
-        "gmacs": round(macs_est / 1e9, 4),
-        "latency_device": device_desc,
-        "latency_batch": batch_size,
-        "latency_median_ms": round(median_latency, 3),
-        "latency_p90_ms": round(p90_latency, 3),
-        "fps": round(fps, 2),
-        "peak_memory_mb": round(peak_mem_mb, 2),
+    median = float(np.median(data))
+    return {
+        "params_total": count_parameters(model),
+        "params_trainable": count_trainable_parameters(model),
+        "input_resolution": f"{input_resolution}x{input_resolution}",
+        "batch_size": batch_size,
+        "conv_macs": total_macs,
+        "conv_gmacs": total_macs / 1e9,
+        "conv_flops_multiply_add_2": 2 * total_macs,
+        "flops_note": "Conv2d only; multiply-add counted as two FLOPs",
+        "latency_device": torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU",
+        "latency_median_ms": median,
+        "latency_p95_ms": float(np.percentile(data, 95)),
+        "throughput_images_per_second": batch_size * 1000.0 / median,
+        "peak_memory_mb": peak_memory,
     }
-    return profile
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/sha.yaml", help="Path to config YAML")
-    parser.add_argument("--resolution", type=int, default=448, help="Input test resolution")
-    parser.add_argument("--output", type=str, default="profile.json", help="Path to save output profile JSON")
+    parser.add_argument("--config", default="configs/ntpc_r4_neural_dtm_tree.yaml")
+    parser.add_argument("--resolution", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--warmup-iters", type=int, default=20)
+    parser.add_argument("--measure-iters", type=int, default=100)
+    parser.add_argument("--output", default="runs/model_profile.json")
     args = parser.parse_args()
-    
-    with open(args.config, "r") as f:
-        cfg = yaml.safe_load(f)
-        
-    m_cfg = cfg.get("model", {})
+    with open(args.config, "r", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+    model_cfg = cfg["model"]
     model = HPCLite(
-        backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
+        backbone_name=model_cfg.get("backbone", "mobilenetv4_conv_small_050"),
         pretrained=False,
-        neck_width=m_cfg.get("neck_width", 32),
-        context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
-        truncate_backbone=m_cfg.get("truncate_backbone", True),
+        neck_width=int(model_cfg.get("neck_width", 32)),
+        context_dilations=tuple(model_cfg.get("context_dilations", [1, 2, 3])),
+        use_p8_context=bool(model_cfg.get("use_p8_context", False)),
+        use_repblock=bool(model_cfg.get("use_repblock", False)),
+        eps_d=float(model_cfg.get("eps_d", 1e-8)),
+        truncate_backbone=bool(model_cfg.get("truncate_backbone", True)),
     )
-    
-    prof = profile_model_efficiency(model, input_resolution=args.resolution)
-    print(json.dumps(prof, indent=2))
-    
+    profile = profile_model_efficiency(
+        model,
+        input_resolution=args.resolution,
+        batch_size=args.batch_size,
+        warmup_iters=args.warmup_iters,
+        measure_iters=args.measure_iters,
+    )
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, "w") as f:
-        json.dump(prof, f, indent=2)
+    with open(args.output, "w", encoding="utf-8") as handle:
+        json.dump(profile, handle, indent=2)
+    print(json.dumps(profile, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,88 @@
+# Experiment S2: MobileNetV4 Champion with P8 Context (+1.8K params, Pure-GT, No KD)
+experiment:
+  name: sha_mobilenetv4_p8_s2
+  seed: 42
+  save_dir: ./runs/mobilenetv4_p8_s2
+
+dataset:
+  name: sha
+  part: part_A
+  root: ./data/ShanghaiTech
+  crop_size: 448
+  output_stride: 4
+  hnb_blocks: [16, 32, 64]
+  allocation_block: 16
+  image_mean: [0.5, 0.5, 0.5]
+  image_std: [0.5, 0.5, 0.5]
+
+model:
+  name: hpc_lite
+  backbone: mobilenetv4_conv_small_050
+  pretrained: true
+  neck_width: 32
+  context_dilations: [1, 2, 3]
+  use_p8_context: true
+  eps_d: 1.0e-6
+  truncate_backbone: true
+  init_checkpoint: ./runs/mobilenetv4_ms_mae/best.pt
+
+loss:
+  lambda_count: 1.0
+  count_scale: 100.0
+  lambda_ms_mae: 1.0
+  lambda_point: 0.0
+  lambda_hnb: 0.25
+  lambda_alloc: 0.0
+  lambda_hn: 0.10
+  lambda_empty: 0.25
+  lambda_global: 0.10
+  lambda_rob: 0.05
+  lambda_route: 0.0
+  hard_negative_fraction: 0.10
+  density_stratified_nb: true
+  global_count_mode: log_smooth_l1
+  learn_dispersion: false
+  enable_curriculum: false
+
+augmentation:
+  scale_range: [0.75, 2.0]
+  flip_prob: 0.5
+  safe_crop: true
+  max_crop_attempts: 20
+  crop_guard_nn_factor: 0.2
+  crop_guard_min_px: 8
+  crop_guard_max_px: 48
+  large_nn_threshold_px: 48
+  true_border_threshold_px: 32
+  random_crop_prob: 0.75
+  large_center_crop_prob: 0.15
+  border_center_crop_prob: 0.1
+
+robustness:
+  second_view_prob: 0.2
+
+sampler:
+  weighted: true
+  density_bins: 5
+  luminance_bins: 4
+  power: 0.5
+
+optimizer:
+  lr_new_layers: 5.0e-5
+  lr_existing: 5.0e-6
+  lr_min: 1.0e-6
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+
+schedule:
+  epochs: 300
+  warmup_epochs: 5
+
+training:
+  effective_batch_size: 16
+  batch_size: 16
+  accum_steps: 1
+  amp: true
+  num_workers: 0
+  validate_every: 5
+  save_best_by: mae

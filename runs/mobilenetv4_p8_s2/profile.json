@@ -1,0 +1,17 @@
+{
+  "params_total": 352161,
+  "params_trainable": 352161,
+  "params_deploy": 352161,
+  "params_backbone": 340992,
+  "params_neck": 10784,
+  "params_head": 385,
+  "macs_resolution": "448x448",
+  "macs": 294439040,
+  "gmacs": 0.2944,
+  "latency_device": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+  "latency_batch": 1,
+  "latency_median_ms": 9.388,
+  "latency_p90_ms": 11.996,
+  "fps": 106.51,
+  "peak_memory_mb": 19.1
+}
