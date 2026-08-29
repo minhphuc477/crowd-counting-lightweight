@@ -7,7 +7,7 @@
 ### Key Architectural Principles
 - **Minimal Deployed Graph**:
   $$\text{Image} \xrightarrow{} \text{MobileNetV4-Conv-Small-0.5} \xrightarrow{} \text{Additive 32-ch FPN Neck} \xrightarrow{} 1\text{-channel Softplus Mass Map } D \xrightarrow{} \hat{C} = \sum D$$
-  - Deployed parameters: ~0.35M parameters (with physical truncation of reduction-32 stages).
+  - Deployed parameters: ~0.097M parameters (with physical truncation after C16; reduction-32 stages are absent).
   - Single-scale, single-head feed-forward inference at stride 4 predicting a count-mass map \(D\).
   - No Gaussian density targets, transformer decoders, or matching in the deployed counting graph. Exact sparse bipartite matching is used only for offline localization evaluation.
   - Zero-extra-parameter localization: the same predicted mass map \(D\) can optionally be decoded into point coordinates via parameter-free Optimal Transport Monge (OT-M) optimization.

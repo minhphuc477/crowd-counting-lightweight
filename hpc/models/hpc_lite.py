@@ -1,4 +1,4 @@
-"""HPC-Lite / NTPC Lightweight Crowd Counter (~0.35M Parameters).
+"""HPC-Lite / NTPC Lightweight Crowd Counter (~0.097M Parameters).
 
 Architecture:
   Image -> MobileNetV4 features (C4, C8, C16)

@@ -10,7 +10,7 @@ NTPC is a credible ultra-lightweight research prototype, not yet a demonstrated 
 
 `root count -> regional allocation -> recursive child allocation`
 
-with Negative-Binomial and Dirichlet-Multinomial likelihoods over one positive stride-4 mass field. The architecture itself is intentionally conventional: 340,992 of 350,017 parameters (97.4%) are in the pretrained MobileNetV4 backbone. Therefore the paper should claim a **probabilistic hierarchical training formulation and conserved representation**, not a fundamentally new backbone.
+with Negative-Binomial and Dirichlet-Multinomial likelihoods over one positive stride-4 mass field. The architecture itself is intentionally conventional: 87,568 of 96,593 parameters (90.7%) are in the C16-truncated pretrained MobileNetV4 backbone. Therefore the paper should claim a **probabilistic hierarchical training formulation and conserved representation**, not a fundamentally new backbone.
 
 Current recommendation: **promising but empirically incomplete / weak reject if submitted now**. The recommendation can move to borderline accept or accept only after the causal study and cross-dataset results validate the central claim.
 
@@ -22,24 +22,24 @@ Exa Search reviewed 106 search hits across three workstreams: ultra-lightweight 
 
 | Property | Verified NTPC value | Interpretation |
 |---|---:|---|
-| Parameters | 350,017 | Genuinely sub-0.5M |
-| Backbone parameters | 340,992 (97.4%) | Novelty is primarily the objective, not the feature extractor |
-| Neck + head | 9,025 (2.6%) | Very small task-specific graph |
-| Conv MACs, 256x256 | 0.09421 GMAC | Verified by forward hooks |
-| Conv MACs, 1920x1080 | 2.98938 GMAC | Measured at the comparison resolution |
-| Conv FLOPs, MAC=2 ops | 5.97876 GFLOPs | Convolution only; GN/interpolation/activations excluded |
-| 1920x1080 latency | 17.77 ms median, 18.17 ms p95 | 56.3 FPS, batch 1, FP32, RTX 3050 Ti Laptop |
-| 1920x1080 peak allocation | 161.36 MiB | PyTorch CUDA allocator, inference without profiling hooks |
-| Automated verification | 84 tests passed | Includes conservation, gradients, 10k localization matching, OT-M and tiled inference |
+| Parameters | 96,593 | Genuinely sub-0.1M |
+| Backbone parameters | 87,568 (90.7%) | Novelty is primarily the objective, not the feature extractor |
+| Neck + head | 9,025 (9.3%) | Very small task-specific graph |
+| Conv MACs, 256x256 | 0.075764 GMAC | Verified by forward hooks |
+| Conv MACs, 1920x1080 | 2.40141 GMAC | Measured at the comparison resolution |
+| Conv FLOPs, MAC=2 ops | 4.80281 GFLOPs | Convolution only; GN/interpolation/activations excluded |
+| 1920x1080 latency | 15.95 ms median, 16.89 ms p95 | 62.7 FPS, batch 1, FP32, RTX 3050 Ti Laptop |
+| 1920x1080 peak allocation | 160.34 MiB | PyTorch CUDA allocator, inference without profiling hooks |
+| Automated verification | 85 tests passed | Includes exact pretrained truncation parity, conservation, gradients, 10k localization matching, OT-M and tiled inference |
 
-The nearest efficiency competitor found is ZIP-P, which also uses a MobileNetV4-Small 0.5x family backbone and probabilistic discrete-count modeling. ZIP-P reports 0.81M parameters and 6.46 GFLOPs at 1920x1080, with MAE 71.18/8.23/96.29 on SHA/SHB/QNRF. FLOP definitions must be re-measured in the same profiler before claiming NTPC is cheaper, but NTPC already uses approximately 57% fewer parameters.
+The nearest efficiency competitor found is ZIP-P, which also uses a MobileNetV4-Small 0.5x family backbone and probabilistic discrete-count modeling. ZIP-P reports 0.81M parameters and 6.46 GFLOPs at 1920x1080, with MAE 71.18/8.23/96.29 on SHA/SHB/QNRF. FLOP definitions must be re-measured in the same profiler before claiming NTPC is cheaper, but NTPC uses approximately 88% fewer parameters.
 
 ## Reviewer-style scorecard
 
 | Dimension | Score | Evidence-based assessment |
 |---|---:|---|
 | Technical soundness | 8/10 | Conservation and the hierarchical likelihood are internally coherent and tested |
-| Architectural efficiency | 9/10 | 0.35M parameters, practical 1080p memory and latency |
+| Architectural efficiency | 9.5/10 | 0.097M parameters, practical 1080p memory and latency |
 | Method novelty | 6.5/10 | Tree-structured DM allocation is interesting, but ZIP already occupies probabilistic lightweight counting and PML formalizes modern density losses |
 | Experimental design | 7.5/10 | R1/R2/R3/R4 isolate deterministic, flat, multinomial, and overdispersed hierarchy unusually well |
 | Empirical evidence | 1/10 | No current compatible checkpoint or verified MAE/RMSE table |
@@ -56,13 +56,13 @@ The nearest efficiency competitor found is ZIP-P, which also uses a MobileNetV4-
 | OT-M (CVPR 2023) | Parameter-free density-to-point localization | Present OT-M as an external decoder, not an NTPC architectural invention |
 | PML (ICLR 2025) | Principled density loss and counting/localization unification | Explain why conserved hierarchical count likelihood is different and when it wins |
 | P2R (CVPR 2025) | Point-to-region supervision for localization/counting | Do not claim point supervision or semi-supervision unless implemented and evaluated |
-| TinyCount (2024) | Extreme parameter minimization, reported around 0.06M | NTPC needs substantially better accuracy to justify six times more parameters |
+| TinyCount (2024) | Extreme parameter minimization, reported around 0.06M | NTPC is now in the same sub-0.1M regime and must compare accuracy under matched profiling |
 
 ## Strongest aspects
 
 1. **Exact conservation:** every reported regional count and the global count comes from sums of the same positive mass field; there are no inconsistent auxiliary heads.
 2. **Clean causal ablations:** R3 versus R4 directly tests multinomial versus Dirichlet-Multinomial overdispersion; R2 versus R4 tests flat versus hierarchical allocation; R1 versus R4 tests deterministic versus probabilistic allocation.
-3. **Deployment credibility:** the task-specific graph is only 9,025 parameters, full-HD inference fits comfortably on the audit GPU, and tiled inference is explicit rather than silently changing protocol.
+3. **Deployment credibility:** the task-specific graph is only 9,025 parameters, the backbone is physically truncated after C16, full-HD inference fits comfortably on the audit GPU, and tiled inference is explicit rather than silently changing protocol.
 4. **Secondary localization:** OT-M can test whether deeper conserved supervision makes the mass representation more instance-aware without adding trained parameters.
 
 ## Main rejection risks

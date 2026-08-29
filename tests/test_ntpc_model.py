@@ -252,6 +252,7 @@ def test_all_cli_modules_import():
     """All tools and CLI modules must import without missing attributes or syntax errors."""
     import tools.eval_localization
     import tools.eval_ntpc_localization_depth
+    import tools.architecture_table
     import tools.export_onnx
     import tools.profile_model
     import tools.create_smoke_dataset

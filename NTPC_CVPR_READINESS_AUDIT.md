@@ -19,8 +19,8 @@ The implementation and official ShanghaiTech installation are coherent enough fo
 - One positive stride-4 mass map is conserved exactly by sum pooling through the count tree.
 - R4 implements the intended `N -> 64 -> 32 -> 16` factorization; R5 adds only the dense-parent `16 -> 8` auxiliary.
 - The root Negative-Binomial and conditional Dirichlet-Multinomial terms are evaluated in FP32 with finite/target-conservation checks.
-- The deployed model has 350,017 parameters and 0.09421 Conv2d GMAC at `256x256` (interpolation, normalization, activation, and OT-M costs are excluded from this Conv-only figure).
-- On the audit machine (RTX 3050 Ti Laptop GPU, batch 1, `256x256`) the current graph measured about 7.88 ms median, 9.85 ms p95, and 6.47 MiB peak allocated memory. These numbers are machine-specific, not cross-paper claims.
+- The deployed model has 96,593 parameters and 0.075764 Conv2d GMAC at `256x256` (interpolation, normalization, activation, and OT-M costs are excluded from this Conv-only figure).
+- On the audit machine (RTX 3050 Ti Laptop GPU, batch 1, `256x256`) the physically C16-truncated graph measured 6.93 ms median, 8.99 ms p95, and 5.45 MiB peak allocated memory. These numbers are machine-specific, not cross-paper claims.
 - Parameter-free local-max and OT-M localization remain offline secondary decoders; neither changes the counting graph.
 - Full-image inference remains the official default. An explicit stride-aligned tiled mode is available for very large images; because GroupNorm statistics are tile-local, tiled results are a separately recorded protocol rather than a silent OOM fallback.
 
@@ -41,7 +41,8 @@ The implementation and official ShanghaiTech installation are coherent enough fo
 - Added explicit OT-M full-resolution initialization limits and a recorded `stride_grid` alternative for large images; Oracle-cardinality evaluation is now recorded in both metadata and per-image rows.
 - Added deterministic generator plumbing to the weighted sampler, positive `pad_multiple` validation, one-sync gradient diagnostics, and tests that data-driven head initialization cannot alter backbone weights.
 - Locked the causal ablation contract: R0--R5/T1/T2 may differ only in experiment identity and loss; dataset, model, augmentation, statistics, sampler, optimizer, schedule, and training sections are tested equal.
-- Final project validation: `84 passed`; Python byte-compilation, evaluator CLI checks, and launcher dry-run complete without code errors. The shared Python environment still has unrelated optional-package conflicts reported by `pip check` (for example MLflow/Unsloth); the NTPC runtime versions are pinned separately in `requirements-lock.txt`.
+- Corrected timm MobileNetV4 feature extraction: `MobileNetV3Features` returns selected tensors but still iterates all stages, so NTPC now physically removes `blocks.3` and `blocks.4` after loading pretrained weights. Retained pretrained tensors and C4/C8/C16 outputs are bit-exact to the untruncated timm extractor.
+- Final project validation: `85 passed`; Python byte-compilation, evaluator CLI checks, and launcher dry-run complete without code errors. The shared Python environment still has unrelated optional-package conflicts reported by `pip check` (for example MLflow/Unsloth); the NTPC runtime versions are pinned separately in `requirements-lock.txt`.
 
 ## Evidence still required before a CVPR claim
 
