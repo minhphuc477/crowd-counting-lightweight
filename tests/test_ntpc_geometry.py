@@ -4,10 +4,14 @@ import pytest
 import torch
 from PIL import Image
 
-from hpc.data.common import BaseCrowdDataset
+from hpc.data.common import BaseCrowdDataset, validate_point_annotations
+from hpc.data.nwpu import resolve_nwpu_split_file
 from hpc.data.point_counts import points_to_y4
-from hpc.data.sha import _validate_points
-from hpc.data.transforms import NTPCGeometricTransform
+from hpc.data.transforms import (
+    NTPCGeometricTransform,
+    compute_isotropic_resize,
+    in_closed_pixel_support,
+)
 
 
 def test_flip_twice_is_identity():
@@ -41,7 +45,7 @@ def test_exact_boundary_flip_reflection_closed():
         [float(crop_size) - 0.5, 100.0],
     ], dtype=np.float32)
 
-    flipped_x = np.clip((float(crop_size) - 1.0) - pts[:, 0], -0.5, float(crop_size) - 0.5)
+    flipped_x = (float(crop_size) - 1.0) - pts[:, 0]
 
     assert flipped_x[0] == pytest.approx(float(crop_size) - 0.5)
     assert flipped_x[1] == pytest.approx(-0.5)
@@ -53,7 +57,6 @@ def test_isotropic_scaling_preserves_aspect_ratio():
     random.seed(42)
     np.random.seed(42)
     crop_size = 256
-    transform = NTPCGeometricTransform(crop_size=crop_size, scale_range=(0.7, 1.3), flip_prob=0.0)
 
     test_shapes = [
         (100, 1000),
@@ -64,20 +67,13 @@ def test_isotropic_scaling_preserves_aspect_ratio():
     ]
 
     for old_w, old_h in test_shapes:
-        img = Image.new("RGB", (old_w, old_h), color="gray")
-        pts = np.array([[0.0, 0.0], [float(old_w - 1), float(old_h - 1)]], dtype=np.float32)
-
-        # Scale step inspection
         sampled_scale = random.uniform(0.7, 1.3)
-        fit_scale = max(crop_size / float(old_w), crop_size / float(old_h))
-        scale = max(sampled_scale, fit_scale)
-        new_w = max(crop_size, int(round(old_w * scale)))
-        new_h = max(crop_size, int(round(old_h * scale)))
+        new_w, new_h = compute_isotropic_resize(old_w, old_h, crop_size, sampled_scale)
 
         sx = new_w / float(old_w)
         sy = new_h / float(old_h)
 
-        # Aspect ratio distortion must be negligible (due only to 1px rounding)
+        # Aspect ratio distortion must be negligible (due only to 1px integer rounding)
         aspect_ratio_error = abs(sx - sy) / min(sx, sy)
         assert aspect_ratio_error < 0.02, (
             f"Aspect ratio distorted for ({old_w}, {old_h}): sx={sx:.4f}, sy={sy:.4f}, error={aspect_ratio_error:.4f}"
@@ -85,7 +81,7 @@ def test_isotropic_scaling_preserves_aspect_ratio():
 
 
 def test_transform_bounds_invariant():
-    """NTPCGeometricTransform must always produce points strictly within valid bounds [-0.5, crop-0.5)."""
+    """NTPCGeometricTransform must always produce points strictly within closed support [-0.5, crop-0.5]."""
     random.seed(42)
     np.random.seed(42)
     crop_size = 256
@@ -104,10 +100,7 @@ def test_transform_bounds_invariant():
         assert crop_img.size == (crop_size, crop_size)
 
         if len(crop_pts) > 0:
-            assert np.all(crop_pts[:, 0] >= -0.5)
-            assert np.all(crop_pts[:, 0] < float(crop_size) - 0.5)
-            assert np.all(crop_pts[:, 1] >= -0.5)
-            assert np.all(crop_pts[:, 1] < float(crop_size) - 0.5)
+            assert in_closed_pixel_support(crop_pts, crop_size, crop_size).all()
 
 
 def test_sha_coordinate_base_conversion():
@@ -119,7 +112,7 @@ def test_sha_coordinate_base_conversion():
         [200.0, 150.0],
     ], dtype=np.float32)
 
-    converted = _validate_points(mat_pts_1based, source="test", coordinate_base=1, image_shape=(w, h))
+    converted = validate_point_annotations(mat_pts_1based, source="test", coordinate_base=1, image_shape=(w, h))
 
     expected = np.array([
         [0.0, 0.0],
@@ -141,11 +134,11 @@ def test_out_of_bounds_annotation_fails_fast():
     ], dtype=np.float32)
 
     with pytest.raises(ValueError, match="Out-of-bounds annotation"):
-        _validate_points(bad_pts, source="test_bad", coordinate_base=0, image_shape=(w, h))
+        validate_point_annotations(bad_pts, source="test_bad", coordinate_base=0, image_shape=(w, h))
 
 
 def test_continuous_support_boundary_binning():
-    """Points at support boundaries [-0.5, W-0.5) must bin into correct stride-4 cells without dropping."""
+    """Points at support boundaries [-0.5, W-0.5] must bin into correct stride-4 cells without dropping."""
     H, W = 256, 256
     pts = torch.tensor([
         [-0.49, -0.49],       # Extreme top-left -> cell (0, 0)
@@ -179,3 +172,19 @@ def test_dataset_sample_point_tree_match(tmp_path):
     sample = ds[0]
     assert sample["image"].shape == (3, 256, 256)
     assert int(sample["gt_count"].item()) == len(sample["gt_points"])
+
+
+def test_nwpu_test_never_uses_train_split():
+    """NWPU split resolver must correctly map train/val/test without cross-split fallback."""
+    cfg = {
+        "train_split_file": "train.txt",
+        "val_split_file": "val.txt",
+        "test_split_file": "test.txt",
+    }
+    assert resolve_nwpu_split_file(cfg, "train") == "train.txt"
+    assert resolve_nwpu_split_file(cfg, "val") == "val.txt"
+    assert resolve_nwpu_split_file(cfg, "test") == "test.txt"
+
+    with pytest.raises(ValueError, match="Unsupported NWPU split"):
+        resolve_nwpu_split_file(cfg, "unknown_split")
+

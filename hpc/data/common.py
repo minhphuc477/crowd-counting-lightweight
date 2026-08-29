@@ -10,11 +10,57 @@ from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 
 from .point_counts import build_exact_count_pyramid
-from .transforms import NTPCGeometricTransform
+from .transforms import NTPCGeometricTransform, in_closed_pixel_support
 
 
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def validate_point_annotations(
+    points: Any,
+    source: str,
+    coordinate_base: int = 1,
+    image_shape: Optional[Tuple[int, int]] = None,
+    tol: float = 1e-3,
+) -> np.ndarray:
+    """Validate and convert coordinates to 0-based pixel-center coordinates [0, W-1] x [0, H-1]."""
+    arr = np.asarray(points, dtype=np.float32)
+    if arr.size == 0:
+        return np.empty((0, 2), dtype=np.float32)
+    arr = np.squeeze(arr)
+    if arr.ndim == 1 and arr.size == 2:
+        arr = arr.reshape(1, 2)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError(f"Invalid point array in {source}: shape={arr.shape}")
+    if not np.isfinite(arr).all():
+        raise ValueError(f"Non-finite point coordinate in {source}")
+
+    arr = arr.astype(np.float32, copy=True)
+    if coordinate_base == 1:
+        # Standard MATLAB 1-based coordinates [1, W] x [1, H] -> 0-based [0, W-1] x [0, H-1]
+        arr -= 1.0
+    elif coordinate_base != 0:
+        raise ValueError(f"Unsupported coordinate_base={coordinate_base}; must be 0 or 1")
+
+    if image_shape is not None:
+        w, h = image_shape
+        bad = (
+            (arr[:, 0] < -tol)
+            | (arr[:, 0] > float(w - 1) + tol)
+            | (arr[:, 1] < -tol)
+            | (arr[:, 1] > float(h - 1) + tol)
+        )
+        if bad.any():
+            bad_pts = arr[bad][:10].tolist()
+            raise ValueError(
+                f"Out-of-bounds annotation in {source} (image_size={image_shape}): "
+                f"found {bad.sum()} points out of bounds, samples: {bad_pts}"
+            )
+        arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
+        arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
+
+    return arr
 
 
 class BaseCrowdDataset(Dataset):
@@ -53,6 +99,13 @@ class BaseCrowdDataset(Dataset):
         self.image_mean = list(image_mean) if image_mean is not None else list(IMAGENET_MEAN)
         self.image_std = list(image_std) if image_std is not None else list(IMAGENET_STD)
 
+        if len(self.image_mean) != 3 or len(self.image_std) != 3:
+            raise ValueError("image_mean and image_std must each have exactly 3 elements")
+        if not np.isfinite(self.image_mean).all() or not np.isfinite(self.image_std).all():
+            raise ValueError("image_mean and image_std must contain finite values")
+        if np.any(np.asarray(self.image_std) <= 0):
+            raise ValueError("image_std elements must be strictly positive")
+
         self.has_ground_truth = (
             list(has_ground_truth)
             if has_ground_truth is not None
@@ -86,15 +139,9 @@ class BaseCrowdDataset(Dataset):
         if self.is_train:
             image_crop, crop_pts = self.geom_transform(image, points)
 
-            # Assert geometry bounds in continuous pixel-center support [-0.5, crop_size - 0.5)
+            # Assert geometry bounds in closed continuous pixel-center support [-0.5, crop_size - 0.5]
             if len(crop_pts) > 0:
-                upper = float(self.crop_size) - 0.5
-                if not (
-                    np.all(crop_pts[:, 0] >= -0.5)
-                    and np.all(crop_pts[:, 0] <= upper)
-                    and np.all(crop_pts[:, 1] >= -0.5)
-                    and np.all(crop_pts[:, 1] <= upper)
-                ):
+                if not in_closed_pixel_support(crop_pts, self.crop_size, self.crop_size).all():
                     raise RuntimeError(
                         f"Geometric transform produced out-of-bounds points for crop_size={self.crop_size}"
                     )

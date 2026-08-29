@@ -8,7 +8,21 @@ import numpy as np
 from PIL import Image
 import scipy.io as sio
 
-from .common import BaseCrowdDataset
+from .common import BaseCrowdDataset, validate_point_annotations
+
+
+def resolve_nwpu_split_file(ds_cfg: dict, eval_split: str) -> Optional[str]:
+    """Resolve split file key for NWPU without cross-split fallbacks."""
+    split_file_keys = {
+        "train": "train_split_file",
+        "val": "val_split_file",
+        "test": "test_split_file",
+    }
+    if eval_split not in split_file_keys:
+        raise ValueError(
+            f"Unsupported NWPU split '{eval_split}'; must be one of {list(split_file_keys.keys())}"
+        )
+    return ds_cfg.get(split_file_keys[eval_split])
 
 
 def _validate_points(
@@ -25,41 +39,9 @@ def _validate_points(
         arr = arr.get("points", arr.get("annPoints", None))
         if arr is None:
             raise KeyError(f"No points/annPoints in {source}")
-    arr = np.asarray(arr, dtype=np.float32)
-    if arr.size == 0:
-        return np.empty((0, 2), dtype=np.float32)
-    arr = np.squeeze(arr)
-    if arr.ndim == 1 and arr.size == 2:
-        arr = arr.reshape(1, 2)
-    if arr.ndim != 2 or arr.shape[1] != 2:
-        raise ValueError(f"Invalid NWPU point array in {source}: shape={arr.shape}")
-    if not np.isfinite(arr).all():
-        raise ValueError(f"Non-finite NWPU coordinate in {source}")
-
-    arr = arr.astype(np.float32, copy=True)
-    if coordinate_base == 1:
-        arr -= 1.0
-    elif coordinate_base != 0:
-        raise ValueError(f"Unsupported coordinate_base={coordinate_base}; must be 0 or 1")
-
-    if image_shape is not None:
-        w, h = image_shape
-        bad = (
-            (arr[:, 0] < -tol)
-            | (arr[:, 0] > float(w - 1) + tol)
-            | (arr[:, 1] < -tol)
-            | (arr[:, 1] > float(h - 1) + tol)
-        )
-        if bad.any():
-            bad_pts = arr[bad][:10].tolist()
-            raise ValueError(
-                f"Out-of-bounds annotation in {source} (image_size={image_shape}): "
-                f"found {bad.sum()} points out of bounds, samples: {bad_pts}"
-            )
-        arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
-        arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
-
-    return arr
+    return validate_point_annotations(
+        arr, source=source, coordinate_base=coordinate_base, image_shape=image_shape, tol=tol
+    )
 
 
 def load_nwpu_points(

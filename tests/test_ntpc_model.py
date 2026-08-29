@@ -1,7 +1,8 @@
+import pytest
 import torch
 
 from hpc.models.backbone import MobileNetV4Backbone
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 from hpc.models.hpc_lite import HPCLite
 from hpc.models.neck import AdditiveFPNNeck
 
@@ -46,39 +47,63 @@ def test_factory_build_model_equivalence():
     assert 349_000 <= n_params <= 352_000
 
 
-def test_arbitrary_padded_inference():
-    """predict() must handle arbitrary resolutions not divisible by 32 or 4."""
+def test_direct_arbitrary_resolution():
+    """HPCLite forward must process arbitrary resolutions directly without zero-padding distortion."""
+    model = HPCLite(pretrained=False, neck_width=32).eval()
+    x = torch.randn(1, 3, 317, 411)
+    with torch.no_grad():
+        d = model(x)
+    assert d.shape == (1, 1, 80, 103)
+    assert torch.isfinite(d).all()
+
+
+def test_arbitrary_direct_and_padded_inference():
+    """predict() must handle arbitrary resolutions directly (pad_multiple=None) or with padding."""
     model = HPCLite(pretrained=False, neck_width=32)
     model.eval()
 
     # Image dimensions not divisible by 32 or 4
     x = torch.randn(1, 3, 317, 411)
     with torch.no_grad():
-        count, d_valid = model.predict(x, pad_multiple=32)
+        count_direct, d_direct = model.predict(x, pad_multiple=None)
+        count_padded, d_padded = model.predict(x, pad_multiple=32)
 
-    assert count.ndim == 1 and count.shape[0] == 1
-    assert torch.isfinite(count).all()
-    assert d_valid.shape == (1, 1, 80, 103)
+    assert count_direct.ndim == 1 and count_direct.shape[0] == 1
+    assert torch.isfinite(count_direct).all()
+    assert d_direct.shape == (1, 1, 80, 103)
+
+    assert count_padded.ndim == 1 and count_padded.shape[0] == 1
+    assert torch.isfinite(count_padded).all()
+    assert d_padded.shape == (1, 1, 80, 103)
 
 
-def test_padding_multiple_invariance_diagnostic():
-    """Diagnostic test: measure count variance across pad_multiple=16, 32, 64 for non-divisible image."""
-    torch.manual_seed(42)
-    model = HPCLite(pretrained=False, neck_width=32)
-    model.eval()
+def test_checkpoint_compatibility_assertion():
+    """assert_checkpoint_compatible must accept matching configs and reject mismatches."""
+    cfg = {
+        "model": {"backbone": "mobilenetv4_conv_small_050", "neck_width": 32},
+        "dataset": {"name": "sha", "part": "part_A", "coordinate_base": 1},
+    }
 
-    # Arbitrary non-divisible image (317, 411)
-    x = torch.randn(1, 3, 317, 411)
-    with torch.no_grad():
-        count_16, d_16 = model.predict(x, pad_multiple=16)
-        count_32, d_32 = model.predict(x, pad_multiple=32)
-        count_64, d_64 = model.predict(x, pad_multiple=64)
+    # Matching checkpoint
+    assert_checkpoint_compatible({"config": cfg}, cfg)
 
-    # Valid output shapes must be identical (80, 103) regardless of pad_multiple
-    assert d_16.shape == d_32.shape == d_64.shape == (1, 1, 80, 103)
-    diff_32_16 = abs(count_32.item() - count_16.item())
-    diff_64_32 = abs(count_64.item() - count_32.item())
-    assert diff_32_16 < 0.5 and diff_64_32 < 0.5, (
-        f"Significant count drift across padding policies: 16={count_16.item():.3f}, "
-        f"32={count_32.item():.3f}, 64={count_64.item():.3f}"
-    )
+    # Model architecture mismatch
+    bad_model_ckpt = {
+        "config": {
+            "model": {"backbone": "mobilenetv4_conv_small_050", "neck_width": 64},
+            "dataset": {"name": "sha", "part": "part_A", "coordinate_base": 1},
+        }
+    }
+    with pytest.raises(ValueError, match="Model config mismatch"):
+        assert_checkpoint_compatible(bad_model_ckpt, cfg)
+
+    # Dataset preprocessing mismatch
+    bad_ds_ckpt = {
+        "config": {
+            "model": {"backbone": "mobilenetv4_conv_small_050", "neck_width": 32},
+            "dataset": {"name": "sha", "part": "part_B", "coordinate_base": 1},
+        }
+    }
+    with pytest.raises(ValueError, match="Dataset/preprocessing config mismatch"):
+        assert_checkpoint_compatible(bad_ds_ckpt, cfg)
+

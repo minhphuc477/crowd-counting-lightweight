@@ -18,13 +18,13 @@ if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
 from hpc.data.sha import ShanghaiTechDataset
-from hpc.metrics.localization import extract_points_from_mass_map
+from hpc.metrics.localization import extract_points_from_mass_map, local_max_localization
 from hpc.metrics.otm import (
     DEFAULT_OTM_MAX_SOURCE_POINTS,
     DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
     otm_localize,
 )
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
 def apply_colormap_jet(density_norm: np.ndarray) -> np.ndarray:
@@ -56,7 +56,8 @@ def visualize_crowd_localization(
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
     model = build_model_from_config(cfg).to(device)
 
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    assert_checkpoint_compatible(ckpt, cfg)
     state_dict = ckpt.get("model_state_dict", ckpt)
     model.load_state_dict(state_dict, strict=True)
     model.eval()
@@ -88,7 +89,7 @@ def visualize_crowd_localization(
         # Model inference
         img_tensor = sample["image"].unsqueeze(0).to(device)
         with torch.no_grad():
-            pred_cnt, d_map = model.predict(img_tensor, pad_multiple=32)
+            pred_cnt, d_map = model.predict(img_tensor, pad_multiple=None)
 
         pred_val = float(pred_cnt.item())
         d_np = d_map.squeeze().cpu().numpy()  # (H/4, W/4)

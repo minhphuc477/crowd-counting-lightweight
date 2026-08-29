@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import yaml
 
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
 class _ExportMassWrapper(nn.Module):
@@ -34,7 +34,8 @@ def export_model_to_onnx(
     if checkpoint_path is not None and checkpoint_path.lower() != "none" and checkpoint_path != "":
         if not os.path.isfile(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        assert_checkpoint_compatible(ckpt, cfg)
         state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
         model.load_state_dict(state_dict, strict=True)
         print(f"Loaded checkpoint from: {checkpoint_path}")
@@ -81,9 +82,14 @@ def export_model_to_onnx(
             ort_out = ort_session.run(None, {"image": x.numpy()})[0]
 
             diff = float(np.max(np.abs(torch_out - ort_out)))
-            print(f"Parity check for shape {shape}: Max absolute diff = {diff:.6e}")
+            torch_cnt = torch_out.reshape(torch_out.shape[0], -1).sum(axis=-1)
+            ort_cnt = ort_out.reshape(ort_out.shape[0], -1).sum(axis=-1)
+            cnt_diff = float(np.max(np.abs(torch_cnt - ort_cnt)))
+            print(f"Parity check for shape {shape}: Max map diff = {diff:.6e}, Max count diff = {cnt_diff:.6e}")
             if not np.allclose(torch_out, ort_out, rtol=1e-3, atol=1e-3):
-                raise RuntimeError(f"ONNX parity check failed for shape {shape} with max absolute error: {diff}")
+                raise RuntimeError(f"ONNX map parity check failed for shape {shape} with max absolute error: {diff}")
+            if not np.allclose(torch_cnt, ort_cnt, rtol=1e-3, atol=0.5):
+                raise RuntimeError(f"ONNX count parity check failed for shape {shape} with max count error: {cnt_diff}")
 
         print("Dynamic ONNX multi-shape verification PASSED.")
     except ImportError:

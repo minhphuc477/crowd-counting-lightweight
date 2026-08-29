@@ -323,7 +323,11 @@ def main() -> None:
         weight_decay=float(optimizer_cfg.get("weight_decay", 1e-4)),
     )
     epochs = int(cfg["schedule"]["epochs"])
+    if epochs <= 0:
+        raise ValueError(f"schedule.epochs must be positive, got {epochs}")
     warmup_epochs = int(cfg["schedule"].get("warmup_epochs", 25))
+    if warmup_epochs < 0 or warmup_epochs > epochs:
+        raise ValueError(f"schedule.warmup_epochs must be in [0, {epochs}], got {warmup_epochs}")
 
     def lr_lambda(epoch: int) -> float:
         if epoch < warmup_epochs:
@@ -340,7 +344,11 @@ def main() -> None:
         enabled=amp_enabled,
     )
     grad_clip = float(optimizer_cfg.get("grad_clip", 5.0))
+    if grad_clip <= 0 or not math.isfinite(grad_clip):
+        raise ValueError(f"grad_clip must be positive and finite, got {grad_clip}")
     evaluate_every = int(training_cfg.get("evaluate_every", training_cfg.get("validate_every", 5)))
+    if evaluate_every <= 0:
+        raise ValueError(f"evaluate_every must be positive, got {evaluate_every}")
     gradient_every = int(training_cfg.get("gradient_audit_every", 50))
     grad_names = _grad_names_for_mode(criterion.cfg.mode)
 
@@ -367,6 +375,7 @@ def main() -> None:
     component_names = train_fields[2:13]
     for epoch in range(1, epochs + 1):
         started = time.time()
+        lr_used = optimizer.param_groups[0]["lr"]
         model.train()
         running_loss = torch.zeros((), device=device)
         running = {name: torch.zeros((), device=device) for name in component_names}
@@ -379,7 +388,9 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 mass = model(images)
-                loss, logs, components = criterion(mass, targets, return_components=True)
+                loss, logs, components = criterion(
+                    mass, targets, return_components=True, validate_targets=False
+                )
             if audit_gradients and step == 0:
                 epoch_grads = component_gradient_norms(components, model.parameters(), grad_names)
             if amp_enabled:
@@ -395,14 +406,13 @@ def main() -> None:
             running_loss += loss.detach()
             for name in component_names:
                 running[name] += logs.get(name, mass.new_zeros(()))
-        scheduler.step()
         steps = len(train_loader)
         train_row = {
             "epoch": epoch,
             "loss": float((running_loss / steps).cpu()),
             **{name: float((running[name] / steps).cpu()) for name in component_names},
             **epoch_grads,
-            "lr": optimizer.param_groups[0]["lr"],
+            "lr": lr_used,
         }
         _append_csv(train_csv, train_row, train_fields)
 
@@ -417,7 +427,7 @@ def main() -> None:
                 "sparse_bias": metrics.get("bin_sparse_bias", float("nan")),
                 "medium_bias": metrics.get("bin_medium_bias", float("nan")),
                 "dense_bias": metrics.get("bin_dense_bias", float("nan")),
-                "lr": optimizer.param_groups[0]["lr"],
+                "lr": lr_used,
             }
             _append_csv(val_csv, val_row, val_fields)
             if metrics["mae"] < best_mae:
@@ -444,6 +454,7 @@ def main() -> None:
                 f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.3f} "
                 f"lr={train_row['lr']:.2e} time={time.time()-started:.1f}s"
             )
+        scheduler.step()
 
     print(f"Training complete. Best MAE={best_mae:.3f} at epoch {best_epoch} on {selection_split}.")
 

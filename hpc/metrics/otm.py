@@ -196,9 +196,13 @@ def _initialize_target_points(
         mode="bilinear",
         align_corners=False,
     )[0, 0]
-    coordinates = torch.nonzero(resized > _TINY, as_tuple=False)
-    weights = resized[coordinates[:, 0], coordinates[:, 1]].clamp_min(_TINY)
-    replacement = point_count > coordinates.shape[0]
+    flat = resized.flatten()
+    weights = torch.where(flat > _TINY, flat, torch.zeros_like(flat))
+    pos_count = int(torch.count_nonzero(weights))
+    if pos_count == 0:
+        weights = torch.ones_like(flat)
+        pos_count = weights.numel()
+    replacement = point_count > pos_count
     generator = torch.Generator(device=mass.device)
     generator.manual_seed(int(seed))
     chosen = torch.multinomial(
@@ -207,7 +211,9 @@ def _initialize_target_points(
         replacement=replacement,
         generator=generator,
     )
-    return coordinates[chosen].float().reshape(1, point_count, 2)
+    rows = torch.div(chosen, image_width, rounding_mode="floor")
+    cols = chosen % image_width
+    return torch.stack([rows, cols], dim=-1).float().reshape(1, point_count, 2)
 
 
 @torch.no_grad()

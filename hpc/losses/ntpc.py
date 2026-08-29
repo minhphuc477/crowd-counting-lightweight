@@ -36,21 +36,21 @@ def sum_pool_mass_pyramid(
     block_sizes: Tuple[int, ...] = (4, 8, 16, 32, 64),
     stride: int = 4,
 ) -> Dict[int, torch.Tensor]:
-    """Build exactly the requested count maps from one positive mass map."""
+    """Build requested count maps from one positive mass map via exact recursive 2x2 pooling."""
     if mass.ndim == 3:
         mass = mass.unsqueeze(1)
     if mass.ndim != 4 or mass.shape[1] != 1:
         raise ValueError(f"Expected mass shape (B,1,H,W), got {tuple(mass.shape)}")
-    result: Dict[int, torch.Tensor] = {}
-    for block_size in block_sizes:
-        if block_size % stride:
-            raise ValueError(f"Block size {block_size} must be divisible by stride {stride}")
-        factor = block_size // stride
-        if factor < 1:
-            raise ValueError(f"Block size {block_size} is smaller than stride {stride}")
-        pooled = mass if factor == 1 else block_sum(mass, factor)
-        result[int(block_size)] = pooled.squeeze(1)
-    return result
+    if stride != 4:
+        raise ValueError(f"Expected stride 4, got {stride}")
+
+    levels: Dict[int, torch.Tensor] = {4: mass.squeeze(1)}
+    curr = mass
+    for block in (8, 16, 32, 64):
+        curr = block_sum(curr, 2)
+        levels[block] = curr.squeeze(1)
+
+    return {int(b): levels[int(b)] for b in block_sizes if int(b) in levels}
 
 
 mass_pyramid = sum_pool_mass_pyramid
@@ -249,14 +249,34 @@ class NTPCLoss(nn.Module):
     @property
     def is_exact_joint_nll(self) -> bool:
         """True iff the loss configuration is the exact factorized joint NLL."""
-        return (
-            self.cfg.mode == "r4_dtm_tree16"
-            and self.cfg.root_loss == "nb"
-            and self.cfg.w_root_nb == 1.0
-            and self.cfg.w_root64 == 1.0
-            and self.cfg.w_64_32 == 1.0
-            and self.cfg.w_32_16 == 1.0
-        )
+        c = self.cfg
+        if c.root_loss not in {"nb", "poisson"}:
+            return False
+        if c.w_root_nb != 1.0:
+            return False
+
+        if c.mode == "r2_flat_dm":
+            return c.w_flat_16 == 1.0
+        if c.mode == "r3_multinomial_tree":
+            return c.w_root64 == 1.0 and c.w_64_32 == 1.0 and c.w_32_16 == 1.0
+        if c.mode == "r4_dtm_tree16":
+            return c.w_root64 == 1.0 and c.w_64_32 == 1.0 and c.w_32_16 == 1.0
+        if c.mode == "r4_dtm_tree8":
+            return (
+                c.w_root64 == 1.0
+                and c.w_64_32 == 1.0
+                and c.w_32_16 == 1.0
+                and c.w_16_8 == 1.0
+            )
+        if c.mode == "r4_dtm_tree4":
+            return (
+                c.w_root64 == 1.0
+                and c.w_64_32 == 1.0
+                and c.w_32_16 == 1.0
+                and c.w_16_8 == 1.0
+                and c.w_8_4 == 1.0
+            )
+        return False
 
     def _validate_targets(self, targets: Dict[int | str, torch.Tensor]) -> None:
         """Fail-fast validation: key existence, integer values, non-negative, count conservation, and parent-child tree consistency."""
@@ -344,10 +364,12 @@ class NTPCLoss(nn.Module):
         mass: torch.Tensor,
         target_pyramid: Dict[int | str, torch.Tensor],
         return_components: bool = False,
+        validate_targets: bool = True,
     ):
-        self._validate_targets(target_pyramid)
+        if validate_targets:
+            self._validate_targets(target_pyramid)
         mass = mass.float()
-        needed = tuple(sorted(set(self._required_blocks()) | {4, 8, 16, 32, 64}))
+        needed = tuple(sorted(self._required_blocks()))
         pred = sum_pool_mass_pyramid(mass, block_sizes=needed, stride=4)
         pred_n = mass.flatten(1).sum(dim=1)
         target_n = target_pyramid["N"].to(mass.device, torch.float32).reshape(-1)

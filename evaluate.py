@@ -8,11 +8,11 @@ import os
 import torch
 import yaml
 
-from hpc.data.nwpu import NWPUDataset
+from hpc.data.nwpu import NWPUDataset, resolve_nwpu_split_file
 from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
 def build_evaluation_dataset(cfg: dict, split: str | None = None):
@@ -41,7 +41,7 @@ def build_evaluation_dataset(cfg: dict, split: str | None = None):
         return NWPUDataset(
             root=ds_cfg["root"],
             split=eval_split,
-            split_file=ds_cfg.get("val_split_file" if eval_split == "val" else "train_split_file"),
+            split_file=resolve_nwpu_split_file(ds_cfg, eval_split),
             **common_args,
         )
     else:
@@ -66,7 +66,8 @@ def evaluate_model(
     # 1. Load Model via Centralized Factory
     model = build_model_from_config(cfg).to(device)
 
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    assert_checkpoint_compatible(ckpt, cfg)
     state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
     model.load_state_dict(state_dict, strict=True)
     print(f"Loaded checkpoint from: {checkpoint_path}")

@@ -76,11 +76,15 @@ def build_evaluation_dataset(cfg: dict):
     raise ValueError(f"Localization evaluator does not support dataset '{name}'")
 
 
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
+
+
 def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> nn.Module:
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
     model = build_model_from_config(cfg).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    assert_checkpoint_compatible(checkpoint, cfg)
     state = checkpoint.get("model_state_dict", checkpoint)
     model.load_state_dict(state, strict=True)
     model.eval()
@@ -189,7 +193,7 @@ def evaluate_checkpoint(
 
         _synchronize(device)
         started = time.perf_counter()
-        pred_count_tensor, pred_mass = model.predict(image, pad_multiple=32)
+        pred_count_tensor, pred_mass = model.predict(image, pad_multiple=None)
         _synchronize(device)
         model_ms = (time.perf_counter() - started) * 1000.0
         pred_count = float(pred_count_tensor.item())

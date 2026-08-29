@@ -52,8 +52,8 @@ class HPCLite(nn.Module):
 
         if self.output_stride != 4:
             raise ValueError("Target and loss formulations assume output_stride=4")
-        if self.eps_d < 1e-8:
-            raise ValueError("eps_d must be at least 1e-8 for stable FP32 mass")
+        if not math.isfinite(self.eps_d) or self.eps_d < 1e-8:
+            raise ValueError(f"eps_d must be finite and at least 1e-8 for stable FP32 mass, got {self.eps_d}")
 
         self.backbone = MobileNetV4Backbone(
             model_name=backbone_name,
@@ -150,11 +150,21 @@ class HPCLite(nn.Module):
     def predict(
         self,
         x: torch.Tensor,
-        pad_multiple: int = 32,
+        pad_multiple: int | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Variable-resolution inference with constant zero padding to pad_multiple."""
+        """Variable-resolution inference.
+
+        If pad_multiple is None (default for official PyTorch evaluation), processes arbitrary
+        resolutions directly without zero-padding distortion on GroupNorm statistics.
+        If pad_multiple is an integer, pads input to multiples of pad_multiple and crops output.
+        """
         if x.ndim != 4:
             raise ValueError(f"Expected 4D tensor input, got {tuple(x.shape)}")
+
+        if pad_multiple is None:
+            d = self.forward_mass(x)
+            count = d.sum(dim=(-1, -2, -3))
+            return count, d
 
         _, _, h, w = x.shape
         pad_h = (pad_multiple - (h % pad_multiple)) % pad_multiple
@@ -163,7 +173,7 @@ class HPCLite(nn.Module):
         if pad_h > 0 or pad_w > 0:
             x = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
 
-        d_padded = self.forward(x)
+        d_padded = self.forward_mass(x)
         out_h = math.ceil(h / self.output_stride)
         out_w = math.ceil(w / self.output_stride)
 

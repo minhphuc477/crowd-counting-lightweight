@@ -32,11 +32,19 @@ def test_dtm_scale_invariance():
 
 
 def test_is_exact_joint_nll():
-    """is_exact_joint_nll must be True ONLY for r4_dtm_tree16 with unit weights."""
+    """is_exact_joint_nll must be True for unweighted R2, R3, R4 (tree16, tree8, tree4) with NB or Poisson."""
+    assert NTPCLoss(NTPCConfig(mode="r2_flat_dm", root_loss="nb")).is_exact_joint_nll
+    assert NTPCLoss(NTPCConfig(mode="r3_multinomial_tree", root_loss="nb")).is_exact_joint_nll
     assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree16", root_loss="nb")).is_exact_joint_nll
+    assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree8", root_loss="nb")).is_exact_joint_nll
+    assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree4", root_loss="nb")).is_exact_joint_nll
+    assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree16", root_loss="poisson")).is_exact_joint_nll
+
+    # False cases
     assert not NTPCLoss(NTPCConfig(mode="r4_dtm_tree16", w_64_32=2.0)).is_exact_joint_nll
     assert not NTPCLoss(NTPCConfig(mode="r4_dtm_tree16", root_loss="l1")).is_exact_joint_nll
     assert not NTPCLoss(NTPCConfig(mode="r0_exact")).is_exact_joint_nll
+    assert not NTPCLoss(NTPCConfig(mode="r1_deterministic")).is_exact_joint_nll
     assert not NTPCLoss(NTPCConfig(mode="r5_full_ntpc")).is_exact_joint_nll
 
 

@@ -132,7 +132,7 @@ class RepDWBlock(nn.Module):
         w_1, b_1 = self._fuse_bn(self.rbr_1x1[0], self.rbr_1x1[1])
         w_1_padded = F.pad(w_1, (1, 1, 1, 1))
 
-        ident_kernel = torch.zeros(self.channels, 1, 3, 3, device=w_3.device)
+        ident_kernel = torch.zeros(self.channels, 1, 3, 3, device=w_3.device, dtype=w_3.dtype)
         ident_kernel[:, 0, 1, 1] = 1.0
         mean = self.rbr_identity.running_mean
         var_sqrt = torch.sqrt(self.rbr_identity.running_var + self.rbr_identity.eps)
@@ -144,7 +144,9 @@ class RepDWBlock(nn.Module):
         w_fused = w_3 + w_1_padded + w_id
         b_fused = b_3 + b_1 + b_id
 
-        self.rbr_reparam = nn.Conv2d(self.channels, self.channels, 3, padding=1, groups=self.channels, bias=True).to(w_3.device)
+        self.rbr_reparam = nn.Conv2d(
+            self.channels, self.channels, 3, padding=1, groups=self.channels, bias=True
+        ).to(device=w_3.device, dtype=w_3.dtype)
         self.rbr_reparam.weight.data.copy_(w_fused)
         self.rbr_reparam.bias.data.copy_(b_fused)
 

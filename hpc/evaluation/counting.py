@@ -21,7 +21,7 @@ def evaluate_counting(model: nn.Module, dataset, device: torch.device) -> dict:
         if not bool(sample.get("has_gt", True)):
             raise ValueError("Evaluation requires a labeled validation/test split")
         image = sample["image"].unsqueeze(0).to(device)
-        prediction, _ = model.predict(image, pad_multiple=32)
+        prediction, _ = model.predict(image, pad_multiple=None)
         predictions.append(float(prediction.item()))
         ground_truths.append(float(sample["gt_count"]))
     result = evaluate_counting_metrics(predictions, ground_truths)
