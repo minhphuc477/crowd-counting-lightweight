@@ -78,9 +78,37 @@ def profile_model_efficiency(
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
             latency.append((time.perf_counter() - start) * 1000.0)
+    import platform
+    import subprocess
+    import timm
+
+    git_sha = None
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        pass
+
+    runtime = {
+        "python": platform.python_version(),
+        "torch": str(torch.__version__),
+        "timm": str(timm.__version__),
+        "cuda": str(torch.version.cuda) if torch.cuda.is_available() else None,
+        "cudnn": str(torch.backends.cudnn.version()) if torch.cuda.is_available() and torch.backends.cudnn.version() is not None else None,
+        "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+        "git_sha": git_sha,
+    }
+
     data = np.asarray(latency)
-    peak_memory = (
-        float(torch.cuda.max_memory_allocated(device) / 1024**2)
+    peak_allocated = (
+        float(torch.cuda.max_memory_allocated(device) / (1024**2))
+        if device.type == "cuda" else 0.0
+    )
+    peak_reserved = (
+        float(torch.cuda.max_memory_reserved(device) / (1024**2))
         if device.type == "cuda" else 0.0
     )
     median = float(np.median(data))
@@ -97,7 +125,9 @@ def profile_model_efficiency(
         "latency_median_ms": median,
         "latency_p95_ms": float(np.percentile(data, 95)),
         "throughput_images_per_second": batch_size * 1000.0 / median,
-        "peak_memory_mb": peak_memory,
+        "peak_allocated_mb": peak_allocated,
+        "peak_reserved_mb": peak_reserved,
+        "runtime": runtime,
     }
 
 

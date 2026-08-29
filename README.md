@@ -49,6 +49,7 @@ lightweightcrcn/
 │   │   ├── backbone.py          # MobileNetV4 with reduction-16 truncation
 │   │   ├── blocks.py            # ConvGNAct, DepthwiseDilated, DSResidual, RepDWBlock
 │   │   ├── neck.py              # 32-ch additive FPN with multi-dilation context
+│   │   ├── factory.py           # Unified model builder
 │   │   └── hpc_lite.py          # HPCLite model & data-driven head bias initialization
 │   ├── losses/
 │   │   ├── negative_binomial.py # Root Negative-Binomial loss & dispersion estimator
@@ -69,20 +70,20 @@ lightweightcrcn/
 │   │   ├── otm.py               # Optimal Transport Monge parameter-free localizer
 │   │   └── subgroup.py          # Diagnostic bins & luminance evaluation
 │   └── utils/
-│       ├── seed.py              # Deterministic seeding
-│       ├── logging.py           # CSV logger
-│       └── checkpoint.py        # Model checkpoint management
+│       └── seed.py              # Deterministic seeding & worker initialization
 ├── tools/
 │   ├── eval_localization.py     # Joint counting & OT-M localization evaluator
 │   ├── profile_model.py         # Latency, MACs, FPS, parameter breakdown
-│   ├── export_onnx.py           # ONNX export & numerical parity check
-│   └── analyze_errors.py        # Detailed diagnostic error reporting
-└── tests/                       # Complete NTPC test suite (41 unit & integration tests)
+│   ├── export_onnx.py           # ONNX export & dynamic multi-shape parity check
+│   ├── visualize_localization.py# Side-by-side localization visualizer
+│   ├── summary_runs.py          # Multi-run evaluation summary and decision check
+│   └── create_smoke_dataset.py  # Synthetic crowd dataset generator for smoke tests
+└── tests/                       # Complete NTPC test suite (54 unit & integration tests)
     ├── test_ntpc_math.py        # Dirichlet-Multinomial math & tree collapse identity
     ├── test_ntpc_targets.py     # Recursive integer count pyramids & validation
     ├── test_ntpc_geometry.py    # Geometry transforms & coordinate invariance
     ├── test_ntpc_loss.py        # Loss behaviors, scale invariance, gradient checks
-    ├── test_ntpc_model.py       # Architecture shapes & parameter budget
+    ├── test_ntpc_model.py       # Architecture shapes, padding invariance & parameter budget
     ├── test_ntpc_overfit.py     # 1-image and batch optimization sanity tests
     ├── test_localization.py     # Hungarian point matching & F1 metrics
     ├── test_otm_official.py     # OT-M official Monge solver tests
@@ -110,7 +111,7 @@ lightweightcrcn/
 
 ### 4. Evaluate OT-M Localization
 ```powershell
-.venv\Scripts\python tools/eval_localization.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt
+.venv\Scripts\python tools/eval_localization.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt --output runs/ntpc_r4_neural_dtm_tree/loc.json
 ```
 
 ### 5. Profile Model Efficiency & Parameters
@@ -118,7 +119,7 @@ lightweightcrcn/
 .venv\Scripts\python tools/profile_model.py --config configs/ntpc_sha.yaml
 ```
 
-### 6. Export to ONNX
+### 6. Export to ONNX & Verify Dynamic Shapes
 ```powershell
 .venv\Scripts\python tools/export_onnx.py --config configs/ntpc_sha.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt --output hpc_lite.onnx
 ```
@@ -130,7 +131,7 @@ lightweightcrcn/
 Ground-truth count pyramids are generated deterministically in `hpc/data/point_counts.py`:
 
 ```
-Y4 (H/4 × W/4)  ← rasterize points at stride-4: floor(x/4), floor(y/4)
+Y4 (H/4 × W/4)  ← rasterize points at stride-4: floor((x + 0.5)/4), floor((y + 0.5)/4)
   → Y8  = sum_2x2(Y4)
   → Y16 = sum_2x2(Y8)
   → Y32 = sum_2x2(Y16)

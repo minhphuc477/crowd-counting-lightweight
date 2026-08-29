@@ -6,9 +6,13 @@ import argparse
 import csv
 import math
 import os
+import platform
+import shutil
+import subprocess
 import time
 from typing import Dict, Iterable, Tuple
 
+import timm
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -22,7 +26,29 @@ from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.models.factory import build_model_from_config
-from hpc.utils.seed import seed_everything
+from hpc.utils.seed import make_generator, seed_everything, seed_worker
+
+
+def get_runtime_metadata() -> dict:
+    """Capture environment and git commit metadata for reproducibility."""
+    git_sha = None
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        pass
+    return {
+        "python": platform.python_version(),
+        "torch": str(torch.__version__),
+        "timm": str(timm.__version__),
+        "cuda": str(torch.version.cuda) if torch.cuda.is_available() else None,
+        "cudnn": str(torch.backends.cudnn.version()) if torch.cuda.is_available() and torch.backends.cudnn.version() is not None else None,
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "git_sha": git_sha,
+    }
 
 
 def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
@@ -160,6 +186,7 @@ def _append_csv(path: str, row: dict, fieldnames: list[str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Neural Tree-Polya Crowd Counting")
     parser.add_argument("--config", required=True)
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
     args = parser.parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
@@ -187,6 +214,14 @@ def main() -> None:
     seed = int(exp_cfg.get("seed", 42))
     seed_everything(seed)
     save_dir = os.path.abspath(exp_cfg.get("save_dir", "./runs/ntpc_experiment"))
+
+    if os.path.isdir(save_dir) and any(os.scandir(save_dir)):
+        if not args.overwrite:
+            raise FileExistsError(
+                f"Run directory is not empty: {save_dir}. Use --overwrite explicitly."
+            )
+        shutil.rmtree(save_dir)
+
     os.makedirs(save_dir, exist_ok=True)
     with open(os.path.join(save_dir, "config.yaml"), "w", encoding="utf-8") as handle:
         yaml.safe_dump(cfg, handle, sort_keys=False)
@@ -217,15 +252,19 @@ def main() -> None:
             power=float(sampler_cfg.get("power", 0.5)),
         )
 
+    num_workers = int(training_cfg.get("num_workers", 0))
     train_loader = DataLoader(
         train_ds,
         batch_size=int(training_cfg.get("batch_size", 16)),
         shuffle=sampler is None,
         sampler=sampler,
-        num_workers=int(training_cfg.get("num_workers", 0)),
+        num_workers=num_workers,
         collate_fn=ntpc_collate_fn,
         pin_memory=device.type == "cuda",
         drop_last=bool(training_cfg.get("drop_last", True)),
+        worker_init_fn=seed_worker if num_workers > 0 else None,
+        generator=make_generator(seed),
+        persistent_workers=num_workers > 0,
     )
     if len(train_loader) == 0:
         raise ValueError("Training loader has zero batches; reduce batch_size or disable drop_last")
@@ -273,6 +312,11 @@ def main() -> None:
     )).to(device)
 
     optimizer_cfg = cfg["optimizer"]
+    optimizer_name = str(optimizer_cfg.get("name", "AdamW")).lower()
+    if optimizer_name != "adamw":
+        raise ValueError(
+            f"Unsupported optimizer '{optimizer_cfg.get('name')}'. Only 'AdamW' is supported."
+        )
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(optimizer_cfg.get("lr", 1e-4)),
@@ -324,8 +368,8 @@ def main() -> None:
     for epoch in range(1, epochs + 1):
         started = time.time()
         model.train()
-        running = {name: 0.0 for name in component_names}
-        running_loss = 0.0
+        running_loss = torch.zeros((), device=device)
+        running = {name: torch.zeros((), device=device) for name in component_names}
         epoch_grads = {f"grad_{name}": float("nan") for name in grad_names}
         audit_gradients = epoch == 1 or (gradient_every > 0 and epoch % gradient_every == 0)
         for step, batch in enumerate(train_loader):
@@ -348,15 +392,15 @@ def main() -> None:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=True)
                 optimizer.step()
-            running_loss += float(loss.detach())
+            running_loss += loss.detach()
             for name in component_names:
-                running[name] += float(logs.get(name, mass.new_zeros(())))
+                running[name] += logs.get(name, mass.new_zeros(()))
         scheduler.step()
         steps = len(train_loader)
         train_row = {
             "epoch": epoch,
-            "loss": running_loss / steps,
-            **{name: running[name] / steps for name in component_names},
+            "loss": float((running_loss / steps).cpu()),
+            **{name: float((running[name] / steps).cpu()) for name in component_names},
             **epoch_grads,
             "lr": optimizer.param_groups[0]["lr"],
         }
@@ -388,6 +432,7 @@ def main() -> None:
                     "selection_split": selection_split,
                     "is_exact_joint_nll": criterion.is_exact_joint_nll,
                     "initialization_policy": "scratch",
+                    "runtime": get_runtime_metadata(),
                 }, os.path.join(save_dir, "best.pt"))
             print(
                 f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.3f} "

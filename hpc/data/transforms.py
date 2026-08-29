@@ -12,7 +12,7 @@ class NTPCGeometricTransform:
 
     Point coordinates follow zero-based pixel-center convention where the continuous
     support for an image of width W and height H is:
-        [-0.5, W - 0.5) x [-0.5, H - 0.5).
+        [-0.5, W - 0.5] x [-0.5, H - 0.5].
     """
 
     def __init__(
@@ -83,11 +83,7 @@ class NTPCGeometricTransform:
         if random.random() < self.flip_prob:
             image_crop = image_crop.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             if len(pts) > 0:
-                pts[:, 0] = np.clip(
-                    (float(self.crop_size) - 1.0) - pts[:, 0],
-                    -0.5,
-                    float(self.crop_size) - 0.5,
-                )
+                pts[:, 0] = (float(self.crop_size) - 1.0) - pts[:, 0]
 
         # 4. Invariant assertion on transformed points
         if len(pts) > 0:

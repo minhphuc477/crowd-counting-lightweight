@@ -132,7 +132,6 @@ class NWPUDataset(BaseCrowdDataset):
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
         coordinate_base: int = 0,
-        **kwargs,
     ):
         img_dir = os.path.join(root, "images")
         if not os.path.isdir(img_dir):

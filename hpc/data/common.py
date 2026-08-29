@@ -88,13 +88,16 @@ class BaseCrowdDataset(Dataset):
 
             # Assert geometry bounds in continuous pixel-center support [-0.5, crop_size - 0.5)
             if len(crop_pts) > 0:
+                upper = float(self.crop_size) - 0.5
                 if not (
                     np.all(crop_pts[:, 0] >= -0.5)
-                    and np.all(crop_pts[:, 0] < float(self.crop_size) - 0.5)
+                    and np.all(crop_pts[:, 0] <= upper)
                     and np.all(crop_pts[:, 1] >= -0.5)
-                    and np.all(crop_pts[:, 1] < float(self.crop_size) - 0.5)
+                    and np.all(crop_pts[:, 1] <= upper)
                 ):
-                    raise RuntimeError("Geometric transform produced out-of-bounds points")
+                    raise RuntimeError(
+                        f"Geometric transform produced out-of-bounds points for crop_size={self.crop_size}"
+                    )
 
             img_tensor = TF.to_tensor(image_crop)
             img_clean = TF.normalize(img_tensor, mean=self.image_mean, std=self.image_std)

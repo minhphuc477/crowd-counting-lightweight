@@ -60,7 +60,7 @@ def points_to_y4(
     """Rasterize points onto stride-4 grid (1, H/4, W/4).
 
     points_xy: [N, 2], zero-based continuous coordinates (x, y) with
-               support x in [-0.5, W - 0.5), y in [-0.5, H - 0.5).
+               support x in [-0.5, W - 0.5], y in [-0.5, H - 0.5].
     H, W must be divisible by 64 for tree hierarchy.
     """
     if H % 64 != 0 or W % 64 != 0:

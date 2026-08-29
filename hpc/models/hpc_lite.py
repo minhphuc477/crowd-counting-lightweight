@@ -112,6 +112,17 @@ class HPCLite(nn.Module):
         with torch.no_grad():
             nn.init.constant_(self.head_out.bias, inv_softplus(m0))
 
+    def forward_mass(self, x: torch.Tensor) -> torch.Tensor:
+        """Branchless mass forward pass for clean tracing and ONNX deployment."""
+        c4, c8, c16 = self.backbone(x)
+        p4 = self.neck(c4, c8, c16)
+        if self.use_repblock:
+            h = self.head_refine(p4)
+        else:
+            h = self.head_act(self.head_norm(self.head_dw(p4)))
+        z = self.head_out(h)
+        return F.softplus(z.float()).clamp_min(self.eps_d)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -120,11 +131,11 @@ class HPCLite(nn.Module):
         if x.ndim != 4 or x.shape[1] != 3:
             raise ValueError(f"Expected 4D image input (B, 3, H, W), got {tuple(x.shape)}")
 
+        if not return_aux:
+            return self.forward_mass(x)
+
         c4, c8, c16 = self.backbone(x)
-        if return_aux:
-            p4, aux = self.neck(c4, c8, c16, return_routes=True)
-        else:
-            p4 = self.neck(c4, c8, c16)
+        p4, aux = self.neck(c4, c8, c16, return_routes=True)
 
         if self.use_repblock:
             h = self.head_refine(p4)
@@ -132,12 +143,8 @@ class HPCLite(nn.Module):
             h = self.head_act(self.head_norm(self.head_dw(p4)))
 
         z = self.head_out(h)
-        # Forced float32 under AMP autocast to prevent float16 underflow
         d_map = F.softplus(z.float()).clamp_min(self.eps_d)
-
-        if return_aux:
-            return d_map, aux
-        return d_map
+        return d_map, aux
 
     @torch.no_grad()
     def predict(

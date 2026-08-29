@@ -95,3 +95,39 @@ def test_all_modes_backward_pass():
         assert mass.grad is not None
         assert torch.isfinite(mass.grad).all()
         assert mass.grad.abs().sum() > 0
+
+
+def test_gradient_ratio_diagnostic_r1_vs_r4():
+    """Diagnostic comparing spatial/root gradient ratios for R1 deterministic vs R4 DTM."""
+    import math
+
+    pts = torch.tensor([[10.0, 10.0], [50.0, 50.0], [120.0, 150.0], [200.0, 200.0]])
+    tree = build_exact_count_pyramid([pts], height=256, width=256)
+    targets = {k: tree[k].clone() for k in (4, 8, 16, 32, 64)}
+    targets["N"] = tree["N"].clone()
+
+    # R1 Deterministic
+    mass_r1 = (torch.rand(1, 1, 64, 64) + 0.1).detach().requires_grad_(True)
+    criterion_r1 = NTPCLoss(NTPCConfig(mode="r1_deterministic"))
+    _, _, comp_r1 = criterion_r1(mass_r1, targets, return_components=True)
+    comp_r1["root_nb"].backward(retain_graph=True)
+    grad_root_r1 = mass_r1.grad.clone().norm().item()
+    mass_r1.grad.zero_()
+    comp_r1["deterministic_alloc"].backward()
+    grad_spatial_r1 = mass_r1.grad.clone().norm().item()
+
+    # R4 DTM Tree
+    mass_r4 = mass_r1.detach().clone().requires_grad_(True)
+    criterion_r4 = NTPCLoss(NTPCConfig(mode="r4_dtm_tree16"))
+    _, _, comp_r4 = criterion_r4(mass_r4, targets, return_components=True)
+    comp_r4["root_nb"].backward(retain_graph=True)
+    grad_root_r4 = mass_r4.grad.clone().norm().item()
+    mass_r4.grad.zero_()
+    (comp_r4["root_to_64"] + comp_r4["64_to_32"] + comp_r4["32_to_16"]).backward()
+    grad_spatial_r4 = mass_r4.grad.clone().norm().item()
+
+    ratio_r1 = grad_spatial_r1 / max(grad_root_r1, 1e-12)
+    ratio_r4 = grad_spatial_r4 / max(grad_root_r4, 1e-12)
+
+    assert ratio_r1 > 0.0 and ratio_r4 > 0.0
+    assert math.isfinite(ratio_r1) and math.isfinite(ratio_r4)

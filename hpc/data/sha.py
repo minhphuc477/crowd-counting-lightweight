@@ -102,7 +102,6 @@ class ShanghaiTechDataset(BaseCrowdDataset):
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
         coordinate_base: int = 1,
-        **kwargs,
     ):
         candidates = [
             os.path.join(root, part, split),

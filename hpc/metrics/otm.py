@@ -19,6 +19,8 @@ import torch.nn.functional as F
 
 
 _TINY = 1e-12
+DEFAULT_OTM_MAX_SOURCE_POINTS: int = 4096
+DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS: int = 5_000_000
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,8 @@ class OTMConfig:
     cost_factor: float = 1.0 / 32.0
     mean_stop_px: float = 1.0
     source_relative_threshold: float = 1e-8
-    max_source_points: int | None = 4096
-    max_transport_elements: int = 5_000_000
+    max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS
+    max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS
     seed: int = 42
 
     def __post_init__(self) -> None:
@@ -218,8 +220,8 @@ def otm_localize(
     cost_factor: float = 1.0 / 32.0,
     mean_stop_px: float = 1.0,
     source_relative_threshold: float = 1e-8,
-    max_source_points: int | None = 8192,
-    max_transport_elements: int = 50_000_000,
+    max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS,
+    max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
     seed: int = 42,
     image_hw: Tuple[int, int] | None = None,
     return_diagnostics: bool = False,

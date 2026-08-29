@@ -11,17 +11,19 @@ import argparse
 import yaml
 import numpy as np
 import torch
-import torchvision.transforms.functional as TF
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-from hpc.models.hpc_lite import HPCLite
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.metrics.localization import extract_points_from_mass_map
-from hpc.metrics.otm import otm_localize
+from hpc.metrics.otm import (
+    DEFAULT_OTM_MAX_SOURCE_POINTS,
+    DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
+    otm_localize,
+)
 from hpc.models.factory import build_model_from_config
 
 
@@ -68,6 +70,7 @@ def visualize_crowd_localization(
         split="test_data",
         is_train=False,
         crop_size=d_cfg["crop_size"],
+        coordinate_base=int(d_cfg.get("coordinate_base", 1)),
         image_mean=d_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         image_std=d_cfg.get("image_std", [0.229, 0.224, 0.225]),
     )
@@ -112,10 +115,12 @@ def visualize_crowd_localization(
 
         if method == "otm":
             pred_pts_t = otm_localize(
-                d_map.squeeze(0),
+                d_map[0, 0],
                 output_stride=4,
-                seed=seed,
-                max_source_points=None,
+                image_hw=(h, w),
+                seed=seed + int(idx),
+                max_source_points=DEFAULT_OTM_MAX_SOURCE_POINTS,
+                max_transport_elements=DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
             )
             pred_pts = pred_pts_t.cpu().numpy()
         else:
@@ -154,12 +159,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/ntpc_r4_neural_dtm_tree.yaml", help="Path to config YAML")
     parser.add_argument("--checkpoint", type=str, default="runs/ntpc_r4_neural_dtm_tree/best.pt", help="Path to checkpoint")
-    parser.add_argument("--output_dir", type=str, default="runs/ntpc_r4_neural_dtm_tree/visualizations", help="Output directory")
-    parser.add_argument("--num_samples", type=int, default=5, help="Number of test images to visualize")
+    parser.add_argument("--output-dir", "--output_dir", dest="output_dir", type=str, default="runs/ntpc_r4_neural_dtm_tree/visualizations", help="Output directory")
+    parser.add_argument("--num-samples", "--num_samples", dest="num_samples", type=int, default=5, help="Number of test images to visualize")
     parser.add_argument("--method", choices=["local_max", "otm"], default="otm")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     visualize_crowd_localization(
-        args.config, args.checkpoint, args.output_dir, args.num_samples, args.method, args.seed
+        config_path=args.config,
+        checkpoint_path=args.checkpoint,
+        output_dir=args.output_dir,
+        num_samples=args.num_samples,
+        method=args.method,
+        seed=args.seed,
     )

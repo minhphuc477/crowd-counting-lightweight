@@ -24,7 +24,11 @@ from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.metrics.counting import evaluate_counting_metrics
 from hpc.metrics.localization import evaluate_dataset_localization, extract_points_from_mass_map
-from hpc.metrics.otm import otm_localize
+from hpc.metrics.otm import (
+    DEFAULT_OTM_MAX_SOURCE_POINTS,
+    DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
+    otm_localize,
+)
 from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
 from hpc.models.factory import build_model_from_config
 from hpc.utils.seed import seed_everything
@@ -55,6 +59,9 @@ def build_evaluation_dataset(cfg: dict):
         "image_mean": data.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": data.get("image_std", [0.229, 0.224, 0.225]),
     }
+    if "coordinate_base" in data:
+        common["coordinate_base"] = int(data["coordinate_base"])
+
     if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
         part = data.get("part", "part_B" if name.endswith("_b") else "part_A")
         return ShanghaiTechDataset(
@@ -69,7 +76,7 @@ def build_evaluation_dataset(cfg: dict):
     raise ValueError(f"Localization evaluator does not support dataset '{name}'")
 
 
-def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> HPCLite:
+def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> nn.Module:
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
     model = build_model_from_config(cfg).to(device)
@@ -138,8 +145,8 @@ def evaluate_checkpoint(
     otm_max_iterations: int = 16,
     otm_scaling: float = 0.75,
     otm_blur: float = 0.01,
-    otm_max_source_points: int | None = 8192,
-    otm_max_transport_elements: int = 50_000_000,
+    otm_max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS,
+    otm_max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
 ) -> dict:
     methods = tuple(dict.fromkeys(methods))
     unknown = set(methods) - {"local_max", "otm"}
@@ -310,7 +317,7 @@ def main() -> None:
     parser.add_argument("--radii", nargs="+", type=float, default=[4.0, 8.0])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int)
-    parser.add_argument("--otm-max-source-points", type=int, default=8192)
+    parser.add_argument("--otm-max-source-points", type=int, default=DEFAULT_OTM_MAX_SOURCE_POINTS)
     args = parser.parse_args()
     result = evaluate_checkpoint(
         config_path=args.config,

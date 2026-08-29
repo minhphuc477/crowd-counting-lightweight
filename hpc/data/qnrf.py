@@ -95,7 +95,6 @@ class UCFQNRFDataset(BaseCrowdDataset):
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
         coordinate_base: int = 1,
-        **kwargs,
     ):
         split_dir = os.path.join(root, split)
         if not os.path.isdir(split_dir):

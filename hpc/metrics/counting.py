@@ -14,6 +14,10 @@ def _validate_pair(predictions, targets):
     preds, gts = _as_flat(predictions), _as_flat(targets)
     if preds.shape != gts.shape:
         raise ValueError(f"Prediction/target shapes differ: {preds.shape} vs {gts.shape}")
+    if not np.isfinite(preds).all():
+        raise ValueError("Predictions contain non-finite values (NaN or Inf)")
+    if not np.isfinite(gts).all():
+        raise ValueError("Ground-truth targets contain non-finite values (NaN or Inf)")
     return preds, gts
 
 

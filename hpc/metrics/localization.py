@@ -6,12 +6,11 @@ Evaluates:
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Dict, Sequence, Tuple, Union
 
 import numpy as np
 import scipy.ndimage as ndi
 from scipy.optimize import linear_sum_assignment
-from scipy.spatial.distance import cdist
 import torch
 
 
@@ -31,9 +30,8 @@ def extract_points_from_mass_map(
     if max_val < threshold_abs:
         return np.empty((0, 2), dtype=np.float32)
     thresh = max(threshold_abs, threshold_rel * max_val)
-    window_size = max(3, int(round(min_distance_px / stride)))
-    if window_size % 2 == 0:
-        window_size += 1
+    radius_cells = max(1, int(np.ceil(float(min_distance_px) / float(stride))))
+    window_size = 2 * radius_cells + 1
     local_max = (ndi.maximum_filter(mass_map, size=window_size) == mass_map)
     peak_mask = local_max & (mass_map >= thresh)
     peak_y, peak_x = np.nonzero(peak_mask)
@@ -133,7 +131,7 @@ def evaluate_dataset_localization(
     summary: Dict[str, float] = {}
     for sigma in distance_thresholds:
         m = localization_metrics(accum[sigma]["tp"], accum[sigma]["fp"], accum[sigma]["fn"])
-        sig_str = f"sigma_{int(sigma)}"
+        sig_str = f"sigma_{int(sigma)}" if float(sigma).is_integer() else f"sigma_{float(sigma):g}"
         summary[f"{sig_str}_precision"] = m["precision"]
         summary[f"{sig_str}_recall"] = m["recall"]
         summary[f"{sig_str}_f1"] = m["f1"]
