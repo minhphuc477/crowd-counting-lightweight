@@ -27,5 +27,5 @@ evaluation:
   otm_max_iterations: 16
   otm_scaling: 0.75
   otm_blur: 0.01
-  otm_max_source_points: 8192
-  otm_max_transport_elements: 50000000
+  otm_max_source_points: 4096
+  otm_max_transport_elements: 5000000
