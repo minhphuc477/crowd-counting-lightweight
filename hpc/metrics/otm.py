@@ -349,7 +349,7 @@ def infer_count_and_localization(
     model: torch.nn.Module,
     image: torch.Tensor,
     output_stride: int = 4,
-    pad_multiple: int = 32,
+    pad_multiple: int | None = None,
     seed: int = 42,
 ) -> Dict[str, Union[torch.Tensor, float, dict]]:
     model.eval()

@@ -14,6 +14,7 @@ _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
+from hpc.metrics.otm import DEFAULT_OTM_MAX_SOURCE_POINTS, DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS
 from tools.eval_localization import evaluate_checkpoint
 
 
@@ -74,8 +75,8 @@ def run_manifest(manifest_path: str, max_samples: int | None = None) -> dict:
             otm_max_iterations=int(evaluation.get("otm_max_iterations", 16)),
             otm_scaling=float(evaluation.get("otm_scaling", 0.75)),
             otm_blur=float(evaluation.get("otm_blur", 0.01)),
-            otm_max_source_points=evaluation.get("otm_max_source_points", 8192),
-            otm_max_transport_elements=int(evaluation.get("otm_max_transport_elements", 50_000_000)),
+            otm_max_source_points=evaluation.get("otm_max_source_points", DEFAULT_OTM_MAX_SOURCE_POINTS),
+            otm_max_transport_elements=int(evaluation.get("otm_max_transport_elements", DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS)),
         )
         results[name] = result
         row = {
