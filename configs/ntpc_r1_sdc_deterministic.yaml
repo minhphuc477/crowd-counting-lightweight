@@ -1,60 +1,65 @@
-# R1: S-DCNet-style Deterministic Hierarchical Allocation (1000 Epochs, Batch Size 16, Strict Scratch)
 experiment:
   name: ntpc_r1_sdc_deterministic
   seed: 42
   save_dir: ./runs/ntpc_r1_sdc_deterministic
-
 dataset:
   name: sha
   part: part_A
   root: ./data/ShanghaiTech
-  crop_size: 448
+  crop_size: 256
   output_stride: 4
-  hnb_blocks: [8, 16, 32, 64]
+  hnb_blocks:
+  - 8
+  - 16
+  - 32
+  - 64
   allocation_block: 16
-  image_mean: [0.5, 0.5, 0.5]
-  image_std: [0.5, 0.5, 0.5]
-
+  image_mean:
+  - 0.5
+  - 0.5
+  - 0.5
+  image_std:
+  - 0.5
+  - 0.5
+  - 0.5
 model:
   name: hpc_lite
   backbone: mobilenetv4_conv_small_050
   pretrained: false
   neck_width: 32
-  context_dilations: [1, 2, 3]
+  context_dilations:
+  - 1
+  - 2
+  - 3
   use_p8_context: true
   use_repblock: false
-  eps_d: 1.0e-6
+  eps_d: 1.0e-06
   truncate_backbone: true
   init_checkpoint: null
-
 statistics:
   root_dispersion: 50.0
-
 loss:
   mode: r1_deterministic
   w_root_nb: 1.0
   w_deterministic_alloc: 1.0
-
 augmentation:
-  scale_range: [0.75, 2.0]
+  scale_range:
+  - 0.75
+  - 2.0
   flip_prob: 0.5
-
 sampler:
   weighted: true
   density_bins: 5
   luminance_bins: 4
   power: 0.5
-
 optimizer:
   name: AdamW
-  lr: 1.0e-4
-  weight_decay: 1.0e-4
+  lr: 0.0001
+  weight_decay: 0.0001
   grad_clip: 5.0
-
 schedule:
   epochs: 1000
   warmup_epochs: 25
-
 training:
   batch_size: 16
   amp: true
