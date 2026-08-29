@@ -18,6 +18,38 @@ import torch
 import torch.nn.functional as F
 
 
+def pad_hw_to_multiple(h: int, w: int, multiple: int) -> Tuple[int, int]:
+    hp = ((h + multiple - 1) // multiple) * multiple
+    wp = ((w + multiple - 1) // multiple) * multiple
+    return hp, wp
+
+
+@torch.no_grad()
+def points_to_impulse_map(
+    points_batch: Sequence[torch.Tensor],
+    height: int,
+    width: int,
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    batch_size = len(points_batch)
+    impulse = torch.zeros(batch_size, 1, height, width, device=device, dtype=dtype)
+    for b, pts in enumerate(points_batch):
+        if pts is None or pts.numel() == 0:
+            continue
+        pts = pts.to(device=device)
+        x = torch.floor(pts[:, 0]).long()
+        y = torch.floor(pts[:, 1]).long()
+        valid = (x >= 0) & (x < width) & (y >= 0) & (y < height)
+        x, y = x[valid], y[valid]
+        if x.numel() == 0:
+            continue
+        flat_idx = y * width + x
+        flat = impulse[b, 0].view(-1)
+        flat.scatter_add_(0, flat_idx, torch.ones(flat_idx.numel(), device=device, dtype=dtype))
+    return impulse
+
+
 def block_sum(x: torch.Tensor, k: int) -> torch.Tensor:
     """Non-overlapping exact block sum via reshape (avoids pooling roundoff).
     
