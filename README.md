@@ -8,8 +8,8 @@
 - **Minimal Deployed Graph**:
   $$\text{Image} \xrightarrow{} \text{MobileNetV4-Conv-Small-0.5} \xrightarrow{} \text{Additive 32-ch FPN Neck} \xrightarrow{} 1\text{-channel Softplus Mass Map } D \xrightarrow{} \hat{C} = \sum D$$
   - Deployed parameters: ~0.35M parameters (with physical truncation of reduction-32 stages).
-  - Single-scale, single-head feed-forward inference at stride 4.
-  - No Gaussian density maps, no transformer decoders, no Hungarian matchers, no multi-scale test ensembles.
+  - Single-scale, single-head feed-forward inference at stride 4 predicting a count-mass map \(D\).
+  - No Gaussian density targets, transformer decoders, or Hungarian matching in the deployed counting graph. (Hungarian matching is used only for offline localization evaluation).
 
 ### Training-Only Structured Objectives (R0–R5)
 All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu^2 / r$); spatial supervision is the only variable.
@@ -23,7 +23,7 @@ All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu
 | `r4_dtm_tree16` | Root-NB + full DTM tree down to stride-16 **(proposed core)** |
 | `r4_dtm_tree8` | R4 + DTM supervision down to stride-8 (depth study) |
 | `r4_dtm_tree4` | R4 + DTM supervision down to stride-4 (depth study) |
-| `r5_full_ntpc` | R4 + dense-gate 16→8 auxiliary term **(full NTPC)** |
+| `r5_full_ntpc` | R4 + dense-gate 16→8 auxiliary term **(optional adaptive extension)** |
 
 ---
 
@@ -49,10 +49,10 @@ lightweightcrcn/
 │   │   ├── backbone.py          # MobileNetV4 with reduction-16 truncation
 │   │   ├── blocks.py            # ConvGNAct, DepthwiseDilated, DSResidual, RepDWBlock
 │   │   ├── neck.py              # 32-ch additive FPN with multi-dilation context
-│   │   ├── factory.py           # Unified model builder
+│   │   ├── factory.py           # Unified model builder & checkpoint compatibility validator
 │   │   └── hpc_lite.py          # HPCLite model & data-driven head bias initialization
 │   ├── losses/
-│   │   ├── negative_binomial.py # Root Negative-Binomial loss & dispersion estimator
+│   │   ├── negative_binomial.py # Root NB and Poisson likelihoods
 │   │   └── ntpc.py              # NTPCLoss supporting R0-R5 objectives
 │   ├── data/
 │   │   ├── transforms.py        # NTPCGeometricTransform (scale, crop, flip, exact coords)
@@ -73,12 +73,13 @@ lightweightcrcn/
 │       └── seed.py              # Deterministic seeding & worker initialization
 ├── tools/
 │   ├── eval_localization.py     # Joint counting & OT-M localization evaluator
+│   ├── eval_ntpc_localization_depth.py # Hierarchy depth evaluator
 │   ├── profile_model.py         # Latency, MACs, FPS, parameter breakdown
 │   ├── export_onnx.py           # ONNX export & dynamic multi-shape parity check
 │   ├── visualize_localization.py# Side-by-side localization visualizer
 │   ├── summary_runs.py          # Multi-run evaluation summary and decision check
 │   └── create_smoke_dataset.py  # Synthetic crowd dataset generator for smoke tests
-└── tests/                       # Complete NTPC test suite (54 unit & integration tests)
+└── tests/                       # NTPC unit and integration test suite
     ├── test_ntpc_math.py        # Dirichlet-Multinomial math & tree collapse identity
     ├── test_ntpc_targets.py     # Recursive integer count pyramids & validation
     ├── test_ntpc_geometry.py    # Geometry transforms & coordinate invariance

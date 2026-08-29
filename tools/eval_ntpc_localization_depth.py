@@ -90,7 +90,7 @@ def run_manifest(manifest_path: str, max_samples: int | None = None) -> dict:
         }
         for method in methods:
             for radius in radii:
-                key = f"sigma_{int(radius)}"
+                key = f"sigma_{int(radius)}" if float(radius).is_integer() else f"sigma_{float(radius):g}"
                 row[f"{method}_{key}_precision"] = result["localization"][method][f"{key}_precision"]
                 row[f"{method}_{key}_recall"] = result["localization"][method][f"{key}_recall"]
                 row[f"{method}_{key}_f1"] = result["localization"][method][f"{key}_f1"]

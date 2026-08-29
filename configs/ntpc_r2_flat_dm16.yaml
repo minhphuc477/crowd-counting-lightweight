@@ -20,6 +20,7 @@ model:
   use_p8_context: false
   use_repblock: false
   eps_d: 1.0e-08
+  output_stride: 4
 
 statistics:
   seed: 12345
@@ -53,6 +54,7 @@ schedule:
 
 training:
   batch_size: 16
+  drop_last: true
   amp: true
   init_scale: 256.0
   num_workers: 0

@@ -44,13 +44,21 @@ def sum_pool_mass_pyramid(
     if stride != 4:
         raise ValueError(f"Expected stride 4, got {stride}")
 
+    valid_blocks = {4, 8, 16, 32, 64}
+    requested = tuple(dict.fromkeys(int(b) for b in block_sizes))
+    invalid = set(requested) - valid_blocks
+    if invalid:
+        raise ValueError(f"Unsupported mass levels: {sorted(invalid)}; expected subset of {sorted(valid_blocks)}")
+    if not requested:
+        raise ValueError("block_sizes cannot be empty")
+
     levels: Dict[int, torch.Tensor] = {4: mass.squeeze(1)}
     curr = mass
     for block in (8, 16, 32, 64):
         curr = block_sum(curr, 2)
         levels[block] = curr.squeeze(1)
 
-    return {int(b): levels[int(b)] for b in block_sizes if int(b) in levels}
+    return {int(b): levels[int(b)] for b in requested}
 
 
 mass_pyramid = sum_pool_mass_pyramid
@@ -105,8 +113,13 @@ def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8) -> torc
     return torch.where(n == 0, torch.zeros_like(n), -log_prob)
 
 
-def dm_from_mass(y: torch.Tensor, child_mass: torch.Tensor, kappa: float) -> torch.Tensor:
-    return dm_nll_none(y, alpha_from_mass(child_mass, kappa))
+def dm_from_mass(
+    y: torch.Tensor,
+    child_mass: torch.Tensor,
+    kappa: float,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    return dm_nll_none(y, alpha_from_mass(child_mass, kappa, tiny=eps), eps=eps)
 
 
 def multinomial_nll_none(y: torch.Tensor, pi: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -126,20 +139,27 @@ def tree_level_dm_nll(
     child_gt_map: torch.Tensor,
     child_pred_map: torch.Tensor,
     kappa: float,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
     """Joint node NLL at one tree level, returned per image."""
     return dm_from_mass(
         group_2x2_flat(child_gt_map),
         group_2x2_flat(child_pred_map),
         kappa,
+        eps=eps,
     ).sum(dim=1)
 
 
 tree_level_nll_per_image = tree_level_dm_nll
 
 
-def root_to_64_nll(y64: torch.Tensor, mu64: torch.Tensor, kappa: float) -> torch.Tensor:
-    return dm_from_mass(y64.float().flatten(1), mu64.float().flatten(1), kappa)
+def root_to_64_nll(
+    y64: torch.Tensor,
+    mu64: torch.Tensor,
+    kappa: float,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    return dm_from_mass(y64.float().flatten(1), mu64.float().flatten(1), kappa, eps=eps)
 
 
 root_grid_nll_per_image = root_to_64_nll
@@ -408,7 +428,7 @@ class NTPCLoss(nn.Module):
         if self.cfg.mode == "r1_deterministic":
             root_parent = target_n.reshape(-1, 1)
             y64_flat = target_pyramid[64].to(mass.device).float().flatten(1)
-            pi64 = probs_from_positive_mass(pred[64].flatten(1))
+            pi64 = probs_from_positive_mass(pred[64].flatten(1), tiny=self.cfg.eps)
             root_alloc = (root_parent * pi64 - y64_flat).abs().sum(dim=-1)
             split64 = self._deterministic_split(
                 target_pyramid[64].to(mass.device), target_pyramid[32].to(mass.device), pred[32]
@@ -432,6 +452,7 @@ class NTPCLoss(nn.Module):
                 target_pyramid[16].to(mass.device).float().flatten(1),
                 pred[16].flatten(1),
                 self.cfg.kappa_flat16,
+                eps=self.cfg.eps,
             ).mean()
             components["flat_16"] = self.cfg.w_flat_16 * flat
             return self._finish(root + components["flat_16"], components, return_components)
@@ -439,15 +460,18 @@ class NTPCLoss(nn.Module):
         if self.cfg.mode == "r3_multinomial_tree":
             root64 = multinomial_nll_none(
                 target_pyramid[64].to(mass.device).float().flatten(1),
-                probs_from_positive_mass(pred[64].flatten(1)),
+                probs_from_positive_mass(pred[64].flatten(1), tiny=self.cfg.eps),
+                eps=self.cfg.eps,
             )
             split64 = multinomial_nll_none(
                 group_2x2_flat(target_pyramid[32].to(mass.device).float()),
-                probs_from_positive_mass(group_2x2_flat(pred[32])),
+                probs_from_positive_mass(group_2x2_flat(pred[32]), tiny=self.cfg.eps),
+                eps=self.cfg.eps,
             ).sum(1)
             split32 = multinomial_nll_none(
                 group_2x2_flat(target_pyramid[16].to(mass.device).float()),
-                probs_from_positive_mass(group_2x2_flat(pred[16])),
+                probs_from_positive_mass(group_2x2_flat(pred[16]), tiny=self.cfg.eps),
+                eps=self.cfg.eps,
             ).sum(1)
             components["root_to_64"] = self.cfg.w_root64 * root64.mean()
             components["64_to_32"] = self.cfg.w_64_32 * split64.mean()
@@ -460,13 +484,13 @@ class NTPCLoss(nn.Module):
             return self._finish(root + components["multinomial_tree"], components, return_components)
 
         root64 = self.cfg.w_root64 * root_to_64_nll(
-            target_pyramid[64].to(mass.device), pred[64], self.cfg.kappa_root64
+            target_pyramid[64].to(mass.device), pred[64], self.cfg.kappa_root64, eps=self.cfg.eps
         ).mean()
         split64 = self.cfg.w_64_32 * tree_level_dm_nll(
-            target_pyramid[32].to(mass.device), pred[32], self.cfg.kappa_64_32
+            target_pyramid[32].to(mass.device), pred[32], self.cfg.kappa_64_32, eps=self.cfg.eps
         ).mean()
         split32 = self.cfg.w_32_16 * tree_level_dm_nll(
-            target_pyramid[16].to(mass.device), pred[16], self.cfg.kappa_32_16
+            target_pyramid[16].to(mass.device), pred[16], self.cfg.kappa_32_16, eps=self.cfg.eps
         ).mean()
         components["root_to_64"] = root64
         components["64_to_32"] = split64
@@ -478,20 +502,20 @@ class NTPCLoss(nn.Module):
             child_mass = group_2x2_flat(pred[8])
             parent_gt = target_pyramid[16].to(mass.device).float().flatten(1)
             dense = parent_gt >= self.cfg.dense_threshold_16
-            node_nll = dm_from_mass(child_gt, child_mass, self.cfg.kappa_16_8)
+            node_nll = dm_from_mass(child_gt, child_mass, self.cfg.kappa_16_8, eps=self.cfg.eps)
             dense_loss = node_nll[dense].mean() if dense.any() else zero
             components["16_to_8_dense"] = self.cfg.w_16_8 * dense_loss
             total = total + components["16_to_8_dense"]
         elif self.cfg.mode in {"r4_dtm_tree8", "r4_dtm_tree4"}:
             fine = self.cfg.w_16_8 * tree_level_dm_nll(
-                target_pyramid[8].to(mass.device), pred[8], self.cfg.kappa_16_8
+                target_pyramid[8].to(mass.device), pred[8], self.cfg.kappa_16_8, eps=self.cfg.eps
             ).mean()
             components["16_to_8"] = fine
             total = total + fine
 
         if self.cfg.mode == "r4_dtm_tree4":
             finest = self.cfg.w_8_4 * tree_level_dm_nll(
-                target_pyramid[4].to(mass.device), pred[4], self.cfg.kappa_8_4
+                target_pyramid[4].to(mass.device), pred[4], self.cfg.kappa_8_4, eps=self.cfg.eps
             ).mean()
             components["8_to_4"] = finest
             total = total + finest

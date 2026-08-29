@@ -147,9 +147,10 @@ class NWPUDataset(BaseCrowdDataset):
                 ids = [line.split()[0] for line in f if line.strip()]
             image_names = [x if x.lower().endswith((".jpg", ".png", ".jpeg")) else f"{x}.jpg" for x in ids]
         else:
-            if split.lower() not in {"all", "test"}:
+            if split.lower() != "all":
                 raise FileNotFoundError(
-                    f"No split file for split='{split}'. Provide split_file explicitly to avoid split leakage."
+                    f"Explicit split file required for NWPU split='{split}'. "
+                    "Provide split_file explicitly to avoid split leakage. Use split='all' only intentionally."
                 )
             image_names = sorted(
                 n for n in os.listdir(img_dir) if n.lower().endswith((".jpg", ".png", ".jpeg"))

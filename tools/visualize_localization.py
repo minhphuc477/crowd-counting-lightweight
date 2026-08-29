@@ -1,8 +1,8 @@
-"""Visualize the mass map with either local-max or OT-M point decoding.
+"""Visualize the count-mass map with either local-max or OT-M point decoding.
 
 Generates side-by-side comparisons:
 - Left: Original Image + Ground Truth Point Annotations (Red)
-- Middle: Predicted Stride-4 Density Heatmap Overlay
+- Middle: Predicted Count-Mass Map Overlay (Stride 4)
 - Right: Parameter-free predicted locations (Green) + count comparison
 """
 import os
@@ -18,7 +18,7 @@ if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
 from hpc.data.sha import ShanghaiTechDataset
-from hpc.metrics.localization import extract_points_from_mass_map, local_max_localization
+from hpc.metrics.localization import extract_points_from_mass_map
 from hpc.metrics.otm import (
     DEFAULT_OTM_MAX_SOURCE_POINTS,
     DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
@@ -103,7 +103,7 @@ def visualize_crowd_localization(
             px, py = float(pt[0]), float(pt[1])
             draw_gt.ellipse([px - 3, py - 3, px + 3, py + 3], fill="red", outline="black")
 
-        # 2. Density Heatmap Canvas
+        # 2. Mass Map Overlay Canvas
         d_rescaled = (d_np - d_np.min()) / (d_np.max() - d_np.min() + 1e-8)
         heatmap_np = apply_colormap_jet(d_rescaled)
         heatmap_img = Image.fromarray(heatmap_np).resize((w, h), Image.Resampling.BILINEAR)
@@ -126,7 +126,7 @@ def visualize_crowd_localization(
             pred_pts = pred_pts_t.cpu().numpy()
         else:
             pred_pts = extract_points_from_mass_map(
-                d_np, stride=4, threshold_abs=0.01, min_distance_px=4
+                d_np, stride=4, threshold_abs=0.01, min_distance_px=4, image_hw=(h, w)
             )
 
         for pt in pred_pts:
@@ -142,9 +142,9 @@ def visualize_crowd_localization(
         # Title bar text
         draw_combined = ImageDraw.Draw(combined)
         title_gt = f"GT: {int(gt_cnt)} people (Red dots)"
-        title_heat = f"Predicted Heatmap (Stride-4 Density Map)"
+        title_heat = "Predicted Mass Map (Stride 4)"
         title_pred = f"Pred: {pred_val:.1f} people ({method}: {len(pred_pts)} points)"
-        
+
         draw_combined.text((20, 15), title_gt, fill="white")
         draw_combined.text((w + 20, 15), title_heat, fill="white")
         draw_combined.text((w * 2 + 20, 15), title_pred, fill="white")

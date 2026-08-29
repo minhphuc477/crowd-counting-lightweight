@@ -71,7 +71,7 @@ def test_ten_images_overfit():
     torch.manual_seed(42)
     device = torch.device("cpu")
     model = HPCLite(pretrained=False, neck_width=32).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=0.0)
 
     images = torch.randn(10, 3, 256, 256, device=device)
     points_list = [torch.rand(torch.randint(2, 20, (1,)).item(), 2) * 250.0 for _ in range(10)]
@@ -83,7 +83,7 @@ def test_ten_images_overfit():
 
     model.train()
     losses = []
-    for step in range(15):
+    for step in range(25):
         optimizer.zero_grad()
         mass = model(images)
         loss, _ = criterion(mass, targets)
@@ -91,4 +91,4 @@ def test_ten_images_overfit():
         optimizer.step()
         losses.append(loss.item())
 
-    assert losses[-1] < losses[0]
+    assert losses[-1] < 0.7 * losses[0], f"Loss did not decrease sufficiently: {losses[0]:.4f} -> {losses[-1]:.4f}"

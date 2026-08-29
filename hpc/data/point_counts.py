@@ -82,11 +82,10 @@ def points_to_y4(
     y = pts[:, 1]
 
     valid = (x >= -0.5) & (x <= float(W) - 0.5) & (y >= -0.5) & (y <= float(H) - 0.5)
-    x = x[valid]
-    y = y[valid]
-
-    if x.numel() == 0:
-        return y4
+    if not valid.all():
+        raise ValueError(
+            f"points_to_y4 received out-of-bounds points for grid size ({H}, {W})"
+        )
 
     cell_x = torch.floor((x + 0.5) / 4.0).long().clamp(0, gw - 1)
     cell_y = torch.floor((y + 0.5) / 4.0).long().clamp(0, gh - 1)
@@ -112,6 +111,24 @@ def build_exact_count_pyramid(
     """Build exact block-count levels {4, 8, 16, 32, 64} plus total count ``N``."""
     if device is None:
         device = torch.device("cpu")
+
+    if pad_multiple <= 0 or pad_multiple % 64 != 0:
+        raise ValueError(f"pad_multiple must be a positive multiple of 64, got {pad_multiple}")
+
+    if not points_batch:
+        raise ValueError("points_batch cannot be empty")
+
+    for i, pts in enumerate(points_batch):
+        if pts is not None and pts.numel() > 0:
+            p = pts.float()
+            x = p[:, 0]
+            y = p[:, 1]
+            valid = (x >= -0.5) & (x <= float(width) - 0.5) & (y >= -0.5) & (y <= float(height) - 0.5)
+            if not valid.all():
+                raise ValueError(
+                    f"Sample {i} contains points outside original image support "
+                    f"[-0.5, {width} - 0.5] x [-0.5, {height} - 0.5]"
+                )
 
     hp = ((height + pad_multiple - 1) // pad_multiple) * pad_multiple
     wp = ((width + pad_multiple - 1) // pad_multiple) * pad_multiple

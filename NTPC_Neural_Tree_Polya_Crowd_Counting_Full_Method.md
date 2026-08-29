@@ -179,9 +179,35 @@ where \(Z\) is the raw one-channel mass logit map.
 
 # 5. Exact point-derived regional targets
 
-No Gaussian kernel is used.
+No Gaussian kernel is used. Point annotations \((x_i, y_i)\) lie in the continuous pixel support \([-0.5, W-0.5] \times [-0.5, H-0.5]\).
 
-For a square region size \(B\in\{8,16,32,64\}\), define
+For a square block size \(B\in\{4, 8, 16, 32, 64\}\), pixel coordinates map to discrete grid cells via zero-based pixel centers:
+
+\[
+c_x^{(B)}(i)
+=
+\operatorname{clip}
+\left(
+\left\lfloor
+\frac{x_i+0.5}{B}
+\right\rfloor,
+0,W_B-1
+\right),
+\]
+
+\[
+c_y^{(B)}(i)
+=
+\operatorname{clip}
+\left(
+\left\lfloor
+\frac{y_i+0.5}{B}
+\right\rfloor,
+0,H_B-1
+\right),
+\]
+
+where \(W_B = \lceil W/B \rceil, H_B = \lceil H/B \rceil\). The exact integer count target for cell \((u, v)\) is:
 
 \[
 Y^{(B)}_{u,v}
@@ -189,51 +215,21 @@ Y^{(B)}_{u,v}
 \sum_{i=1}^{N}
 \mathbf 1
 \left[
-(x_i,y_i)\in
-[uB,(u+1)B)
-\times
-[vB,(v+1)B)
+c_y^{(B)}(i)=u,\;
+c_x^{(B)}(i)=v
 \right].
 \]
 
-Therefore every target is an exact non-negative integer.
-
-The count pyramid is
+In practice, \(Y^4\) is rasterized as the authoritative leaf level. All coarser levels are generated recursively by exact \(2\times2\) summation:
 
 \[
-Y^{8},\quad
-Y^{16},\quad
-Y^{32},\quad
-Y^{64}.
+Y^4 \xrightarrow{\text{SumPool}_2} Y^8 \xrightarrow{\text{SumPool}_2} Y^{16} \xrightarrow{\text{SumPool}_2} Y^{32} \xrightarrow{\text{SumPool}_2} Y^{64} \rightarrow N.
 \]
 
-Exact consistency holds:
+Exact conservation holds by construction across all levels:
 
 \[
-Y^{16}_{u,v}
-=
-\sum_{(a,b)\in\{0,1\}^{2}}
-Y^{8}_{2u+a,2v+b},
-\]
-
-\[
-Y^{32}_{u,v}
-=
-\sum_{(a,b)\in\{0,1\}^{2}}
-Y^{16}_{2u+a,2v+b},
-\]
-
-\[
-Y^{64}_{u,v}
-=
-\sum_{(a,b)\in\{0,1\}^{2}}
-Y^{32}_{2u+a,2v+b}.
-\]
-
-The image count is also conserved:
-
-\[
-N=\sum_{u,v}Y^{64}_{u,v}.
+\sum_{u,v} Y^4_{u,v} = \sum_{u,v} Y^8_{u,v} = \sum_{u,v} Y^{16}_{u,v} = \sum_{u,v} Y^{32}_{u,v} = \sum_{u,v} Y^{64}_{u,v} = N.
 \]
 
 ---
@@ -358,44 +354,34 @@ The negative log-likelihood is
 \log P(N\mid \mu_N,r).
 \]
 
-For the first implementation, **keep \(r\) fixed**, estimated from the training split only.
+Official experiments use fixed \(r = 50.0\) for every matched ablation. The dispersion parameter \(r\) is bounded in \((0, 10000]\) and is not dynamically re-estimated across splits.
 
-Method-of-moments estimate:
+Root alternatives:
+- **L1 loss**
+- **Poisson NLL**
+- **Negative-Binomial NLL**
 
-\[
-r
-=
-\frac{m^2}{v-m},
-\qquad v>m,
-\]
-
-where \(m\) and \(v\) are the training image-count mean and variance.
-
-If \(v\le m\), use a large value such as
-
-\[
-r=10^6.
-\]
-
-Do not estimate this from validation or test data.
+Any change to \(r\) is treated as a separate ablation.
 
 ---
 
 # 8. Conditional spatial allocation
 
-For a parent region \(p\) with \(K\) children, let predicted child masses be
+For a parent region \(p\) with \(K\) children, let predicted positive child masses be
 
 \[
 \mu_{p,1},\ldots,\mu_{p,K}.
 \]
 
-Convert them into a composition
+Clamp them from below and normalize to obtain the composition:
 
 \[
+\tilde\mu_{p,c} = \max(\mu_{p,c}, \epsilon),
+\qquad
 \pi_{p,c}
 =
-\frac{\mu_{p,c}+\epsilon}
-{\sum_{j=1}^{K}\mu_{p,j}+K\epsilon}.
+\frac{\tilde\mu_{p,c}}
+{\sum_{j=1}^{K}\tilde\mu_{p,j}}.
 \]
 
 Then
@@ -640,16 +626,30 @@ Thus
 \lambda_{16}\mathcal L_{32\rightarrow16}^{DM}.
 \]
 
-Initial recommendation:
+The proposed core loss is:
 
 \[
-\lambda_N=
-\lambda_{64}=
-\lambda_{32}=
-\lambda_{16}=1.
+\boxed{
+\mathcal L_{\text{NTPC-core}}
+=
+\mathcal L_{\text{root}}
++
+\mathcal L_{N\rightarrow64}^{DM}
++
+\mathcal L_{64\rightarrow32}^{DM}
++
+\mathcal L_{32\rightarrow16}^{DM}
+}
 \]
 
-Do not tune many weights before first understanding the gradient magnitudes.
+with default unit weights:
+
+\[
+w_{\text{root}}=
+w_{64}=
+w_{32}=
+w_{16}=1.
+\]
 
 ---
 
@@ -678,8 +678,8 @@ Then
 \[
 \pi^{64}_j
 =
-\frac{\mu^{64}_j+\epsilon}
-{\sum_k\mu^{64}_k+M\epsilon}.
+\frac{\max(\mu^{64}_j, \epsilon)}
+{\sum_k \max(\mu^{64}_k, \epsilon)}.
 \]
 
 Use
@@ -700,7 +700,7 @@ This makes the root magnitude and root spatial composition distinct:
 
 ---
 
-# 14. Density-adaptive fine likelihood
+# 14. Optional density-adaptive fine likelihood (R5 Extension)
 
 Fine \(8\times8\) supervision everywhere can be dominated by empty cells.
 
@@ -710,9 +710,9 @@ Therefore use the fixed base tree
 64\rightarrow32\rightarrow16
 \]
 
-for all valid regions.
+as the primary proposed core formulation for all valid regions.
 
-Only sufficiently dense \(16\times16\) parents receive
+As an optional extension (R5), sufficiently dense \(16\times16\) parents receive additional
 
 \[
 16\rightarrow8
@@ -762,28 +762,24 @@ Y_p^{16},
 ).
 \]
 
-The full proposed method is
+The full adaptive extension loss (R5) is:
 
 \[
 \boxed{
-\mathcal L_{\text{NTPC}}
+\mathcal L_{\text{R5}}
 =
-\mathcal L_{\text{Tree}}
+\mathcal L_{\text{NTPC-core}}
 +
 \lambda_8
 \mathcal L_{Dense8}
 }
 \]
 
-with initial
-
-\[
-\lambda_8=1.
-\]
+with initial \(\lambda_8=1.0\).
 
 The split is used **only to choose training likelihood terms**.
 
-Inference remains
+Inference remains pure single forward pass:
 
 \[
 \hat N=\sum D.
@@ -1410,71 +1406,59 @@ def predicted_total_count(mass: torch.Tensor) -> torch.Tensor:
 ## 21.5 Negative Binomial NLL
 
 ```python
-# ntpc/losses/negative_binomial.py
+# hpc/losses/negative_binomial.py
+
+from __future__ import annotations
 
 import torch
 
 
+_MAX_DISPERSION = 1e4
+
+
 def negative_binomial_nll_mean_dispersion(
-    y: torch.Tensor,
-    mu: torch.Tensor,
-    r: float | torch.Tensor,
+    target: torch.Tensor,
+    mean: torch.Tensor,
+    dispersion: float | torch.Tensor,
     eps: float = 1e-8,
     reduction: str = "mean",
 ) -> torch.Tensor:
-    """
-    Mean-dispersion parameterization:
-        E[Y] = mu
-        Var[Y] = mu + mu^2 / r
-    """
-    y = y.float()
-    mu = mu.float().clamp_min(eps)
+    """NB NLL with Var(Y)=mu+mu^2/r, evaluated in float32."""
+    y = target.to(device=mean.device, dtype=torch.float32)
+    mu = mean.to(dtype=torch.float32).clamp_min(eps)
+    r = torch.as_tensor(dispersion, device=mean.device, dtype=torch.float32)
 
-    if not torch.is_tensor(r):
-        r = torch.tensor(
-            float(r),
-            device=mu.device,
-            dtype=mu.dtype,
+    if torch.any(r <= 0) or torch.any(r > _MAX_DISPERSION) or not torch.isfinite(r).all():
+        raise ValueError(
+            f"Negative-Binomial dispersion parameter r must be in (0, {_MAX_DISPERSION}], got {dispersion}"
         )
+    if torch.any(y < 0):
+        raise ValueError("Negative-Binomial targets must be non-negative")
 
-    r = r.float().clamp_min(eps)
-
-    log_prob = (
+    log_r_plus_mu = torch.log(r + mu)
+    nll = -(
         torch.lgamma(y + r)
         - torch.lgamma(r)
         - torch.lgamma(y + 1.0)
-        + r * (torch.log(r) - torch.log(r + mu))
-        + y * (torch.log(mu) - torch.log(r + mu))
+        + r * (torch.log(r) - log_r_plus_mu)
+        + y * (torch.log(mu) - log_r_plus_mu)
     )
-
-    nll = -log_prob
-
-    if reduction == "mean":
-        return nll.mean()
-    if reduction == "sum":
-        return nll.sum()
     if reduction == "none":
         return nll
+    if reduction == "sum":
+        return nll.sum()
+    if reduction == "mean":
+        return nll.mean()
+    raise ValueError(f"Unsupported reduction: {reduction}")
 
-    raise ValueError(reduction)
 
-
-def estimate_nb_dispersion_method_of_moments(
-    counts: torch.Tensor,
-    fallback: float = 1e6,
-) -> float:
-    x = counts.double()
-
-    mean = x.mean().item()
-    var = x.var(unbiased=True).item()
-
-    if mean <= 0:
-        return fallback
-
-    if var <= mean:
-        return fallback
-
-    return (mean * mean) / (var - mean)
+def poisson_nll(y: torch.Tensor, mu: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Elementwise Poisson NLL including the constant log(y!) term."""
+    y = y.float()
+    mu = mu.float().clamp_min(eps)
+    if torch.any(y < 0):
+        raise ValueError("Poisson targets must be non-negative")
+    return mu - y * torch.log(mu) + torch.lgamma(y + 1.0)
 ```
 
 ---
@@ -2465,110 +2449,73 @@ This initialization must be derived from training statistics only.
 
 # 29. Reference YAML configuration
 
+Authoritative example from `configs/ntpc_r4_neural_dtm_tree.yaml`:
+
 ```yaml
 experiment:
-  name: ntpc_r5
+  name: ntpc_r4_neural_dtm_tree
   seed: 42
+  save_dir: ./runs/ntpc_r4_neural_dtm_tree
 
-data:
-  dataset: ShanghaiTechA
-  train_split: train_data
-  selection_split: test_data
-  no_custom_train_val_split: true
-
+dataset:
+  name: sha
+  part: part_A
+  root: ./data/ShanghaiTech
   crop_size: 256
-  augmentation:
-    scale_range: [0.7, 1.3]
-    crop_sampling: uniform
-    horizontal_flip_probability: 0.5
-
-  pad_multiple: 64
-
-  point_supervision: true
-  gaussian_density_target: false
+  coordinate_base: 1
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
 
 model:
-  parameter_budget_million: 0.5
-
+  backbone: mobilenetv4_conv_small_050
   pretrained: false
-  checkpoint: null
-  resume: null
-
+  neck_width: 32
+  context_dilations: [1, 2, 3]
+  use_p8_context: false
+  use_repblock: false
+  eps_d: 1.0e-08
   output_stride: 4
-  positive_output: softplus
 
-  mass_head:
-    initial_mass_per_cell: null
-    # estimate from training crop statistics
+statistics:
+  seed: 12345
+  root_dispersion: 50.0
+  max_samples: null
+  crops_per_image: 3
 
 loss:
-  type: ntpc
+  mode: r4_dtm_tree16
+  root_loss: nb
+  kappa_shared: 20.0
+  w_root_nb: 1.0
+  w_root64: 1.0
+  w_64_32: 1.0
+  w_32_16: 1.0
 
-  root:
-    distribution: negative_binomial
-    dispersion: 50.0
-    # fixed baseline; compare against L1 and Poisson with all else matched
+augmentation:
+  scale_range: [0.7, 1.3]
+  flip_prob: 0.5
 
-  tree:
-    root_to_64:
-      enabled: true
-      kappa: 20.0
-
-    64_to_32:
-      enabled: true
-      kappa: 20.0
-
-    32_to_16:
-      enabled: true
-      kappa: 20.0
-
-    dense_16_to_8:
-      enabled: true
-      kappa: 20.0
-      quantile: 0.85
-      threshold: null
-      # estimate from training y16 counts
-
-  weights:
-    root_nb: 1.0
-    root_to_64: 1.0
-    64_to_32: 1.0
-    32_to_16: 1.0
-    dense_16_to_8: 1.0
+sampler:
+  weighted: false
 
 optimizer:
   name: AdamW
   lr: 0.0001
   weight_decay: 0.0001
+  grad_clip: 5.0
 
-scheduler:
-  name: cosine
-  warmup_epochs: 10
+schedule:
+  epochs: 1000
+  warmup_epochs: 25
 
 training:
-  epochs: 1000
+  batch_size: 16
+  drop_last: true
   amp: true
-  grad_clip_norm: 5.0
-
+  init_scale: 256.0
+  num_workers: 0
   evaluate_every: 5
-  save_best_by: mae
-
-evaluation:
-  metrics:
-    - mae
-    - rmse
-    - bias
-
-  density_groups:
-    sparse:
-      max_count: 299
-
-    medium:
-      min_count: 300
-      max_count: 999
-
-    dense:
-      min_count: 1000
+  gradient_audit_every: 50
 ```
 
 Benchmark selection protocol used by every matched R0--R5 run:

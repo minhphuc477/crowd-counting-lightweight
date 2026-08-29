@@ -104,6 +104,31 @@ def test_checkpoint_compatibility_assertion():
             "dataset": {"name": "sha", "part": "part_B", "coordinate_base": 1},
         }
     }
-    with pytest.raises(ValueError, match="Dataset/preprocessing config mismatch"):
+    with pytest.raises(ValueError, match="Dataset config mismatch"):
         assert_checkpoint_compatible(bad_ds_ckpt, cfg)
+
+
+def test_all_cli_modules_import():
+    """All tools and CLI modules must import without missing attributes or syntax errors."""
+    import tools.eval_localization
+    import tools.eval_ntpc_localization_depth
+    import tools.export_onnx
+    import tools.profile_model
+    import tools.visualize_localization
+
+
+def test_repblock_deploy_parity():
+    """RepDWBlock must produce mathematically equivalent output after switch_to_deploy."""
+    from hpc.models.blocks import RepDWBlock
+
+    torch.manual_seed(42)
+    block = RepDWBlock(channels=32, act=True).eval()
+    x = torch.randn(2, 32, 20, 20)
+
+    with torch.no_grad():
+        before = block(x)
+        block.switch_to_deploy()
+        after = block(x)
+
+    torch.testing.assert_close(before, after, atol=1e-5, rtol=1e-4)
 

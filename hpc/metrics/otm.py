@@ -127,6 +127,7 @@ def _epsilon_scaling_transport_plan(
 def _source_distribution(
     mass: torch.Tensor,
     config: OTMConfig,
+    image_hw: Tuple[int, int] | None = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, object]]:
     """Convert the stride mass grid into weighted source coordinates ``(y,x)``."""
     height, width = mass.shape
@@ -140,11 +141,19 @@ def _source_distribution(
     rows = torch.div(indices, width, rounding_mode="floor").float()
     columns = (indices % width).float()
     stride = float(config.output_stride)
-    # Stride-4 cell center: average of 4 pixel centers (e.g. 0, 1, 2, 3 -> 1.5)
-    cell_center_offset = (stride - 1.0) / 2.0
-    coordinates_yx = torch.stack(
-        (rows * stride + cell_center_offset, columns * stride + cell_center_offset), dim=-1
-    )
+
+    if image_hw is not None:
+        image_h, image_w = float(image_hw[0]), float(image_hw[1])
+        y0 = rows * stride
+        x0 = columns * stride
+        y1 = torch.minimum(y0 + stride - 1.0, y0.new_tensor(image_h - 1.0))
+        x1 = torch.minimum(x0 + stride - 1.0, x0.new_tensor(image_w - 1.0))
+        coordinates_yx = torch.stack((0.5 * (y0 + y1), 0.5 * (x0 + x1)), dim=-1)
+    else:
+        cell_center_offset = (stride - 1.0) / 2.0
+        coordinates_yx = torch.stack(
+            (rows * stride + cell_center_offset, columns * stride + cell_center_offset), dim=-1
+        )
     compaction = "none"
     coarse_height, coarse_width = height, width
     if config.max_source_points is not None and indices.numel() > config.max_source_points:
@@ -195,8 +204,8 @@ def _initialize_target_points(
         size=(image_height, image_width),
         mode="bilinear",
         align_corners=False,
-    )[0, 0]
-    flat = resized.flatten()
+    )[0, 0].clamp_min(0.0)
+    flat = resized.reshape(-1)
     weights = torch.where(flat > _TINY, flat, torch.zeros_like(flat))
     pos_count = int(torch.count_nonzero(weights))
     if pos_count == 0:
@@ -297,16 +306,18 @@ def otm_localize(
         if image_height <= 0 or image_width <= 0:
             raise ValueError("image_hw must contain positive dimensions")
 
-    source_mass, source_yx, source_diagnostics = _source_distribution(mass, config)
+    source_mass, source_yx, source_diagnostics = _source_distribution(
+        mass, config, image_hw=(image_height, image_width)
+    )
     diagnostics.update(source_diagnostics)
     transport_elements = int(source_mass.numel()) * point_count
-    peak_vram_mb = float(transport_elements * 20) / (1024.0 * 1024.0)
+    rough_working_set_mb = float(transport_elements * 32) / (1024.0 * 1024.0)
     diagnostics["transport_elements"] = transport_elements
-    diagnostics["peak_vram_mb_est"] = peak_vram_mb
+    diagnostics["rough_transport_working_set_mb_est"] = rough_working_set_mb
     if transport_elements > config.max_transport_elements:
         raise MemoryError(
             f"OT-M transport matrix requires {transport_elements:,} elements "
-            f"(~{peak_vram_mb:.1f} MB peak VRAM); "
+            f"(~{rough_working_set_mb:.1f} MB estimated working set); "
             f"limit is {config.max_transport_elements:,} elements. Reduce max_source_points explicitly."
         )
 

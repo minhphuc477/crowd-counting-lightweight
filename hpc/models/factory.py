@@ -36,6 +36,31 @@ def _parse_bool(val: Any, default: bool = False) -> bool:
     raise TypeError(f"Invalid type for boolean: {type(val)}")
 
 
+def resolve_model_config(cfg: dict) -> dict:
+    m = cfg.get("model", cfg)
+    return {
+        "backbone": str(m.get("backbone", "mobilenetv4_conv_small_050")),
+        "pretrained": _parse_bool(m.get("pretrained", False)),
+        "neck_width": int(m.get("neck_width", 32)),
+        "context_dilations": tuple(int(x) for x in m.get("context_dilations", (1, 2, 3))),
+        "use_p8_context": _parse_bool(m.get("use_p8_context", False)),
+        "use_repblock": _parse_bool(m.get("use_repblock", False)),
+        "eps_d": float(m.get("eps_d", 1e-8)),
+        "output_stride": int(m.get("output_stride", 4)),
+    }
+
+
+def resolve_dataset_config(cfg: dict) -> dict:
+    d = cfg.get("dataset", {})
+    return {
+        "name": str(d.get("name", "")),
+        "part": str(d.get("part", "part_A")),
+        "coordinate_base": int(d.get("coordinate_base", 1)),
+        "image_mean": tuple(float(x) for x in d.get("image_mean", [0.485, 0.456, 0.406])),
+        "image_std": tuple(float(x) for x in d.get("image_std", [0.229, 0.224, 0.225])),
+    }
+
+
 def build_model_from_config(cfg: Dict[str, Any]) -> HPCLite:
     """Construct an HPCLite instance faithfully from a config dictionary."""
     model_cfg = cfg.get("model", cfg)
@@ -43,15 +68,16 @@ def build_model_from_config(cfg: Dict[str, Any]) -> HPCLite:
     if unknown_keys:
         raise ValueError(f"Unknown keys in model config: {sorted(unknown_keys)}")
 
+    resolved = resolve_model_config(cfg)
     return HPCLite(
-        backbone_name=str(model_cfg.get("backbone", "mobilenetv4_conv_small_050")),
-        pretrained=_parse_bool(model_cfg.get("pretrained", False)),
-        neck_width=int(model_cfg.get("neck_width", 32)),
-        context_dilations=tuple(int(d) for d in model_cfg.get("context_dilations", (1, 2, 3))),
-        use_p8_context=_parse_bool(model_cfg.get("use_p8_context", False)),
-        use_repblock=_parse_bool(model_cfg.get("use_repblock", False)),
-        eps_d=float(model_cfg.get("eps_d", 1e-8)),
-        output_stride=int(model_cfg.get("output_stride", 4)),
+        backbone_name=resolved["backbone"],
+        pretrained=resolved["pretrained"],
+        neck_width=resolved["neck_width"],
+        context_dilations=resolved["context_dilations"],
+        use_p8_context=resolved["use_p8_context"],
+        use_repblock=resolved["use_repblock"],
+        eps_d=resolved["eps_d"],
+        output_stride=resolved["output_stride"],
     )
 
 
@@ -61,41 +87,20 @@ def assert_checkpoint_compatible(checkpoint: dict, cfg: dict) -> None:
     if trained is None or not isinstance(trained, dict):
         return
 
-    old_model = trained.get("model", {})
-    new_model = cfg.get("model", {})
-    for k in (
-        "backbone",
-        "neck_width",
-        "context_dilations",
-        "use_p8_context",
-        "use_repblock",
-        "eps_d",
-        "output_stride",
-    ):
-        if k in old_model and k in new_model:
-            old_v, new_v = old_model[k], new_model[k]
-            if k in {"use_p8_context", "use_repblock", "pretrained"}:
-                old_v, new_v = _parse_bool(old_v), _parse_bool(new_v)
-            elif k in {"eps_d"}:
-                old_v, new_v = float(old_v), float(new_v)
-            elif k in {"context_dilations"}:
-                old_v, new_v = list(old_v), list(new_v)
-            if old_v != new_v:
+    old_model = resolve_model_config(trained)
+    new_model = resolve_model_config(cfg)
+    for k in old_model:
+        if old_model[k] != new_model[k]:
+            raise ValueError(
+                f"Model config mismatch for '{k}': checkpoint has {old_model[k]!r}, active config has {new_model[k]!r}"
+            )
+
+    old_ds = resolve_dataset_config(trained)
+    new_ds = resolve_dataset_config(cfg)
+    if old_ds["name"] and new_ds["name"]:
+        for k in old_ds:
+            if old_ds[k] != new_ds[k]:
                 raise ValueError(
-                    f"Model config mismatch for '{k}': checkpoint has {old_v!r}, active config has {new_v!r}"
+                    f"Dataset config mismatch for '{k}': checkpoint has {old_ds[k]!r}, active config has {new_ds[k]!r}"
                 )
-
-    ds_keys = ("name", "part", "coordinate_base", "image_mean", "image_std")
-    old_ds = trained.get("dataset", {})
-    new_ds = cfg.get("dataset", {})
-
-    mismatches = {}
-    for key in ds_keys:
-        if key in old_ds and key in new_ds and old_ds[key] != new_ds[key]:
-            mismatches[key] = (old_ds[key], new_ds[key])
-
-    if mismatches:
-        raise ValueError(
-            f"Dataset/preprocessing config mismatch between checkpoint and active YAML: {mismatches}"
-        )
 

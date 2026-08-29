@@ -108,3 +108,30 @@ def test_validate_targets_catches_missing_keys():
     targets.pop(64)
     with pytest.raises(KeyError, match="requires targets"):
         NTPCLoss(NTPCConfig(mode="r4_dtm_tree16"))(mass, targets)
+
+
+def test_build_exact_count_pyramid_catches_oob_before_padding():
+    """Points outside original support must raise ValueError even if they fit in padded size."""
+    # Image size 410x300, padded to 448x320. Point at x=430 is in padded support but invalid for original image.
+    pts = torch.tensor([[430.0, 100.0]])
+    with pytest.raises(ValueError, match="outside original image support"):
+        build_exact_count_pyramid([pts], height=300, width=410, pad_multiple=64)
+
+
+def test_build_exact_count_pyramid_invalid_inputs():
+    with pytest.raises(ValueError, match="points_batch cannot be empty"):
+        build_exact_count_pyramid([], height=256, width=256)
+
+    pts = torch.tensor([[50.0, 50.0]])
+    with pytest.raises(ValueError, match="positive multiple of 64"):
+        build_exact_count_pyramid([pts], height=256, width=256, pad_multiple=32)
+
+    with pytest.raises(ValueError, match="Unsupported block sizes"):
+        build_exact_count_pyramid([pts], height=256, width=256, block_sizes=(12,))
+
+
+def test_sum_pool_mass_pyramid_invalid_levels():
+    mass = torch.rand(1, 1, 64, 64)
+    with pytest.raises(ValueError, match="Unsupported mass levels"):
+        sum_pool_mass_pyramid(mass, block_sizes=(12,))
+

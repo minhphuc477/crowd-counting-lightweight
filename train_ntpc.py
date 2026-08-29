@@ -192,17 +192,30 @@ def main() -> None:
         cfg = yaml.safe_load(handle)
 
     # Scratch and config fail-fast invariants
-    for forbidden in (
+    FORBIDDEN_SCRATCH_KEYS = {
         "resume",
         "teacher_checkpoint",
         "distillation",
         "warm_start",
         "pretrained_checkpoint",
-    ):
-        if cfg.get(forbidden):
-            raise ValueError(
-                f"NTPC strict-scratch invariant: '{forbidden}' is forbidden in config"
-            )
+        "init_checkpoint",
+    }
+
+    def assert_strict_scratch(obj: Any, path: str = "") -> None:
+        if not isinstance(obj, dict):
+            return
+        for key, value in obj.items():
+            full = f"{path}.{key}" if path else key
+            if key in FORBIDDEN_SCRATCH_KEYS and value not in (None, False, "", 0):
+                raise ValueError(
+                    f"NTPC strict-scratch invariant: '{full}' is forbidden in config ({value!r})"
+                )
+            if isinstance(value, dict):
+                assert_strict_scratch(value, full)
+
+    assert_strict_scratch(cfg)
+    if cfg.get("model", {}).get("pretrained", False):
+        raise ValueError("NTPC matched ablations must start from scratch; model.pretrained is forbidden")
 
     training_cfg = cfg.get("training", {})
     if "epochs" in training_cfg:

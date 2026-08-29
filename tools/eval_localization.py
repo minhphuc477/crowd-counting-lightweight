@@ -217,6 +217,7 @@ def evaluate_checkpoint(
                 threshold_rel=local_threshold_rel,
                 threshold_abs=local_threshold_abs,
                 min_distance_px=local_min_distance_px,
+                image_hw=image_hw,
             )
             local_ms = (time.perf_counter() - started) * 1000.0
             predicted_points["local_max"].append(local_points)

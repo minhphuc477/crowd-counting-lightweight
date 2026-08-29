@@ -20,12 +20,15 @@ def extract_points_from_mass_map(
     threshold_rel: float = 0.05,
     threshold_abs: float = 0.01,
     min_distance_px: int = 4,
+    image_hw: Tuple[int, int] | None = None,
 ) -> np.ndarray:
-    """Extract (x, y) continuous coordinate head locations from mass density map D via local maxima."""
+    """Extract (x, y) continuous coordinate head locations from mass map D via local maxima."""
     if isinstance(mass_map, torch.Tensor):
         mass_map = mass_map.detach().cpu().float().squeeze().numpy()
     if mass_map.ndim != 2:
         raise ValueError(f"Expected 2D mass map, got shape {mass_map.shape}")
+    if not np.isfinite(mass_map).all():
+        raise ValueError("Mass map contains non-finite values (NaN or Inf)")
     max_val = float(np.max(mass_map))
     if max_val < threshold_abs:
         return np.empty((0, 2), dtype=np.float32)
@@ -37,9 +40,18 @@ def extract_points_from_mass_map(
     peak_y, peak_x = np.nonzero(peak_mask)
     if len(peak_x) == 0:
         return np.empty((0, 2), dtype=np.float32)
-    offset = (float(stride) - 1.0) / 2.0
-    orig_x = peak_x.astype(np.float32) * float(stride) + offset
-    orig_y = peak_y.astype(np.float32) * float(stride) + offset
+    if image_hw is not None:
+        image_h, image_w = float(image_hw[0]), float(image_hw[1])
+        x0 = peak_x.astype(np.float32) * float(stride)
+        y0 = peak_y.astype(np.float32) * float(stride)
+        x1 = np.minimum(x0 + float(stride) - 1.0, image_w - 1.0)
+        y1 = np.minimum(y0 + float(stride) - 1.0, image_h - 1.0)
+        orig_x = 0.5 * (x0 + x1)
+        orig_y = 0.5 * (y0 + y1)
+    else:
+        offset = (float(stride) - 1.0) / 2.0
+        orig_x = peak_x.astype(np.float32) * float(stride) + offset
+        orig_y = peak_y.astype(np.float32) * float(stride) + offset
     return np.stack([orig_x, orig_y], axis=1)
 
 

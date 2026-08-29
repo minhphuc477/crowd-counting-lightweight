@@ -57,9 +57,24 @@ def test_dataset_localization():
     print("  [✓] Dataset-level localization aggregation: PASS")
 
 
+def test_partial_border_cell_centers():
+    """Partial border cells at image boundaries must have centers bounded by original image width/height."""
+    mass = np.zeros((75, 103), dtype=np.float32)
+    # Put peak at bottom-right partial cell (row 74, col 102) for image of size H=298, W=410
+    mass[74, 102] = 1.0
+
+    pts = extract_points_from_mass_map(mass, stride=4, threshold_abs=0.1, min_distance_px=4, image_hw=(298, 410))
+    assert len(pts) == 1
+    # Col 102: x0 = 408, x1 = min(408+3, 409) = 409 -> center = 408.5
+    # Row 74: y0 = 296, y1 = min(296+3, 297) = 297 -> center = 296.5
+    assert abs(pts[0, 0] - 408.5) < 1e-4
+    assert abs(pts[0, 1] - 296.5) < 1e-4
+
+
 if __name__ == "__main__":
     print("Running localization test suite:")
     test_peak_extraction()
     test_localization_matching()
     test_dataset_localization()
+    test_partial_border_cell_centers()
     print("All localization tests PASSED!")

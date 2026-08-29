@@ -99,3 +99,19 @@ def test_otm_memory_guard_raises_on_huge_transport():
     mass = torch.ones(10, 10)  # 100 source cells, 100 target points -> 10,000 elements
     with pytest.raises(MemoryError, match="OT-M transport matrix requires"):
         otm_localize(mass, max_transport_elements=100, max_source_points=None)
+
+
+def test_otm_partial_edge_center():
+    """OT-M source distribution on partial border cells must compute coordinate centers bounded by image_hw."""
+    from hpc.metrics.otm import _source_distribution, OTMConfig
+
+    mass = torch.zeros((75, 103))
+    mass[74, 102] = 1.0
+    config = OTMConfig(output_stride=4)
+
+    weight, coord_yx, _ = _source_distribution(mass, config, image_hw=(298, 410))
+    # Row 74 center: 0.5 * (296 + 297) = 296.5
+    # Col 102 center: 0.5 * (408 + 409) = 408.5
+    assert abs(float(coord_yx[0, 0]) - 296.5) < 1e-4
+    assert abs(float(coord_yx[0, 1]) - 408.5) < 1e-4
+
