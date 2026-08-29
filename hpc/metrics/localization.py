@@ -55,12 +55,19 @@ def extract_points_from_mass_map(
     return np.stack([orig_x, orig_y], axis=1)
 
 
+from scipy.spatial import cKDTree
+
+
 def match_points(
     pred_xy: Union[np.ndarray, torch.Tensor],
     gt_xy: Union[np.ndarray, torch.Tensor],
     threshold: float,
 ) -> Tuple[int, int, int]:
-    """Hungarian minimum distance one-to-one matching with distance gating."""
+    """Hungarian minimum distance one-to-one matching with distance gating.
+    
+    Supports dense direct evaluation on small sets and scalable O(N log N)
+    sparse spatial graph component matching on large sets (e.g. 10k-20k points).
+    """
     if isinstance(pred_xy, torch.Tensor):
         pred_xy = pred_xy.detach().cpu().float().numpy()
     if isinstance(gt_xy, torch.Tensor):
@@ -77,19 +84,77 @@ def match_points(
     if ng_pts == 0:
         return 0, np_pts, 0
 
-    diff = pred_xy[:, None, :] - gt_xy[None, :, :]
-    distance = np.sqrt(np.sum(diff ** 2, axis=-1))
+    if np_pts * ng_pts <= 2500:
+        diff = pred_xy[:, None, :] - gt_xy[None, :, :]
+        distance = np.sqrt(np.sum(diff ** 2, axis=-1))
+        penalty = 1e6
+        gated_distance = np.where(distance <= threshold, distance, penalty)
+        pred_idx, gt_idx = linear_sum_assignment(gated_distance)
+        matched_distance = distance[pred_idx, gt_idx]
+        tp = int(np.sum(matched_distance <= threshold))
+        return tp, int(np_pts - tp), int(ng_pts - tp)
 
-    # Distance-gated Hungarian matching
+    # Scalable sparse candidate bipartite matching
+    pred_tree = cKDTree(pred_xy)
+    gt_tree = cKDTree(gt_xy)
+    neighbors = pred_tree.query_ball_tree(gt_tree, r=threshold)
+
+    parent: Dict[int, int] = {}
+
+    def find(i: int) -> int:
+        path = []
+        while i in parent and parent[i] != i:
+            path.append(i)
+            i = parent[i]
+        for p in path:
+            parent[p] = i
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    active_preds = []
+    has_edges = False
+    for p_i, gt_indices in enumerate(neighbors):
+        if len(gt_indices) > 0:
+            has_edges = True
+            active_preds.append(p_i)
+            for g_j in gt_indices:
+                union(p_i, g_j + np_pts)
+
+    if not has_edges:
+        return 0, np_pts, ng_pts
+
+    comp_preds: Dict[int, list[int]] = {}
+    comp_gts: Dict[int, list[int]] = {}
+    for p_i in active_preds:
+        root = find(p_i)
+        if root not in comp_preds:
+            comp_preds[root] = []
+            comp_gts[root] = []
+        comp_preds[root].append(p_i)
+        for g_j in neighbors[p_i]:
+            comp_gts[root].append(g_j)
+
+    for root in comp_gts:
+        comp_gts[root] = list(set(comp_gts[root]))
+
+    tp = 0
     penalty = 1e6
-    gated_distance = np.where(distance <= threshold, distance, penalty)
-    pred_idx, gt_idx = linear_sum_assignment(gated_distance)
-    matched_distance = distance[pred_idx, gt_idx]
+    for root, p_list in comp_preds.items():
+        g_list = comp_gts[root]
+        p_sub = pred_xy[p_list]
+        g_sub = gt_xy[g_list]
+        diff = p_sub[:, None, :] - g_sub[None, :, :]
+        dist_sub = np.sqrt(np.sum(diff ** 2, axis=-1))
+        gated_sub = np.where(dist_sub <= threshold, dist_sub, penalty)
+        pi, gi = linear_sum_assignment(gated_sub)
+        tp += int(np.sum(dist_sub[pi, gi] <= threshold))
 
-    tp = int(np.sum(matched_distance <= threshold))
     fp = int(np_pts - tp)
     fn = int(ng_pts - tp)
-
     return tp, fp, fn
 
 

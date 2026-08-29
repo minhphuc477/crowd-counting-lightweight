@@ -978,9 +978,11 @@ The most informative experiment sequence is:
 | R0 | Exact regional L1 | basic local-count supervision |
 | R1 | Deterministic conserved allocation | is decomposition alone enough? |
 | R2 | Flat DM at 16 | is probabilistic overdispersion enough? |
-| R3 | Hierarchical Multinomial | does hierarchy without overdispersion help? |
-| R4 | Neural DTM 64→32→16 | does conditional over-dispersed hierarchy help? |
-| R5 | R4 + dense-only 16→8 | does adaptive fine likelihood improve dense cases? |
+| R3 | Hierarchical Multinomial | Multinomial control: does DTM improve over the corresponding non-overdispersed allocation model? |
+| R4 | Neural DTM 64→32→16 | does conditional over-dispersed hierarchy help? (Proposed Core) |
+| R5 | R4 + dense-only 16→8 | does adaptive fine likelihood improve dense cases? (Optional Extension) |
+
+Under a single conserved mass map, pure hierarchical Multinomial probabilities collapse to the flat leaf Multinomial. Therefore, R3 serves as a strict non-overdispersed allocation control to isolate the exact impact of Dirichlet concentration / overdispersion in DTM.
 
 The two critical comparisons are
 

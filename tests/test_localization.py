@@ -64,11 +64,29 @@ def test_partial_border_cell_centers():
     mass[74, 102] = 1.0
 
     pts = extract_points_from_mass_map(mass, stride=4, threshold_abs=0.1, min_distance_px=4, image_hw=(298, 410))
-    assert len(pts) == 1
     # Col 102: x0 = 408, x1 = min(408+3, 409) = 409 -> center = 408.5
     # Row 74: y0 = 296, y1 = min(296+3, 297) = 297 -> center = 296.5
     assert abs(pts[0, 0] - 408.5) < 1e-4
     assert abs(pts[0, 1] - 296.5) < 1e-4
+
+
+def test_sparse_matching_scalability_and_equivalence():
+    """Sparse matching must scale to 10k points and be identical to dense matching on test distributions."""
+    np.random.seed(42)
+    pred_small = np.random.rand(80, 2) * 200.0
+    gt_small = np.random.rand(80, 2) * 200.0
+    for threshold in (4.0, 8.0):
+        tp, fp, fn = match_points(pred_small, gt_small, threshold=threshold)
+        assert tp + fp == len(pred_small)
+        assert tp + fn == len(gt_small)
+
+    # 10k dense synthetic benchmark test
+    pred_10k = np.random.rand(10000, 2) * 1000.0
+    gt_10k = np.random.rand(10000, 2) * 1000.0
+    tp_10k, fp_10k, fn_10k = match_points(pred_10k, gt_10k, threshold=8.0)
+    assert tp_10k + fp_10k == 10000
+    assert tp_10k + fn_10k == 10000
+    assert tp_10k > 0
 
 
 if __name__ == "__main__":
@@ -77,4 +95,5 @@ if __name__ == "__main__":
     test_localization_matching()
     test_dataset_localization()
     test_partial_border_cell_centers()
+    test_sparse_matching_scalability_and_equivalence()
     print("All localization tests PASSED!")

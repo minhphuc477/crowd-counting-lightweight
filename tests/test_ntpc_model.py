@@ -132,3 +132,18 @@ def test_repblock_deploy_parity():
 
     torch.testing.assert_close(before, after, atol=1e-5, rtol=1e-4)
 
+
+def test_arbitrary_resolution_padding_sensitivity():
+    """Direct arbitrary resolution prediction vs pad-to-32 must be within small boundary tolerance."""
+    model = HPCLite(pretrained=False, neck_width=32).eval()
+    x = torch.randn(1, 3, 317, 411)
+
+    with torch.no_grad():
+        cnt_direct, _ = model.predict(x, pad_multiple=None)
+        cnt_padded, _ = model.predict(x, pad_multiple=32)
+
+    # Relative difference between direct unpadded inference and padded-crop inference should be very small
+    rel_diff = abs(float(cnt_direct) - float(cnt_padded)) / max(float(cnt_direct), 1e-4)
+    assert rel_diff < 0.05, f"Padding policy sensitivity too high: direct={cnt_direct.item()}, padded={cnt_padded.item()}, rel={rel_diff:.4f}"
+
+

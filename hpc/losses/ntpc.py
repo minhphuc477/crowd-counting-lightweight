@@ -364,8 +364,8 @@ class NTPCLoss(nn.Module):
     def _zero(mass: torch.Tensor) -> torch.Tensor:
         return mass.sum() * 0.0
 
-    @staticmethod
     def _deterministic_split(
+        self,
         parent_gt: torch.Tensor,
         child_gt: torch.Tensor,
         child_mass: torch.Tensor,
@@ -373,7 +373,7 @@ class NTPCLoss(nn.Module):
         """Per-image sum of parent L1 allocation errors (shape: (B,))."""
         parent = parent_gt.float().flatten(1)
         target_children = group_2x2_flat(child_gt.float())
-        pi = probs_from_positive_mass(group_2x2_flat(child_mass.float()))
+        pi = probs_from_positive_mass(group_2x2_flat(child_mass.float()), tiny=self.cfg.eps)
         expected = parent.unsqueeze(-1) * pi
         per_parent = (expected - target_children).abs().sum(dim=-1)
         valid = (parent > 0).float()

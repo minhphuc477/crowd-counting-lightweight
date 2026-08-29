@@ -96,9 +96,9 @@ def test_otm_config_rejects_invalid_scaling():
 
 def test_otm_memory_guard_raises_on_huge_transport():
     """OT-M should raise MemoryError when estimated transport matrix exceeds limit."""
-    mass = torch.ones(10, 10)  # 100 source cells, 100 target points -> 10,000 elements
+    mass = torch.ones(10, 10)  # 100 target points; with max_transport_elements=50, even 1 source atom requires 100 elements
     with pytest.raises(MemoryError, match="OT-M transport matrix requires"):
-        otm_localize(mass, max_transport_elements=100, max_source_points=None)
+        otm_localize(mass, max_transport_elements=50, max_source_points=None)
 
 
 def test_otm_partial_edge_center():
@@ -114,4 +114,21 @@ def test_otm_partial_edge_center():
     # Col 102 center: 0.5 * (408 + 409) = 408.5
     assert abs(float(coord_yx[0, 0]) - 296.5) < 1e-4
     assert abs(float(coord_yx[0, 1]) - 408.5) < 1e-4
+
+
+def test_otm_effective_source_cap_prevents_memory_error():
+    """OT-M should adapt effective source cap to respect max_transport_elements under high predicted count."""
+    mass = torch.ones(64, 64) * 0.5  # sum = 2048
+    # With 2048 target points and default max_transport_elements=5_000_000,
+    # effective source cap adapts to ~2441 points, successfully avoiding MemoryError.
+    pts = otm_localize(mass, outer_iterations=2, max_transport_elements=5_000_000)
+    assert len(pts) == 2048
+
+
+def test_otm_oracle_cardinality():
+    """OT-M with target_point_count must decode exactly the specified oracle cardinality."""
+    mass = torch.ones(20, 20) * 0.1  # sum = 40.0
+    pts = otm_localize(mass, target_point_count=50, outer_iterations=2)
+    assert len(pts) == 50
+
 

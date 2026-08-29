@@ -151,6 +151,7 @@ def evaluate_checkpoint(
     otm_blur: float = 0.01,
     otm_max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS,
     otm_max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
+    oracle_cardinality: bool = False,
 ) -> dict:
     methods = tuple(dict.fromkeys(methods))
     unknown = set(methods) - {"local_max", "otm"}
@@ -229,6 +230,7 @@ def evaluate_checkpoint(
         if "otm" in methods:
             _synchronize(device)
             started = time.perf_counter()
+            target_pts_override = int(gt_count + 0.5) if oracle_cardinality else None
             otm_points, diagnostics = otm_localize(
                 pred_mass[0, 0],
                 output_stride=4,
@@ -239,6 +241,7 @@ def evaluate_checkpoint(
                 max_transport_elements=otm_max_transport_elements,
                 seed=seed + index,
                 image_hw=image_hw,
+                target_point_count=target_pts_override,
                 return_diagnostics=True,
             )
             _synchronize(device)
@@ -323,6 +326,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--otm-max-source-points", type=int, default=DEFAULT_OTM_MAX_SOURCE_POINTS)
+    parser.add_argument("--oracle-cardinality", action="store_true", help="Evaluate OT-M with Oracle GT cardinality m=N_GT")
     args = parser.parse_args()
     result = evaluate_checkpoint(
         config_path=args.config,
@@ -334,6 +338,7 @@ def main() -> None:
         seed=args.seed,
         max_samples=args.max_samples,
         otm_max_source_points=args.otm_max_source_points,
+        oracle_cardinality=args.oracle_cardinality,
     )
     print(json.dumps(result, indent=2))
 

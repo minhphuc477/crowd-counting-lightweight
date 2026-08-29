@@ -9,7 +9,7 @@ always ``(x, y)`` in input-image pixels (zero-based pixel centers).
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import math
 from typing import Dict, Tuple, Union
 
@@ -242,8 +242,14 @@ def otm_localize(
     return_diagnostics: bool = False,
     sinkhorn_iterations: int | None = None,
     epsilon: float | None = None,
+    target_point_count: int | None = None,
 ) -> torch.Tensor | Tuple[torch.Tensor, Dict[str, object]]:
-    """Decode a single positive mass map with OT-M."""
+    """Decode a single positive mass map with OT-M.
+    
+    Args:
+        target_point_count: Optional explicit point cardinality (e.g. Oracle GT cardinality
+            for decoupling count error from spatial allocation error in mechanism analysis).
+    """
     if sinkhorn_iterations is not None or epsilon is not None:
         raise ValueError(
             "Fixed-epsilon/sinkhorn_iterations belong to the old approximation; "
@@ -275,10 +281,15 @@ def otm_localize(
     if not math.isfinite(predicted_count) or predicted_count < 0:
         raise ValueError(f"Invalid predicted count from mass map: {predicted_count}")
 
-    point_count = max(0, int(predicted_count + 0.5))
+    if target_point_count is not None:
+        point_count = max(0, int(target_point_count))
+    else:
+        point_count = max(0, int(predicted_count + 0.5))
+
     diagnostics: Dict[str, object] = {
         "predicted_count": predicted_count,
         "localized_count": point_count,
+        "target_point_count_override": target_point_count is not None,
         "cardinality_gap": abs(point_count - predicted_count),
         "iterations": 0,
         **{f"config_{key}": value for key, value in asdict(config).items() if value is not None},
@@ -306,8 +317,15 @@ def otm_localize(
         if image_height <= 0 or image_width <= 0:
             raise ValueError("image_hw must contain positive dimensions")
 
+    effective_max_source = config.max_source_points
+    if config.max_transport_elements is not None and point_count > 0:
+        max_src_by_transport = max(1, config.max_transport_elements // point_count)
+        if effective_max_source is None or max_src_by_transport < effective_max_source:
+            effective_max_source = max_src_by_transport
+
+    source_config = replace(config, max_source_points=effective_max_source)
     source_mass, source_yx, source_diagnostics = _source_distribution(
-        mass, config, image_hw=(image_height, image_width)
+        mass, source_config, image_hw=(image_height, image_width)
     )
     diagnostics.update(source_diagnostics)
     transport_elements = int(source_mass.numel()) * point_count

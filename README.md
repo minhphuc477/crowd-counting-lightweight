@@ -2,14 +2,15 @@
 
 ## Overview
 
-**NTPC** (Neural Tree-Pólya Crowd Counter) is a single-map lightweight crowd counting and localization framework engineered for robust real-world deployment across sparse, dense, dark, blurry, and empty/negative scenes (such as ShanghaiTech, UCF-QNRF, and NWPU-Crowd).
+**NTPC** (Neural Tree-Pólya Crowd Counter) is a single-map lightweight crowd counting framework designed for lightweight point-supervised crowd counting across varying crowd densities (such as ShanghaiTech, UCF-QNRF, and NWPU-Crowd).
 
 ### Key Architectural Principles
 - **Minimal Deployed Graph**:
   $$\text{Image} \xrightarrow{} \text{MobileNetV4-Conv-Small-0.5} \xrightarrow{} \text{Additive 32-ch FPN Neck} \xrightarrow{} 1\text{-channel Softplus Mass Map } D \xrightarrow{} \hat{C} = \sum D$$
   - Deployed parameters: ~0.35M parameters (with physical truncation of reduction-32 stages).
   - Single-scale, single-head feed-forward inference at stride 4 predicting a count-mass map \(D\).
-  - No Gaussian density targets, transformer decoders, or Hungarian matching in the deployed counting graph. (Hungarian matching is used only for offline localization evaluation).
+  - No Gaussian density targets, transformer decoders, or Hungarian matching in the deployed counting graph. (Scalable Hungarian matching is used only for offline localization evaluation).
+  - Zero-extra-parameter localization: the same predicted mass map \(D\) can optionally be decoded into point coordinates via parameter-free Optimal Transport Monge (OT-M) optimization.
 
 ### Training-Only Structured Objectives (R0–R5)
 All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu^2 / r$); spatial supervision is the only variable.
@@ -19,7 +20,7 @@ All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu
 | `r0_exact` | **Baseline**: Root-NB + mean regional L1 ($\frac{L_{64}+L_{32}+L_{16}}{3}$) |
 | `r1_deterministic` | Root-NB + deterministic allocation (proportion matching) |
 | `r2_flat_dm` | Root-NB + flat Dirichlet-Multinomial over all level-16 cells |
-| `r3_multinomial_tree` | Root-NB + tree Multinomial (no concentration parameter) |
+| `r3_multinomial_tree` | **Multinomial control**: tree Multinomial (flat equivalent, non-overdispersed) |
 | `r4_dtm_tree16` | Root-NB + full DTM tree down to stride-16 **(proposed core)** |
 | `r4_dtm_tree8` | R4 + DTM supervision down to stride-8 (depth study) |
 | `r4_dtm_tree4` | R4 + DTM supervision down to stride-4 (depth study) |

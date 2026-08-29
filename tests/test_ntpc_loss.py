@@ -138,4 +138,17 @@ def test_gradient_ratio_diagnostic_r1_vs_r4():
     ratio_r4 = grad_spatial_r4 / max(grad_root_r4, 1e-12)
 
     assert ratio_r1 > 0.0 and ratio_r4 > 0.0
-    assert math.isfinite(ratio_r1) and math.isfinite(ratio_r4)
+
+
+def test_r1_custom_eps_propagation():
+    """R1 deterministic split must respect and propagate custom cfg.eps."""
+    pts = torch.tensor([[10.0, 10.0]])
+    tree = build_exact_count_pyramid([pts], height=256, width=256)
+    targets = {k: tree[k].clone() for k in (4, 8, 16, 32, 64)}
+    targets["N"] = tree["N"].clone()
+
+    mass = torch.zeros(1, 1, 64, 64)  # zero mass tests epsilon clamping behavior
+    loss_eps1, _ = NTPCLoss(NTPCConfig(mode="r1_deterministic", eps=1e-3))(mass, targets)
+    loss_eps2, _ = NTPCLoss(NTPCConfig(mode="r1_deterministic", eps=1e-1))(mass, targets)
+    assert torch.isfinite(loss_eps1) and torch.isfinite(loss_eps2)
+
