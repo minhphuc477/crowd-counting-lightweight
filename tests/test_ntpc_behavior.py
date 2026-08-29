@@ -86,3 +86,50 @@ def test_modes_and_required_targets_fail_fast():
     targets.pop("y8")
     with pytest.raises(KeyError):
         NTPCLoss(NTPCConfig(mode="r5_full_ntpc"))(mass, targets)
+
+
+def test_validate_targets_catches_non_integer():
+    """_validate_targets must raise ValueError when count targets contain fractional values."""
+    _, mass, targets = _case()
+    # Inject a fractional value into the level-16 target
+    targets[16] = targets[16] + 0.5
+    with pytest.raises(ValueError, match="non-integer"):
+        NTPCLoss(NTPCConfig(mode="r4_dtm_tree16"))(mass, targets)
+
+
+def test_validate_targets_catches_conservation_violation():
+    """_validate_targets must raise ValueError when child counts don't sum to N."""
+    _, mass, targets = _case()
+    # Corrupt the level-32 target by adding extra mass in one cell
+    targets[32] = targets[32].clone()
+    targets[32].view(-1)[0] += 100.0   # now sum(Y32) != N
+    with pytest.raises(ValueError, match="conservation"):
+        NTPCLoss(NTPCConfig(mode="r4_dtm_tree16"))(mass, targets)
+
+
+def test_validate_targets_catches_negative_values():
+    """_validate_targets must raise ValueError when any count target is negative."""
+    _, mass, targets = _case()
+    targets[16] = targets[16].clone()
+    targets[16].view(-1)[0] = -1.0
+    with pytest.raises(ValueError, match="negative"):
+        NTPCLoss(NTPCConfig(mode="r4_dtm_tree16"))(mass, targets)
+
+
+def test_r0_has_root_nb_component():
+    """R0 must now log root_magnitude > 0 (Root-NB is shared with R1–R5)."""
+    _, mass, targets = _case()
+    _, logs = NTPCLoss(NTPCConfig(mode="r0_exact"))(mass, targets)
+    assert logs["root_magnitude"].item() > 0.0, "R0 root_magnitude must be positive"
+    assert logs["exact_regression"].item() > 0.0, "R0 exact_regression must be positive"
+
+
+def test_multinomial_renormalization_stable():
+    """multinomial_nll_none must remain finite even when pi values before renorm sum > 1."""
+    from hpc.losses.ntpc import multinomial_nll_none
+    # All-ones pi: before renorm, sum = 4 per row (> 1); after renorm each = 0.25
+    pi = torch.ones(5, 4) * 10.0   # very large, clamp_min has no effect; renorm fixes sum
+    y = torch.tensor([[2., 1., 1., 0.]] * 5)
+    nll = multinomial_nll_none(y, pi)
+    assert torch.isfinite(nll).all(), "multinomial_nll must be finite after renormalization"
+

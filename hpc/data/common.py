@@ -10,6 +10,7 @@ import torchvision.transforms.functional as TF
 
 from .transforms import ScaleAwareSafeGeometricTransforms, PhotometricTransforms
 from ..targets.block_counts import build_hierarchical_block_counts
+from .point_counts import build_exact_count_pyramid
 from ..targets.allocation_target import build_block_constrained_allocation_target
 from ..targets.special_blocks import build_special_block_masks
 from ..targets.routing_target import build_routing_target
@@ -106,6 +107,11 @@ class BaseCrowdDataset(Dataset):
                 )
         if self.allocation_block % 4 != 0:
             raise ValueError("allocation_block must be divisible by output stride 4")
+        if self.ntpc_only and self.crop_size % 64 != 0:
+            raise ValueError(
+                f"NTPC mode requires crop_size divisible by 64 (for stride-4 → stride-64 "
+                f"pyramid), got crop_size={self.crop_size}"
+            )
 
         self.geom_transform = ScaleAwareSafeGeometricTransforms(
             crop_size=self.crop_size,
@@ -160,10 +166,41 @@ class BaseCrowdDataset(Dataset):
                 img_degraded = img_clean.clone()
 
             # --- Count and density targets ---
-            gt_blocks = build_hierarchical_block_counts(
-                crop_pts, self.crop_size, self.crop_size, self.hnb_blocks
-            )
-            gt_count = torch.tensor(float(len(crop_pts)), dtype=torch.float32)
+            if self.ntpc_only:
+                # Recursive exact integer tree: Y4→Y8→Y16→Y32→Y64
+                # build_exact_count_pyramid returns batched tensors (batch=1); unbatch here.
+                tree = build_exact_count_pyramid(
+                    [torch.from_numpy(crop_pts).float()],
+                    height=self.crop_size,
+                    width=self.crop_size,
+                    block_sizes=(4, 8, 16, 32, 64),
+                )
+                gt_count = tree["N"][0].float()   # scalar ()
+                gt_blocks = {
+                    b: tree[b][0].float()          # 2D (H/b, W/b)
+                    for b in (4, 8, 16, 32, 64)
+                }
+                # Fast per-sample sanity: integer, non-negative, conservation
+                assert gt_count.ndim == 0, f"gt_count must be scalar, got shape {gt_count.shape}"
+                for b in (4, 8, 16, 32, 64):
+                    assert gt_blocks[b].ndim == 2, (
+                        f"gt_blocks[{b}] must be 2D, got shape {gt_blocks[b].shape}"
+                    )
+                    assert torch.equal(gt_blocks[b], gt_blocks[b].round()), (
+                        f"gt_blocks[{b}] contains non-integer values"
+                    )
+                    assert gt_blocks[b].min() >= 0, (
+                        f"gt_blocks[{b}] contains negative values"
+                    )
+                    assert torch.allclose(gt_blocks[b].sum(), gt_count, atol=1e-4), (
+                        f"gt_blocks[{b}] count {gt_blocks[b].sum().item()} != "
+                        f"gt_count {gt_count.item()}"
+                    )
+            else:
+                gt_blocks = build_hierarchical_block_counts(
+                    crop_pts, self.crop_size, self.crop_size, self.hnb_blocks
+                )
+                gt_count = torch.tensor(float(len(crop_pts)), dtype=torch.float32)
             if self.ntpc_only:
                 return {
                     "image": img_clean,

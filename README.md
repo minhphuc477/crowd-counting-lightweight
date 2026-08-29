@@ -117,3 +117,102 @@ f:\lightweightcrcn\.venv\Scripts\python evaluate.py --config configs/sha.yaml --
 ```powershell
 f:\lightweightcrcn\.venv\Scripts\python tools/export_onnx.py --config configs/sha.yaml --checkpoint runs/sha/best.pt --output hpc_lite.onnx
 ```
+
+---
+
+## NTPC — Neural Tree-Pólya Crowd Counting (Paper Ablations)
+
+> **Important**: NTPC matched ablations (R0–R5) use a **separate trainer** (`train_ntpc.py`)
+> and a dedicated loss module (`hpc/losses/ntpc.py`).  Do **not** use `train.py` for NTPC
+> experiments — it runs the legacy HNB/HardNegative/Allocation objective which is an
+> entirely different experimental setup.
+
+### NTPC Ablation Modes
+
+| Mode | Description |
+|------|-------------|
+| `r0_exact` | **Baseline**: Root-NB + mean regional L1 (64/32/16) |
+| `r1_deterministic` | Root-NB + deterministic allocation (proportion matching) |
+| `r2_flat_dm` | Root-NB + flat Dirichlet-Multinomial over all level-16 cells |
+| `r3_multinomial_tree` | Root-NB + tree Multinomial (no concentration parameter) |
+| `r4_dtm_tree16` | Root-NB + full DTM tree down to stride-16 **(proposed core)** |
+| `r4_dtm_tree8` | R4 + DTM supervision at stride-8 (depth study) |
+| `r4_dtm_tree4` | R4 + DTM supervision at stride-4 (depth study) |
+| `r5_full_ntpc` | R4 + dense-gate 16→8 auxiliary term **(full NTPC)** |
+
+All modes share the same Root-NB for count magnitude; spatial mechanism is the only variable.
+
+### Run NTPC Ablation (SHA Part A, R4)
+
+```powershell
+f:\lightweightcrcn\.venv\Scripts\python train_ntpc.py --config configs/ntpc_sha.yaml
+```
+
+A minimal config template (`configs/ntpc_sha.yaml`):
+
+```yaml
+experiment:
+  seed: 42
+  save_dir: ./runs/ntpc_r4_sha
+
+dataset:
+  name: sha
+  root: /path/to/ShanghaiTech
+  crop_size: 256        # must be divisible by 64 for NTPC pyramid
+
+augmentation:
+  scale_range: [0.7, 1.3]
+  flip_prob: 0.5
+
+training:
+  batch_size: 16
+  epochs: 300
+  amp: true
+  evaluate_every: 5
+  gradient_audit_every: 50
+
+loss:
+  mode: r4_dtm_tree16   # change to r0_exact … r5_full_ntpc for ablations
+  root_loss: nb
+  kappa_shared: 20.0
+
+optimizer:
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 5.0
+
+schedule:
+  epochs: 300
+  warmup_epochs: 25
+
+model:
+  backbone: mobilenetv4_conv_small_050
+  neck_width: 32
+  truncate_backbone: true
+```
+
+### Target Pipeline
+
+NTPC training generates ground-truth count pyramids via `hpc/data/point_counts.py`:
+
+```
+Y4 (H/4 × W/4)  ← rasterize points at stride-4
+  → Y8  = sum_2x2(Y4)
+  → Y16 = sum_2x2(Y8)
+  → Y32 = sum_2x2(Y16)
+  → Y64 = sum_2x2(Y32)
+```
+
+Each level is verified to be integer-valued and to conserve total count.  The `gt_blocks` dict
+exposed to `NTPCLoss` always contains all five levels `{4, 8, 16, 32, 64}` regardless of mode.
+The criterion selects which levels to supervise.
+
+### Tests
+
+```powershell
+# NTPC-specific tests
+f:\lightweightcrcn\.venv\Scripts\pytest tests/test_ntpc_behavior.py tests/test_point_counts.py tests/test_tree_loss.py -v
+
+# Full suite (excluding legacy SR48 audit)
+f:\lightweightcrcn\.venv\Scripts\pytest tests/ --ignore=tests/test_sr48.py -v
+```

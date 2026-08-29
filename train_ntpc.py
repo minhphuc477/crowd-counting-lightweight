@@ -119,8 +119,12 @@ def estimate_crop_statistics(dataset, max_samples: int | None = None) -> dict:
         "mean_crop_count": float(counts.mean()),
         "count_mean": float(counts.mean()),
         "count_variance": float(counts.var(unbiased=counts.numel() > 1)),
+        # interpolation="higher" ensures threshold is an integer present in the data,
+        # avoiding fractional values like 3.4 for integer-valued count cells.
         "dense_threshold_q85": (
-            float(torch.quantile(positive, 0.85)) if positive.numel() else 1.0
+            int(torch.quantile(positive, 0.85, interpolation="higher").item())
+            if positive.numel()
+            else 1
         ),
     }
 
@@ -141,6 +145,23 @@ def component_gradient_norms(
         )
         result[f"grad_{name}"] = math.sqrt(squared)
     return result
+
+
+def _grad_names_for_mode(mode: str) -> Tuple[str, ...]:
+    """Return the component names to audit per gradient for a given NTPC mode.
+
+    Always audits the shared root + tree-16 components.  Finer-grain terms are
+    added only when that depth is actually supervised, so the audit directly
+    answers whether fine-level gradients dominate.
+    """
+    names = ["root_magnitude", "root_to_64", "64_to_32", "32_to_16"]
+    if mode in {"r4_dtm_tree8", "r4_dtm_tree4"}:
+        names.append("16_to_8")
+    if mode == "r4_dtm_tree4":
+        names.append("8_to_4")
+    if mode == "r5_full_ntpc":
+        names.append("16_to_8_dense")
+    return tuple(names)
 
 
 def _append_csv(path: str, row: dict, fieldnames: list[str]) -> None:
@@ -265,7 +286,7 @@ def main() -> None:
     grad_clip = float(optimizer_cfg.get("grad_clip", 5.0))
     evaluate_every = int(training_cfg.get("evaluate_every", training_cfg.get("validate_every", 5)))
     gradient_every = int(training_cfg.get("gradient_audit_every", 50))
-    grad_names = ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8_dense")
+    grad_names = _grad_names_for_mode(criterion.cfg.mode)
 
     train_fields = [
         "epoch", "loss", "root_magnitude", "root_to_64", "64_to_32", "32_to_16",

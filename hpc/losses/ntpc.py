@@ -112,6 +112,7 @@ def dm_from_mass(y: torch.Tensor, child_mass: torch.Tensor, kappa: float) -> tor
 def multinomial_nll_none(y: torch.Tensor, pi: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     y = y.float()
     pi = pi.float().clamp_min(eps)
+    pi = pi / pi.sum(dim=-1, keepdim=True).clamp_min(eps)  # renormalize: clamp can push sum > 1
     n = y.sum(dim=-1)
     log_prob = (
         torch.lgamma(n + 1.0)
@@ -207,6 +208,8 @@ class NTPCLoss(nn.Module):
         self.cfg = cfg or NTPCConfig()
 
     def _required_blocks(self) -> Tuple[int, ...]:
+        if self.cfg.mode == "r0_exact":
+            return (16, 32, 64)   # regional L1 at these three levels
         if self.cfg.mode == "r2_flat_dm":
             return (16,)
         if self.cfg.mode == "r5_full_ntpc" or self.cfg.mode == "r4_dtm_tree8":
@@ -216,9 +219,26 @@ class NTPCLoss(nn.Module):
         return (16, 32, 64)
 
     def _validate_targets(self, targets: Dict[int | str, torch.Tensor]) -> None:
+        """Fail-fast validation: key existence, integer values, non-negative, count conservation."""
         missing = [key for key in ("N", *self._required_blocks()) if key not in targets]
         if missing:
             raise KeyError(f"Mode {self.cfg.mode} requires targets {missing}")
+        N = targets["N"].float().reshape(-1)
+        for key in self._required_blocks():
+            t = targets[key].float()
+            if not torch.allclose(t, t.round(), atol=1e-4, rtol=0):
+                raise ValueError(
+                    f"Target level {key} contains non-integer values; "
+                    "DTM requires exact integer counts."
+                )
+            if (t < 0).any():
+                raise ValueError(f"Target level {key} contains negative values.")
+            s = t.flatten(1).sum(1)
+            if not torch.allclose(s, N, atol=1e-3, rtol=0):
+                raise ValueError(
+                    f"Target level {key} violates count conservation: "
+                    f"sum={s.tolist()} != N={N.tolist()}"
+                )
 
     def _root_nll(self, target: torch.Tensor, mean: torch.Tensor) -> torch.Tensor:
         if self.cfg.root_loss == "nb":
@@ -273,14 +293,20 @@ class NTPCLoss(nn.Module):
         components = {name: zero for name in names}
 
         if self.cfg.mode == "r0_exact":
-            exact = (
-                F.l1_loss(pred_n, target_n)
-                + F.l1_loss(pred[64], target_pyramid[64].to(mass.device).float())
+            # Root-NB: matched to R1–R5 so ablation is fair.
+            root = self.cfg.w_root_nb * self._root_nll(target_n, pred_n).mean()
+            components["root_magnitude"] = root
+            if self.cfg.root_loss == "nb":
+                components["root_nb"] = root
+            # Regional L1: mean over three spatial levels (scale-invariant magnitude).
+            # L_R0 = L_Root-NB + w_exact_reg * mean(L1_64 + L1_32 + L1_16) / 3
+            regional = (
+                F.l1_loss(pred[64], target_pyramid[64].to(mass.device).float())
                 + F.l1_loss(pred[32], target_pyramid[32].to(mass.device).float())
                 + F.l1_loss(pred[16], target_pyramid[16].to(mass.device).float())
-            )
-            components["exact_regression"] = self.cfg.w_exact_regression * exact
-            total = components["exact_regression"]
+            ) / 3.0
+            components["exact_regression"] = self.cfg.w_exact_regression * regional
+            total = root + components["exact_regression"]
             return self._finish(total, components, return_components)
 
         root = self.cfg.w_root_nb * self._root_nll(target_n, pred_n).mean()

@@ -47,7 +47,14 @@ class ShuffleNetV2PyramidBackbone(nn.Module):
 
 
 class MobileNetV4Backbone(nn.Module):
-    """MobileNetV4 feature backbone returning features at reductions 4, 8, 16."""
+    """MobileNetV4 feature backbone returning features at reductions 4, 8, 16.
+
+    The ``truncate`` parameter controls whether stages beyond ``max(target_reductions)``
+    are omitted.  In practice, timm's ``features_only=True`` with explicit ``out_indices``
+    already achieves this: stages beyond the last selected index are not instantiated or
+    executed, so no additional truncation code is needed.  The parameter is accepted for
+    API compatibility but has no further effect beyond index selection.
+    """
 
     def __init__(
         self,
@@ -60,6 +67,10 @@ class MobileNetV4Backbone(nn.Module):
         import timm
         self.model_name = model_name
         self.target_reductions = tuple(int(r) for r in target_reductions)
+        # truncate=True is the intent; timm features_only + out_indices already enforces
+        # it by not instantiating stages beyond max(selected_indices).
+        # Stored only for serialization / state_dict compatibility; not used in forward.
+        self.truncate = bool(truncate)
 
         probe = timm.create_model(model_name, pretrained=False, features_only=True)
         reductions = list(probe.feature_info.reduction())
@@ -84,7 +95,6 @@ class MobileNetV4Backbone(nn.Module):
             features_only=True,
             out_indices=self.selected_indices,
         )
-        self.truncate = bool(truncate)
 
     def forward(self, x: torch.Tensor):
         features = self.backbone(x)
