@@ -15,6 +15,7 @@ def _validate_points(
     source: str,
     coordinate_base: int = 1,
     image_shape: Optional[Tuple[int, int]] = None,
+    tol: float = 1e-3,
 ) -> np.ndarray:
     arr = np.asarray(points, dtype=np.float32)
     if arr.size == 0:
@@ -35,6 +36,18 @@ def _validate_points(
 
     if image_shape is not None:
         w, h = image_shape
+        bad = (
+            (arr[:, 0] < -tol)
+            | (arr[:, 0] > float(w - 1) + tol)
+            | (arr[:, 1] < -tol)
+            | (arr[:, 1] > float(h - 1) + tol)
+        )
+        if bad.any():
+            bad_pts = arr[bad][:10].tolist()
+            raise ValueError(
+                f"Out-of-bounds annotation in {source} (image_size={image_shape}): "
+                f"found {bad.sum()} points out of bounds, samples: {bad_pts}"
+            )
         arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
         arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
 

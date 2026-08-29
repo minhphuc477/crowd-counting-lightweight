@@ -58,7 +58,8 @@ def test_otm_cardinality_and_localization():
     points = otm_localize(mass, seed=42, max_source_points=None)
     assert len(points) == 3, f"Expected 3 points, got {len(points)}"
 
-    gt_points = np.array([[22.0, 22.0], [42.0, 42.0], [82.0, 82.0]], dtype=np.float32)
+    # Cell center coordinates: (5*4 + 1.5, 5*4 + 1.5) = (21.5, 21.5)
+    gt_points = np.array([[21.5, 21.5], [41.5, 41.5], [81.5, 81.5]], dtype=np.float32)
     tp, fp, fn = match_points(points.numpy(), gt_points, threshold=4.0)
     assert tp == 3 and fp == 0 and fn == 0, f"Expected perfect match, got tp={tp}, fp={fp}, fn={fn}"
 

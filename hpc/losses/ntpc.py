@@ -185,19 +185,47 @@ class NTPCConfig:
     eps: float = 1e-8
 
     def __post_init__(self) -> None:
+        import math
+
         self.mode = _MODE_ALIASES.get(self.mode, self.mode)
         if self.mode not in _VALID_MODES:
-            raise ValueError(f"Unsupported NTPC mode: {self.mode}")
+            raise ValueError(f"Unsupported NTPC mode: {self.mode}; must be one of {sorted(_VALID_MODES)}")
         if self.root_loss not in {"nb", "poisson", "l1"}:
-            raise ValueError(f"Unsupported root_loss: {self.root_loss}")
-        if self.root_dispersion <= 0 or self.eps <= 0:
-            raise ValueError("root_dispersion and eps must be positive")
-        for name in (
-            "kappa_root64", "kappa_64_32", "kappa_32_16",
-            "kappa_16_8", "kappa_8_4", "kappa_flat16",
+            raise ValueError(f"Unsupported root_loss: {self.root_loss}; must be 'nb', 'poisson', or 'l1'")
+        if self.root_dispersion <= 0 or self.root_dispersion > 1e4 or not math.isfinite(self.root_dispersion):
+            raise ValueError(f"root_dispersion must be in (0, 10000], got {self.root_dispersion}")
+        if self.dense_threshold_16 < 0 or not math.isfinite(self.dense_threshold_16):
+            raise ValueError(f"dense_threshold_16 must be non-negative and finite, got {self.dense_threshold_16}")
+        if self.eps <= 0 or not math.isfinite(self.eps):
+            raise ValueError(f"eps must be positive and finite, got {self.eps}")
+
+        for k in (
+            "kappa_root64",
+            "kappa_64_32",
+            "kappa_32_16",
+            "kappa_16_8",
+            "kappa_8_4",
+            "kappa_flat16",
         ):
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} must be positive")
+            val = getattr(self, k)
+            if val <= 0 or not math.isfinite(val):
+                raise ValueError(f"{k} must be positive and finite, got {val}")
+
+        for w in (
+            "w_root_nb",
+            "w_root64",
+            "w_64_32",
+            "w_32_16",
+            "w_16_8",
+            "w_8_4",
+            "w_flat_16",
+            "w_exact_regression",
+            "w_deterministic_alloc",
+        ):
+            val = getattr(self, w)
+            if val < 0 or not math.isfinite(val):
+                raise ValueError(f"{w} must be non-negative and finite, got {val}")
+
 
 
 class NTPCLoss(nn.Module):

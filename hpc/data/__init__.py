@@ -1,5 +1,5 @@
 from .transforms import NTPCGeometricTransform
-from .common import BaseCrowdDataset, custom_collate_fn
+from .common import BaseCrowdDataset, ntpc_collate_fn
 from .point_counts import build_exact_count_pyramid, points_to_y4
 from .sha import ShanghaiTechDataset
 from .qnrf import UCFQNRFDataset
@@ -9,7 +9,7 @@ from .sampler import build_density_luminance_sampler, compute_image_density_and_
 __all__ = [
     "NTPCGeometricTransform",
     "BaseCrowdDataset",
-    "custom_collate_fn",
+    "ntpc_collate_fn",
     "build_exact_count_pyramid",
     "points_to_y4",
     "ShanghaiTechDataset",

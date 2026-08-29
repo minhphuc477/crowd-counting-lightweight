@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from hpc.metrics.otm import OTMConfig, otm_localize
+from hpc.metrics.otm import OTMConfig, _epsilon_scaling_transport_plan, otm_localize
 
 
 def test_official_otm_is_deterministic_for_one_seed():
@@ -12,6 +12,43 @@ def test_official_otm_is_deterministic_for_one_seed():
     second = otm_localize(mass, seed=9, max_source_points=None)
     assert torch.equal(first, second)
     assert len(first) == round(float(mass.sum()))
+
+
+def test_otm_cell_center_coordinate_offset():
+    """Stride-4 mass cell at (row=5, col=5) should place source mass at pixel center (21.5, 21.5)."""
+    mass = torch.zeros(16, 16)
+    mass[5, 5] = 1.0  # Exactly 1 point
+    points = otm_localize(mass, output_stride=4, outer_iterations=1, seed=42, max_source_points=None)
+    assert len(points) == 1
+    # Pixel center coordinate of stride-4 cell 5 is 5 * 4 + 1.5 = 21.5
+    assert points[0, 0].item() == pytest.approx(21.5, abs=1e-3)
+    assert points[0, 1].item() == pytest.approx(21.5, abs=1e-3)
+
+
+def test_otm_simultaneous_dual_update_numerical_invariants():
+    """Verify simultaneous dual update produces valid non-negative transport plan matching costs."""
+    torch.manual_seed(42)
+    # S=2 source points, T=2 target points with diagonal cost 0 and off-diagonal cost 16.0
+    source_weight = torch.tensor([[[0.5], [0.5]]], dtype=torch.float32)  # [1, 2, 1]
+    target_weight = torch.tensor([[[0.5], [0.5]]], dtype=torch.float32)  # [1, 2, 1]
+    cost = torch.tensor([[[0.0, 16.0], [16.0, 0.0]]], dtype=torch.float32)  # [1, S=2, T=2]
+
+    plan = _epsilon_scaling_transport_plan(
+        source_weight=source_weight,
+        target_weight=target_weight,
+        cost=cost,
+        blur=0.05,
+        scaling=0.75,
+    )
+    assert plan.shape == (1, 2, 2)
+    assert torch.isfinite(plan).all()
+    assert (plan >= 0).all()
+    # Diagonal matches (cost=0) must receive virtually all transport mass over off-diagonal (cost=16)
+    assert plan[0, 0, 0] > plan[0, 0, 1] * 50
+    assert plan[0, 1, 1] > plan[0, 1, 0] * 50
+    # Marginals must sum to source and target weights
+    torch.testing.assert_close(plan.sum(dim=2), source_weight.squeeze(-1), atol=1e-3, rtol=1e-3)
+    torch.testing.assert_close(plan.sum(dim=1), target_weight.squeeze(-1), atol=1e-3, rtol=1e-3)
 
 
 def test_otm_rounding_and_consistency_diagnostics():
@@ -39,6 +76,12 @@ def test_softplus_source_sparsification_is_explicit_and_bounded():
     )
     assert diagnostics["source_points"] <= 64
     assert diagnostics["source_retained_mass_ratio"] > 0.999
+
+
+def test_otm_rejects_nan_and_inf():
+    nan_mass = torch.full((8, 8), float("nan"))
+    with pytest.raises(ValueError, match="NaN or Inf"):
+        otm_localize(nan_mass)
 
 
 def test_deprecated_fixed_epsilon_api_fails_instead_of_mislabeling_otm():

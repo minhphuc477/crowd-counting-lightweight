@@ -26,7 +26,7 @@ from hpc.metrics.counting import evaluate_counting_metrics
 from hpc.metrics.localization import evaluate_dataset_localization, extract_points_from_mass_map
 from hpc.metrics.otm import otm_localize
 from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
-from hpc.models.hpc_lite import HPCLite
+from hpc.models.factory import build_model_from_config
 from hpc.utils.seed import seed_everything
 
 
@@ -70,16 +70,9 @@ def build_evaluation_dataset(cfg: dict):
 
 
 def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> HPCLite:
-    model_cfg = cfg["model"]
-    model = HPCLite(
-        backbone_name=model_cfg.get("backbone", "mobilenetv4_conv_small_050"),
-        pretrained=False,
-        neck_width=int(model_cfg.get("neck_width", 32)),
-        context_dilations=tuple(model_cfg.get("context_dilations", [1, 2, 3])),
-        use_p8_context=bool(model_cfg.get("use_p8_context", False)),
-        use_repblock=bool(model_cfg.get("use_repblock", False)),
-        eps_d=float(model_cfg.get("eps_d", 1e-8)),
-    ).to(device)
+    if not os.path.isfile(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    model = build_model_from_config(cfg).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = checkpoint.get("model_state_dict", checkpoint)
     model.load_state_dict(state, strict=True)

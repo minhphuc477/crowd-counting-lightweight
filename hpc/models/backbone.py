@@ -22,8 +22,13 @@ class MobileNetV4Backbone(nn.Module):
         super().__init__()
         import timm
 
+        if tuple(target_reductions) != (4, 8, 16):
+            raise ValueError(
+                f"MobileNetV4Backbone requires target_reductions=(4, 8, 16), got {target_reductions}"
+            )
+
         self.model_name = model_name
-        self.target_reductions = tuple(int(r) for r in target_reductions)
+        self.target_reductions = (4, 8, 16)
 
         # Isolate RNG state when creating the probe model so feature inspection does not consume RNG
         with torch.random.fork_rng(devices=[]):

@@ -22,6 +22,7 @@ from hpc.models.hpc_lite import HPCLite
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.metrics.localization import extract_points_from_mass_map
 from hpc.metrics.otm import otm_localize
+from hpc.models.factory import build_model_from_config
 
 
 def apply_colormap_jet(density_norm: np.ndarray) -> np.ndarray:
@@ -49,16 +50,9 @@ def visualize_crowd_localization(
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. Load Model
-    m_cfg = cfg["model"]
-    model = HPCLite(
-        backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
-        pretrained=False,
-        neck_width=m_cfg.get("neck_width", 32),
-        context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
-        use_p8_context=bool(m_cfg.get("use_p8_context", False)),
-        use_repblock=bool(m_cfg.get("use_repblock", False)),
-        eps_d=float(m_cfg.get("eps_d", 1e-8)),
-    ).to(device)
+    if not os.path.isfile(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    model = build_model_from_config(cfg).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
     state_dict = ckpt.get("model_state_dict", ckpt)

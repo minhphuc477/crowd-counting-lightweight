@@ -1,6 +1,7 @@
 import torch
 
 from hpc.models.backbone import MobileNetV4Backbone
+from hpc.models.factory import build_model_from_config
 from hpc.models.hpc_lite import HPCLite
 from hpc.models.neck import AdditiveFPNNeck
 
@@ -20,11 +21,29 @@ def test_model_forward_and_positivity():
 
 
 def test_parameter_budget():
-    """Total deployed parameters must be under 1.5M (target ~0.35M)."""
+    """Total deployed parameters must match the ~0.35M Carrier budget."""
     model = HPCLite(pretrained=False, neck_width=32)
     n_params = sum(p.numel() for p in model.parameters())
-    assert n_params < 1_500_000, f"Parameter count {n_params} exceeds 1.5M budget"
-    assert n_params < 500_000, f"Parameter count {n_params} exceeds 0.5M lightweight budget"
+    assert 349_000 <= n_params <= 352_000, f"Parameter count {n_params} drifted outside [349k, 352k]"
+
+
+def test_factory_build_model_equivalence():
+    """build_model_from_config must build model with matching architecture."""
+    cfg = {
+        "model": {
+            "backbone": "mobilenetv4_conv_small_050",
+            "pretrained": False,
+            "neck_width": 32,
+            "context_dilations": [1, 2, 3],
+            "use_p8_context": False,
+            "use_repblock": False,
+            "eps_d": 1e-8,
+        }
+    }
+    model = build_model_from_config(cfg)
+    assert isinstance(model, HPCLite)
+    n_params = sum(p.numel() for p in model.parameters())
+    assert 349_000 <= n_params <= 352_000
 
 
 def test_arbitrary_padded_inference():

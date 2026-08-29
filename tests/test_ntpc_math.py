@@ -33,8 +33,8 @@ def test_hierarchical_multinomial_equals_flat_leaf():
     P(Y64 | N) * P(Y32 | Y64) * P(Y16 | Y32) == P(Y16 | N)
     """
     torch.manual_seed(42)
-    # Mass map at stride 4: (1, 1, 64, 64) -> 256x256 image
-    mass = torch.rand(1, 1, 64, 64) + 0.1
+    # Multi-batch Mass maps at stride 4: (B=3, 1, 64, 64)
+    mass = torch.rand(3, 1, 64, 64) + 0.1
     pred = sum_pool_mass_pyramid(mass)
 
     # Ground truth targets consistent with tree
@@ -55,14 +55,12 @@ def test_hierarchical_multinomial_equals_flat_leaf():
     # 2. 64 -> 32
     target_32_groups = group_2x2_flat(y32)
     pi_32_groups = probs_from_positive_mass(group_2x2_flat(pred[32]))
-    valid_64 = y64.flatten(1) > 0
-    term_64_32 = multinomial_nll_none(target_32_groups, pi_32_groups)[valid_64].sum(dim=-1)
+    term_64_32 = multinomial_nll_none(target_32_groups, pi_32_groups).sum(dim=-1)
 
     # 3. 32 -> 16
     target_16_groups = group_2x2_flat(y16)
     pi_16_groups = probs_from_positive_mass(group_2x2_flat(pred[16]))
-    valid_32 = y32.flatten(1) > 0
-    term_32_16 = multinomial_nll_none(target_16_groups, pi_16_groups)[valid_32].sum(dim=-1)
+    term_32_16 = multinomial_nll_none(target_16_groups, pi_16_groups).sum(dim=-1)
 
     hierarchical_nll = term_root64 + term_64_32 + term_32_16
 

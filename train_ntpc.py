@@ -14,19 +14,19 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import yaml
 
-from hpc.data.common import custom_collate_fn
+from hpc.data.common import ntpc_collate_fn
 from hpc.data.nwpu import NWPUDataset
 from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
-from hpc.models.hpc_lite import HPCLite
+from hpc.models.factory import build_model_from_config
 from hpc.utils.seed import seed_everything
 
 
 def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
-    return {
+    res = {
         "crop_size": int(ds_cfg.get("crop_size", 256)),
         "is_train": is_train,
         "scale_range": tuple(aug_cfg.get("scale_range", [0.7, 1.3])),
@@ -34,6 +34,9 @@ def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
         "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
     }
+    if "coordinate_base" in ds_cfg:
+        res["coordinate_base"] = int(ds_cfg["coordinate_base"])
+    return res
 
 
 def build_datasets(cfg: dict):
@@ -79,23 +82,28 @@ def build_datasets(cfg: dict):
 
 
 @torch.no_grad()
-def estimate_crop_statistics(dataset, max_samples: int | None = None) -> dict:
-    """Estimate initialization and dense threshold from training crops only."""
+def estimate_crop_statistics(
+    dataset,
+    max_samples: int | None = None,
+    crops_per_image: int = 3,
+) -> dict:
+    """Estimate initialization and dense threshold from training crops across the full dataset."""
     count_values = []
     positive_y16 = []
     limit = len(dataset) if max_samples is None else min(len(dataset), int(max_samples))
     if limit <= 0:
         raise ValueError("Training dataset is empty")
     for index in range(limit):
-        sample = dataset[index]
-        count_values.append(sample["gt_count"].float().reshape(()))
-        if 16 in sample["gt_blocks"]:
-            cells = sample["gt_blocks"][16].float().reshape(-1)
-            positive_y16.append(cells[cells > 0])
+        for _ in range(crops_per_image):
+            sample = dataset[index]
+            count_values.append(sample["gt_count"].float().reshape(()))
+            if 16 in sample["gt_blocks"]:
+                cells = sample["gt_blocks"][16].float().reshape(-1)
+                positive_y16.append(cells[cells > 0])
     counts = torch.stack(count_values)
     positive = torch.cat(positive_y16) if positive_y16 else torch.empty(0)
     return {
-        "samples": limit,
+        "samples": len(count_values),
         "mean_crop_count": float(counts.mean()),
         "count_mean": float(counts.mean()),
         "count_variance": float(counts.var(unbiased=counts.numel() > 1)),
@@ -211,7 +219,7 @@ def main() -> None:
         shuffle=sampler is None,
         sampler=sampler,
         num_workers=int(training_cfg.get("num_workers", 0)),
-        collate_fn=custom_collate_fn,
+        collate_fn=ntpc_collate_fn,
         pin_memory=device.type == "cuda",
         drop_last=bool(training_cfg.get("drop_last", True)),
     )
@@ -221,15 +229,7 @@ def main() -> None:
     model_cfg = cfg["model"]
     if model_cfg.get("pretrained", False) or model_cfg.get("init_checkpoint"):
         raise ValueError("NTPC matched ablations must start from scratch; pretrained/init_checkpoint is forbidden")
-    model = HPCLite(
-        backbone_name=model_cfg.get("backbone", "mobilenetv4_conv_small_050"),
-        pretrained=False,
-        neck_width=int(model_cfg.get("neck_width", 32)),
-        context_dilations=tuple(model_cfg.get("context_dilations", [1, 2, 3])),
-        use_p8_context=bool(model_cfg.get("use_p8_context", False)),
-        use_repblock=bool(model_cfg.get("use_repblock", False)),
-        eps_d=float(model_cfg.get("eps_d", 1e-8)),
-    ).to(device)
+    model = build_model_from_config(cfg).to(device)
     model.init_head_bias_from_data(
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4
     )
@@ -337,12 +337,12 @@ def main() -> None:
             if amp_enabled:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=True)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=True)
                 optimizer.step()
             running_loss += float(loss.detach())
             for name in component_names:

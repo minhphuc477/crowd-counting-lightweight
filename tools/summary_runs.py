@@ -30,11 +30,11 @@ for name, path in runs:
     print(f"\n=======================================================")
     print(f" {name}")
     print(f"=======================================================")
-    print(f" Current Progress      : Epoch {last['epoch']} / 1000")
+    print(f" Current Progress      : Epoch {last['epoch']}")
     print(f" Best Validation Epoch : {best['epoch']}")
     print(f" Best Val MAE          : {float(best['mae']):.2f}")
     print(f" Best Val RMSE         : {float(best['rmse']):.2f}")
-    print(f" Breakdown at Best MAE : Sparse={float(best.get('sparse_mae', 0.0)):.2f} | Med={float(best.get('med_mae', 0.0)):.2f} | Dense={float(best.get('dense_mae', 0.0)):.2f}")
+    print(f" Breakdown at Best MAE : Sparse={float(best.get('sparse_mae', 0.0)):.2f} | Med={float(best.get('medium_mae', 0.0)):.2f} | Dense={float(best.get('dense_mae', 0.0)):.2f}")
     print(f" Latest Val MAE (Ep {last['epoch']}) : {float(last['mae']):.2f}")
 
 # Check Decision Rule (§33) if available

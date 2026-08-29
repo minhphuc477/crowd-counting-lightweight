@@ -82,8 +82,6 @@ class AdditiveFPNNeck(nn.Module):
 
         if return_routes:
             return p4, {
-                "routes8": None,
-                "routes4": None,
                 "p4": p4,
                 "p8": p8,
                 "p16": p16,

@@ -18,7 +18,7 @@ def _dummy_case():
 def test_exact_count_pyramid_conservation():
     """All levels of exact count pyramid must conserve count and be exact integers."""
     pts = [
-        torch.tensor([[0.0, 0.0], [255.9, 255.9], [128.0, 128.0]]),
+        torch.tensor([[0.0, 0.0], [255.0, 255.0], [128.0, 128.0]]),
         torch.empty(0, 2),
     ]
     tree = build_exact_count_pyramid(pts, height=256, width=256)
@@ -43,11 +43,11 @@ def test_parent_child_adjacent_exact_conservation():
 
 
 def test_points_to_y4_known_boundaries():
-    """Points exactly on boundaries must be assigned to correct floor(coord / 4) cells."""
+    """Points on boundary transitions must be assigned to floor((coord + 0.5) / 4) cells."""
     pts = torch.tensor([
         [0.0, 0.0],      # cell (0, 0)
-        [3.99, 3.99],    # cell (0, 0)
-        [4.0, 4.0],      # cell (1, 1)
+        [3.49, 3.49],    # cell (0, 0)
+        [3.51, 3.51],    # cell (1, 1)
         [255.0, 255.0],  # cell (63, 63)
     ])
     y4 = points_to_y4(pts, 256, 256)

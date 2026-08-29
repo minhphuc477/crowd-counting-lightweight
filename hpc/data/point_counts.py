@@ -21,7 +21,7 @@ def pad_hw_to_multiple(h: int, w: int, multiple: int = 64) -> Tuple[int, int]:
 
 def block_sum(x: torch.Tensor, k: int) -> torch.Tensor:
     """Non-overlapping exact sum pooling via reshape (preserves float32/int exactness).
-    
+
     Args:
         x: [B, C, H, W] or [B, H, W] or [1, H, W]
         k: integer downscaling factor
@@ -51,61 +51,6 @@ def sum_2x2(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def points_to_impulse_map(
-    points_batch: Sequence[torch.Tensor],
-    height: int,
-    width: int,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    batch_size = len(points_batch)
-    impulse = torch.zeros(batch_size, 1, height, width, device=device, dtype=dtype)
-    for b, pts in enumerate(points_batch):
-        if pts is None or pts.numel() == 0:
-            continue
-        pts = pts.to(device=device)
-        x = torch.floor(pts[:, 0]).long()
-        y = torch.floor(pts[:, 1]).long()
-        valid = (x >= 0) & (x < width) & (y >= 0) & (y < height)
-        x, y = x[valid], y[valid]
-        if x.numel() == 0:
-            continue
-        flat_idx = y * width + x
-        flat = impulse[b, 0].view(-1)
-        flat.scatter_add_(0, flat_idx, torch.ones(flat_idx.numel(), device=device, dtype=dtype))
-    return impulse
-
-
-@torch.no_grad()
-def points_to_y8_grid(
-    points_xy: torch.Tensor,
-    height: int,
-    width: int,
-    device: torch.device | None = None,
-    dtype: torch.dtype = torch.float32,
-) -> torch.Tensor:
-    """Rasterize points directly onto stride-8 integer count grid (1, H//8, W//8)."""
-    if device is None:
-        device = points_xy.device if isinstance(points_xy, torch.Tensor) else torch.device("cpu")
-    gh = height // 8
-    gw = width // 8
-    grid = torch.zeros((1, gh, gw), device=device, dtype=dtype)
-    if points_xy is None or points_xy.numel() == 0:
-        return grid
-    pts = points_xy.to(device=device, dtype=torch.float32)
-    x, y = pts[:, 0], pts[:, 1]
-    valid = (x >= 0) & (x < width) & (y >= 0) & (y < height)
-    x, y = x[valid], y[valid]
-    if x.numel() == 0:
-        return grid
-    bx = torch.floor(x / 8.0).long()
-    by = torch.floor(y / 8.0).long()
-    flat_idx = by * gw + bx
-    grid.view(-1).scatter_add_(0, flat_idx, torch.ones(flat_idx.numel(), device=device, dtype=dtype))
-    return grid
-
-
-@torch.no_grad()
 def points_to_y4(
     points_xy: torch.Tensor,
     H: int,
@@ -113,8 +58,9 @@ def points_to_y4(
     device: torch.device | None = None,
 ) -> torch.Tensor:
     """Rasterize points onto stride-4 grid (1, H/4, W/4).
-    
-    points_xy: [N, 2], zero-based continuous coordinates (x, y) with x in [0, W), y in [0, H).
+
+    points_xy: [N, 2], zero-based continuous coordinates (x, y) with
+               support x in [-0.5, W - 0.5), y in [-0.5, H - 0.5).
     H, W must be divisible by 64 for tree hierarchy.
     """
     if H % 64 != 0 or W % 64 != 0:
@@ -135,15 +81,15 @@ def points_to_y4(
     x = pts[:, 0]
     y = pts[:, 1]
 
-    valid = (x >= 0) & (x < W) & (y >= 0) & (y < H)
+    valid = (x >= -0.5) & (x < float(W) - 0.5) & (y >= -0.5) & (y < float(H) - 0.5)
     x = x[valid]
     y = y[valid]
 
     if x.numel() == 0:
         return y4
 
-    cell_x = torch.floor(x / 4.0).long()
-    cell_y = torch.floor(y / 4.0).long()
+    cell_x = torch.floor((x + 0.5) / 4.0).long().clamp(0, gw - 1)
+    cell_y = torch.floor((y + 0.5) / 4.0).long().clamp(0, gh - 1)
 
     # Tensor flat indexing: row (y) * width + col (x)
     flat_idx = cell_y * gw + cell_x
@@ -155,77 +101,6 @@ def points_to_y4(
 
 
 @torch.no_grad()
-def build_count_tree(
-    points_xy: torch.Tensor,
-    H: int,
-    W: int,
-    device: torch.device | None = None,
-) -> Dict[str | int, torch.Tensor]:
-    """Build single-image recursive count tree down to stride-4."""
-    y4 = points_to_y4(points_xy, H, W, device=device)
-    y8 = sum_2x2(y4)
-    y16 = sum_2x2(y8)
-    y32 = sum_2x2(y16)
-    y64 = sum_2x2(y32)
-
-    N = y4.sum()
-
-    # Exact hierarchy assertions
-    assert torch.equal(y8.sum(), N), "y8 count mismatch"
-    assert torch.equal(y16.sum(), N), "y16 count mismatch"
-    assert torch.equal(y32.sum(), N), "y32 count mismatch"
-    assert torch.equal(y64.sum(), N), "y64 count mismatch"
-
-    return {
-        4: y4,
-        8: y8,
-        16: y16,
-        32: y32,
-        64: y64,
-        "y4": y4,
-        "y8": y8,
-        "y16": y16,
-        "y32": y32,
-        "y64": y64,
-        "N": N,
-    }
-
-
-def assert_integer_tensor(x: torch.Tensor, atol: float = 1e-5) -> None:
-    """Verify that counts are non-negative integers."""
-    if not torch.allclose(x, x.round(), atol=atol, rtol=0):
-        raise RuntimeError("Count target contains fractional values; DTM requires exact integers.")
-
-
-assert_integer_counts = assert_integer_tensor
-
-
-def assert_parent_child_conservation(
-    parent: torch.Tensor,
-    children_4: torch.Tensor,
-    tol: float = 1e-5,
-) -> None:
-    p = parent.float().reshape(parent.shape[0], -1)
-    c = children_4.float().sum(dim=-1).reshape(parent.shape[0], -1)
-    if not torch.allclose(p, c, atol=tol, rtol=0):
-        raise RuntimeError("Broken target hierarchy: children sum does not equal parent count.")
-
-
-def validate_targets(t: Dict[str | int, torch.Tensor]) -> None:
-    """Validate full count tree targets for integer validity and conservation."""
-    for name in (4, 8, 16, 32, 64, "y4", "y8", "y16", "y32", "y64"):
-        if name in t:
-            assert_integer_tensor(t[name])
-
-    N = t["N"].reshape(-1)
-    for name in (4, 8, 16, 32, 64):
-        if name in t:
-            s = t[name].flatten(1).sum(1)
-            if not torch.allclose(s, N, atol=1e-4, rtol=0):
-                raise RuntimeError(f"Target level {name} violates count conservation (sum {s} != {N})")
-
-
-@torch.no_grad()
 def build_exact_count_pyramid(
     points_batch: Sequence[torch.Tensor],
     height: int,
@@ -234,7 +109,7 @@ def build_exact_count_pyramid(
     pad_multiple: int = 64,
     device: torch.device | None = None,
 ) -> Dict[int | str, torch.Tensor]:
-    """Build only the requested exact block-count levels plus ``N``."""
+    """Build exact block-count levels {4, 8, 16, 32, 64} plus total count ``N``."""
     if device is None:
         device = torch.device("cpu")
 
@@ -263,10 +138,14 @@ def build_exact_count_pyramid(
 
     n_batch = y4_batch.flatten(1).sum(dim=1)
 
-    assert torch.allclose(y8_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
-    assert torch.allclose(y16_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
-    assert torch.allclose(y32_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
-    assert torch.allclose(y64_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4)
+    if not torch.allclose(y8_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4):
+        raise RuntimeError("Count conservation failed between Y4 and Y8")
+    if not torch.allclose(y16_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4):
+        raise RuntimeError("Count conservation failed between Y4 and Y16")
+    if not torch.allclose(y32_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4):
+        raise RuntimeError("Count conservation failed between Y4 and Y32")
+    if not torch.allclose(y64_batch.flatten(1).sum(dim=1), n_batch, atol=1e-4):
+        raise RuntimeError("Count conservation failed between Y4 and Y64")
 
     all_levels = {4: y4_batch, 8: y8_batch, 16: y16_batch, 32: y32_batch, 64: y64_batch}
     result: Dict[int | str, torch.Tensor] = {"N": n_batch}

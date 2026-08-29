@@ -15,6 +15,7 @@ def _validate_points(
     source: str,
     coordinate_base: int = 1,
     image_shape: Optional[Tuple[int, int]] = None,
+    tol: float = 1e-3,
 ) -> np.ndarray:
     """Validate and convert coordinates to 0-based pixel-center coordinates [0, W-1] x [0, H-1]."""
     arr = np.asarray(points, dtype=np.float32)
@@ -37,7 +38,19 @@ def _validate_points(
 
     if image_shape is not None:
         w, h = image_shape
-        # Guarantee points lie within image bounds [0, W-1] x [0, H-1]
+        bad = (
+            (arr[:, 0] < -tol)
+            | (arr[:, 0] > float(w - 1) + tol)
+            | (arr[:, 1] < -tol)
+            | (arr[:, 1] > float(h - 1) + tol)
+        )
+        if bad.any():
+            bad_pts = arr[bad][:10].tolist()
+            raise ValueError(
+                f"Out-of-bounds annotation in {source} (image_size={image_shape}): "
+                f"found {bad.sum()} points out of bounds, samples: {bad_pts}"
+            )
+        # Snap slight numerical float noise within tolerance
         arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
         arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
 
@@ -89,7 +102,6 @@ class ShanghaiTechDataset(BaseCrowdDataset):
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
         coordinate_base: int = 1,
-        # Accepted as keyword arguments for backwards-compatibility callers but ignored:
         **kwargs,
     ):
         candidates = [

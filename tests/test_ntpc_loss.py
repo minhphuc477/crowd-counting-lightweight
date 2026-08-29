@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from hpc.data.point_counts import build_exact_count_pyramid
+from hpc.losses.negative_binomial import negative_binomial_nll_mean_dispersion
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss, sum_pool_mass_pyramid
 
 
@@ -44,6 +45,34 @@ def test_r0_has_root_nb_and_regional():
     _, logs = NTPCLoss(NTPCConfig(mode="r0_exact"))(mass, targets)
     assert logs["root_magnitude"].item() > 0.0
     assert logs["exact_regression"].item() > 0.0
+
+
+def test_ntpc_config_validation_catches_invalids():
+    """NTPCConfig must reject negative/non-finite weights, invalid dispersions and thresholds."""
+    with pytest.raises(ValueError):
+        NTPCConfig(w_root64=-1.0)
+    with pytest.raises(ValueError):
+        NTPCConfig(w_64_32=float("nan"))
+    with pytest.raises(ValueError):
+        NTPCConfig(root_dispersion=0.0)
+    with pytest.raises(ValueError):
+        NTPCConfig(root_dispersion=20000.0)  # Exceeds max 10000
+    with pytest.raises(ValueError):
+        NTPCConfig(dense_threshold_16=-1.0)
+    with pytest.raises(ValueError):
+        NTPCConfig(kappa_root64=-5.0)
+
+
+def test_negative_binomial_dispersion_validation():
+    """NB NLL must reject non-positive or overly large dispersion parameters."""
+    y = torch.tensor([10.0])
+    mu = torch.tensor([10.0])
+    with pytest.raises(ValueError):
+        negative_binomial_nll_mean_dispersion(y, mu, dispersion=0.0)
+    with pytest.raises(ValueError):
+        negative_binomial_nll_mean_dispersion(y, mu, dispersion=-1.0)
+    with pytest.raises(ValueError):
+        negative_binomial_nll_mean_dispersion(y, mu, dispersion=50000.0)
 
 
 def test_all_modes_backward_pass():

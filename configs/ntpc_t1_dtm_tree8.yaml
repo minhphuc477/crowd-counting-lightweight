@@ -1,4 +1,3 @@
-# T1: DTM Tree to 8 (64 -> 32 -> 16 -> 8)
 experiment:
   name: ntpc_t1_dtm_tree8
   seed: 42
@@ -9,33 +8,29 @@ dataset:
   part: part_A
   root: ./data/ShanghaiTech
   crop_size: 256
-  output_stride: 4
-  hnb_blocks: [8, 16, 32, 64]
-  allocation_block: 8
-  image_mean: [0.5, 0.5, 0.5]
-  image_std: [0.5, 0.5, 0.5]
+  coordinate_base: 1
+  image_mean: [0.485, 0.456, 0.406]
+  image_std: [0.229, 0.224, 0.225]
 
 model:
-  name: hpc_lite
   backbone: mobilenetv4_conv_small_050
   pretrained: false
   neck_width: 32
   context_dilations: [1, 2, 3]
   use_p8_context: false
   use_repblock: false
-  eps_d: 1.0e-8
-  init_checkpoint: null
+  eps_d: 1.0e-08
 
 statistics:
+  seed: 12345
   root_dispersion: 50.0
+  max_samples: null
+  crops_per_image: 3
 
 loss:
   mode: r4_dtm_tree8
   root_loss: nb
-  kappa_root64: 20.0
-  kappa_64_32: 20.0
-  kappa_32_16: 20.0
-  kappa_16_8: 20.0
+  kappa_shared: 20.0
   w_root_nb: 1.0
   w_root64: 1.0
   w_64_32: 1.0
@@ -45,18 +40,14 @@ loss:
 augmentation:
   scale_range: [0.7, 1.3]
   flip_prob: 0.5
-  crop_sampling: uniform
 
 sampler:
   weighted: false
-  density_bins: 5
-  luminance_bins: 4
-  power: 0.5
 
 optimizer:
   name: AdamW
-  lr: 1.0e-4
-  weight_decay: 1.0e-4
+  lr: 0.0001
+  weight_decay: 0.0001
   grad_clip: 5.0
 
 schedule:

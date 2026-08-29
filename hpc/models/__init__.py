@@ -1,16 +1,12 @@
-from .blocks import ConvGNAct, DSResidual, DepthwiseDilated, RepDWBlock, make_group_norm
 from .backbone import MobileNetV4Backbone
-from .neck import AdditiveFPNNeck
+from .factory import build_model_from_config
 from .hpc_lite import HPCLite, inv_softplus
+from .neck import AdditiveFPNNeck
 
 __all__ = [
-    "ConvGNAct",
-    "DSResidual",
-    "DepthwiseDilated",
-    "RepDWBlock",
-    "make_group_norm",
+    "HPCLite",
     "MobileNetV4Backbone",
     "AdditiveFPNNeck",
-    "HPCLite",
+    "build_model_from_config",
     "inv_softplus",
 ]

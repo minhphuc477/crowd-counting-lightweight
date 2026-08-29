@@ -1,19 +1,18 @@
 experiment:
-  name: ntpc_sha_default
+  name: ntpc_sha
   seed: 42
-  save_dir: ./runs/ntpc_sha_default
+  save_dir: ./runs/ntpc_sha
 
 dataset:
   name: sha
   part: part_A
   root: ./data/ShanghaiTech
   crop_size: 256
-  output_stride: 4
+  coordinate_base: 1
   image_mean: [0.485, 0.456, 0.406]
   image_std: [0.229, 0.224, 0.225]
 
 model:
-  name: hpc_lite
   backbone: mobilenetv4_conv_small_050
   pretrained: false
   neck_width: 32
@@ -25,7 +24,8 @@ model:
 statistics:
   seed: 12345
   root_dispersion: 50.0
-  max_samples: 100
+  max_samples: null
+  crops_per_image: 3
 
 loss:
   mode: r4_dtm_tree16

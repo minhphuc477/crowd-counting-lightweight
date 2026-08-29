@@ -12,7 +12,7 @@ from hpc.data.nwpu import NWPUDataset
 from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
-from hpc.models.hpc_lite import HPCLite
+from hpc.models.factory import build_model_from_config
 
 
 def build_evaluation_dataset(cfg: dict, split: str | None = None):
@@ -24,6 +24,8 @@ def build_evaluation_dataset(cfg: dict, split: str | None = None):
         "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
     }
+    if "coordinate_base" in ds_cfg:
+        common_args["coordinate_base"] = int(ds_cfg["coordinate_base"])
 
     if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
         part = ds_cfg.get("part", "part_B" if name.endswith("_b") else "part_A")
@@ -52,28 +54,22 @@ def evaluate_model(
     output_json: str = "eval_results.json",
     split: str | None = None,
 ) -> dict:
+    if not os.path.isfile(checkpoint_path):
+        raise FileNotFoundError(f"Evaluation checkpoint file not found: {checkpoint_path}")
+
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Evaluation on device: {device}")
 
-    # 1. Load Model
-    m_cfg = cfg["model"]
-    model = HPCLite(
-        backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
-        pretrained=False,
-        neck_width=int(m_cfg.get("neck_width", 32)),
-        context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
-    ).to(device)
+    # 1. Load Model via Centralized Factory
+    model = build_model_from_config(cfg).to(device)
 
-    if os.path.exists(checkpoint_path):
-        ckpt = torch.load(checkpoint_path, map_location=device)
-        state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
-        model.load_state_dict(state_dict)
-        print(f"Loaded checkpoint from: {checkpoint_path}")
-    else:
-        print(f"Warning: Checkpoint not found at {checkpoint_path}. Running with initialized weights.")
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
+    model.load_state_dict(state_dict, strict=True)
+    print(f"Loaded checkpoint from: {checkpoint_path}")
 
     model.eval()
 

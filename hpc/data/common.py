@@ -21,7 +21,7 @@ class BaseCrowdDataset(Dataset):
     """Base dataset for NTPC crowd counting.
 
     Exposes recursive exact integer count pyramids {4, 8, 16, 32, 64}.
-    Use :func:`custom_collate_fn` for batching.
+    Use :func:`ntpc_collate_fn` for training batching.
     """
 
     def __init__(
@@ -86,13 +86,13 @@ class BaseCrowdDataset(Dataset):
         if self.is_train:
             image_crop, crop_pts = self.geom_transform(image, points)
 
-            # Assert geometry bounds
+            # Assert geometry bounds in continuous pixel-center support [-0.5, crop_size - 0.5)
             if len(crop_pts) > 0:
                 if not (
-                    np.all(crop_pts[:, 0] >= 0.0)
-                    and np.all(crop_pts[:, 0] <= float(self.crop_size - 1.0))
-                    and np.all(crop_pts[:, 1] >= 0.0)
-                    and np.all(crop_pts[:, 1] <= float(self.crop_size - 1.0))
+                    np.all(crop_pts[:, 0] >= -0.5)
+                    and np.all(crop_pts[:, 0] < float(self.crop_size) - 0.5)
+                    and np.all(crop_pts[:, 1] >= -0.5)
+                    and np.all(crop_pts[:, 1] < float(self.crop_size) - 0.5)
                 ):
                     raise RuntimeError("Geometric transform produced out-of-bounds points")
 
@@ -153,8 +153,8 @@ class BaseCrowdDataset(Dataset):
         }
 
 
-def custom_collate_fn(batch: List[dict]) -> dict:
-    """Collate function supporting the NTPC training and evaluation schema."""
+def ntpc_collate_fn(batch: List[dict]) -> dict:
+    """Collate function supporting fixed-size cropped training batches."""
     images = torch.stack([s["image"] for s in batch])
     gt_count = torch.stack([s["gt_count"] for s in batch])
 
@@ -175,3 +175,6 @@ def custom_collate_fn(batch: List[dict]) -> dict:
         res["has_gt"] = torch.stack([s["has_gt"] for s in batch])
 
     return res
+
+
+custom_collate_fn = ntpc_collate_fn

@@ -17,7 +17,7 @@ _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-from hpc.models.hpc_lite import HPCLite
+from hpc.models.factory import build_model_from_config
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -112,16 +112,7 @@ def main() -> None:
     args = parser.parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
-    model_cfg = cfg["model"]
-    model = HPCLite(
-        backbone_name=model_cfg.get("backbone", "mobilenetv4_conv_small_050"),
-        pretrained=False,
-        neck_width=int(model_cfg.get("neck_width", 32)),
-        context_dilations=tuple(model_cfg.get("context_dilations", [1, 2, 3])),
-        use_p8_context=bool(model_cfg.get("use_p8_context", False)),
-        use_repblock=bool(model_cfg.get("use_repblock", False)),
-        eps_d=float(model_cfg.get("eps_d", 1e-8)),
-    )
+    model = build_model_from_config(cfg)
     profile = profile_model_efficiency(
         model,
         input_resolution=args.resolution,

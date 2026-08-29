@@ -1,15 +1,16 @@
 """Parameter-free OT-M localization for a conserved count-mass map.
 
 This is a PyTorch reimplementation of the alternating OT-step/M-step from
-Lin & Chan, CVPR 2023.  It follows the official epsilon-scaling Sinkhorn
+Lin & Chan, CVPR 2023. It follows the official epsilon-scaling Sinkhorn
 solver, pixel-coordinate cost, density-weighted initialization, barycentric
-M-step, and stopping criterion.  Coordinates returned by this module are
-always ``(x, y)`` in input-image pixels.
+M-step, and stopping criterion. Coordinates returned by this module are
+always ``(x, y)`` in input-image pixels (zero-based pixel centers).
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from typing import Dict, Tuple, Union
 
 import numpy as np
@@ -38,8 +39,8 @@ class OTMConfig:
             raise ValueError("output_stride and max_iterations must be positive")
         if not 0.0 < self.ot_scaling < 1.0:
             raise ValueError("ot_scaling must lie in (0, 1)")
-        if self.blur <= 0 or self.cost_factor <= 0:
-            raise ValueError("blur and cost_factor must be positive")
+        if self.blur <= 0 or self.cost_factor <= 0 or self.mean_stop_px <= 0:
+            raise ValueError("blur, cost_factor, and mean_stop_px must be positive")
         if self.source_relative_threshold < 0:
             raise ValueError("source_relative_threshold cannot be negative")
         if self.max_source_points is not None and self.max_source_points <= 0:
@@ -108,8 +109,13 @@ def _epsilon_scaling_transport_plan(
         next_target = _softmin(log_source, source_potential, reverse_cost, epsilon)
         source_potential = 0.5 * (source_potential + next_source)
         target_potential = 0.5 * (target_potential + next_target)
-    source_potential = _softmin(log_target, target_potential, cost, blur)
-    target_potential = _softmin(log_source, source_potential, reverse_cost, blur)
+
+    # Official upstream simultaneous update for final plan
+    new_source = _softmin(log_target, target_potential, cost, blur)
+    new_target = _softmin(log_source, source_potential, reverse_cost, blur)
+    source_potential = new_source
+    target_potential = new_target
+
     kernel = torch.exp(
         (source_potential + target_potential.permute(0, 2, 1) - cost) / blur
     )
@@ -132,15 +138,16 @@ def _source_distribution(
     rows = torch.div(indices, width, rounding_mode="floor").float()
     columns = (indices % width).float()
     stride = float(config.output_stride)
+    # Stride-4 cell center: average of 4 pixel centers (e.g. 0, 1, 2, 3 -> 1.5)
+    cell_center_offset = (stride - 1.0) / 2.0
     coordinates_yx = torch.stack(
-        ((rows + 0.5) * stride, (columns + 0.5) * stride), dim=-1
+        (rows * stride + cell_center_offset, columns * stride + cell_center_offset), dim=-1
     )
     compaction = "none"
     coarse_height, coarse_width = height, width
     if config.max_source_points is not None and indices.numel() > config.max_source_points:
         # Aggregate the complete thresholded measure into a deterministic
-        # coarse grid. Unlike top-k pruning, this preserves total source mass
-        # and represents each bin at its mass-weighted barycenter.
+        # coarse grid. Preserves total source mass and represents each bin at its mass-weighted barycenter.
         aspect = height / max(width, 1)
         coarse_height = min(height, max(1, int(np.sqrt(config.max_source_points * aspect))))
         coarse_width = min(width, max(1, config.max_source_points // coarse_height))
@@ -216,16 +223,10 @@ def otm_localize(
     seed: int = 42,
     image_hw: Tuple[int, int] | None = None,
     return_diagnostics: bool = False,
-    # Deprecated arguments accepted explicitly so old calls fail informatively.
     sinkhorn_iterations: int | None = None,
     epsilon: float | None = None,
 ) -> torch.Tensor | Tuple[torch.Tensor, Dict[str, object]]:
-    """Decode a single positive mass map with OT-M.
-
-    ``max_source_points`` is a deterministic mass-preserving grid compaction
-    for the dense Softplus field. Set it to ``None`` for the exact full-grid
-    source used by the official code.
-    """
+    """Decode a single positive mass map with OT-M."""
     if sinkhorn_iterations is not None or epsilon is not None:
         raise ValueError(
             "Fixed-epsilon/sinkhorn_iterations belong to the old approximation; "
@@ -237,6 +238,9 @@ def otm_localize(
         mass = mass[0]
     if mass.ndim != 2:
         raise ValueError(f"Expected a 2D mass map, got {tuple(mass.shape)}")
+    if not torch.isfinite(mass).all():
+        raise ValueError("OT-M input mass contains NaN or Inf values")
+
     mass = mass.detach().float().clamp_min(0.0)
     config = OTMConfig(
         output_stride=output_stride,
@@ -251,6 +255,9 @@ def otm_localize(
         seed=seed,
     )
     predicted_count = float(mass.sum())
+    if not math.isfinite(predicted_count) or predicted_count < 0:
+        raise ValueError(f"Invalid predicted count from mass map: {predicted_count}")
+
     point_count = max(0, int(predicted_count + 0.5))
     diagnostics: Dict[str, object] = {
         "predicted_count": predicted_count,
