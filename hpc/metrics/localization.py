@@ -39,8 +39,9 @@ def extract_points_from_mass_map(
     peak_y, peak_x = np.nonzero(peak_mask)
     if len(peak_x) == 0:
         return np.empty((0, 2), dtype=np.float32)
-    orig_x = (peak_x.astype(np.float32) + 0.5) * stride
-    orig_y = (peak_y.astype(np.float32) + 0.5) * stride
+    offset = (float(stride) - 1.0) / 2.0
+    orig_x = peak_x.astype(np.float32) * float(stride) + offset
+    orig_y = peak_y.astype(np.float32) * float(stride) + offset
     return np.stack([orig_x, orig_y], axis=1)
 
 

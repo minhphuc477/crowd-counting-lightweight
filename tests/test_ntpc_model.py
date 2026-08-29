@@ -59,3 +59,26 @@ def test_arbitrary_padded_inference():
     assert count.ndim == 1 and count.shape[0] == 1
     assert torch.isfinite(count).all()
     assert d_valid.shape == (1, 1, 80, 103)
+
+
+def test_padding_multiple_invariance_diagnostic():
+    """Diagnostic test: measure count variance across pad_multiple=16, 32, 64 for non-divisible image."""
+    torch.manual_seed(42)
+    model = HPCLite(pretrained=False, neck_width=32)
+    model.eval()
+
+    # Arbitrary non-divisible image (317, 411)
+    x = torch.randn(1, 3, 317, 411)
+    with torch.no_grad():
+        count_16, d_16 = model.predict(x, pad_multiple=16)
+        count_32, d_32 = model.predict(x, pad_multiple=32)
+        count_64, d_64 = model.predict(x, pad_multiple=64)
+
+    # Valid output shapes must be identical (80, 103) regardless of pad_multiple
+    assert d_16.shape == d_32.shape == d_64.shape == (1, 1, 80, 103)
+    diff_32_16 = abs(count_32.item() - count_16.item())
+    diff_64_32 = abs(count_64.item() - count_32.item())
+    assert diff_32_16 < 0.5 and diff_64_32 < 0.5, (
+        f"Significant count drift across padding policies: 16={count_16.item():.3f}, "
+        f"32={count_32.item():.3f}, 64={count_64.item():.3f}"
+    )

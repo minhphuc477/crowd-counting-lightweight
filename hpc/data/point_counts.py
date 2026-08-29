@@ -81,7 +81,7 @@ def points_to_y4(
     x = pts[:, 0]
     y = pts[:, 1]
 
-    valid = (x >= -0.5) & (x < float(W) - 0.5) & (y >= -0.5) & (y < float(H) - 0.5)
+    valid = (x >= -0.5) & (x <= float(W) - 0.5) & (y >= -0.5) & (y <= float(H) - 0.5)
     x = x[valid]
     y = y[valid]
 

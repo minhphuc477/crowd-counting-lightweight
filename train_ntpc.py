@@ -198,7 +198,11 @@ def main() -> None:
     # Isolated statistics seed so dataset initialization and tau_D are deterministic across runs
     stats_seed = int(stats_cfg.get("seed", 12345))
     seed_everything(stats_seed)
-    crop_stats = estimate_crop_statistics(train_ds, stats_cfg.get("max_samples", 100))
+    crop_stats = estimate_crop_statistics(
+        train_ds,
+        max_samples=stats_cfg.get("max_samples"),
+        crops_per_image=int(stats_cfg.get("crops_per_image", 3)),
+    )
     # Restore experiment seed before model/loader instantiation
     seed_everything(seed)
 

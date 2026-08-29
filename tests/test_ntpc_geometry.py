@@ -33,6 +33,21 @@ def test_flip_twice_is_identity():
     np.testing.assert_allclose(pts, pts_restored, atol=1e-6)
 
 
+def test_exact_boundary_flip_reflection_closed():
+    """Points at exact boundaries -0.5 and W-0.5 must reflect to each other and remain within closed support."""
+    crop_size = 256
+    pts = np.array([
+        [-0.5, 100.0],
+        [float(crop_size) - 0.5, 100.0],
+    ], dtype=np.float32)
+
+    flipped_x = np.clip((float(crop_size) - 1.0) - pts[:, 0], -0.5, float(crop_size) - 0.5)
+
+    assert flipped_x[0] == pytest.approx(float(crop_size) - 0.5)
+    assert flipped_x[1] == pytest.approx(-0.5)
+    assert np.all(flipped_x >= -0.5) and np.all(flipped_x <= float(crop_size) - 0.5)
+
+
 def test_isotropic_scaling_preserves_aspect_ratio():
     """Transform must preserve aspect ratio for non-square aspect ratios (e.g. 100x1000, 300x1000)."""
     random.seed(42)

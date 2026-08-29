@@ -30,8 +30,8 @@ class OTMConfig:
     cost_factor: float = 1.0 / 32.0
     mean_stop_px: float = 1.0
     source_relative_threshold: float = 1e-8
-    max_source_points: int | None = 8192
-    max_transport_elements: int = 50_000_000
+    max_source_points: int | None = 4096
+    max_transport_elements: int = 5_000_000
     seed: int = 42
 
     def __post_init__(self) -> None:
@@ -292,11 +292,14 @@ def otm_localize(
     source_mass, source_yx, source_diagnostics = _source_distribution(mass, config)
     diagnostics.update(source_diagnostics)
     transport_elements = int(source_mass.numel()) * point_count
+    peak_vram_mb = float(transport_elements * 20) / (1024.0 * 1024.0)
     diagnostics["transport_elements"] = transport_elements
+    diagnostics["peak_vram_mb_est"] = peak_vram_mb
     if transport_elements > config.max_transport_elements:
         raise MemoryError(
-            f"OT-M transport matrix requires {transport_elements:,} elements; "
-            f"limit is {config.max_transport_elements:,}. Reduce max_source_points explicitly."
+            f"OT-M transport matrix requires {transport_elements:,} elements "
+            f"(~{peak_vram_mb:.1f} MB peak VRAM); "
+            f"limit is {config.max_transport_elements:,} elements. Reduce max_source_points explicitly."
         )
 
     # OT-M uses equal total mass m on the source and m unit target atoms.

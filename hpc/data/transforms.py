@@ -70,28 +70,32 @@ class NTPCGeometricTransform:
             pts[:, 0] -= float(crop_x)
             pts[:, 1] -= float(crop_y)
 
-            # Filter points in continuous support [-0.5, crop_size - 0.5)
+            # Filter points in closed continuous support [-0.5, crop_size - 0.5]
             valid = (
                 (pts[:, 0] >= -0.5)
-                & (pts[:, 0] < float(self.crop_size) - 0.5)
+                & (pts[:, 0] <= float(self.crop_size) - 0.5)
                 & (pts[:, 1] >= -0.5)
-                & (pts[:, 1] < float(self.crop_size) - 0.5)
+                & (pts[:, 1] <= float(self.crop_size) - 0.5)
             )
             pts = pts[valid]
 
-        # 3. Random horizontal flip
+        # 3. Random horizontal flip (invariant under reflection [-0.5, W-0.5] <-> [-0.5, W-0.5])
         if random.random() < self.flip_prob:
             image_crop = image_crop.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             if len(pts) > 0:
-                pts[:, 0] = (float(self.crop_size) - 1.0) - pts[:, 0]
+                pts[:, 0] = np.clip(
+                    (float(self.crop_size) - 1.0) - pts[:, 0],
+                    -0.5,
+                    float(self.crop_size) - 0.5,
+                )
 
         # 4. Invariant assertion on transformed points
         if len(pts) > 0:
             if not (
                 np.all(pts[:, 0] >= -0.5)
-                and np.all(pts[:, 0] < float(self.crop_size) - 0.5)
+                and np.all(pts[:, 0] <= float(self.crop_size) - 0.5)
                 and np.all(pts[:, 1] >= -0.5)
-                and np.all(pts[:, 1] < float(self.crop_size) - 0.5)
+                and np.all(pts[:, 1] <= float(self.crop_size) - 0.5)
             ):
                 raise RuntimeError(
                     f"Geometric transform produced out-of-bounds points for crop_size={self.crop_size}"

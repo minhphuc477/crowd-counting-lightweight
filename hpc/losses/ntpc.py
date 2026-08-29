@@ -329,17 +329,15 @@ class NTPCLoss(nn.Module):
         parent_gt: torch.Tensor,
         child_gt: torch.Tensor,
         child_mass: torch.Tensor,
-        zero: torch.Tensor,
     ) -> torch.Tensor:
+        """Per-image sum of parent L1 allocation errors (shape: (B,))."""
         parent = parent_gt.float().flatten(1)
         target_children = group_2x2_flat(child_gt.float())
         pi = probs_from_positive_mass(group_2x2_flat(child_mass.float()))
         expected = parent.unsqueeze(-1) * pi
-        valid = parent > 0
-        if not valid.any():
-            return zero
         per_parent = (expected - target_children).abs().sum(dim=-1)
-        return (per_parent[valid] / parent[valid].clamp_min(1.0)).mean()
+        valid = (parent > 0).float()
+        return (per_parent * valid).sum(dim=-1)
 
     def forward(
         self,
@@ -389,21 +387,21 @@ class NTPCLoss(nn.Module):
             root_parent = target_n.reshape(-1, 1)
             y64_flat = target_pyramid[64].to(mass.device).float().flatten(1)
             pi64 = probs_from_positive_mass(pred[64].flatten(1))
-            valid_root = target_n > 0
-            if valid_root.any():
-                root_alloc = (
-                    (root_parent * pi64 - y64_flat).abs().sum(dim=-1)[valid_root]
-                    / target_n[valid_root].clamp_min(1.0)
-                ).mean()
-            else:
-                root_alloc = zero
-            allocation = root_alloc
-            allocation = allocation + self._deterministic_split(
-                target_pyramid[64].to(mass.device), target_pyramid[32].to(mass.device), pred[32], zero
+            root_alloc = (root_parent * pi64 - y64_flat).abs().sum(dim=-1)
+            split64 = self._deterministic_split(
+                target_pyramid[64].to(mass.device), target_pyramid[32].to(mass.device), pred[32]
             )
-            allocation = allocation + self._deterministic_split(
-                target_pyramid[32].to(mass.device), target_pyramid[16].to(mass.device), pred[16], zero
+            split32 = self._deterministic_split(
+                target_pyramid[32].to(mass.device), target_pyramid[16].to(mass.device), pred[16]
             )
+            components["root_to_64"] = self.cfg.w_root64 * root_alloc.mean()
+            components["64_to_32"] = self.cfg.w_64_32 * split64.mean()
+            components["32_to_16"] = self.cfg.w_32_16 * split32.mean()
+            allocation = (
+                self.cfg.w_root64 * root_alloc
+                + self.cfg.w_64_32 * split64
+                + self.cfg.w_32_16 * split32
+            ).mean()
             components["deterministic_alloc"] = self.cfg.w_deterministic_alloc * allocation
             return self._finish(root + components["deterministic_alloc"], components, return_components)
 
@@ -429,7 +427,14 @@ class NTPCLoss(nn.Module):
                 group_2x2_flat(target_pyramid[16].to(mass.device).float()),
                 probs_from_positive_mass(group_2x2_flat(pred[16])),
             ).sum(1)
-            components["multinomial_tree"] = (root64 + split64 + split32).mean()
+            components["root_to_64"] = self.cfg.w_root64 * root64.mean()
+            components["64_to_32"] = self.cfg.w_64_32 * split64.mean()
+            components["32_to_16"] = self.cfg.w_32_16 * split32.mean()
+            components["multinomial_tree"] = (
+                self.cfg.w_root64 * root64
+                + self.cfg.w_64_32 * split64
+                + self.cfg.w_32_16 * split32
+            ).mean()
             return self._finish(root + components["multinomial_tree"], components, return_components)
 
         root64 = self.cfg.w_root64 * root_to_64_nll(

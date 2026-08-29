@@ -21,10 +21,9 @@ def test_peak_extraction():
     pts = extract_points_from_mass_map(mass, stride=4, threshold_abs=0.1, min_distance_px=8)
     assert len(pts) == 3, f"Expected 3 extracted points, got {len(pts)}"
     
-    expected = np.array([[42.0, 42.0], [82.0, 82.0], [122.0, 122.0]], dtype=np.float32)
+    expected = np.array([[41.5, 41.5], [81.5, 81.5], [121.5, 121.5]], dtype=np.float32)
     diff = np.abs(np.sort(pts, axis=0) - np.sort(expected, axis=0))
-    assert np.all(diff < 1e-3), "Extracted point coordinates mismatch"
-    print("  [✓] Peak extraction from continuous mass map: PASS")
+    assert np.all(diff < 1e-3), f"Extracted point coordinates mismatch: got {pts}, expected {expected}"
 
 
 def test_localization_matching():

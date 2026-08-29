@@ -85,7 +85,7 @@ def visualize_crowd_localization(
         # Model inference
         img_tensor = sample["image"].unsqueeze(0).to(device)
         with torch.no_grad():
-            pred_cnt, d_map = model.predict(img_tensor, pad_multiple=16)
+            pred_cnt, d_map = model.predict(img_tensor, pad_multiple=32)
 
         pred_val = float(pred_cnt.item())
         d_np = d_map.squeeze().cpu().numpy()  # (H/4, W/4)
@@ -109,23 +109,29 @@ def visualize_crowd_localization(
         # 3. Predicted Localization Points Canvas
         pred_canvas = raw_img.copy()
         draw_pred = ImageDraw.Draw(pred_canvas)
+
         if method == "otm":
-            pred_pts = otm_localize(
-                d_map[0, 0], output_stride=4, image_hw=(h, w), seed=seed + int(idx)
-            ).cpu().numpy()
-        elif method == "local_max":
-            pred_pts = extract_points_from_mass_map(d_np, stride=4)
+            pred_pts_t = otm_localize(
+                d_map.squeeze(0),
+                output_stride=4,
+                seed=seed,
+                max_source_points=None,
+            )
+            pred_pts = pred_pts_t.cpu().numpy()
         else:
-            raise ValueError("method must be 'otm' or 'local_max'")
+            pred_pts = extract_points_from_mass_map(
+                d_np, stride=4, threshold_abs=0.01, min_distance_px=4
+            )
+
         for pt in pred_pts:
             px, py = float(pt[0]), float(pt[1])
             draw_pred.ellipse([px - 3, py - 3, px + 3, py + 3], fill="lime", outline="black")
 
-        # Combine 3 panels horizontally
-        combined = Image.new("RGB", (w * 3, h + 50), color=(25, 25, 25))
-        combined.paste(gt_canvas, (0, 50))
-        combined.paste(blend_canvas, (w, 50))
-        combined.paste(pred_canvas, (w * 2, 50))
+        # Concatenate canvases horizontally
+        combined = Image.new("RGB", (w * 3, h + 40), color=(30, 30, 30))
+        combined.paste(gt_canvas, (0, 40))
+        combined.paste(blend_canvas, (w, 40))
+        combined.paste(pred_canvas, (w * 2, 40))
 
         # Title bar text
         draw_combined = ImageDraw.Draw(combined)
@@ -146,9 +152,9 @@ def visualize_crowd_localization(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/sha.yaml", help="Path to config YAML")
-    parser.add_argument("--checkpoint", type=str, default="runs/sha/best.pt", help="Path to checkpoint")
-    parser.add_argument("--output_dir", type=str, default="runs/sha/visualizations", help="Output directory")
+    parser.add_argument("--config", type=str, default="configs/ntpc_r4_neural_dtm_tree.yaml", help="Path to config YAML")
+    parser.add_argument("--checkpoint", type=str, default="runs/ntpc_r4_neural_dtm_tree/best.pt", help="Path to checkpoint")
+    parser.add_argument("--output_dir", type=str, default="runs/ntpc_r4_neural_dtm_tree/visualizations", help="Output directory")
     parser.add_argument("--num_samples", type=int, default=5, help="Number of test images to visualize")
     parser.add_argument("--method", choices=["local_max", "otm"], default="otm")
     parser.add_argument("--seed", type=int, default=42)

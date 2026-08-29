@@ -51,6 +51,6 @@ if "R4" in best_results and "R1" in best_results and "R2" in best_results:
     print(f" R1 (S-DC Det) MAE : {r1_mae:.2f} -> R4 Beats R1: {'YES [✓]' if beats_r1 else 'NO [✗]'}")
     print(f" R2 (Flat DM)  MAE : {r2_mae:.2f} -> R4 Beats R2: {'YES [✓]' if beats_r2 else 'NO [✗]'}")
     if beats_r1 and beats_r2:
-        print(" -> CONCLUSION: PROBABILISTIC DTM TREE HYPOTHESIS CONFIRMED!")
+        print(" -> CONCLUSION: PASSES FIRST-PASS FALSIFICATION (§33); proceed to multi-seed confirmation runs.")
     else:
         print(" -> CONCLUSION: Falsification condition triggered or training still in progress.")

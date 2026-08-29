@@ -92,3 +92,10 @@ def test_deprecated_fixed_epsilon_api_fails_instead_of_mislabeling_otm():
 def test_otm_config_rejects_invalid_scaling():
     with pytest.raises(ValueError):
         OTMConfig(ot_scaling=1.0)
+
+
+def test_otm_memory_guard_raises_on_huge_transport():
+    """OT-M should raise MemoryError when estimated transport matrix exceeds limit."""
+    mass = torch.ones(10, 10)  # 100 source cells, 100 target points -> 10,000 elements
+    with pytest.raises(MemoryError, match="OT-M transport matrix requires"):
+        otm_localize(mass, max_transport_elements=100, max_source_points=None)
