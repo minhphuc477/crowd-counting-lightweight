@@ -1,10 +1,18 @@
 import pytest
 import torch
+import yaml
+from pathlib import Path
 
 from hpc.models.backbone import MobileNetV4Backbone
-from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
+from hpc.models.factory import (
+    assert_checkpoint_compatible,
+    build_model_from_config,
+    resolve_pretrained_spec,
+    validate_pretrained_normalization,
+)
 from hpc.models.hpc_lite import HPCLite
 from hpc.models.neck import AdditiveFPNNeck
+from train_ntpc import build_optimizer
 
 
 def test_model_forward_and_positivity():
@@ -22,10 +30,12 @@ def test_model_forward_and_positivity():
 
 
 def test_parameter_budget():
-    """Total deployed parameters must match the ~0.35M Carrier budget."""
+    """Dead stride-32 stages must not inflate the deployed parameter budget."""
     model = HPCLite(pretrained=False, neck_width=32)
     n_params = sum(p.numel() for p in model.parameters())
-    assert 349_000 <= n_params <= 352_000, f"Parameter count {n_params} drifted outside [349k, 352k]"
+    assert 95_000 <= n_params <= 98_000, f"Parameter count {n_params} drifted outside [95k, 98k]"
+    assert model.backbone.truncated_after == "blocks.2"
+    assert len(model.backbone.backbone.blocks) == 3
 
 
 def test_factory_build_model_equivalence():
@@ -44,7 +54,107 @@ def test_factory_build_model_equivalence():
     model = build_model_from_config(cfg)
     assert isinstance(model, HPCLite)
     n_params = sum(p.numel() for p in model.parameters())
-    assert 349_000 <= n_params <= 352_000
+    assert 95_000 <= n_params <= 98_000
+
+
+def test_truncated_backbone_is_exactly_equal_to_full_timm_features():
+    import timm
+
+    torch.manual_seed(7)
+    full = timm.create_model(
+        "mobilenetv4_conv_small_050",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3),
+    ).eval()
+    truncated = MobileNetV4Backbone(
+        "mobilenetv4_conv_small_050", pretrained=False
+    ).eval()
+    incompatible = truncated.backbone.load_state_dict(full.state_dict(), strict=False)
+    assert not incompatible.missing_keys
+    assert all(key.startswith("blocks.3.") or key.startswith("blocks.4.") for key in incompatible.unexpected_keys)
+    image = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        expected = full(image)
+        actual = truncated(image)
+    for expected_level, actual_level in zip(expected, actual):
+        torch.testing.assert_close(actual_level, expected_level, rtol=0, atol=0)
+
+
+def test_pretrained_contract_and_offline_checkpoint_construction():
+    cfg = {
+        "model": {
+            "backbone": "mobilenetv4_conv_small_050.e3000_r224_in1k",
+            "pretrained": True,
+        },
+        "dataset": {
+            "name": "sha",
+            "image_mean": [0.5, 0.5, 0.5],
+            "image_std": [0.5, 0.5, 0.5],
+        },
+    }
+    spec = validate_pretrained_normalization(cfg)
+    assert spec is not None
+    assert spec["source"] == "timm/mobilenetv4_conv_small_050.e3000_r224_in1k"
+    assert spec["mean"] == (0.5, 0.5, 0.5)
+
+    # Evaluation/checkpoint loading must preserve provenance without downloading weights.
+    model = build_model_from_config(cfg, load_pretrained=False)
+    assert model.pretrained_requested is True
+    assert model.pretrained_loaded is False
+    assert model.backbone.pretrained is False
+
+    bad = {
+        **cfg,
+        "dataset": {
+            **cfg["dataset"],
+            "image_mean": [0.485, 0.456, 0.406],
+            "image_std": [0.229, 0.224, 0.225],
+        },
+    }
+    with pytest.raises(ValueError, match="normalization mismatch"):
+        validate_pretrained_normalization(bad)
+
+
+def test_published_configs_pin_pretraining_and_normalization():
+    root = Path(__file__).resolve().parents[1]
+    manifest = yaml.safe_load((root / "configs/ntpc_one_seed_experiments.yaml").read_text())
+    for relative_path in manifest["training_order"]:
+        cfg = yaml.safe_load((root / relative_path).read_text())
+        assert cfg["model"]["pretrained"] is True
+        assert ".e3000_r224_in1k" in cfg["model"]["backbone"]
+        assert resolve_pretrained_spec(cfg) is not None
+        validate_pretrained_normalization(cfg)
+        assert cfg["optimizer"]["backbone_lr_scale"] == pytest.approx(0.1)
+
+
+def test_ablation_configs_differ_only_in_experiment_and_loss():
+    root = Path(__file__).resolve().parents[1]
+    manifest = yaml.safe_load((root / "configs/ntpc_one_seed_experiments.yaml").read_text())
+    configs = [yaml.safe_load((root / path).read_text()) for path in manifest["training_order"]]
+    controlled_sections = (
+        "dataset", "model", "statistics", "augmentation", "sampler",
+        "optimizer", "schedule", "training",
+    )
+    for section in controlled_sections:
+        assert all(cfg[section] == configs[0][section] for cfg in configs[1:]), (
+            f"Ablation protocol drifted in shared section '{section}'"
+        )
+
+
+def test_discriminative_optimizer_groups_are_disjoint_and_scaled():
+    model = HPCLite(pretrained=False, neck_width=32)
+    optimizer = build_optimizer(
+        model,
+        {"name": "AdamW", "lr": 1e-4, "backbone_lr_scale": 0.1, "weight_decay": 1e-4},
+    )
+    groups = {group["name"]: group for group in optimizer.param_groups}
+    assert groups["backbone"]["lr"] == pytest.approx(1e-5)
+    assert groups["task"]["lr"] == pytest.approx(1e-4)
+    backbone_ids = {id(parameter) for parameter in groups["backbone"]["params"]}
+    task_ids = {id(parameter) for parameter in groups["task"]["params"]}
+    assert backbone_ids.isdisjoint(task_ids)
+    assert backbone_ids | task_ids == {id(parameter) for parameter in model.parameters()}
 
 
 def test_direct_arbitrary_resolution():
@@ -75,6 +185,36 @@ def test_arbitrary_direct_and_padded_inference():
     assert count_padded.ndim == 1 and count_padded.shape[0] == 1
     assert torch.isfinite(count_padded).all()
     assert d_padded.shape == (1, 1, 80, 103)
+
+
+@pytest.mark.parametrize("bad_value", [0, -4, 3.5, True])
+def test_predict_rejects_invalid_pad_multiple(bad_value):
+    model = HPCLite(pretrained=False, neck_width=32).eval()
+    with pytest.raises(ValueError, match="positive integer"):
+        model.predict(torch.randn(1, 3, 32, 32), pad_multiple=bad_value)
+
+
+def test_data_driven_head_bias_does_not_modify_pretrained_backbone():
+    model = HPCLite(pretrained=False, neck_width=32)
+    backbone_before = {
+        name: tensor.detach().clone() for name, tensor in model.backbone.state_dict().items()
+    }
+    bias_before = model.head_out.bias.detach().clone()
+    model.init_head_bias_from_data(mean_crop_count=80.0, crop_size=256)
+    assert not torch.equal(model.head_out.bias, bias_before)
+    for name, tensor in model.backbone.state_dict().items():
+        torch.testing.assert_close(tensor, backbone_before[name], rtol=0, atol=0)
+
+
+def test_explicit_tiled_inference_shape_count_and_validation():
+    model = HPCLite(pretrained=False, neck_width=32).eval()
+    image = torch.randn(1, 3, 81, 97)
+    count, mass = model.predict_tiled(image, tile_size=64, halo=16)
+    assert mass.shape == (1, 1, 21, 25)
+    torch.testing.assert_close(count, mass.sum(dim=(-1, -2, -3)))
+    assert torch.isfinite(mass).all()
+    with pytest.raises(ValueError, match="positive multiple of 16"):
+        model.predict_tiled(image, tile_size=63)
 
 
 def test_checkpoint_compatibility_assertion():
@@ -114,6 +254,9 @@ def test_all_cli_modules_import():
     import tools.eval_ntpc_localization_depth
     import tools.export_onnx
     import tools.profile_model
+    import tools.create_smoke_dataset
+    import tools.run_ntpc_one_seed
+    import tools.summary_runs
     import tools.visualize_localization
 
 
@@ -145,5 +288,3 @@ def test_arbitrary_resolution_padding_sensitivity():
     # Relative difference between direct unpadded inference and padded-crop inference should be very small
     rel_diff = abs(float(cnt_direct) - float(cnt_padded)) / max(float(cnt_direct), 1e-4)
     assert rel_diff < 0.05, f"Padding policy sensitivity too high: direct={cnt_direct.item()}, padded={cnt_padded.item()}, rel={rel_diff:.4f}"
-
-

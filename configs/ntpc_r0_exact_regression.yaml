@@ -8,13 +8,15 @@ dataset:
   part: part_A
   root: ./data/ShanghaiTech
   crop_size: 256
-  coordinate_base: 1
-  image_mean: [0.485, 0.456, 0.406]
-  image_std: [0.229, 0.224, 0.225]
+  # Official PET/DM-Count convention: preserve raw ShanghaiTech MAT coordinates.
+  coordinate_base: 0
+  # Must match the pinned timm MobileNetV4 ImageNet-1k weights.
+  image_mean: [0.5, 0.5, 0.5]
+  image_std: [0.5, 0.5, 0.5]
 
 model:
-  backbone: mobilenetv4_conv_small_050
-  pretrained: false
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
   neck_width: 32
   context_dilations: [1, 2, 3]
   use_p8_context: false
@@ -44,6 +46,7 @@ sampler:
 optimizer:
   name: AdamW
   lr: 0.0001
+  backbone_lr_scale: 0.1
   weight_decay: 0.0001
   grad_clip: 5.0
 

@@ -9,7 +9,13 @@ from ..metrics.subgroup import evaluate_subgroup_diagnostics
 
 
 @torch.no_grad()
-def evaluate_counting(model: nn.Module, dataset, device: torch.device) -> dict:
+def evaluate_counting(
+    model: nn.Module,
+    dataset,
+    device: torch.device,
+    tile_size: int | None = None,
+    tile_halo: int = 64,
+) -> dict:
     """Single-scale full-image evaluation on a labeled dataset.
 
     Returns overall metrics (MAE, RMSE, NAE, Bias) and subgroup diagnostics.
@@ -21,7 +27,10 @@ def evaluate_counting(model: nn.Module, dataset, device: torch.device) -> dict:
         if not bool(sample.get("has_gt", True)):
             raise ValueError("Evaluation requires a labeled validation/test split")
         image = sample["image"].unsqueeze(0).to(device)
-        prediction, _ = model.predict(image, pad_multiple=None)
+        if tile_size is None:
+            prediction, _ = model.predict(image, pad_multiple=None)
+        else:
+            prediction, _ = model.predict_tiled(image, tile_size=tile_size, halo=tile_halo)
         predictions.append(float(prediction.item()))
         ground_truths.append(float(sample["gt_count"]))
     result = evaluate_counting_metrics(predictions, ground_truths)

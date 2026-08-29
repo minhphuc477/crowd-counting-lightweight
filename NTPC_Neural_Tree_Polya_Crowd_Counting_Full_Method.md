@@ -4,7 +4,7 @@
 **Status:** research specification  
 **Task:** ultra-lightweight point-supervised crowd counting  
 **Primary objective:** strong counting accuracy with a clearly defensible contribution under a sub-0.5M parameter budget  
-**Training protocol:** from scratch; no old checkpoint, no teacher, no knowledge distillation, no inherited weights  
+**Training protocol:** pinned ImageNet-1k backbone pretraining; no old crowd checkpoint, teacher, knowledge distillation, or warm start
 **Core idea:** learn one positive conserved mass map and train its regional allocation as an image-conditioned Tree-Pólya / Dirichlet-tree count process.
 
 ---
@@ -884,7 +884,7 @@ for the tree contribution to be convincing.
 
 ---
 
-# 17. Scratch-training rule
+# 17. Matched pretrained-initialization rule
 
 All official experiments must follow:
 
@@ -897,21 +897,30 @@ NO inherited crowd-counting weights
 NO checkpoint-preserving initialization trick
 ```
 
-Strict scratch means:
+The only allowed inherited weights are the same pinned timm ImageNet-1k backbone weights in every R0--R5 run:
 
 ```yaml
-pretrained: false
+backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+pretrained: true
 checkpoint: null
 resume: null
+
+dataset:
+  image_mean: [0.5, 0.5, 0.5]
+  image_std: [0.5, 0.5, 0.5]
+
+optimizer:
+  lr: 0.0001
+  backbone_lr_scale: 0.1
 ```
 
-All compared formulations use the same initialization policy.
+All compared formulations use exactly the same pretrained source, normalization, and optimizer grouping. The trainer fails fast if normalization does not match the timm weight metadata. Checkpoint evaluation constructs the architecture without downloading ImageNet weights, because task weights overwrite the complete state dict.
 
 If a better initialization for the mass head is introduced, it must be applied to **all** baselines and proposed runs.
 
 ---
 
-# 18. Mass-head initialization for scratch training
+# 18. Data-driven mass-head initialization
 
 A positive mass map with Softplus can start with a dangerously large image count.
 
@@ -965,7 +974,7 @@ Softplus^{-1}(x)
 x+\log(-\operatorname{expm1}(-x)).
 \]
 
-This uses no learned weights and is fully compatible with training from scratch.
+This uses no crowd-counting checkpoint and is compatible with either a scratch or pretrained backbone.
 
 ---
 
@@ -1092,7 +1101,7 @@ For each checkpoint report a local-maximum baseline and OT-M with:
 
 ```text
 Precision / Recall / F1 at sigma = 4, 8 pixels
-distance-gated Hungarian one-to-one matching
+exact maximum-cardinality distance-gated one-to-one matching
 micro aggregation over the evaluation split
 |number of localized points - sum(D)|
 model latency and OT-M post-processing latency separately
@@ -2465,12 +2474,12 @@ dataset:
   root: ./data/ShanghaiTech
   crop_size: 256
   coordinate_base: 1
-  image_mean: [0.485, 0.456, 0.406]
-  image_std: [0.229, 0.224, 0.225]
+  image_mean: [0.5, 0.5, 0.5]
+  image_std: [0.5, 0.5, 0.5]
 
 model:
-  backbone: mobilenetv4_conv_small_050
-  pretrained: false
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
   neck_width: 32
   context_dilations: [1, 2, 3]
   use_p8_context: false
@@ -2503,6 +2512,7 @@ sampler:
 optimizer:
   name: AdamW
   lr: 0.0001
+  backbone_lr_scale: 0.1
   weight_decay: 0.0001
   grad_clip: 5.0
 
@@ -2735,7 +2745,7 @@ mean GT count
 median GT count
 ```
 
-A scratch model should not begin with predicted counts thousands above the target purely due to Softplus baseline mass.
+A newly initialized mass head should not begin with predicted counts thousands above the target purely due to Softplus baseline mass.
 
 ### Test O2 — one-image overfit
 
@@ -2973,7 +2983,7 @@ Therefore the paper should target the joint frontier:
 +
 \text{no Gaussian}
 +
-\text{scratch training}
+\text{matched pinned pretraining}
 }
 \]
 
@@ -2981,7 +2991,7 @@ The most scientifically meaningful claim is not an arbitrary target such as MAE 
 
 It is:
 
-> under the same architecture and scratch protocol, the proposed probabilistic formulation consistently improves counting accuracy and dense-region error over strong deterministic and flat probabilistic baselines.
+> under the same architecture and pinned-pretraining protocol, the proposed probabilistic formulation consistently improves counting accuracy and dense-region error over strong deterministic and flat probabilistic baselines.
 
 A strong absolute result then amplifies the paper.
 
@@ -3064,7 +3074,7 @@ However, this increases complexity and should only be attempted after the fixed-
 Before claiming success:
 
 ```text
-[ ] all models trained from scratch
+[ ] all models use the same pinned ImageNet-1k initialization and normalization
 [ ] same architecture for R0-R5 formulation study
 [ ] exact point-derived targets only
 [ ] no Gaussian density target
@@ -3112,7 +3122,7 @@ The strongest result would be:
 \boxed{
 \text{sub-0.5M}
 +
-\text{scratch}
+\text{pinned pretraining}
 +
 \text{point-only}
 +

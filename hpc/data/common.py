@@ -23,8 +23,18 @@ def validate_point_annotations(
     coordinate_base: int = 1,
     image_shape: Optional[Tuple[int, int]] = None,
     tol: float = 1e-3,
+    bounds_policy: str = "error",
 ) -> np.ndarray:
-    """Validate and convert coordinates to 0-based pixel-center coordinates [0, W-1] x [0, H-1]."""
+    """Validate/convert point coordinates with an explicit source-bounds policy.
+
+    ``allow`` exists for the original ShanghaiTech release: its official MAT files
+    contain source outliers and widely used PET/DM-Count loaders preserve the raw
+    annotations, then filter them only when forming a training crop.
+    """
+    if bounds_policy not in {"error", "allow", "clip"}:
+        raise ValueError(
+            f"Unsupported bounds_policy={bounds_policy!r}; must be 'error', 'allow', or 'clip'"
+        )
     arr = np.asarray(points, dtype=np.float32)
     if arr.size == 0:
         return np.empty((0, 2), dtype=np.float32)
@@ -51,14 +61,15 @@ def validate_point_annotations(
             | (arr[:, 1] < -tol)
             | (arr[:, 1] > float(h - 1) + tol)
         )
-        if bad.any():
+        if bad.any() and bounds_policy == "error":
             bad_pts = arr[bad][:10].tolist()
             raise ValueError(
                 f"Out-of-bounds annotation in {source} (image_size={image_shape}): "
                 f"found {bad.sum()} points out of bounds, samples: {bad_pts}"
             )
-        arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
-        arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
+        if bounds_policy == "clip":
+            arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
+            arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
 
     return arr
 

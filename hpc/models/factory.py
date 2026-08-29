@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict
 
 from .hpc_lite import HPCLite
@@ -15,7 +16,6 @@ _KNOWN_MODEL_KEYS = {
     "use_repblock",
     "eps_d",
     "output_stride",
-    "init_checkpoint",
 }
 
 
@@ -61,17 +61,83 @@ def resolve_dataset_config(cfg: dict) -> dict:
     }
 
 
-def build_model_from_config(cfg: Dict[str, Any]) -> HPCLite:
-    """Construct an HPCLite instance faithfully from a config dictionary."""
+def resolve_pretrained_spec(cfg: dict) -> dict | None:
+    """Resolve immutable timm weight/input metadata without downloading weights."""
+    resolved = resolve_model_config(cfg)
+    if not resolved["pretrained"]:
+        return None
+
+    import timm
+
+    try:
+        pretrained_cfg = timm.get_pretrained_cfg(resolved["backbone"])
+    except Exception as exc:
+        raise ValueError(
+            f"Cannot resolve pretrained weights for backbone '{resolved['backbone']}'"
+        ) from exc
+    if pretrained_cfg is None:
+        raise ValueError(f"Backbone '{resolved['backbone']}' has no timm pretrained configuration")
+
+    source = pretrained_cfg.hf_hub_id or pretrained_cfg.url or pretrained_cfg.file
+    if not source:
+        raise ValueError(
+            f"Backbone '{resolved['backbone']}' declares pretrained=True but has no weight source"
+        )
+    return {
+        "architecture": pretrained_cfg.architecture,
+        "tag": pretrained_cfg.tag,
+        "source": str(source),
+        "mean": tuple(float(x) for x in pretrained_cfg.mean),
+        "std": tuple(float(x) for x in pretrained_cfg.std),
+        "input_size": tuple(int(x) for x in pretrained_cfg.input_size),
+        "license": pretrained_cfg.license,
+    }
+
+
+def validate_pretrained_normalization(cfg: dict, atol: float = 1e-8) -> dict | None:
+    """Fail fast when dataset normalization does not match the selected timm weights."""
+    spec = resolve_pretrained_spec(cfg)
+    if spec is None:
+        return None
+    dataset = resolve_dataset_config(cfg)
+    for key in ("mean", "std"):
+        actual = dataset[f"image_{key}"]
+        expected = spec[key]
+        if len(actual) != len(expected) or any(
+            not math.isclose(a, b, rel_tol=0.0, abs_tol=atol)
+            for a, b in zip(actual, expected)
+        ):
+            raise ValueError(
+                f"Pretrained normalization mismatch for image_{key}: config has {actual}, "
+                f"but {spec['source']} requires {expected}"
+            )
+    return spec
+
+
+def build_model_from_config(
+    cfg: Dict[str, Any],
+    *,
+    load_pretrained: bool | None = None,
+) -> HPCLite:
+    """Construct HPCLite; optionally suppress weight I/O when a task checkpoint will be loaded.
+
+    ``model.pretrained`` remains part of checkpoint provenance and compatibility.  The
+    ``load_pretrained`` override controls only whether timm downloads/loads those weights
+    for this construction call.
+    """
     model_cfg = cfg.get("model", cfg)
     unknown_keys = set(model_cfg.keys()) - _KNOWN_MODEL_KEYS
     if unknown_keys:
         raise ValueError(f"Unknown keys in model config: {sorted(unknown_keys)}")
 
     resolved = resolve_model_config(cfg)
-    return HPCLite(
+    requested_pretrained = resolved["pretrained"]
+    effective_pretrained = (
+        requested_pretrained if load_pretrained is None else bool(load_pretrained)
+    )
+    model = HPCLite(
         backbone_name=resolved["backbone"],
-        pretrained=resolved["pretrained"],
+        pretrained=effective_pretrained,
         neck_width=resolved["neck_width"],
         context_dilations=resolved["context_dilations"],
         use_p8_context=resolved["use_p8_context"],
@@ -79,6 +145,9 @@ def build_model_from_config(cfg: Dict[str, Any]) -> HPCLite:
         eps_d=resolved["eps_d"],
         output_stride=resolved["output_stride"],
     )
+    model.pretrained_requested = requested_pretrained
+    model.pretrained_loaded = effective_pretrained
+    return model
 
 
 def assert_checkpoint_compatible(checkpoint: dict, cfg: dict) -> None:
@@ -103,4 +172,3 @@ def assert_checkpoint_compatible(checkpoint: dict, cfg: dict) -> None:
                 raise ValueError(
                     f"Dataset config mismatch for '{k}': checkpoint has {old_ds[k]!r}, active config has {new_ds[k]!r}"
                 )
-

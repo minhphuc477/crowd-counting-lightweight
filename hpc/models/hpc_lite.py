@@ -166,6 +166,11 @@ class HPCLite(nn.Module):
             count = d.sum(dim=(-1, -2, -3))
             return count, d
 
+        if isinstance(pad_multiple, bool) or not isinstance(pad_multiple, int) or pad_multiple <= 0:
+            raise ValueError(
+                f"pad_multiple must be None or a positive integer, got {pad_multiple!r}"
+            )
+
         _, _, h, w = x.shape
         pad_h = (pad_multiple - (h % pad_multiple)) % pad_multiple
         pad_w = (pad_multiple - (w % pad_multiple)) % pad_multiple
@@ -180,3 +185,59 @@ class HPCLite(nn.Module):
         d_valid = d_padded[..., :out_h, :out_w]
         count = d_valid.sum(dim=(-1, -2, -3))
         return count, d_valid
+
+    @torch.no_grad()
+    def predict_tiled(
+        self,
+        x: torch.Tensor,
+        tile_size: int,
+        halo: int = 64,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Explicit memory-bounded inference using disjoint cores and context halos.
+
+        ``tile_size`` and ``halo`` are aligned to the backbone's maximum stride
+        (16), so stitched stride-4 cells retain a consistent global phase. Each
+        output cell is written exactly once. GroupNorm statistics are tile-local,
+        therefore this mode is deterministic but not numerically equivalent to
+        full-image inference and must be reported as a separate protocol.
+        """
+        if x.ndim != 4:
+            raise ValueError(f"Expected 4D tensor input, got {tuple(x.shape)}")
+        for name, value in (("tile_size", tile_size), ("halo", halo)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer, got {value!r}")
+        if tile_size <= 0 or tile_size % 16 != 0:
+            raise ValueError("tile_size must be a positive multiple of 16")
+        if halo < 0 or halo % 16 != 0:
+            raise ValueError("halo must be a non-negative multiple of 16")
+
+        batch, _, height, width = x.shape
+        if height <= tile_size and width <= tile_size:
+            return self.predict(x, pad_multiple=None)
+
+        out_h = math.ceil(height / self.output_stride)
+        out_w = math.ceil(width / self.output_stride)
+        stitched = x.new_empty((batch, 1, out_h, out_w), dtype=torch.float32)
+        for core_y0 in range(0, height, tile_size):
+            core_y1 = min(core_y0 + tile_size, height)
+            tile_y0 = max(0, core_y0 - halo)
+            tile_y1 = min(height, core_y1 + halo)
+            for core_x0 in range(0, width, tile_size):
+                core_x1 = min(core_x0 + tile_size, width)
+                tile_x0 = max(0, core_x0 - halo)
+                tile_x1 = min(width, core_x1 + halo)
+                tile_mass = self.forward_mass(x[..., tile_y0:tile_y1, tile_x0:tile_x1])
+
+                global_y0 = core_y0 // self.output_stride
+                global_y1 = math.ceil(core_y1 / self.output_stride)
+                global_x0 = core_x0 // self.output_stride
+                global_x1 = math.ceil(core_x1 / self.output_stride)
+                local_y0 = (core_y0 - tile_y0) // self.output_stride
+                local_x0 = (core_x0 - tile_x0) // self.output_stride
+                local_y1 = local_y0 + (global_y1 - global_y0)
+                local_x1 = local_x0 + (global_x1 - global_x0)
+                stitched[..., global_y0:global_y1, global_x0:global_x1] = tile_mass[
+                    ..., local_y0:local_y1, local_x0:local_x1
+                ]
+        count = stitched.sum(dim=(-1, -2, -3))
+        return count, stitched

@@ -38,8 +38,15 @@ def export_model_to_onnx(
             "Pass --allow-random-init explicitly if you intend to export untrained weights."
         )
 
-    model = build_model_from_config(cfg)
-    if checkpoint_path is not None and checkpoint_path.lower() != "none" and checkpoint_path != "":
+    has_checkpoint = (
+        checkpoint_path is not None
+        and checkpoint_path.lower() != "none"
+        and checkpoint_path != ""
+    )
+    # A checkpoint overwrites every parameter, so never download pretrained weights in that path.
+    # Without a checkpoint, --allow-random-init means exactly random initialization.
+    model = build_model_from_config(cfg, load_pretrained=False)
+    if has_checkpoint:
         if not os.path.isfile(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)

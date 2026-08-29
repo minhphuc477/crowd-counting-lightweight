@@ -1,4 +1,4 @@
-"""Unit test for crowd localization metrics & Hungarian distance matching."""
+"""Unit tests for crowd localization extraction and gated matching."""
 
 import numpy as np
 import torch
@@ -26,6 +26,16 @@ def test_peak_extraction():
     assert np.all(diff < 1e-3), f"Extracted point coordinates mismatch: got {pts}, expected {expected}"
 
 
+def test_peak_extraction_collapses_flat_plateau():
+    mass = np.zeros((12, 12), dtype=np.float32)
+    mass[4:7, 5:8] = 1.0
+    points = extract_points_from_mass_map(
+        mass, stride=4, threshold_abs=0.1, min_distance_px=4
+    )
+    assert points.shape == (1, 2)
+    np.testing.assert_allclose(points[0], [25.5, 21.5])
+
+
 def test_localization_matching():
     gt_pts = np.array([[100.0, 100.0], [200.0, 200.0], [300.0, 300.0]], dtype=np.float32)
     pred_pts = np.array([[102.0, 100.0], [200.0, 203.0], [50.0, 50.0]], dtype=np.float32)
@@ -37,7 +47,7 @@ def test_localization_matching():
     print("  [✓] Single-image Hungarian matching & F1 metric: PASS")
 
 
-def test_hungarian_maximizes_valid_matches_not_greedy_order():
+def test_bipartite_matcher_maximizes_valid_matches_not_greedy_order():
     # Greedy nearest-pair matching consumes the shared GT with pred[0] and
     # returns one match. Global one-to-one assignment returns both matches.
     pred_pts = np.array([[1.0, 0.0], [-1.1, 0.0]], dtype=np.float32)
@@ -71,7 +81,7 @@ def test_partial_border_cell_centers():
 
 
 def test_sparse_matching_scalability_and_equivalence():
-    """Sparse matching must scale to 10k points and be identical to dense matching on test distributions."""
+    """Sparse matching must scale to 10k points without constructing a dense distance matrix."""
     np.random.seed(42)
     pred_small = np.random.rand(80, 2) * 200.0
     gt_small = np.random.rand(80, 2) * 200.0
@@ -87,6 +97,15 @@ def test_sparse_matching_scalability_and_equivalence():
     assert tp_10k + fp_10k == 10000
     assert tp_10k + fn_10k == 10000
     assert tp_10k > 0
+
+
+def test_sparse_matching_large_connected_component():
+    # One connected chain component with bounded degree; component-based dense
+    # Hungarian would allocate a 10k x 10k matrix here.
+    x = np.arange(10_000, dtype=np.float32)[:, None] * 3.0
+    pred = np.concatenate([x, np.zeros_like(x)], axis=1)
+    gt = pred + np.array([0.25, 0.0], dtype=np.float32)
+    assert match_points(pred, gt, threshold=3.1) == (10_000, 0, 0)
 
 
 if __name__ == "__main__":

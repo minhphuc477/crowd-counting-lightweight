@@ -19,18 +19,16 @@ _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-from hpc.data.nwpu import NWPUDataset
-from hpc.data.qnrf import UCFQNRFDataset
-from hpc.data.sha import ShanghaiTechDataset
+from hpc.data.factory import build_evaluation_dataset
 from hpc.metrics.counting import evaluate_counting_metrics
 from hpc.metrics.localization import evaluate_dataset_localization, extract_points_from_mass_map
 from hpc.metrics.otm import (
+    DEFAULT_OTM_MAX_INITIALIZATION_PIXELS,
     DEFAULT_OTM_MAX_SOURCE_POINTS,
     DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
     otm_localize,
 )
 from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
-from hpc.models.factory import build_model_from_config
 from hpc.utils.seed import seed_everything
 
 
@@ -50,39 +48,13 @@ def _timing_summary(values: Sequence[float]) -> dict:
     }
 
 
-def build_evaluation_dataset(cfg: dict):
-    data = cfg["dataset"]
-    name = str(data.get("name", "sha")).lower().replace("-", "_")
-    common = {
-        "crop_size": int(data.get("crop_size", 256)),
-        "is_train": False,
-        "image_mean": data.get("image_mean", [0.485, 0.456, 0.406]),
-        "image_std": data.get("image_std", [0.229, 0.224, 0.225]),
-    }
-    if "coordinate_base" in data:
-        common["coordinate_base"] = int(data["coordinate_base"])
-
-    if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
-        part = data.get("part", "part_B" if name.endswith("_b") else "part_A")
-        return ShanghaiTechDataset(
-            root=data["root"], part=part, split="test_data", **common
-        ), "test_data"
-    if name in {"qnrf", "ucf_qnrf"}:
-        return UCFQNRFDataset(root=data["root"], split="Test", **common), "Test"
-    if name == "nwpu":
-        return NWPUDataset(
-            root=data["root"], split="val", split_file=data.get("val_split_file"), **common
-        ), "val"
-    raise ValueError(f"Localization evaluator does not support dataset '{name}'")
-
-
 from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
 def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> nn.Module:
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
-    model = build_model_from_config(cfg).to(device)
+    model = build_model_from_config(cfg, load_pretrained=False).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     assert_checkpoint_compatible(checkpoint, cfg)
     state = checkpoint.get("model_state_dict", checkpoint)
@@ -151,7 +123,11 @@ def evaluate_checkpoint(
     otm_blur: float = 0.01,
     otm_max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS,
     otm_max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
+    otm_initialization_mode: str = "fullres_bilinear",
+    otm_max_initialization_pixels: int = DEFAULT_OTM_MAX_INITIALIZATION_PIXELS,
     oracle_cardinality: bool = False,
+    tile_size: int | None = None,
+    tile_halo: int = 64,
 ) -> dict:
     methods = tuple(dict.fromkeys(methods))
     unknown = set(methods) - {"local_max", "otm"}
@@ -194,7 +170,12 @@ def evaluate_checkpoint(
 
         _synchronize(device)
         started = time.perf_counter()
-        pred_count_tensor, pred_mass = model.predict(image, pad_multiple=None)
+        if tile_size is None:
+            pred_count_tensor, pred_mass = model.predict(image, pad_multiple=None)
+        else:
+            pred_count_tensor, pred_mass = model.predict_tiled(
+                image, tile_size=tile_size, halo=tile_halo
+            )
         _synchronize(device)
         model_ms = (time.perf_counter() - started) * 1000.0
         pred_count = float(pred_count_tensor.item())
@@ -239,6 +220,8 @@ def evaluate_checkpoint(
                 blur=otm_blur,
                 max_source_points=otm_max_source_points,
                 max_transport_elements=otm_max_transport_elements,
+                initialization_mode=otm_initialization_mode,
+                max_initialization_pixels=otm_max_initialization_pixels,
                 seed=seed + index,
                 image_hw=image_hw,
                 target_point_count=target_pts_override,
@@ -254,6 +237,7 @@ def evaluate_checkpoint(
             otm_diagnostics.append(diagnostics)
             row.update(
                 otm_points=len(otm_numpy), otm_gap=gap, otm_latency_ms=otm_ms,
+                otm_oracle_cardinality=oracle_cardinality,
                 otm_iterations=diagnostics["iterations"],
                 otm_retained_mass_ratio=diagnostics["source_retained_mass_ratio"],
             )
@@ -291,8 +275,16 @@ def evaluate_checkpoint(
             "samples": sample_count,
             "methods": list(methods),
             "radii_px": [float(x) for x in radii],
-            "matching": "distance-gated Hungarian one-to-one, micro-aggregated",
-            "otm": "Lin & Chan CVPR 2023 alternating epsilon-scaling OT/M-step",
+            "matching": "exact sparse maximum-cardinality distance-gated one-to-one, micro-aggregated",
+            "oracle_cardinality": bool(oracle_cardinality),
+            "otm": "Lin & Chan CVPR 2023 OT/M-step adapted to NTPC zero-based pixel centers",
+            "otm_initialization_mode": otm_initialization_mode,
+            "otm_max_initialization_pixels": int(otm_max_initialization_pixels),
+            "inference": (
+                {"mode": "full_image"}
+                if tile_size is None
+                else {"mode": "tiled", "tile_size": tile_size, "tile_halo": tile_halo}
+            ),
         },
         "counting": evaluate_counting_metrics(predictions_count, ground_truth_count),
         "subgroups": evaluate_subgroup_diagnostics(predictions_count, ground_truth_count),
@@ -327,6 +319,14 @@ def main() -> None:
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--otm-max-source-points", type=int, default=DEFAULT_OTM_MAX_SOURCE_POINTS)
     parser.add_argument("--oracle-cardinality", action="store_true", help="Evaluate OT-M with Oracle GT cardinality m=N_GT")
+    parser.add_argument("--tile-size", type=int, help="Explicit tiled-inference core size (multiple of 16)")
+    parser.add_argument("--tile-halo", type=int, default=64)
+    parser.add_argument(
+        "--otm-initialization-mode",
+        choices=["fullres_bilinear", "stride_grid"],
+        default="fullres_bilinear",
+        help="Use paper-style full-resolution initialization or explicit memory-safe stride-grid initialization",
+    )
     args = parser.parse_args()
     result = evaluate_checkpoint(
         config_path=args.config,
@@ -339,6 +339,9 @@ def main() -> None:
         max_samples=args.max_samples,
         otm_max_source_points=args.otm_max_source_points,
         oracle_cardinality=args.oracle_cardinality,
+        otm_initialization_mode=args.otm_initialization_mode,
+        tile_size=args.tile_size,
+        tile_halo=args.tile_halo,
     )
     print(json.dumps(result, indent=2))
 

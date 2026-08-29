@@ -9,8 +9,14 @@
   $$\text{Image} \xrightarrow{} \text{MobileNetV4-Conv-Small-0.5} \xrightarrow{} \text{Additive 32-ch FPN Neck} \xrightarrow{} 1\text{-channel Softplus Mass Map } D \xrightarrow{} \hat{C} = \sum D$$
   - Deployed parameters: ~0.35M parameters (with physical truncation of reduction-32 stages).
   - Single-scale, single-head feed-forward inference at stride 4 predicting a count-mass map \(D\).
-  - No Gaussian density targets, transformer decoders, or Hungarian matching in the deployed counting graph. (Scalable Hungarian matching is used only for offline localization evaluation).
+  - No Gaussian density targets, transformer decoders, or matching in the deployed counting graph. Exact sparse bipartite matching is used only for offline localization evaluation.
   - Zero-extra-parameter localization: the same predicted mass map \(D\) can optionally be decoded into point coordinates via parameter-free Optimal Transport Monge (OT-M) optimization.
+
+- **Reproducible transfer initialization**:
+  - All first-pass R0--R5 experiments use the same pinned `mobilenetv4_conv_small_050.e3000_r224_in1k` timm weights.
+  - Input normalization is validated against timm metadata (`mean=std=(0.5, 0.5, 0.5)`).
+  - AdamW uses explicit discriminative rates: `1e-5` for the backbone and `1e-4` for the task neck/head.
+  - Evaluation, profiling, visualization, and ONNX export do not redownload ImageNet weights when loading an NTPC checkpoint.
 
 ### Training-Only Structured Objectives (R0–R5)
 All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu^2 / r$); spatial supervision is the only variable.
@@ -67,7 +73,7 @@ lightweightcrcn/
 │   │   └── counting.py          # Shared evaluate_counting protocol
 │   ├── metrics/
 │   │   ├── counting.py          # MAE, RMSE, NAE, Bias metrics
-│   │   ├── localization.py      # Hungarian matching, F1@4px, F1@8px
+│   │   ├── localization.py      # Sparse gated matching, F1@4px, F1@8px
 │   │   ├── otm.py               # Optimal Transport Monge parameter-free localizer
 │   │   └── subgroup.py          # Diagnostic bins & luminance evaluation
 │   └── utils/
@@ -87,7 +93,7 @@ lightweightcrcn/
     ├── test_ntpc_loss.py        # Loss behaviors, scale invariance, gradient checks
     ├── test_ntpc_model.py       # Architecture shapes, padding invariance & parameter budget
     ├── test_ntpc_overfit.py     # 1-image and batch optimization sanity tests
-    ├── test_localization.py     # Hungarian point matching & F1 metrics
+    ├── test_localization.py     # Sparse point matching & F1 metrics
     ├── test_otm_official.py     # OT-M official Monge solver tests
     └── test_dtm4_otm.py         # Stride-4 DTM tree & OT-M integration
 ```
@@ -106,15 +112,23 @@ lightweightcrcn/
 .venv\Scripts\python train_ntpc.py --config configs/ntpc_r4_neural_dtm_tree.yaml
 ```
 
+The first execution downloads the pinned timm ImageNet-1k backbone weights. Later checkpoint evaluation is offline-safe.
+
+ShanghaiTech is read with the raw-coordinate convention used by the official PET and DM-Count loaders. The source archive contains some out-of-image annotations; they are preserved for official full-image cardinality and filtered only by the sampled training crop. Other dataset loaders remain strict by default.
+
 ### 3. Evaluate Checkpoint
 ```powershell
 .venv\Scripts\python evaluate.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt
 ```
 
+Full-image inference is the default paper protocol. For images that do not fit GPU memory, select tiled inference explicitly, for example `--tile-size 1024 --tile-halo 64`. This is recorded separately because tile-local GroupNorm statistics make it non-equivalent to full-image inference.
+
 ### 4. Evaluate OT-M Localization
 ```powershell
 .venv\Scripts\python tools/eval_localization.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt --output runs/ntpc_r4_neural_dtm_tree/loc.json
 ```
+
+OT-M defaults to full-resolution bilinear target initialization with a fail-fast memory guard. Large-image studies may explicitly use `--otm-initialization-mode stride_grid`; the selected mode and Oracle-cardinality flag are written to result metadata.
 
 ### 5. Profile Model Efficiency & Parameters
 ```powershell

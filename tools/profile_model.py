@@ -142,7 +142,8 @@ def main() -> None:
     args = parser.parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
-    model = build_model_from_config(cfg)
+    # Initialization values do not affect architecture/efficiency profiling.
+    model = build_model_from_config(cfg, load_pretrained=False)
     profile = profile_model_efficiency(
         model,
         input_resolution=args.resolution,

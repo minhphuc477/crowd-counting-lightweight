@@ -25,6 +25,7 @@ def build_density_luminance_sampler(
     num_luminance_bins: int = 4,
     power: float = 0.5,
     num_samples: Optional[int] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> Tuple[WeightedRandomSampler, Dict[str, Any]]:
     """2D density/luminance sampler with a dedicated empty-scene density bin."""
     if len(image_paths) != len(points_list):
@@ -76,7 +77,12 @@ def build_density_luminance_sampler(
     if total_samples <= 0:
         raise ValueError("num_samples must be positive")
 
-    sampler = WeightedRandomSampler(weights_tensor, num_samples=total_samples, replacement=True)
+    sampler = WeightedRandomSampler(
+        weights_tensor,
+        num_samples=total_samples,
+        replacement=True,
+        generator=generator,
+    )
     return sampler, {
         "positive_density_quantiles": d_quantiles.tolist(),
         "luminance_quantiles": l_quantiles.tolist(),

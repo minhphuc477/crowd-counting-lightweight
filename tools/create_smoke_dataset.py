@@ -1,3 +1,8 @@
+"""Create a small, explicit synthetic ShanghaiTech-format smoke dataset."""
+
+from __future__ import annotations
+
+import argparse
 import os
 import numpy as np
 from PIL import Image
@@ -11,6 +16,15 @@ def create_synthetic_crowd_dataset(
     crop_size: int = 448,
 ):
     """Create synthetic dataset mimicking ShanghaiTech 1-based format."""
+    if num_train <= 0 or num_val <= 0:
+        raise ValueError("num_train and num_val must be positive")
+    if crop_size < 64 or crop_size % 64 != 0:
+        raise ValueError("crop_size must be at least 64 and divisible by 64 for NTPC")
+    root = os.path.abspath(root)
+    if os.path.isdir(root) and any(os.scandir(root)):
+        raise FileExistsError(
+            f"Refusing to overwrite non-empty smoke dataset directory: {root}"
+        )
     for split, count in [("train_data", num_train), ("test_data", num_val)]:
         img_dir = os.path.join(root, "part_A", split, "images")
         gt_dir = os.path.join(root, "part_A", split, "ground-truth")
@@ -52,5 +66,20 @@ def create_synthetic_crowd_dataset(
     print(f"Synthetic crowd dataset created at {root}")
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default="./data/synthetic_crowd")
+    parser.add_argument("--num-train", type=int, default=16)
+    parser.add_argument("--num-test", type=int, default=8)
+    parser.add_argument("--crop-size", type=int, default=256)
+    args = parser.parse_args()
+    create_synthetic_crowd_dataset(
+        root=args.root,
+        num_train=args.num_train,
+        num_val=args.num_test,
+        crop_size=args.crop_size,
+    )
+
+
 if __name__ == "__main__":
-    create_synthetic_crowd_dataset()
+    main()

@@ -110,12 +110,18 @@ def evaluate_nwpu_official_groups(
     overall = meter(np.ones(len(gts), dtype=bool))
     level_stats = [meter(levels == i) for i in range(5)]
     illum_stats = [meter(illuminations == i) for i in range(4)]
+
+    def available_mean(rows, key):
+        values = np.asarray([row[key] for row in rows], dtype=np.float64)
+        finite = np.isfinite(values)
+        return float(values[finite].mean()) if np.any(finite) else float("nan")
+
     return {
         "overall": overall,
         "levels": level_stats,
         "illums": illum_stats,
         "mmae": {
-            "mmae_level": float(np.nanmean([x["mae"] for x in level_stats])),
-            "mmae_illum": float(np.nanmean([x["mae"] for x in illum_stats])),
+            "mmae_level": available_mean(level_stats, "mae"),
+            "mmae_illum": available_mean(illum_stats, "mae"),
         },
     }

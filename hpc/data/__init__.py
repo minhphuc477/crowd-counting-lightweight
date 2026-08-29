@@ -5,6 +5,7 @@ from .sha import ShanghaiTechDataset
 from .qnrf import UCFQNRFDataset
 from .nwpu import NWPUDataset
 from .sampler import build_density_luminance_sampler, compute_image_density_and_luminance
+from .factory import build_evaluation_dataset
 
 __all__ = [
     "NTPCGeometricTransform",
@@ -17,4 +18,5 @@ __all__ = [
     "NWPUDataset",
     "build_density_luminance_sampler",
     "compute_image_density_and_luminance",
+    "build_evaluation_dataset",
 ]

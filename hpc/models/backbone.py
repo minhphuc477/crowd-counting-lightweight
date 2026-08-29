@@ -28,6 +28,7 @@ class MobileNetV4Backbone(nn.Module):
             )
 
         self.model_name = model_name
+        self.pretrained = bool(pretrained)
         self.target_reductions = (4, 8, 16)
 
         # Isolate RNG state when creating the probe model so feature inspection does not consume RNG
@@ -55,6 +56,26 @@ class MobileNetV4Backbone(nn.Module):
             features_only=True,
             out_indices=self.selected_indices,
         )
+
+        # timm's features_only wrapper returns only the requested tensors but
+        # still executes every MobileNet stage. NTPC stops at C16, so stages
+        # after blocks.2 are provably dead: they cannot affect C4/C8/C16. Drop
+        # them after pretrained weights have loaded to remove dead parameters
+        # and computation from the deployed graph.
+        selected_module_names = list(self.backbone.feature_info.module_name())
+        last_module = selected_module_names[-1]
+        if not last_module.startswith("blocks."):
+            raise RuntimeError(
+                f"Cannot safely truncate {model_name}: last selected feature is {last_module!r}"
+            )
+        last_block_index = int(last_module.split(".")[1])
+        blocks = list(self.backbone.blocks.children())
+        if last_block_index >= len(blocks):
+            raise RuntimeError(
+                f"Invalid truncation block {last_block_index} for {len(blocks)} MobileNet stages"
+            )
+        self.backbone.blocks = nn.Sequential(*blocks[: last_block_index + 1])
+        self.truncated_after = last_module
 
     def forward(self, x: torch.Tensor):
         features = self.backbone(x)

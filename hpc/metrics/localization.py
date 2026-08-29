@@ -1,4 +1,4 @@
-"""Crowd Localization Metrics via Hungarian Bipartite Matching (P2PNet / STEERER / CLTR standard).
+"""Crowd-localization metrics via exact distance-gated bipartite matching.
 
 Evaluates:
   - Precision, Recall, and F1-score at distance thresholds sigma in {4, 8} pixels.
@@ -10,7 +10,9 @@ from typing import Dict, Sequence, Tuple, Union
 
 import numpy as np
 import scipy.ndimage as ndi
-from scipy.optimize import linear_sum_assignment
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import maximum_bipartite_matching
+from scipy.spatial import cKDTree
 import torch
 
 
@@ -37,7 +39,18 @@ def extract_points_from_mass_map(
     window_size = 2 * radius_cells + 1
     local_max = (ndi.maximum_filter(mass_map, size=window_size) == mass_map)
     peak_mask = local_max & (mass_map >= thresh)
-    peak_y, peak_x = np.nonzero(peak_mask)
+    # A flat maximum is one peak, not one point per equal-valued pixel. Select the
+    # plateau pixel nearest its centroid (row-major tie break) deterministically.
+    labels, component_count = ndi.label(peak_mask, structure=np.ones((3, 3), dtype=np.uint8))
+    selected_yx: list[np.ndarray] = []
+    for label_index in range(1, component_count + 1):
+        coords = np.argwhere(labels == label_index)
+        center = coords.mean(axis=0)
+        selected_yx.append(coords[np.argmin(np.square(coords - center).sum(axis=1))])
+    if selected_yx:
+        peak_y, peak_x = np.asarray(selected_yx, dtype=np.int64).T
+    else:
+        peak_y = peak_x = np.empty(0, dtype=np.int64)
     if len(peak_x) == 0:
         return np.empty((0, 2), dtype=np.float32)
     if image_hw is not None:
@@ -55,18 +68,16 @@ def extract_points_from_mass_map(
     return np.stack([orig_x, orig_y], axis=1)
 
 
-from scipy.spatial import cKDTree
-
-
 def match_points(
     pred_xy: Union[np.ndarray, torch.Tensor],
     gt_xy: Union[np.ndarray, torch.Tensor],
     threshold: float,
 ) -> Tuple[int, int, int]:
-    """Hungarian minimum distance one-to-one matching with distance gating.
-    
-    Supports dense direct evaluation on small sets and scalable O(N log N)
-    sparse spatial graph component matching on large sets (e.g. 10k-20k points).
+    """Return TP/FP/FN using exact maximum-cardinality gated matching.
+
+    A KD-tree constructs only point pairs within ``threshold``; SciPy then finds
+    an exact maximum-cardinality matching on that sparse bipartite graph. Metric
+    correctness depends on cardinality, not on minimizing the sum of distances.
     """
     if isinstance(pred_xy, torch.Tensor):
         pred_xy = pred_xy.detach().cpu().float().numpy()
@@ -76,6 +87,11 @@ def match_points(
     pred_xy = np.asarray(pred_xy, dtype=np.float32).reshape(-1, 2)
     gt_xy = np.asarray(gt_xy, dtype=np.float32).reshape(-1, 2)
 
+    if not np.isfinite(threshold) or threshold < 0:
+        raise ValueError(f"threshold must be finite and non-negative, got {threshold}")
+    if not np.isfinite(pred_xy).all() or not np.isfinite(gt_xy).all():
+        raise ValueError("Localization points contain NaN or Inf")
+
     np_pts = len(pred_xy)
     ng_pts = len(gt_xy)
 
@@ -84,74 +100,27 @@ def match_points(
     if ng_pts == 0:
         return 0, np_pts, 0
 
-    if np_pts * ng_pts <= 2500:
-        diff = pred_xy[:, None, :] - gt_xy[None, :, :]
-        distance = np.sqrt(np.sum(diff ** 2, axis=-1))
-        penalty = 1e6
-        gated_distance = np.where(distance <= threshold, distance, penalty)
-        pred_idx, gt_idx = linear_sum_assignment(gated_distance)
-        matched_distance = distance[pred_idx, gt_idx]
-        tp = int(np.sum(matched_distance <= threshold))
-        return tp, int(np_pts - tp), int(ng_pts - tp)
-
-    # Scalable sparse candidate bipartite matching
     pred_tree = cKDTree(pred_xy)
     gt_tree = cKDTree(gt_xy)
     neighbors = pred_tree.query_ball_tree(gt_tree, r=threshold)
-
-    parent: Dict[int, int] = {}
-
-    def find(i: int) -> int:
-        path = []
-        while i in parent and parent[i] != i:
-            path.append(i)
-            i = parent[i]
-        for p in path:
-            parent[p] = i
-        return i
-
-    def union(i: int, j: int) -> None:
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[ri] = rj
-
-    active_preds = []
-    has_edges = False
-    for p_i, gt_indices in enumerate(neighbors):
-        if len(gt_indices) > 0:
-            has_edges = True
-            active_preds.append(p_i)
-            for g_j in gt_indices:
-                union(p_i, g_j + np_pts)
-
-    if not has_edges:
+    edge_count = sum(len(indices) for indices in neighbors)
+    if edge_count == 0:
         return 0, np_pts, ng_pts
 
-    comp_preds: Dict[int, list[int]] = {}
-    comp_gts: Dict[int, list[int]] = {}
-    for p_i in active_preds:
-        root = find(p_i)
-        if root not in comp_preds:
-            comp_preds[root] = []
-            comp_gts[root] = []
-        comp_preds[root].append(p_i)
-        for g_j in neighbors[p_i]:
-            comp_gts[root].append(g_j)
-
-    for root in comp_gts:
-        comp_gts[root] = list(set(comp_gts[root]))
-
-    tp = 0
-    penalty = 1e6
-    for root, p_list in comp_preds.items():
-        g_list = comp_gts[root]
-        p_sub = pred_xy[p_list]
-        g_sub = gt_xy[g_list]
-        diff = p_sub[:, None, :] - g_sub[None, :, :]
-        dist_sub = np.sqrt(np.sum(diff ** 2, axis=-1))
-        gated_sub = np.where(dist_sub <= threshold, dist_sub, penalty)
-        pi, gi = linear_sum_assignment(gated_sub)
-        tp += int(np.sum(dist_sub[pi, gi] <= threshold))
+    indptr = np.empty(np_pts + 1, dtype=np.int64)
+    indptr[0] = 0
+    np.cumsum(np.fromiter((len(x) for x in neighbors), dtype=np.int64), out=indptr[1:])
+    indices = np.fromiter(
+        (gt_index for row in neighbors for gt_index in row),
+        dtype=np.int64,
+        count=edge_count,
+    )
+    graph = csr_matrix(
+        (np.ones(edge_count, dtype=np.int8), indices, indptr),
+        shape=(np_pts, ng_pts),
+    )
+    matched_gt_for_pred = maximum_bipartite_matching(graph, perm_type="column")
+    tp = int(np.count_nonzero(matched_gt_for_pred >= 0))
 
     fp = int(np_pts - tp)
     fn = int(ng_pts - tp)

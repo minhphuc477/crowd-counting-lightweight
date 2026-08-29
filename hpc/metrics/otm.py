@@ -1,10 +1,8 @@
 """Parameter-free OT-M localization for a conserved count-mass map.
 
-This is a PyTorch reimplementation of the alternating OT-step/M-step from
-Lin & Chan, CVPR 2023. It follows the official epsilon-scaling Sinkhorn
-solver, pixel-coordinate cost, density-weighted initialization, barycentric
-M-step, and stopping criterion. Coordinates returned by this module are
-always ``(x, y)`` in input-image pixels (zero-based pixel centers).
+This implementation adapts the alternating OT-step/M-step of Lin & Chan,
+CVPR 2023 to NTPC's zero-based pixel-center convention. Coordinates returned
+by this module are always ``(x, y)`` in input-image pixels.
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ import torch.nn.functional as F
 _TINY = 1e-12
 DEFAULT_OTM_MAX_SOURCE_POINTS: int = 4096
 DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS: int = 5_000_000
+DEFAULT_OTM_MAX_INITIALIZATION_PIXELS: int = 16_000_000
 
 
 @dataclass(frozen=True)
@@ -34,6 +33,8 @@ class OTMConfig:
     source_relative_threshold: float = 1e-8
     max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS
     max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS
+    initialization_mode: str = "fullres_bilinear"
+    max_initialization_pixels: int = DEFAULT_OTM_MAX_INITIALIZATION_PIXELS
     seed: int = 42
 
     def __post_init__(self) -> None:
@@ -49,6 +50,12 @@ class OTMConfig:
             raise ValueError("max_source_points must be positive or None")
         if self.max_transport_elements <= 0:
             raise ValueError("max_transport_elements must be positive")
+        if self.initialization_mode not in {"fullres_bilinear", "stride_grid"}:
+            raise ValueError(
+                "initialization_mode must be 'fullres_bilinear' or 'stride_grid'"
+            )
+        if self.max_initialization_pixels <= 0:
+            raise ValueError("max_initialization_pixels must be positive")
 
 
 def sinkhorn_log(
@@ -197,15 +204,30 @@ def _initialize_target_points(
     image_height: int,
     image_width: int,
     seed: int,
+    output_stride: int,
+    mode: str,
+    max_initialization_pixels: int,
 ) -> torch.Tensor:
-    """Official adaptive initialization on the bilinearly upsampled density."""
-    resized = F.interpolate(
-        mass[None, None],
-        size=(image_height, image_width),
-        mode="bilinear",
-        align_corners=False,
-    )[0, 0].clamp_min(0.0)
-    flat = resized.reshape(-1)
+    """Density-weighted initialization with an explicit memory policy."""
+    if mode == "fullres_bilinear":
+        pixel_count = image_height * image_width
+        if pixel_count > max_initialization_pixels:
+            raise MemoryError(
+                f"OT-M full-resolution initialization requires {pixel_count:,} pixels; "
+                f"limit is {max_initialization_pixels:,}. Select initialization_mode='stride_grid' "
+                "explicitly for large images."
+            )
+        resized = F.interpolate(
+            mass[None, None],
+            size=(image_height, image_width),
+            mode="bilinear",
+            align_corners=False,
+        )[0, 0].clamp_min(0.0)
+        flat = resized.reshape(-1)
+        grid_width = image_width
+    else:
+        flat = mass.clamp_min(0.0).reshape(-1)
+        grid_width = int(mass.shape[1])
     weights = torch.where(flat > _TINY, flat, torch.zeros_like(flat))
     pos_count = int(torch.count_nonzero(weights))
     if pos_count == 0:
@@ -220,8 +242,16 @@ def _initialize_target_points(
         replacement=replacement,
         generator=generator,
     )
-    rows = torch.div(chosen, image_width, rounding_mode="floor")
-    cols = chosen % image_width
+    rows = torch.div(chosen, grid_width, rounding_mode="floor")
+    cols = chosen % grid_width
+    if mode == "stride_grid":
+        stride = float(output_stride)
+        y0 = rows.float() * stride
+        x0 = cols.float() * stride
+        y1 = torch.minimum(y0 + stride - 1.0, y0.new_tensor(float(image_height - 1)))
+        x1 = torch.minimum(x0 + stride - 1.0, x0.new_tensor(float(image_width - 1)))
+        rows = 0.5 * (y0 + y1)
+        cols = 0.5 * (x0 + x1)
     return torch.stack([rows, cols], dim=-1).float().reshape(1, point_count, 2)
 
 
@@ -237,6 +267,8 @@ def otm_localize(
     source_relative_threshold: float = 1e-8,
     max_source_points: int | None = DEFAULT_OTM_MAX_SOURCE_POINTS,
     max_transport_elements: int = DEFAULT_OTM_MAX_TRANSPORT_ELEMENTS,
+    initialization_mode: str = "fullres_bilinear",
+    max_initialization_pixels: int = DEFAULT_OTM_MAX_INITIALIZATION_PIXELS,
     seed: int = 42,
     image_hw: Tuple[int, int] | None = None,
     return_diagnostics: bool = False,
@@ -275,6 +307,8 @@ def otm_localize(
         source_relative_threshold=source_relative_threshold,
         max_source_points=max_source_points,
         max_transport_elements=max_transport_elements,
+        initialization_mode=initialization_mode,
+        max_initialization_pixels=max_initialization_pixels,
         seed=seed,
     )
     predicted_count = float(mass.sum())
@@ -344,7 +378,14 @@ def otm_localize(
     target_weight = mass.new_ones((1, point_count, 1))
     source_yx = source_yx.reshape(1, -1, 2)
     target_yx = _initialize_target_points(
-        mass, point_count, image_height, image_width, config.seed
+        mass,
+        point_count,
+        image_height,
+        image_width,
+        config.seed,
+        config.output_stride,
+        config.initialization_mode,
+        config.max_initialization_pixels,
     )
     final_yx = target_yx
     for iteration in range(config.max_iterations):

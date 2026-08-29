@@ -137,6 +137,19 @@ def test_out_of_bounds_annotation_fails_fast():
         validate_point_annotations(bad_pts, source="test_bad", coordinate_base=0, image_shape=(w, h))
 
 
+def test_shanghai_policy_preserves_raw_out_of_bounds_points_without_clipping():
+    """The explicit ShanghaiTech policy must retain source points and cardinality."""
+    points = np.array([[-5.0, 20.0], [450.0, 100.0]], dtype=np.float32)
+    allowed = validate_point_annotations(
+        points,
+        source="official_sha",
+        coordinate_base=0,
+        image_shape=(400, 300),
+        bounds_policy="allow",
+    )
+    np.testing.assert_array_equal(allowed, points)
+
+
 def test_continuous_support_boundary_binning():
     """Points at support boundaries [-0.5, W-0.5] must bin into correct stride-4 cells without dropping."""
     H, W = 256, 256
@@ -187,4 +200,3 @@ def test_nwpu_test_never_uses_train_split():
 
     with pytest.raises(ValueError, match="Unsupported NWPU split"):
         resolve_nwpu_split_file(cfg, "unknown_split")
-

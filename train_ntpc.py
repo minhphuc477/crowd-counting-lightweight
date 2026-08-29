@@ -10,7 +10,7 @@ import platform
 import shutil
 import subprocess
 import time
-from typing import Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 import timm
 import torch
@@ -25,7 +25,10 @@ from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import (
+    build_model_from_config,
+    validate_pretrained_normalization,
+)
 from hpc.utils.seed import make_generator, seed_everything, seed_worker
 
 
@@ -154,10 +157,12 @@ def component_gradient_norms(
     for name in names:
         value = components[name]
         grads = torch.autograd.grad(value, params, retain_graph=True, allow_unused=True)
-        squared = sum(
-            float(grad.detach().float().square().sum()) for grad in grads if grad is not None
-        )
-        result[f"grad_{name}"] = math.sqrt(squared)
+        squared = value.new_zeros((), dtype=torch.float32)
+        for grad in grads:
+            if grad is not None:
+                squared = squared + grad.detach().float().square().sum()
+        # Exactly one device synchronization per audited component.
+        result[f"grad_{name}"] = float(torch.sqrt(squared).cpu())
     return result
 
 
@@ -183,6 +188,46 @@ def _append_csv(path: str, row: dict, fieldnames: list[str]) -> None:
         csv.DictWriter(handle, fieldnames=fieldnames).writerow(row)
 
 
+def build_optimizer(model: nn.Module, optimizer_cfg: dict) -> torch.optim.Optimizer:
+    """Build AdamW with an explicit discriminative LR for a pretrained backbone."""
+    optimizer_name = str(optimizer_cfg.get("name", "AdamW")).lower()
+    if optimizer_name != "adamw":
+        raise ValueError(
+            f"Unsupported optimizer '{optimizer_cfg.get('name')}'. Only 'AdamW' is supported."
+        )
+    base_lr = float(optimizer_cfg.get("lr", 1e-4))
+    weight_decay = float(optimizer_cfg.get("weight_decay", 1e-4))
+    backbone_lr_scale = float(optimizer_cfg.get("backbone_lr_scale", 1.0))
+    if not math.isfinite(base_lr) or base_lr <= 0:
+        raise ValueError(f"optimizer.lr must be positive and finite, got {base_lr}")
+    if not math.isfinite(weight_decay) or weight_decay < 0:
+        raise ValueError(f"optimizer.weight_decay must be non-negative and finite, got {weight_decay}")
+    if not math.isfinite(backbone_lr_scale) or not (0.0 < backbone_lr_scale <= 1.0):
+        raise ValueError(
+            f"optimizer.backbone_lr_scale must be in (0, 1], got {backbone_lr_scale}"
+        )
+
+    backbone_parameters = list(model.backbone.parameters())
+    backbone_ids = {id(parameter) for parameter in backbone_parameters}
+    task_parameters = [
+        parameter for parameter in model.parameters() if id(parameter) not in backbone_ids
+    ]
+    if not backbone_parameters or not task_parameters:
+        raise RuntimeError("Expected non-empty backbone and task parameter groups")
+    return torch.optim.AdamW(
+        [
+            {
+                "params": backbone_parameters,
+                "lr": base_lr * backbone_lr_scale,
+                "name": "backbone",
+            },
+            {"params": task_parameters, "lr": base_lr, "name": "task"},
+        ],
+        lr=base_lr,
+        weight_decay=weight_decay,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Neural Tree-Polya Crowd Counting")
     parser.add_argument("--config", required=True)
@@ -191,8 +236,9 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
 
-    # Scratch and config fail-fast invariants
-    FORBIDDEN_SCRATCH_KEYS = {
+    # Only timm backbone pretraining is supported. Resume/warm-start/distillation
+    # are intentionally separate experiments and remain forbidden in this trainer.
+    FORBIDDEN_INITIALIZATION_KEYS = {
         "resume",
         "teacher_checkpoint",
         "distillation",
@@ -201,21 +247,20 @@ def main() -> None:
         "init_checkpoint",
     }
 
-    def assert_strict_scratch(obj: Any, path: str = "") -> None:
+    def assert_supported_initialization(obj: Any, path: str = "") -> None:
         if not isinstance(obj, dict):
             return
         for key, value in obj.items():
             full = f"{path}.{key}" if path else key
-            if key in FORBIDDEN_SCRATCH_KEYS and value not in (None, False, "", 0):
+            if key in FORBIDDEN_INITIALIZATION_KEYS and value not in (None, False, "", 0):
                 raise ValueError(
-                    f"NTPC strict-scratch invariant: '{full}' is forbidden in config ({value!r})"
+                    f"Unsupported NTPC initialization: '{full}' is forbidden ({value!r})"
                 )
             if isinstance(value, dict):
-                assert_strict_scratch(value, full)
+                assert_supported_initialization(value, full)
 
-    assert_strict_scratch(cfg)
-    if cfg.get("model", {}).get("pretrained", False):
-        raise ValueError("NTPC matched ablations must start from scratch; model.pretrained is forbidden")
+    assert_supported_initialization(cfg)
+    pretrained_spec = validate_pretrained_normalization(cfg)
 
     training_cfg = cfg.get("training", {})
     if "epochs" in training_cfg:
@@ -263,6 +308,7 @@ def main() -> None:
             num_density_bins=int(sampler_cfg.get("density_bins", 5)),
             num_luminance_bins=int(sampler_cfg.get("luminance_bins", 4)),
             power=float(sampler_cfg.get("power", 0.5)),
+            generator=make_generator(seed),
         )
 
     num_workers = int(training_cfg.get("num_workers", 0))
@@ -282,9 +328,6 @@ def main() -> None:
     if len(train_loader) == 0:
         raise ValueError("Training loader has zero batches; reduce batch_size or disable drop_last")
 
-    model_cfg = cfg["model"]
-    if model_cfg.get("pretrained", False) or model_cfg.get("init_checkpoint"):
-        raise ValueError("NTPC matched ablations must start from scratch; pretrained/init_checkpoint is forbidden")
     model = build_model_from_config(cfg).to(device)
     model.init_head_bias_from_data(
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4
@@ -325,16 +368,7 @@ def main() -> None:
     )).to(device)
 
     optimizer_cfg = cfg["optimizer"]
-    optimizer_name = str(optimizer_cfg.get("name", "AdamW")).lower()
-    if optimizer_name != "adamw":
-        raise ValueError(
-            f"Unsupported optimizer '{optimizer_cfg.get('name')}'. Only 'AdamW' is supported."
-        )
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=float(optimizer_cfg.get("lr", 1e-4)),
-        weight_decay=float(optimizer_cfg.get("weight_decay", 1e-4)),
-    )
+    optimizer = build_optimizer(model, optimizer_cfg)
     epochs = int(cfg["schedule"]["epochs"])
     if epochs <= 0:
         raise ValueError(f"schedule.epochs must be positive, got {epochs}")
@@ -368,11 +402,12 @@ def main() -> None:
     train_fields = [
         "epoch", "loss", "root_magnitude", "root_to_64", "64_to_32", "32_to_16",
         "16_to_8", "16_to_8_dense", "8_to_4", "flat_16", "multinomial_tree",
-        "deterministic_alloc", "exact_regression", *[f"grad_{x}" for x in grad_names], "lr",
+        "deterministic_alloc", "exact_regression", *[f"grad_{x}" for x in grad_names],
+        "lr", "lr_backbone", "lr_task",
     ]
     val_fields = [
         "epoch", "mae", "rmse", "nae", "sparse_mae", "medium_mae", "dense_mae",
-        "sparse_bias", "medium_bias", "dense_bias", "lr",
+        "sparse_bias", "medium_bias", "dense_bias", "lr", "lr_backbone", "lr_task",
     ]
     train_csv, val_csv = os.path.join(save_dir, "train.csv"), os.path.join(save_dir, "val.csv")
     for path, fields in ((train_csv, train_fields), (val_csv, val_fields)):
@@ -382,13 +417,15 @@ def main() -> None:
     print(
         f"Device={device}; params={sum(p.numel() for p in model.parameters()):,}; "
         f"mode={criterion.cfg.mode}; selection={selection_split}; stats={crop_stats}; "
-        f"dense_threshold_16={dense_threshold:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}"
+        f"dense_threshold_16={dense_threshold:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}; "
+        f"initialization={'pretrained' if pretrained_spec else 'scratch'}"
     )
     best_mae, best_epoch = float("inf"), 0
     component_names = train_fields[2:13]
     for epoch in range(1, epochs + 1):
         started = time.time()
-        lr_used = optimizer.param_groups[0]["lr"]
+        learning_rates = {str(group["name"]): float(group["lr"]) for group in optimizer.param_groups}
+        lr_used = learning_rates["task"]
         model.train()
         running_loss = torch.zeros((), device=device)
         running = {name: torch.zeros((), device=device) for name in component_names}
@@ -426,6 +463,8 @@ def main() -> None:
             **{name: float((running[name] / steps).cpu()) for name in component_names},
             **epoch_grads,
             "lr": lr_used,
+            "lr_backbone": learning_rates["backbone"],
+            "lr_task": learning_rates["task"],
         }
         _append_csv(train_csv, train_row, train_fields)
 
@@ -441,6 +480,8 @@ def main() -> None:
                 "medium_bias": metrics.get("bin_medium_bias", float("nan")),
                 "dense_bias": metrics.get("bin_dense_bias", float("nan")),
                 "lr": lr_used,
+                "lr_backbone": learning_rates["backbone"],
+                "lr_task": learning_rates["task"],
             }
             _append_csv(val_csv, val_row, val_fields)
             if metrics["mae"] < best_mae:
@@ -449,12 +490,14 @@ def main() -> None:
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
                     "val_res": metrics,
                     "config": cfg,
                     "resolved_crop_statistics": crop_stats,
                     "selection_split": selection_split,
                     "is_exact_joint_nll": criterion.is_exact_joint_nll,
-                    "initialization_policy": "scratch",
+                    "initialization_policy": "timm_pretrained" if pretrained_spec else "scratch",
+                    "pretrained_spec": pretrained_spec,
                     "runtime": get_runtime_metadata(),
                 }, os.path.join(save_dir, "best.pt"))
             print(

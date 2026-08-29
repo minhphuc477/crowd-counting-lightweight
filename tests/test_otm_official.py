@@ -132,3 +132,18 @@ def test_otm_oracle_cardinality():
     assert len(pts) == 50
 
 
+def test_otm_fullres_initialization_guard_and_explicit_stride_grid_mode():
+    mass = torch.zeros(4, 4)
+    mass[1, 1] = 1.0
+    with pytest.raises(MemoryError, match="full-resolution initialization"):
+        otm_localize(mass, image_hw=(100, 100), max_initialization_pixels=1_000)
+    points, diagnostics = otm_localize(
+        mass,
+        image_hw=(100, 100),
+        initialization_mode="stride_grid",
+        max_initialization_pixels=1_000,
+        return_diagnostics=True,
+    )
+    assert len(points) == 1
+    assert diagnostics["config_initialization_mode"] == "stride_grid"
+

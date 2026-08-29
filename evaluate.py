@@ -8,44 +8,9 @@ import os
 import torch
 import yaml
 
-from hpc.data.nwpu import NWPUDataset, resolve_nwpu_split_file
-from hpc.data.qnrf import UCFQNRFDataset
-from hpc.data.sha import ShanghaiTechDataset
+from hpc.data.factory import build_evaluation_dataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
-
-
-def build_evaluation_dataset(cfg: dict, split: str | None = None):
-    ds_cfg = cfg["dataset"]
-    name = str(ds_cfg.get("name", "sha")).lower().replace("-", "_")
-    common_args = {
-        "crop_size": int(ds_cfg.get("crop_size", 256)),
-        "is_train": False,
-        "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
-        "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
-    }
-    if "coordinate_base" in ds_cfg:
-        common_args["coordinate_base"] = int(ds_cfg["coordinate_base"])
-
-    if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
-        part = ds_cfg.get("part", "part_B" if name.endswith("_b") else "part_A")
-        eval_split = split or "test_data"
-        return ShanghaiTechDataset(
-            root=ds_cfg["root"], part=part, split=eval_split, **common_args
-        )
-    elif name in {"qnrf", "ucf_qnrf"}:
-        eval_split = split or "Test"
-        return UCFQNRFDataset(root=ds_cfg["root"], split=eval_split, **common_args)
-    elif name == "nwpu":
-        eval_split = split or "val"
-        return NWPUDataset(
-            root=ds_cfg["root"],
-            split=eval_split,
-            split_file=resolve_nwpu_split_file(ds_cfg, eval_split),
-            **common_args,
-        )
-    else:
-        raise ValueError(f"Unsupported dataset '{name}'")
 
 
 def evaluate_model(
@@ -53,6 +18,8 @@ def evaluate_model(
     config_path: str,
     output_json: str = "eval_results.json",
     split: str | None = None,
+    tile_size: int | None = None,
+    tile_halo: int = 64,
 ) -> dict:
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Evaluation checkpoint file not found: {checkpoint_path}")
@@ -64,7 +31,8 @@ def evaluate_model(
     print(f"Evaluation on device: {device}")
 
     # 1. Load Model via Centralized Factory
-    model = build_model_from_config(cfg).to(device)
+    # The task checkpoint fully defines weights; avoid redundant pretrained network I/O.
+    model = build_model_from_config(cfg, load_pretrained=False).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     assert_checkpoint_compatible(ckpt, cfg)
@@ -75,14 +43,22 @@ def evaluate_model(
     model.eval()
 
     # 2. Load Evaluation Dataset
-    val_dataset = build_evaluation_dataset(cfg, split=split)
+    val_dataset, resolved_split = build_evaluation_dataset(cfg, split=split)
     print(f"Loaded {len(val_dataset)} evaluation samples.")
 
     if len(val_dataset) == 0:
         print("No evaluation samples found.")
         return {}
 
-    metrics = evaluate_counting(model, val_dataset, device)
+    metrics = evaluate_counting(
+        model, val_dataset, device, tile_size=tile_size, tile_halo=tile_halo
+    )
+    metrics["selection_split"] = resolved_split
+    metrics["inference"] = (
+        {"mode": "full_image"}
+        if tile_size is None
+        else {"mode": "tiled", "tile_size": tile_size, "tile_halo": tile_halo}
+    )
 
     print("\n--- Evaluation Results ---")
     print(f"MAE:  {metrics['mae']:.3f}")
@@ -103,6 +79,15 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, required=True, help="Path to config YAML")
     parser.add_argument("--output", type=str, default="eval_results.json", help="Path to output results JSON")
     parser.add_argument("--split", type=str, default=None, help="Dataset split override (e.g. test_data, val)")
+    parser.add_argument("--tile-size", type=int, help="Explicit tiled-inference core size (multiple of 16)")
+    parser.add_argument("--tile-halo", type=int, default=64, help="Tiled-inference context halo (multiple of 16)")
     args = parser.parse_args()
 
-    evaluate_model(args.checkpoint, args.config, args.output, split=args.split)
+    evaluate_model(
+        args.checkpoint,
+        args.config,
+        args.output,
+        split=args.split,
+        tile_size=args.tile_size,
+        tile_halo=args.tile_halo,
+    )

@@ -9,6 +9,12 @@ import sys
 
 import yaml
 
+_REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
+
+from hpc.models.factory import validate_pretrained_normalization
+
 
 def _repo_path(path: str, repository_root: str) -> str:
     return path if os.path.isabs(path) else os.path.abspath(os.path.join(repository_root, path))
@@ -28,6 +34,7 @@ def load_and_validate(manifest_path: str) -> tuple[int, list[str], str, str]:
             raise FileNotFoundError(config_path)
         with open(config_path, "r", encoding="utf-8") as handle:
             cfg = yaml.safe_load(handle)
+        validate_pretrained_normalization(cfg)
         if int(cfg["experiment"].get("seed", seed)) != seed:
             raise ValueError(f"Seed mismatch in {config_path}")
         name = cfg["experiment"]["name"]

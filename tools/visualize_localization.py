@@ -17,7 +17,7 @@ _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-from hpc.data.sha import ShanghaiTechDataset
+from hpc.data.factory import build_evaluation_dataset
 from hpc.metrics.localization import extract_points_from_mass_map
 from hpc.metrics.otm import (
     DEFAULT_OTM_MAX_SOURCE_POINTS,
@@ -54,7 +54,7 @@ def visualize_crowd_localization(
     # 1. Load Model
     if not os.path.isfile(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
-    model = build_model_from_config(cfg).to(device)
+    model = build_model_from_config(cfg, load_pretrained=False).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     assert_checkpoint_compatible(ckpt, cfg)
@@ -64,18 +64,8 @@ def visualize_crowd_localization(
     print(f"Loaded model from: {checkpoint_path}")
 
     # 2. Load Test Dataset
-    d_cfg = cfg["dataset"]
-    dataset = ShanghaiTechDataset(
-        root=d_cfg["root"],
-        part=d_cfg.get("part", "part_A"),
-        split="test_data",
-        is_train=False,
-        crop_size=d_cfg["crop_size"],
-        coordinate_base=int(d_cfg.get("coordinate_base", 1)),
-        image_mean=d_cfg.get("image_mean", [0.485, 0.456, 0.406]),
-        image_std=d_cfg.get("image_std", [0.229, 0.224, 0.225]),
-    )
-    print(f"Loaded {len(dataset)} test samples. Visualizing {num_samples} samples...")
+    dataset, split = build_evaluation_dataset(cfg)
+    print(f"Loaded {len(dataset)} {split} samples. Visualizing {num_samples} samples...")
 
     indices = np.linspace(0, len(dataset) - 1, num_samples, dtype=int)
 

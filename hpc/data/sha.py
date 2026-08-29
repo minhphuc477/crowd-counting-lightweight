@@ -14,10 +14,11 @@ _validate_points = validate_point_annotations
 
 def load_sha_mat_points(
     mat_path: str,
-    coordinate_base: int = 1,
+    coordinate_base: int = 0,
     image_shape: Optional[Tuple[int, int]] = None,
+    bounds_policy: str = "allow",
 ) -> np.ndarray:
-    """Strict ShanghaiTech annotation loader with explicit coordinate base conversion."""
+    """Load original ShanghaiTech points using the official-code raw-coordinate convention."""
     if not os.path.exists(mat_path):
         raise FileNotFoundError(f"ShanghaiTech annotation not found: {mat_path}")
     try:
@@ -37,7 +38,13 @@ def load_sha_mat_points(
             if len(candidates) != 1:
                 raise KeyError(f"Could not uniquely find point array in {mat_path}")
             points = candidates[0]
-        return _validate_points(points, mat_path, coordinate_base=coordinate_base, image_shape=image_shape)
+        return _validate_points(
+            points,
+            mat_path,
+            coordinate_base=coordinate_base,
+            image_shape=image_shape,
+            bounds_policy=bounds_policy,
+        )
     except Exception as exc:
         raise RuntimeError(f"Failed to parse ShanghaiTech annotation {mat_path}: {exc}") from exc
 
@@ -56,7 +63,8 @@ class ShanghaiTechDataset(BaseCrowdDataset):
         flip_prob: float = 0.5,
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
-        coordinate_base: int = 1,
+        coordinate_base: int = 0,
+        annotation_bounds_policy: str = "allow",
     ):
         candidates = [
             os.path.join(root, part, split),
@@ -94,7 +102,12 @@ class ShanghaiTechDataset(BaseCrowdDataset):
             with Image.open(img_path) as im:
                 img_shape = im.size  # (W, H)
 
-            pts = load_sha_mat_points(mat_path, coordinate_base=coordinate_base, image_shape=img_shape)
+            pts = load_sha_mat_points(
+                mat_path,
+                coordinate_base=coordinate_base,
+                image_shape=img_shape,
+                bounds_policy=annotation_bounds_policy,
+            )
             image_paths.append(img_path)
             points_list.append(pts)
 
