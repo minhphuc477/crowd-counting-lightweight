@@ -53,7 +53,7 @@ def test_mass_pyramid_and_grouping():
 
 def test_ntpc_modes():
     print("\n" + "=" * 60)
-    print("AUDIT 2: NTPC 5 Decisive Research Modes (R0 - R4)")
+    print("AUDIT 2: NTPC 6 Formal Research Modes (R0 - R5)")
     print("=" * 60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -63,7 +63,7 @@ def test_ntpc_modes():
     pts = [torch.rand(50, 2, device=device) * 448 for _ in range(2)]
     target_pyramid = build_exact_count_pyramid(pts, 448, 448, (8, 16, 32, 64), device=device)
 
-    # 1. R0: Exact Regional Regression
+    # 1. R0: Exact Regional L1 Regression
     crit_r0 = NTPCLoss(NTPCConfig(mode="r0_exact")).to(device)
     loss_r0, logs_r0 = crit_r0(mass, target_pyramid)
     loss_r0.backward()
@@ -89,23 +89,32 @@ def test_ntpc_modes():
     check("R2 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
     check("R2 logs has flat_16 key", "flat_16" in logs_r2)
 
-    # 4. R3: Neural DTM Tree (Core Proposed)
+    # 4. R3: Hierarchical Multinomial Tree
     mass.grad = None
-    crit_r3 = NTPCLoss(NTPCConfig(mode="r3_tree_dtm")).to(device)
+    crit_r3 = NTPCLoss(NTPCConfig(mode="r3_multinomial_tree")).to(device)
     loss_r3, logs_r3 = crit_r3(mass, target_pyramid)
     loss_r3.backward()
     check("R3 loss is finite scalar", torch.isfinite(loss_r3) and loss_r3.ndim == 0, f"loss={loss_r3.item():.4f}")
     check("R3 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
-    check("R3 logs has root_to_64, 64_to_32, 32_to_16", all(k in logs_r3 for k in ["root_to_64", "64_to_32", "32_to_16"]))
+    check("R3 logs has multinomial_tree key", "multinomial_tree" in logs_r3)
 
-    # 5. R4: Full NTPC (DTM Tree + Dense 16->8)
+    # 5. R4: Neural DTM Tree (Proposed Core)
     mass.grad = None
-    crit_r4 = NTPCLoss(NTPCConfig(mode="r4_full_ntpc", dense_threshold_16=2.0)).to(device)
+    crit_r4 = NTPCLoss(NTPCConfig(mode="r4_dtm_tree")).to(device)
     loss_r4, logs_r4 = crit_r4(mass, target_pyramid)
     loss_r4.backward()
     check("R4 loss is finite scalar", torch.isfinite(loss_r4) and loss_r4.ndim == 0, f"loss={loss_r4.item():.4f}")
     check("R4 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
-    check("R4 logs has 16_to_8_dense key", "16_to_8_dense" in logs_r4)
+    check("R4 logs has root_to_64, 64_to_32, 32_to_16", all(k in logs_r4 for k in ["root_to_64", "64_to_32", "32_to_16"]))
+
+    # 6. R5: Full NTPC (DTM Tree + Dense 16->8)
+    mass.grad = None
+    crit_r5 = NTPCLoss(NTPCConfig(mode="r5_full_ntpc", dense_threshold_16=2.0)).to(device)
+    loss_r5, logs_r5 = crit_r5(mass, target_pyramid)
+    loss_r5.backward()
+    check("R5 loss is finite scalar", torch.isfinite(loss_r5) and loss_r5.ndim == 0, f"loss={loss_r5.item():.4f}")
+    check("R5 grad on mass is finite", mass.grad is not None and torch.isfinite(mass.grad).all())
+    check("R5 logs has 16_to_8_dense key", "16_to_8_dense" in logs_r5)
 
 
 def test_full_model_integration_and_amp():
@@ -115,7 +124,7 @@ def test_full_model_integration_and_amp():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = HPCLite(pretrained=False, use_p8_context=True).to(device)
-    crit = NTPCLoss(NTPCConfig(mode="r4_full_ntpc")).to(device)
+    crit = NTPCLoss(NTPCConfig(mode="r5_full_ntpc")).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     scaler = torch.amp.GradScaler("cuda", init_scale=256.0, enabled=(device.type == "cuda"))
 

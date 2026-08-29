@@ -1,13 +1,12 @@
 """Neural Tree-Pólya Crowd Counting (NTPC) Loss Module.
 
-This module implements the unified probabilistic and deterministic hierarchical
-formulations for the 5 decisive research ablation experiments:
-
-  - R0: Multi-Scale Exact Regional Regression (Baseline)
-  - R1: S-DCNet-style Deterministic Allocation (Prior-Art Match)
+Implements the 6 formal research ablation formulations from the NTPC specification:
+  - R0: Multi-Scale Exact Regional L1 Regression (Baseline)
+  - R1: Deterministic Conserved Allocation (Prior-Art Match / S-DC style)
   - R2: Flat Dirichlet-Multinomial at Leaf 16 (No Hierarchy)
-  - R3: Neural DTM Tree: 64 -> 32 -> 16 (Proposed Core Contribution)
-  - R4: Full NTPC: R3 + Density-Adaptive Fine-Level 16 -> 8 (Proposed Full Method)
+  - R3: Hierarchical Multinomial Tree: 64 -> 32 -> 16 (Hierarchy without Overdispersion)
+  - R4: Neural DTM Tree: 64 -> 32 -> 16 (Proposed Core Contribution)
+  - R5: Full NTPC: R4 + Density-Adaptive Fine-Level 16 -> 8 (Proposed Full Method)
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .dirichlet_multinomial import dirichlet_multinomial_nll, normalize_positive_mass
+from .dirichlet_multinomial import dirichlet_multinomial_nll, multinomial_nll, normalize_positive_mass
 from .negative_binomial import negative_binomial_nll_mean_dispersion
 
 
@@ -28,16 +27,7 @@ def sum_pool_mass_pyramid(
     block_sizes: Tuple[int, ...] = (8, 16, 32, 64),
     stride: int = 4,
 ) -> Dict[int, torch.Tensor]:
-    """Extract spatial count pyramid via linear sum-pooling from single mass map.
-    
-    Args:
-        mass: (B, 1, H/4, W/4) positive mass density map.
-        block_sizes: pixel block sizes.
-        stride: stride of mass map relative to original image (default 4).
-        
-    Returns:
-        dict: {block_size: (B, H_b, W_b)} pooled counts.
-    """
+    """Extract spatial count pyramid via linear sum-pooling from single mass map."""
     pyramid: Dict[int, torch.Tensor] = {}
     for bs in block_sizes:
         scale_factor = bs // stride
@@ -72,7 +62,7 @@ def group_four_children(
 @dataclass
 class NTPCConfig:
     """Configuration for Neural Tree-Pólya Crowd Counting loss."""
-    mode: str = "r4_full_ntpc"  # "r0_exact" | "r1_deterministic" | "r2_flat_dm" | "r3_tree_dtm" | "r4_full_ntpc"
+    mode: str = "r5_full_ntpc"  # "r0_exact" | "r1_deterministic" | "r2_flat_dm" | "r3_multinomial_tree" | "r4_dtm_tree" | "r5_full_ntpc"
     
     # Root Negative-Binomial dispersion parameter
     root_dispersion: float = 50.0
@@ -112,18 +102,7 @@ class NTPCLoss(nn.Module):
         mass: torch.Tensor,
         target_pyramid: Dict[int | str, torch.Tensor],
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """Compute loss and detailed diagnostics.
-        
-        Args:
-            mass: (B, 1, H/4, W/4) predicted positive mass density map.
-            target_pyramid: dictionary containing ground-truth integer counts
-                            for blocks {8, 16, 32, 64} and total count 'N'.
-                            
-        Returns:
-            total_loss: scalar tensor for backpropagation.
-            logs: dictionary of individual loss terms for monitoring.
-        """
-        # Ensure mass is positive and compute spatial pyramid
+        """Compute loss and detailed diagnostics."""
         mass = mass.float()
         pred_pyramid = sum_pool_mass_pyramid(mass, block_sizes=(8, 16, 32, 64), stride=4)
         
@@ -138,13 +117,14 @@ class NTPCLoss(nn.Module):
             "32_to_16": torch.tensor(0.0, device=mass.device),
             "16_to_8_dense": torch.tensor(0.0, device=mass.device),
             "flat_16": torch.tensor(0.0, device=mass.device),
+            "multinomial_tree": torch.tensor(0.0, device=mass.device),
             "deterministic_alloc": torch.tensor(0.0, device=mass.device),
             "exact_regression": torch.tensor(0.0, device=mass.device),
             "total": torch.tensor(0.0, device=mass.device),
         }
 
         # -------------------------------------------------------------
-        # MODE R0: Exact Regional Multi-Scale Regression Baseline
+        # MODE R0: Multi-Scale Exact Regional L1 Regression Baseline
         # -------------------------------------------------------------
         if self.cfg.mode == "r0_exact":
             l_n = F.l1_loss(pred_n, target_n)
@@ -158,7 +138,7 @@ class NTPCLoss(nn.Module):
             return total, logs
 
         # -------------------------------------------------------------
-        # ALL PROBABILISTIC / S-DC MODES (R1, R2, R3, R4) INCLUDE ROOT NB
+        # ALL PROBABILISTIC / S-DC MODES (R1-R5) INCLUDE ROOT NB
         # -------------------------------------------------------------
         l_root_nb = negative_binomial_nll_mean_dispersion(
             target=target_n,
@@ -170,8 +150,8 @@ class NTPCLoss(nn.Module):
         total = self.cfg.w_root_nb * l_root_nb
 
         # -------------------------------------------------------------
-        # MODE R1: S-DCNet-style Deterministic Hierarchical Allocation
-        # L_det = sum_p || Y_child(p) - Y_p * pi_p ||_1
+        # MODE R1: Deterministic Conserved Allocation (S-DCNet style)
+        # L_det = (1/|V|) * sum_{p in V} (sum_c |Y_{p,c} - Y_p * pi_{p,c}|) / (Y_p + eps)
         # -------------------------------------------------------------
         if self.cfg.mode == "r1_deterministic":
             # 64 -> 32 deterministic allocation
@@ -183,10 +163,14 @@ class NTPCLoss(nn.Module):
             m32_grouped = group_four_children(m32)  # (B, H64, W64, 4)
             pi32 = normalize_positive_mass(m32_grouped, dim=-1, eps=self.cfg.eps)
             
-            # Expected deterministic allocation: Y_p * pi_p
             expected_y32 = y64.unsqueeze(-1) * pi32
             mask_64 = y64 > 0
-            l_det_64_32 = F.l1_loss(expected_y32[mask_64], y32_grouped[mask_64]) if mask_64.any() else torch.tensor(0.0, device=mass.device)
+            if mask_64.any():
+                diff_64 = (expected_y32[mask_64] - y32_grouped[mask_64]).abs().sum(dim=-1)
+                norm_64 = diff_64 / y64[mask_64].clamp_min(1.0)
+                l_det_64_32 = norm_64.mean()
+            else:
+                l_det_64_32 = torch.tensor(0.0, device=mass.device)
 
             # 32 -> 16 deterministic allocation
             y16 = target_pyramid[16].float()
@@ -197,7 +181,12 @@ class NTPCLoss(nn.Module):
             
             expected_y16 = y32.unsqueeze(-1) * pi16
             mask_32 = y32 > 0
-            l_det_32_16 = F.l1_loss(expected_y16[mask_32], y16_grouped[mask_32]) if mask_32.any() else torch.tensor(0.0, device=mass.device)
+            if mask_32.any():
+                diff_32 = (expected_y16[mask_32] - y16_grouped[mask_32]).abs().sum(dim=-1)
+                norm_32 = diff_32 / y32[mask_32].clamp_min(1.0)
+                l_det_32_16 = norm_32.mean()
+            else:
+                l_det_32_16 = torch.tensor(0.0, device=mass.device)
 
             l_det = l_det_64_32 + l_det_32_16
             total = total + self.cfg.w_deterministic_alloc * l_det
@@ -227,7 +216,41 @@ class NTPCLoss(nn.Module):
             return total, logs
 
         # -------------------------------------------------------------
-        # MODE R3 & R4: Neural DTM Tree Allocation (64 -> 32 -> 16)
+        # MODE R3: Hierarchical Multinomial Tree (64 -> 32 -> 16)
+        # Tests tree hierarchy WITHOUT Dirichlet overdispersion
+        # -------------------------------------------------------------
+        if self.cfg.mode == "r3_multinomial_tree":
+            # Root -> 64 Multinomial
+            y64_flat = target_pyramid[64].reshape(b, -1).float()
+            m64_flat = pred_pyramid[64].reshape(b, -1).float()
+            pi64_flat = normalize_positive_mass(m64_flat, dim=-1, eps=self.cfg.eps)
+            l_multi_r64 = multinomial_nll(y64_flat, pi64_flat, valid_mask=target_n > 0)
+
+            # 64 -> 32 Multinomial
+            y64 = target_pyramid[64].float()
+            y32 = target_pyramid[32].float()
+            m32 = pred_pyramid[32].float()
+            y32_grouped = group_four_children(y32)
+            m32_grouped = group_four_children(m32)
+            pi32 = normalize_positive_mass(m32_grouped, dim=-1, eps=self.cfg.eps)
+            l_multi_64_32 = multinomial_nll(y32_grouped, pi32, valid_mask=y64 > 0)
+
+            # 32 -> 16 Multinomial
+            y16 = target_pyramid[16].float()
+            m16 = pred_pyramid[16].float()
+            y16_grouped = group_four_children(y16)
+            m16_grouped = group_four_children(m16)
+            pi16 = normalize_positive_mass(m16_grouped, dim=-1, eps=self.cfg.eps)
+            l_multi_32_16 = multinomial_nll(y16_grouped, pi16, valid_mask=y32 > 0)
+
+            l_multi_tree = l_multi_r64 + l_multi_64_32 + l_multi_32_16
+            total = total + l_multi_tree
+            logs["multinomial_tree"] = l_multi_tree.detach()
+            logs["total"] = total.detach()
+            return total, logs
+
+        # -------------------------------------------------------------
+        # MODE R4 & R5: Neural DTM Tree Allocation (64 -> 32 -> 16)
         # -------------------------------------------------------------
         # Level 1: Root N -> 64 blocks
         y64_flat = target_pyramid[64].reshape(b, -1).float()  # (B, 49)
@@ -282,10 +305,10 @@ class NTPCLoss(nn.Module):
         total = total + self.cfg.w_32_16 * l_32_16
 
         # -------------------------------------------------------------
-        # MODE R4: Dense-Adaptive Fine-Level Allocation (16 -> 8)
+        # MODE R5: Dense-Adaptive Fine-Level Allocation (16 -> 8)
         # Evaluated ONLY on congested parent blocks: Y_p^(16) >= tau_D
         # -------------------------------------------------------------
-        if self.cfg.mode == "r4_full_ntpc" and 8 in target_pyramid:
+        if self.cfg.mode in ("r5_full_ntpc", "r4_full_ntpc") and 8 in target_pyramid:
             y8 = target_pyramid[8].float()
             m8 = pred_pyramid[8].float()
             
