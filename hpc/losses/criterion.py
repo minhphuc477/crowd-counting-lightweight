@@ -22,7 +22,8 @@ from .hard_negative import (
 )
 from .robustness import RobustConsistencyLoss
 from .routing import RoutingSupervisionLoss
-from .point_mass import PointMassDecompositionLoss
+from .point_mass import BoundedPointMassLoss
+from .multiscale_mae import MultiScaleBlockMAELoss
 
 
 class HPCLossCriterion(nn.Module):
@@ -47,9 +48,10 @@ class HPCLossCriterion(nn.Module):
         # Loss weights
         lambda_count: float = 1.0,
         count_scale: float = 100.0,
-        lambda_point: float = 1.0,
+        lambda_point: float = 0.0,
+        lambda_ms_mae: float = 0.0,   # Multi-scale block MAE direct density supervision
         lambda_hnb: float = 0.25,
-        lambda_alloc: float = 0.0,    # Deprecated in favor of point loss
+        lambda_alloc: float = 0.0,    # Deprecated in favor of point loss / ms_mae
         lambda_hn: float = 0.10,
         lambda_empty: float = 0.25,
         lambda_global: float = 0.10,
@@ -74,6 +76,7 @@ class HPCLossCriterion(nn.Module):
 
         self.lambda_count   = float(lambda_count)
         self.lambda_point   = float(lambda_point)
+        self.lambda_ms_mae  = float(lambda_ms_mae)
         self.lambda_hnb     = float(lambda_hnb)
         self.lambda_alloc   = float(lambda_alloc)
         self.lambda_hn      = float(lambda_hn)
@@ -91,11 +94,15 @@ class HPCLossCriterion(nn.Module):
             use_poisson=use_poisson,
             learn_dispersion=learn_dispersion,
         )
-        self.point_loss = PointMassDecompositionLoss(
+        self.point_loss = BoundedPointMassLoss(
             output_stride=4,
-            bg_distance_px=point_bg_distance_px,
-            dispersion_weight=point_dispersion_weight,
+            min_radius_px=8.0,
+            max_radius_px=24.0,
             bg_weight=point_bg_weight,
+        )
+        self.ms_mae_loss = MultiScaleBlockMAELoss(
+            block_sizes=self.block_sizes,
+            output_stride=4,
         )
         self.count_loss  = DirectCountL1Loss(count_scale=count_scale)
         self.hn_loss     = HardNegativeMassLoss(top_fraction=hard_negative_fraction,
@@ -110,18 +117,19 @@ class HPCLossCriterion(nn.Module):
         p = min(max(float(progress), 0.0), 1.0)
 
         if not self.enable_curriculum or p >= 0.10:
-            f = dict(count=1.0, point=1.0, hnb=1.0, hn=1.0,
+            f = dict(count=1.0, point=1.0, ms_mae=1.0, hnb=1.0, hn=1.0,
                      empty=1.0, global_=1.0, rob=1.0, route=1.0)
         elif p < 0.03:
-            f = dict(count=1.0, point=0.5, hnb=0.5, hn=0.0,
+            f = dict(count=1.0, point=0.5, ms_mae=0.5, hnb=0.5, hn=0.0,
                      empty=0.5, global_=1.0, rob=0.0, route=0.0)
         else:  # 3–10%
-            f = dict(count=1.0, point=1.0, hnb=1.0, hn=0.5,
+            f = dict(count=1.0, point=1.0, ms_mae=1.0, hnb=1.0, hn=0.5,
                      empty=1.0, global_=1.0, rob=0.0, route=1.0)
 
         return {
             "count":  self.lambda_count  * f["count"],
             "point":  self.lambda_point  * f["point"],
+            "ms_mae": self.lambda_ms_mae * f["ms_mae"],
             "hnb":    self.lambda_hnb    * f["hnb"],
             "hn":     self.lambda_hn     * f["hn"],
             "empty":  self.lambda_empty  * f["empty"],
@@ -160,11 +168,18 @@ class HPCLossCriterion(nn.Module):
             loss_dict["mean_signed_count_error"] = (pred_counts_d - gt_counts_d).mean()
 
         # 2. Point-Neighbor Mass Conservation Loss (person-level spatial constraint)
-        if gt_points is not None:
+        if gt_points is not None and self.lambda_point > 0:
             l_point, point_details = self.point_loss(d_map, gt_points)
             loss_dict.update(point_details)
         else:
             l_point = d_map.new_zeros(())
+
+        # 2b. Multi-Scale Block MAE Loss (direct multi-resolution density supervision)
+        if self.lambda_ms_mae > 0:
+            l_ms_mae, ms_details = self.ms_mae_loss(d_map, gt_block_counts)
+            loss_dict.update(ms_details)
+        else:
+            l_ms_mae = d_map.new_zeros(())
 
         # 3. Hierarchical Negative Binomial Loss (multi-scale probabilistic regularizer)
         l_hnb, hnb_details = self.hnb_loss(d_map, gt_block_counts)
@@ -195,6 +210,7 @@ class HPCLossCriterion(nn.Module):
         total_loss = (
             weights["count"]  * l_count
             + weights["point"]* l_point
+            + weights["ms_mae"]* l_ms_mae
             + weights["hnb"]  * l_hnb
             + weights["hn"]   * l_hn
             + weights["empty"]* l_empty
@@ -209,6 +225,7 @@ class HPCLossCriterion(nn.Module):
         loss_dict.update({
             "loss_count":  l_count.detach(),
             "loss_point":  l_point.detach(),
+            "loss_ms_mae": l_ms_mae.detach(),
             "loss_hnb":    l_hnb.detach(),
             "loss_hn":     l_hn.detach(),
             "loss_empty":  l_empty.detach(),
