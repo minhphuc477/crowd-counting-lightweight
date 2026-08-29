@@ -19,43 +19,20 @@ from hpc.data.nwpu import NWPUDataset
 from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
+from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
-from hpc.metrics.counting import evaluate_counting_metrics
-from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
 from hpc.models.hpc_lite import HPCLite
 from hpc.utils.seed import seed_everything
-
-
-def evaluate_model(model: nn.Module, dataset, device: torch.device) -> dict:
-    """Single-scale full-image evaluation on the official selection split."""
-    model.eval()
-    predictions, ground_truths = [], []
-    with torch.no_grad():
-        for index in range(len(dataset)):
-            sample = dataset[index]
-            if not bool(sample.get("has_gt", True)):
-                raise ValueError("Periodic evaluation requires a labeled validation/test split")
-            image = sample["image"].unsqueeze(0).to(device)
-            prediction, _ = model.predict(image, pad_multiple=32)
-            predictions.append(float(prediction.item()))
-            ground_truths.append(float(sample["gt_count"]))
-    result = evaluate_counting_metrics(predictions, ground_truths)
-    result.update(evaluate_subgroup_diagnostics(predictions, ground_truths))
-    return result
 
 
 def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
     return {
         "crop_size": int(ds_cfg.get("crop_size", 256)),
-        "hnb_blocks": [int(x) for x in ds_cfg.get("hnb_blocks", [8, 16, 32, 64])],
-        "allocation_block": int(ds_cfg.get("allocation_block", 16)),
         "is_train": is_train,
         "scale_range": tuple(aug_cfg.get("scale_range", [0.7, 1.3])),
         "flip_prob": float(aug_cfg.get("flip_prob", 0.5)) if is_train else 0.0,
-        "second_view_prob": 0.0,
         "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
-        "crop_sampling": aug_cfg.get("crop_sampling", "uniform"),
         "ntpc_only": True,
     }
 
@@ -82,12 +59,16 @@ def build_datasets(cfg: dict):
         selection_split = "Test"
     elif name == "nwpu":
         train = NWPUDataset(
-            root=ds_cfg["root"], split="train",
-            split_file=ds_cfg.get("train_split_file"), **train_args,
+            root=ds_cfg["root"],
+            split="train",
+            split_file=ds_cfg.get("train_split_file"),
+            **train_args,
         )
         evaluation = NWPUDataset(
-            root=ds_cfg["root"], split="val",
-            split_file=ds_cfg.get("val_split_file"), **eval_args,
+            root=ds_cfg["root"],
+            split="val",
+            split_file=ds_cfg.get("val_split_file"),
+            **eval_args,
         )
         selection_split = "val"
     else:
@@ -148,20 +129,20 @@ def component_gradient_norms(
 
 
 def _grad_names_for_mode(mode: str) -> Tuple[str, ...]:
-    """Return the component names to audit per gradient for a given NTPC mode.
-
-    Always audits the shared root + tree-16 components.  Finer-grain terms are
-    added only when that depth is actually supervised, so the audit directly
-    answers whether fine-level gradients dominate.
-    """
-    names = ["root_magnitude", "root_to_64", "64_to_32", "32_to_16"]
-    if mode in {"r4_dtm_tree8", "r4_dtm_tree4"}:
-        names.append("16_to_8")
-    if mode == "r4_dtm_tree4":
-        names.append("8_to_4")
-    if mode == "r5_full_ntpc":
-        names.append("16_to_8_dense")
-    return tuple(names)
+    """Return the component names to audit per gradient for each specific NTPC mode."""
+    mapping = {
+        "r0_exact": ("root_magnitude", "exact_regression"),
+        "r1_deterministic": ("root_magnitude", "deterministic_alloc"),
+        "r2_flat_dm": ("root_magnitude", "flat_16"),
+        "r3_multinomial_tree": ("root_magnitude", "multinomial_tree"),
+        "r4_dtm_tree16": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16"),
+        "r4_dtm_tree8": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8"),
+        "r4_dtm_tree4": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8", "8_to_4"),
+        "r5_full_ntpc": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8_dense"),
+    }
+    if mode not in mapping:
+        raise ValueError(f"Unknown mode '{mode}' for gradient auditing")
+    return mapping[mode]
 
 
 def _append_csv(path: str, row: dict, fieldnames: list[str]) -> None:
@@ -176,6 +157,25 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
 
+    # Scratch and config fail-fast invariants
+    for forbidden in (
+        "resume",
+        "teacher_checkpoint",
+        "distillation",
+        "warm_start",
+        "pretrained_checkpoint",
+    ):
+        if cfg.get(forbidden):
+            raise ValueError(
+                f"NTPC strict-scratch invariant: '{forbidden}' is forbidden in config"
+            )
+
+    training_cfg = cfg.get("training", {})
+    if "epochs" in training_cfg:
+        raise ValueError(
+            "training.epochs is invalid and ambiguous; specify total epochs under schedule.epochs"
+        )
+
     exp_cfg = cfg["experiment"]
     seed = int(exp_cfg.get("seed", 42))
     seed_everything(seed)
@@ -187,8 +187,12 @@ def main() -> None:
 
     train_ds, evaluation_ds, selection_split = build_datasets(cfg)
     stats_cfg = cfg.get("statistics", {})
-    crop_stats = estimate_crop_statistics(train_ds, stats_cfg.get("max_samples"))
-    # Statistics sampling must not change model initialization or loader RNG.
+
+    # Isolated statistics seed so dataset initialization and tau_D are deterministic across runs
+    stats_seed = int(stats_cfg.get("seed", 12345))
+    seed_everything(stats_seed)
+    crop_stats = estimate_crop_statistics(train_ds, stats_cfg.get("max_samples", 100))
+    # Restore experiment seed before model/loader instantiation
     seed_everything(seed)
 
     sampler = None
@@ -202,7 +206,6 @@ def main() -> None:
             power=float(sampler_cfg.get("power", 0.5)),
         )
 
-    training_cfg = cfg["training"]
     train_loader = DataLoader(
         train_ds,
         batch_size=int(training_cfg.get("batch_size", 16)),
@@ -235,6 +238,7 @@ def main() -> None:
 
     loss_cfg = cfg.get("loss", {})
     shared_kappa = loss_cfg.get("kappa_shared")
+
     def kappa(name: str, default: float = 20.0) -> float:
         return float(loss_cfg.get(name, shared_kappa if shared_kappa is not None else default))
 
@@ -274,15 +278,21 @@ def main() -> None:
     )
     epochs = int(cfg["schedule"]["epochs"])
     warmup_epochs = int(cfg["schedule"].get("warmup_epochs", 25))
+
     def lr_lambda(epoch: int) -> float:
         if epoch < warmup_epochs:
             return float(epoch + 1) / max(1, warmup_epochs)
         progress = (epoch - warmup_epochs) / max(1, epochs - warmup_epochs)
         return 0.10 + 0.45 * (1.0 + math.cos(math.pi * progress))
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     amp_enabled = bool(training_cfg.get("amp", True)) and device.type == "cuda"
-    scaler = torch.amp.GradScaler("cuda", init_scale=float(training_cfg.get("init_scale", 256)), enabled=amp_enabled)
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        init_scale=float(training_cfg.get("init_scale", 256)),
+        enabled=amp_enabled,
+    )
     grad_clip = float(optimizer_cfg.get("grad_clip", 5.0))
     evaluate_every = int(training_cfg.get("evaluate_every", training_cfg.get("validate_every", 5)))
     gradient_every = int(training_cfg.get("gradient_audit_every", 50))
@@ -305,7 +315,7 @@ def main() -> None:
     print(
         f"Device={device}; params={sum(p.numel() for p in model.parameters()):,}; "
         f"mode={criterion.cfg.mode}; selection={selection_split}; stats={crop_stats}; "
-        f"dense_threshold_16={dense_threshold:.3f}"
+        f"dense_threshold_16={dense_threshold:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}"
     )
     best_mae, best_epoch = float("inf"), 0
     component_names = train_fields[2:13]
@@ -351,7 +361,7 @@ def main() -> None:
         _append_csv(train_csv, train_row, train_fields)
 
         if epoch % evaluate_every == 0 or epoch == epochs:
-            metrics = evaluate_model(model, evaluation_ds, device)
+            metrics = evaluate_counting(model, evaluation_ds, device)
             val_row = {
                 "epoch": epoch,
                 "mae": metrics["mae"], "rmse": metrics["rmse"], "nae": metrics.get("nae", 0.0),
@@ -374,6 +384,8 @@ def main() -> None:
                     "config": cfg,
                     "resolved_crop_statistics": crop_stats,
                     "selection_split": selection_split,
+                    "is_exact_joint_nll": criterion.is_exact_joint_nll,
+                    "initialization_policy": "scratch",
                 }, os.path.join(save_dir, "best.pt"))
             print(
                 f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.3f} "

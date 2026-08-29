@@ -21,9 +21,12 @@ ENV/
 *.mat
 *.npy
 
-# Training Checkpoints & Runs (large binaries)
-runs/**/*.pt
-runs/**/*.onnx
+# Training Checkpoints & Runs
+runs/
+analysis_smoke/
+eval_smoke*.json
+stats_smoke*.json
+profile*.json
 *.pt
 *.pth
 *.onnx

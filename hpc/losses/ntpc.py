@@ -218,12 +218,32 @@ class NTPCLoss(nn.Module):
             return (4, 8, 16, 32, 64)
         return (16, 32, 64)
 
+    @property
+    def is_exact_joint_nll(self) -> bool:
+        """True iff the loss configuration is the exact factorized joint NLL."""
+        return (
+            self.cfg.mode == "r4_dtm_tree16"
+            and self.cfg.root_loss == "nb"
+            and self.cfg.w_root_nb == 1.0
+            and self.cfg.w_root64 == 1.0
+            and self.cfg.w_64_32 == 1.0
+            and self.cfg.w_32_16 == 1.0
+        )
+
     def _validate_targets(self, targets: Dict[int | str, torch.Tensor]) -> None:
-        """Fail-fast validation: key existence, integer values, non-negative, count conservation."""
+        """Fail-fast validation: key existence, integer values, non-negative, count conservation, and parent-child tree consistency."""
         missing = [key for key in ("N", *self._required_blocks()) if key not in targets]
         if missing:
             raise KeyError(f"Mode {self.cfg.mode} requires targets {missing}")
+
         N = targets["N"].float().reshape(-1)
+        if not torch.isfinite(N).all():
+            raise ValueError("N contains NaN/Inf values")
+        if (N < 0).any():
+            raise ValueError("N must be non-negative")
+        if not torch.allclose(N, N.round(), atol=1e-4, rtol=0):
+            raise ValueError("N must contain integer counts")
+
         for key in self._required_blocks():
             t = targets[key].float()
             if not torch.allclose(t, t.round(), atol=1e-4, rtol=0):
@@ -239,6 +259,29 @@ class NTPCLoss(nn.Module):
                     f"Target level {key} violates count conservation: "
                     f"sum={s.tolist()} != N={N.tolist()}"
                 )
+
+        def _assert_parent_child(parent: torch.Tensor, child: torch.Tensor, name: str) -> None:
+            grouped = group_2x2_flat(child.float()).sum(dim=-1)
+            expected = parent.float().flatten(1)
+            if grouped.shape != expected.shape:
+                raise ValueError(
+                    f"{name}: parent/child shape mismatch: {expected.shape} vs {grouped.shape}"
+                )
+            if not torch.allclose(grouped, expected, atol=1e-3, rtol=0):
+                diff = (grouped - expected).abs().max().item()
+                raise ValueError(
+                    f"{name}: child counts do not reconstruct parent counts; max diff = {diff:.4f}"
+                )
+
+        required = set(self._required_blocks())
+        if {32, 64} <= required:
+            _assert_parent_child(targets[64], targets[32], "64->32")
+        if {16, 32} <= required:
+            _assert_parent_child(targets[32], targets[16], "32->16")
+        if 8 in required and 16 in required:
+            _assert_parent_child(targets[16], targets[8], "16->8")
+        if 4 in required and 8 in required:
+            _assert_parent_child(targets[8], targets[4], "8->4")
 
     def _root_nll(self, target: torch.Tensor, mean: torch.Tensor) -> torch.Tensor:
         if self.cfg.root_loss == "nb":
