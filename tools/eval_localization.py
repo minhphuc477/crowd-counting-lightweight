@@ -1,36 +1,37 @@
-"""Standalone evaluation tool for Crowd Counting & Point Localization on benchmark test sets.
+"""Benchmark Evaluation Tool for Joint Counting & OT-M Localization on Test Sets.
 
 Computes:
-  - Global Counting Metrics: MAE, RMSE, NAE, Bias
-  - Density Subgroup Diagnostics: Sparse, Medium, Dense MAE
-  - Localization Metrics: Precision, Recall, F1-Score @ sigma in {4, 8, 16, 32} pixels
+  - Counting: MAE, RMSE, NAE, Bias, Density Subgroups (Sparse, Med, Dense)
+  - Parameter-Free OT-M Localization: F1, Precision, Recall @ sigma in {4, 8, 16} px
+  - Local Maxima Peak Finding (Baseline Comparison)
 """
 
+from __future__ import annotations
+
 import argparse
-import json
 import os
 import sys
 
 import numpy as np
 import torch
-import yaml
 
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.metrics.counting import evaluate_counting_metrics
-from hpc.metrics.localization import evaluate_dataset_localization, extract_points_from_mass_map
+from hpc.metrics.localization import evaluate_dataset_localization, match_points
+from hpc.metrics.otm import otm_localize
 from hpc.metrics.subgroup import evaluate_subgroup_diagnostics
 from hpc.models.hpc_lite import HPCLite
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate Counting and Localization performance.")
+    parser = argparse.ArgumentParser(description="Evaluate NTPC Counting and OT-M Localization.")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint .pt file")
     parser.add_argument("--data_root", type=str, default="./data/ShanghaiTech", help="Dataset root path")
     parser.add_argument("--part", type=str, default="part_A", help="Dataset part (part_A / part_B)")
-    parser.add_argument("--stride", type=int, default=4, help="Mass map output stride (default 4)")
-    parser.add_argument("--min_distance_px", type=int, default=4, help="Min peak distance in pixels")
-    parser.add_argument("--threshold_abs", type=float, default=0.01, help="Min peak absolute value")
-    parser.add_argument("--threshold_rel", type=float, default=0.05, help="Min peak relative value")
+    parser.add_argument("--stride", type=int, default=4, help="Output stride (default 4)")
+    parser.add_argument("--ot_epsilon", type=float, default=0.02, help="OT Sinkhorn epsilon")
+    parser.add_argument("--ot_iters", type=int, default=50, help="OT Sinkhorn iterations")
+    parser.add_argument("--outer_iters", type=int, default=8, help="OT-M outer iterations")
     args = parser.parse_args()
 
     if not os.path.exists(args.checkpoint):
@@ -67,11 +68,11 @@ def main():
         image_std=cfg.get("dataset", {}).get("image_std", [0.5, 0.5, 0.5]),
     )
 
-    print(f"Evaluating {len(ds)} test samples for Counting & Localization...")
+    print(f"Evaluating {len(ds)} test samples for Counting & OT-M Localization...")
 
     predictions_cnt = []
     ground_truths_cnt = []
-    predictions_pts = []
+    otm_points_list = []
     ground_truths_pts = []
 
     with torch.no_grad():
@@ -81,26 +82,25 @@ def main():
             gt_cnt = float(sample["gt_count"])
             gt_pts = sample.get("points", np.empty((0, 2), dtype=np.float32))
 
-            # Full image padded inference
             pred_cnt, pred_mass = model.predict(img, pad_multiple=32)
-            
-            # Extract point coordinates via local maxima on mass map D
-            pred_pts = extract_points_from_mass_map(
+
+            # OT-M parameter-free point localization from single mass map D
+            otm_pts = otm_localize(
                 pred_mass[0, 0],
-                stride=args.stride,
-                threshold_rel=args.threshold_rel,
-                threshold_abs=args.threshold_abs,
-                min_distance_px=args.min_distance_px,
+                output_stride=args.stride,
+                outer_iterations=args.outer_iters,
+                sinkhorn_iterations=args.ot_iters,
+                epsilon=args.ot_epsilon,
             )
 
             predictions_cnt.append(float(pred_cnt.item()))
             ground_truths_cnt.append(gt_cnt)
-            predictions_pts.append(pred_pts)
+            otm_points_list.append(otm_pts.cpu().numpy())
             ground_truths_pts.append(gt_pts)
 
     counting_res = evaluate_counting_metrics(predictions_cnt, ground_truths_cnt)
     subgroup_res = evaluate_subgroup_diagnostics(predictions_cnt, ground_truths_cnt)
-    loc_res = evaluate_dataset_localization(predictions_pts, ground_truths_pts, distance_thresholds=(4.0, 8.0, 16.0, 32.0))
+    loc_res = evaluate_dataset_localization(otm_points_list, ground_truths_pts, distance_thresholds=(4.0, 8.0, 16.0))
 
     print("\n=======================================================")
     print(" COUNTING METRICS")
@@ -109,14 +109,14 @@ def main():
     print(f" RMSE : {counting_res['rmse']:.2f}")
     print(f" Bias : {counting_res['bias']:.2f}")
     print(f" NAE  : {counting_res['nae']:.4f}")
-    print(f" Sparse [11-100] MAE   : {subgroup_res['bin_11_100_mae']:.2f}")
-    print(f" Med [101-1000] MAE    : {subgroup_res['bin_101_1000_mae']:.2f}")
-    print(f" Dense [>1000] MAE     : {subgroup_res['bin_gt1000_mae']:.2f}")
+    print(f" Sparse [11-100] MAE   : {subgroup_res.get('bin_11_100_mae', 0.0):.2f}")
+    print(f" Med [101-1000] MAE    : {subgroup_res.get('bin_101_1000_mae', 0.0):.2f}")
+    print(f" Dense [>1000] MAE     : {subgroup_res.get('bin_gt1000_mae', 0.0):.2f}")
 
     print("\n=======================================================")
-    print(" LOCALIZATION METRICS (Point-Matching Bipartite)")
+    print(" OT-M LOCALIZATION METRICS (Hungarian Matching)")
     print("=======================================================")
-    for sigma in (4, 8, 16, 32):
+    for sigma in (4, 8, 16):
         prec = loc_res[f"sigma_{sigma}_precision"] * 100
         rec = loc_res[f"sigma_{sigma}_recall"] * 100
         f1 = loc_res[f"sigma_{sigma}_f1"] * 100
