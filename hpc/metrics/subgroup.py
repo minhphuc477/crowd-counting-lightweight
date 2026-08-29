@@ -25,6 +25,18 @@ def evaluate_subgroup_diagnostics(
         return {}
 
     results: Dict[str, float] = {}
+    signed_error = preds - gts
+    results.update(
+        gt_mean=float(np.mean(gts)),
+        pred_mean=float(np.mean(preds)),
+        gt_std=float(np.std(gts)),
+        pred_std=float(np.std(preds)),
+        signed_error_mean=float(np.mean(signed_error)),
+        signed_error_median=float(np.median(signed_error)),
+        under_count_fraction=float(np.mean(signed_error < 0)),
+        over_count_fraction=float(np.mean(signed_error > 0)),
+        pred_gt_ratio=float(np.sum(preds) / np.sum(gts)) if np.sum(gts) > 0 else float("nan"),
+    )
     empty = gts == 0
     if np.any(empty):
         e = preds[empty]
@@ -47,6 +59,8 @@ def evaluate_subgroup_diagnostics(
         if np.any(mask):
             results[f"{name}_mae"] = compute_mae(preds[mask], gts[mask])
             results[f"{name}_rmse"] = compute_rmse(preds[mask], gts[mask])
+            results[f"{name}_nae"] = compute_nae(preds[mask], gts[mask], ignore_zero=True)
+            results[f"{name}_bias"] = float(np.mean(preds[mask] - gts[mask]))
             results[f"{name}_count"] = int(mask.sum())
 
     # NTPC paper diagnostics.  Boundaries are disjoint by construction:
@@ -60,12 +74,18 @@ def evaluate_subgroup_diagnostics(
             error = preds[mask] - gts[mask]
             results[f"{name}_mae"] = compute_mae(preds[mask], gts[mask])
             results[f"{name}_rmse"] = compute_rmse(preds[mask], gts[mask])
+            results[f"{name}_nae"] = compute_nae(preds[mask], gts[mask], ignore_zero=True)
             results[f"{name}_bias"] = float(np.mean(error))
             results[f"{name}_count"] = int(mask.sum())
+            denominator = float(np.sum(gts[mask]))
+            results[f"{name}_pred_gt_ratio"] = (
+                float(np.sum(preds[mask]) / denominator) if denominator > 0 else float("nan")
+            )
 
     threshold = np.percentile(gts, 90)
     top = gts >= threshold
     if np.any(top):
+        results["top10_dense_count"] = int(top.sum())
         results["top10_dense_mae"] = compute_mae(preds[top], gts[top])
         results["top10_dense_rmse"] = compute_rmse(preds[top], gts[top])
 

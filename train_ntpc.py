@@ -9,8 +9,20 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any, Dict, Iterable, Tuple
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 import timm
 import torch
@@ -25,6 +37,7 @@ from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
+from hpc.metrics.tree import finalize_tree_diagnostics, tree_allocation_raw_diagnostics
 from hpc.models.factory import (
     build_model_from_config,
     validate_pretrained_normalization,
@@ -164,6 +177,39 @@ def component_gradient_norms(
         # Exactly one device synchronization per audited component.
         result[f"grad_{name}"] = float(torch.sqrt(squared).cpu())
     return result
+
+
+@torch.no_grad()
+def gradient_norm(parameters: Iterable[torch.nn.Parameter]) -> torch.Tensor:
+    """Return the unscaled global L2 gradient norm without modifying gradients."""
+    grads = [p.grad.detach() for p in parameters if p.grad is not None]
+    if not grads:
+        return torch.zeros((), dtype=torch.float32)
+    device = grads[0].device
+    squared = torch.zeros((), device=device, dtype=torch.float32)
+    for grad in grads:
+        squared += grad.float().square().sum()
+    return torch.sqrt(squared)
+
+
+@torch.no_grad()
+def nonfinite_gradient_report(
+    model: nn.Module,
+    max_names: int = 12,
+) -> list[str]:
+    """Describe parameters containing NaN/Inf gradients for actionable failures."""
+    bad: list[str] = []
+    for name, parameter in model.named_parameters():
+        grad = parameter.grad
+        if grad is None or bool(torch.isfinite(grad).all()):
+            continue
+        bad.append(
+            f"{name}: nan={int(torch.isnan(grad).sum())}, "
+            f"inf={int(torch.isinf(grad).sum())}, shape={tuple(grad.shape)}"
+        )
+        if len(bad) >= max_names:
+            break
+    return bad
 
 
 def _grad_names_for_mode(mode: str) -> Tuple[str, ...]:
@@ -398,17 +444,56 @@ def main() -> None:
         raise ValueError(f"evaluate_every must be positive, got {evaluate_every}")
     gradient_every = int(training_cfg.get("gradient_audit_every", 50))
     grad_names = _grad_names_for_mode(criterion.cfg.mode)
+    tree_levels = {
+        "r4_dtm_tree16": ("root_64", "64_32", "32_16"),
+        "r4_dtm_tree8": ("root_64", "64_32", "32_16", "16_8"),
+        "r4_dtm_tree4": ("root_64", "64_32", "32_16", "16_8", "8_4"),
+        "r5_full_ntpc": ("root_64", "64_32", "32_16", "16_8"),
+    }.get(criterion.cfg.mode, ())
+    tree_fields = []
+    for level in tree_levels:
+        prefix = f"tree_{level}"
+        tree_fields.extend([
+            f"{prefix}_active_parents_per_image", f"{prefix}_zero_parent_fraction",
+            f"{prefix}_nll_per_active_parent",
+        ])
+        for group in ("0", "1", "2_4", "5_9", "ge10"):
+            tree_fields.extend([
+                f"{prefix}_parent_{group}_count", f"{prefix}_parent_{group}_mean_nll",
+                f"{prefix}_parent_{group}_mean_prob_l1",
+            ])
 
     train_fields = [
         "epoch", "loss", "root_magnitude", "root_to_64", "64_to_32", "32_to_16",
         "16_to_8", "16_to_8_dense", "8_to_4", "flat_16", "multinomial_tree",
-        "deterministic_alloc", "exact_regression", *[f"grad_{x}" for x in grad_names],
+        "deterministic_alloc", "exact_regression", *tree_fields,
+        *[f"grad_{x}" for x in grad_names],
+        "grad_total_pre_clip", "grad_total_post_clip", "grad_pre_clip_p50",
+        "grad_pre_clip_p95", "grad_pre_clip_max", "grad_backbone", "grad_task",
+        "clip_fraction", "amp_scale_start", "amp_scale_end", "amp_skipped_steps",
         "lr", "lr_backbone", "lr_task",
     ]
-    val_fields = [
-        "epoch", "mae", "rmse", "nae", "sparse_mae", "medium_mae", "dense_mae",
-        "sparse_bias", "medium_bias", "dense_bias", "lr", "lr_backbone", "lr_task",
+    overall_diagnostics = [
+        "mae", "rmse", "nae", "bias", "gt_mean", "pred_mean", "gt_std", "pred_std",
+        "signed_error_mean", "signed_error_median", "under_count_fraction",
+        "over_count_fraction", "pred_gt_ratio",
     ]
+    density_diagnostics = [
+        f"bin_{group}_{metric}"
+        for group in ("sparse", "medium", "dense")
+        for metric in ("count", "mae", "rmse", "nae", "bias", "pred_gt_ratio")
+    ]
+    detailed_count_diagnostics = [
+        f"bin_{group}_{metric}"
+        for group in ("0", "1_10", "11_100", "101_1000", "gt1000")
+        for metric in ("count", "mae", "rmse", "nae", "bias")
+    ]
+    val_metric_fields = [
+        *overall_diagnostics, *density_diagnostics, *detailed_count_diagnostics,
+        "top10_dense_count", "top10_dense_mae", "top10_dense_rmse",
+        "empty_count", "empty_mae", "empty_pred_mean", "empty_pred_p95",
+    ]
+    val_fields = ["epoch", *val_metric_fields, "lr", "lr_backbone", "lr_task"]
     train_csv, val_csv = os.path.join(save_dir, "train.csv"), os.path.join(save_dir, "val.csv")
     for path, fields in ((train_csv, train_fields), (val_csv, val_fields)):
         with open(path, "w", newline="", encoding="utf-8") as handle:
@@ -418,7 +503,8 @@ def main() -> None:
         f"Device={device}; params={sum(p.numel() for p in model.parameters()):,}; "
         f"mode={criterion.cfg.mode}; selection={selection_split}; stats={crop_stats}; "
         f"dense_threshold_16={dense_threshold:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}; "
-        f"initialization={'pretrained' if pretrained_spec else 'scratch'}"
+        f"initialization={'pretrained' if pretrained_spec else 'scratch'}",
+        flush=True,
     )
     best_mae, best_epoch = float("inf"), 0
     component_names = train_fields[2:13]
@@ -430,6 +516,16 @@ def main() -> None:
         running_loss = torch.zeros((), device=device)
         running = {name: torch.zeros((), device=device) for name in component_names}
         epoch_grads = {f"grad_{name}": float("nan") for name in grad_names}
+        tree_raw: dict[str, float] = {}
+        pre_clip_norms: list[float] = []
+        post_clip_norms: list[float] = []
+        backbone_grad_norms: list[float] = []
+        task_grad_norms: list[float] = []
+        clipped_steps = 0
+        amp_skipped_steps = 0
+        amp_scale_start = float(scaler.get_scale()) if amp_enabled else 1.0
+        backbone_params = tuple(optimizer.param_groups[0]["params"])
+        task_params = tuple(optimizer.param_groups[1]["params"])
         audit_gradients = epoch == 1 or (gradient_every > 0 and epoch % gradient_every == 0)
         for step, batch in enumerate(train_loader):
             images = batch["image"].to(device, non_blocking=True)
@@ -441,50 +537,162 @@ def main() -> None:
                 loss, logs, components = criterion(
                     mass, targets, return_components=True, validate_targets=False
                 )
+            if tree_levels:
+                for name, value in tree_allocation_raw_diagnostics(
+                    mass, targets, criterion.cfg, levels=tree_levels
+                ).items():
+                    tree_raw[name] = tree_raw.get(name, 0.0) + value
             if audit_gradients and step == 0:
                 epoch_grads = component_gradient_norms(components, model.parameters(), grad_names)
+                bad_components = {k: v for k, v in epoch_grads.items() if not math.isfinite(v)}
+                if bad_components:
+                    raise FloatingPointError(
+                        f"Non-finite unscaled component gradients at epoch={epoch}, step={step}: "
+                        f"{bad_components}"
+                    )
+                print(f"Gradient audit epoch={epoch}: {epoch_grads}", flush=True)
             if amp_enabled:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
+                pre_clip = gradient_norm(model.parameters())
+                bad_grads = nonfinite_gradient_report(model) if not bool(torch.isfinite(pre_clip)) else []
+                if bad_grads:
+                    scale_before = float(scaler.get_scale())
+                    try:
+                        offending_component_grads = component_gradient_norms(
+                            components, model.parameters(), grad_names
+                        )
+                    except Exception as exc:
+                        offending_component_grads = {"error": str(exc)}
+                    # unscale_ has already recorded found_inf. Do not clip Inf gradients:
+                    # scaler.step() skips optimizer.step(), then update() lowers the scale.
+                    scaler.step(optimizer)
+                    scaler.update()
+                    amp_skipped_steps += 1
+                    gt_n = targets["N"].float()
+                    print(
+                        f"[AMP overflow] epoch={epoch} step={step} "
+                        f"loss={float(loss.detach()):.6g} "
+                        f"gt=[{float(gt_n.min()):.0f}, {float(gt_n.mean()):.1f}, {float(gt_n.max()):.0f}] "
+                        f"mass=[{float(mass.min()):.3e}, {float(mass.max()):.3e}] "
+                        f"scale={scale_before:g}->{float(scaler.get_scale()):g}; "
+                        f"component_grads={offending_component_grads}; "
+                        + "; ".join(bad_grads),
+                        flush=True,
+                    )
+                    running_loss += loss.detach()
+                    for name in component_names:
+                        running[name] += logs.get(name, mass.new_zeros(()))
+                    continue
+                pre_value = float(pre_clip.cpu())
+                backbone_value = float(gradient_norm(backbone_params).cpu())
+                task_value = float(gradient_norm(task_params).cpu())
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=True)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                pre_clip = gradient_norm(model.parameters())
+                if not bool(torch.isfinite(pre_clip)):
+                    raise FloatingPointError(
+                        f"Non-finite gradients without AMP at epoch={epoch}, step={step}:\n"
+                        + "\n".join(nonfinite_gradient_report(model))
+                    )
+                pre_value = float(pre_clip.cpu())
+                backbone_value = float(gradient_norm(backbone_params).cpu())
+                task_value = float(gradient_norm(task_params).cpu())
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=True)
                 optimizer.step()
+            post_value = min(pre_value, grad_clip)
+            pre_clip_norms.append(pre_value)
+            post_clip_norms.append(post_value)
+            backbone_grad_norms.append(backbone_value)
+            task_grad_norms.append(task_value)
+            clipped_steps += int(pre_value > grad_clip)
             running_loss += loss.detach()
             for name in component_names:
                 running[name] += logs.get(name, mass.new_zeros(()))
         steps = len(train_loader)
+        tree_metrics = (
+            {k: v for k, v in finalize_tree_diagnostics(tree_raw).items() if k in tree_fields}
+            if tree_levels else {}
+        )
+        tensor_pre_clip = torch.tensor(pre_clip_norms) if pre_clip_norms else None
         train_row = {
             "epoch": epoch,
             "loss": float((running_loss / steps).cpu()),
             **{name: float((running[name] / steps).cpu()) for name in component_names},
+            **tree_metrics,
             **epoch_grads,
+            "grad_total_pre_clip": sum(pre_clip_norms) / max(1, len(pre_clip_norms)),
+            "grad_total_post_clip": sum(post_clip_norms) / max(1, len(post_clip_norms)),
+            "grad_pre_clip_p50": float(torch.quantile(tensor_pre_clip, 0.50)) if tensor_pre_clip is not None else float("nan"),
+            "grad_pre_clip_p95": float(torch.quantile(tensor_pre_clip, 0.95)) if tensor_pre_clip is not None else float("nan"),
+            "grad_pre_clip_max": max(pre_clip_norms, default=float("nan")),
+            "grad_backbone": sum(backbone_grad_norms) / max(1, len(backbone_grad_norms)),
+            "grad_task": sum(task_grad_norms) / max(1, len(task_grad_norms)),
+            "clip_fraction": clipped_steps / max(1, len(pre_clip_norms)),
+            "amp_scale_start": amp_scale_start,
+            "amp_scale_end": float(scaler.get_scale()) if amp_enabled else 1.0,
+            "amp_skipped_steps": amp_skipped_steps,
             "lr": lr_used,
             "lr_backbone": learning_rates["backbone"],
             "lr_task": learning_rates["task"],
         }
         _append_csv(train_csv, train_row, train_fields)
 
+        # Construct informative loss decomposition string
+        active_comps = [f"root={train_row.get('root_magnitude', 0.0):.2f}"]
+        if "root_to_64" in train_row:
+            active_comps.append(f"r->64={train_row['root_to_64']:.2f}")
+        if "64_to_32" in train_row:
+            active_comps.append(f"64->32={train_row['64_to_32']:.2f}")
+        if "32_to_16" in train_row:
+            active_comps.append(f"32->16={train_row['32_to_16']:.2f}")
+        if "16_to_8" in train_row:
+            active_comps.append(f"16->8={train_row['16_to_8']:.2f}")
+        if "16_to_8_dense" in train_row:
+            active_comps.append(f"16->8_dense={train_row['16_to_8_dense']:.2f}")
+        if "flat_16" in train_row:
+            active_comps.append(f"flat16={train_row['flat_16']:.2f}")
+        if "deterministic_alloc" in train_row:
+            active_comps.append(f"det_alloc={train_row['deterministic_alloc']:.2f}")
+        if "exact_regression" in train_row:
+            active_comps.append(f"exact_reg={train_row['exact_regression']:.2f}")
+        loss_decomp_str = " ".join(active_comps)
+
+        opt_str = (
+            f"grad_mean={train_row.get('grad_total_pre_clip', 0.0):.1f} "
+            f"(p50={train_row.get('grad_pre_clip_p50', 0.0):.1f}, "
+            f"p95={train_row.get('grad_pre_clip_p95', 0.0):.1f}, "
+            f"max={train_row.get('grad_pre_clip_max', 0.0):.1f}) "
+            f"clip={train_row.get('clip_fraction', 0.0)*100:.0f}% "
+            f"bb={train_row.get('grad_backbone', 0.0):.1f} "
+            f"task={train_row.get('grad_task', 0.0):.1f} "
+            f"scale={train_row.get('amp_scale_end', 1.0):g}"
+            + (f" (skipped={train_row['amp_skipped_steps']})" if train_row.get("amp_skipped_steps", 0) > 0 else "")
+        )
+
+        tree_str = ""
+        if "tree_32_16_active_parents_per_image" in train_row:
+            tree_str = (
+                f"  Tree 32->16: active={train_row['tree_32_16_active_parents_per_image']:.1f}/img "
+                f"(zero={train_row.get('tree_32_16_zero_parent_fraction', 0.0)*100:.1f}%) "
+                f"nll/active={train_row.get('tree_32_16_nll_per_active_parent', 0.0):.2f}"
+            )
+
         if epoch % evaluate_every == 0 or epoch == epochs:
             metrics = evaluate_counting(model, evaluation_ds, device)
             val_row = {
                 "epoch": epoch,
-                "mae": metrics["mae"], "rmse": metrics["rmse"], "nae": metrics.get("nae", 0.0),
-                "sparse_mae": metrics.get("bin_sparse_mae", float("nan")),
-                "medium_mae": metrics.get("bin_medium_mae", float("nan")),
-                "dense_mae": metrics.get("bin_dense_mae", float("nan")),
-                "sparse_bias": metrics.get("bin_sparse_bias", float("nan")),
-                "medium_bias": metrics.get("bin_medium_bias", float("nan")),
-                "dense_bias": metrics.get("bin_dense_bias", float("nan")),
+                **{name: metrics.get(name, float("nan")) for name in val_metric_fields},
                 "lr": lr_used,
                 "lr_backbone": learning_rates["backbone"],
                 "lr_task": learning_rates["task"],
             }
             _append_csv(val_csv, val_row, val_fields)
-            if metrics["mae"] < best_mae:
+            is_best = metrics["mae"] < best_mae
+            if is_best:
                 best_mae, best_epoch = metrics["mae"], epoch
                 torch.save({
                     "epoch": epoch,
@@ -500,19 +708,37 @@ def main() -> None:
                     "pretrained_spec": pretrained_spec,
                     "runtime": get_runtime_metadata(),
                 }, os.path.join(save_dir, "best.pt"))
+
             print(
-                f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.3f} "
-                f"MAE={metrics['mae']:.3f} RMSE={metrics['rmse']:.3f} "
-                f"best={best_mae:.3f}@{best_epoch} time={time.time()-started:.1f}s"
+                f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.2f} [{loss_decomp_str}] "
+                f"lr={train_row['lr']:.2e} time={time.time()-started:.1f}s\n"
+                f"  Opt: {opt_str}\n"
+                + (f"{tree_str}\n" if tree_str else "")
+                + f"  >>> EVAL @ {epoch:04d}: MAE={metrics['mae']:.2f} RMSE={metrics['rmse']:.2f} "
+                f"NAE={metrics.get('nae', float('nan')):.3f} Bias={metrics.get('bias', float('nan')):.2f} "
+                f"{'(NEW BEST!)' if is_best else f'(best={best_mae:.2f}@{best_epoch})'}\n"
+                f"      Pred stats: GT={metrics.get('gt_mean', 0.0):.1f}+/-{metrics.get('gt_std', 0.0):.1f} | "
+                f"Pred={metrics.get('pred_mean', 0.0):.1f}+/-{metrics.get('pred_std', 0.0):.1f} | "
+                f"SignedMed={metrics.get('signed_error_median', 0.0):.1f} | Ratio={metrics.get('pred_gt_ratio', float('nan')):.3f} | "
+                f"Under={metrics.get('under_count_fraction', 0.0)*100:.1f}% Over={metrics.get('over_count_fraction', 0.0)*100:.1f}%\n"
+                f"      Density: Sparse(<300, n={metrics.get('bin_sparse_count', 0)}): MAE={metrics.get('bin_sparse_mae', float('nan')):.1f} Bias={metrics.get('bin_sparse_bias', float('nan')):.1f} | "
+                f"Mid(300-1k, n={metrics.get('bin_medium_count', 0)}): MAE={metrics.get('bin_medium_mae', float('nan')):.1f} Bias={metrics.get('bin_medium_bias', float('nan')):.1f} | "
+                f"Dense(>=1k, n={metrics.get('bin_dense_count', 0)}): MAE={metrics.get('bin_dense_mae', float('nan')):.1f} Bias={metrics.get('bin_dense_bias', float('nan')):.1f}\n"
+                f"      Extreme & Empty: Top10% Dense (n={metrics.get('top10_dense_count', 0)}): MAE={metrics.get('top10_dense_mae', float('nan')):.1f} | "
+                f"Empty (n={metrics.get('empty_count', 0)}): MAE={metrics.get('empty_mae', 0.0):.2f} P95={metrics.get('empty_pred_p95', 0.0):.2f}",
+                flush=True,
             )
         else:
             print(
-                f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.3f} "
-                f"lr={train_row['lr']:.2e} time={time.time()-started:.1f}s"
+                f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.2f} [{loss_decomp_str}] "
+                f"lr={train_row['lr']:.2e} time={time.time()-started:.1f}s\n"
+                f"  Opt: {opt_str}"
+                + (f"\n{tree_str}" if tree_str else ""),
+                flush=True,
             )
         scheduler.step()
 
-    print(f"Training complete. Best MAE={best_mae:.3f} at epoch {best_epoch} on {selection_split}.")
+    print(f"Training complete. Best MAE={best_mae:.3f} at epoch {best_epoch} on {selection_split}.", flush=True)
 
 
 if __name__ == "__main__":
