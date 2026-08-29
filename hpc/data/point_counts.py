@@ -51,6 +51,61 @@ def sum_2x2(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
+def points_to_impulse_map(
+    points_batch: Sequence[torch.Tensor],
+    height: int,
+    width: int,
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    batch_size = len(points_batch)
+    impulse = torch.zeros(batch_size, 1, height, width, device=device, dtype=dtype)
+    for b, pts in enumerate(points_batch):
+        if pts is None or pts.numel() == 0:
+            continue
+        pts = pts.to(device=device)
+        x = torch.floor(pts[:, 0]).long()
+        y = torch.floor(pts[:, 1]).long()
+        valid = (x >= 0) & (x < width) & (y >= 0) & (y < height)
+        x, y = x[valid], y[valid]
+        if x.numel() == 0:
+            continue
+        flat_idx = y * width + x
+        flat = impulse[b, 0].view(-1)
+        flat.scatter_add_(0, flat_idx, torch.ones(flat_idx.numel(), device=device, dtype=dtype))
+    return impulse
+
+
+@torch.no_grad()
+def points_to_y8_grid(
+    points_xy: torch.Tensor,
+    height: int,
+    width: int,
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Rasterize points directly onto stride-8 integer count grid (1, H//8, W//8)."""
+    if device is None:
+        device = points_xy.device if isinstance(points_xy, torch.Tensor) else torch.device("cpu")
+    gh = height // 8
+    gw = width // 8
+    grid = torch.zeros((1, gh, gw), device=device, dtype=dtype)
+    if points_xy is None or points_xy.numel() == 0:
+        return grid
+    pts = points_xy.to(device=device, dtype=torch.float32)
+    x, y = pts[:, 0], pts[:, 1]
+    valid = (x >= 0) & (x < width) & (y >= 0) & (y < height)
+    x, y = x[valid], y[valid]
+    if x.numel() == 0:
+        return grid
+    bx = torch.floor(x / 8.0).long()
+    by = torch.floor(y / 8.0).long()
+    flat_idx = by * gw + bx
+    grid.view(-1).scatter_add_(0, flat_idx, torch.ones(flat_idx.numel(), device=device, dtype=dtype))
+    return grid
+
+
+@torch.no_grad()
 def points_to_y4(
     points_xy: torch.Tensor,
     H: int,
@@ -140,6 +195,20 @@ def assert_integer_tensor(x: torch.Tensor, atol: float = 1e-5) -> None:
     """Verify that counts are non-negative integers."""
     if not torch.allclose(x, x.round(), atol=atol, rtol=0):
         raise RuntimeError("Count target contains fractional values; DTM requires exact integers.")
+
+
+assert_integer_counts = assert_integer_tensor
+
+
+def assert_parent_child_conservation(
+    parent: torch.Tensor,
+    children_4: torch.Tensor,
+    tol: float = 1e-5,
+) -> None:
+    p = parent.float().reshape(parent.shape[0], -1)
+    c = children_4.float().sum(dim=-1).reshape(parent.shape[0], -1)
+    if not torch.allclose(p, c, atol=tol, rtol=0):
+        raise RuntimeError("Broken target hierarchy: children sum does not equal parent count.")
 
 
 def validate_targets(t: Dict[str | int, torch.Tensor]) -> None:

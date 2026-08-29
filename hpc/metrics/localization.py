@@ -9,9 +9,39 @@ from __future__ import annotations
 from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
+import scipy.ndimage as ndi
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 import torch
+
+
+def extract_points_from_mass_map(
+    mass_map: Union[np.ndarray, torch.Tensor],
+    stride: int = 4,
+    threshold_rel: float = 0.05,
+    threshold_abs: float = 0.01,
+    min_distance_px: int = 4,
+) -> np.ndarray:
+    """Extract (x, y) continuous coordinate head locations from mass density map D via local maxima."""
+    if isinstance(mass_map, torch.Tensor):
+        mass_map = mass_map.detach().cpu().float().squeeze().numpy()
+    if mass_map.ndim != 2:
+        raise ValueError(f"Expected 2D mass map, got shape {mass_map.shape}")
+    max_val = float(np.max(mass_map))
+    if max_val < threshold_abs:
+        return np.empty((0, 2), dtype=np.float32)
+    thresh = max(threshold_abs, threshold_rel * max_val)
+    window_size = max(3, int(round(min_distance_px / stride)))
+    if window_size % 2 == 0:
+        window_size += 1
+    local_max = (ndi.maximum_filter(mass_map, size=window_size) == mass_map)
+    peak_mask = local_max & (mass_map >= thresh)
+    peak_y, peak_x = np.nonzero(peak_mask)
+    if len(peak_x) == 0:
+        return np.empty((0, 2), dtype=np.float32)
+    orig_x = (peak_x.astype(np.float32) + 0.5) * stride
+    orig_y = (peak_y.astype(np.float32) + 0.5) * stride
+    return np.stack([orig_x, orig_y], axis=1)
 
 
 def match_points(
@@ -19,16 +49,7 @@ def match_points(
     gt_xy: Union[np.ndarray, torch.Tensor],
     threshold: float,
 ) -> Tuple[int, int, int]:
-    """Hungarian minimum distance one-to-one matching between predicted and ground-truth points.
-    
-    Args:
-        pred_xy: [Np, 2] array/tensor of predicted point coordinates in pixel space.
-        gt_xy: [Ng, 2] array/tensor of ground-truth head coordinates in pixel space.
-        threshold: maximum euclidean distance (in pixels) for a valid positive match.
-        
-    Returns:
-        TP, FP, FN counts.
-    """
+    """Hungarian minimum distance one-to-one matching with distance gating."""
     if isinstance(pred_xy, torch.Tensor):
         pred_xy = pred_xy.detach().cpu().float().numpy()
     if isinstance(gt_xy, torch.Tensor):
@@ -45,12 +66,13 @@ def match_points(
     if ng_pts == 0:
         return 0, np_pts, 0
 
-    # Pairwise Euclidean distance matrix [Np, Ng]
     diff = pred_xy[:, None, :] - gt_xy[None, :, :]
     distance = np.sqrt(np.sum(diff ** 2, axis=-1))
 
-    # Hungarian minimum distance assignment
-    pred_idx, gt_idx = linear_sum_assignment(distance)
+    # Distance-gated Hungarian matching
+    penalty = 1e6
+    gated_distance = np.where(distance <= threshold, distance, penalty)
+    pred_idx, gt_idx = linear_sum_assignment(gated_distance)
     matched_distance = distance[pred_idx, gt_idx]
 
     tp = int(np.sum(matched_distance <= threshold))
@@ -58,6 +80,19 @@ def match_points(
     fn = int(ng_pts - tp)
 
     return tp, fp, fn
+
+
+def evaluate_localization_single_image(
+    pred_points: np.ndarray,
+    gt_points: np.ndarray,
+    distance_thresholds: Tuple[float, ...] = (4.0, 8.0, 16.0),
+) -> Dict[float, Dict[str, float]]:
+    res = {}
+    for sigma in distance_thresholds:
+        tp, fp, fn = match_points(pred_points, gt_points, threshold=sigma)
+        m = localization_metrics(tp, fp, fn)
+        res[sigma] = m
+    return res
 
 
 def localization_metrics(total_tp: int, total_fp: int, total_fn: int) -> Dict[str, float]:

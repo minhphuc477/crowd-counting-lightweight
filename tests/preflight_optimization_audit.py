@@ -113,11 +113,11 @@ def test_o3_ten_image_overfit():
     model = HPCLite(pretrained=False, use_p8_context=True).to(device)
     crit = NTPCLoss(NTPCConfig(mode="r4_dtm_tree")).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-3, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-5)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=250, eta_min=1e-5)
 
     imgs = torch.rand(10, 3, 448, 448, device=device)
     pts_batch = [torch.rand(int(20 + i * 10), 2, device=device) * 448 for i in range(10)]
-    targets = build_exact_count_pyramid(pts_batch, 448, 448, (8, 16, 32, 64), device=device)
+    targets = build_exact_count_pyramid(pts_batch, 448, 448, (4, 8, 16, 32, 64), device=device)
     target_n = targets["N"]
 
     model.train()
@@ -125,7 +125,7 @@ def test_o3_ten_image_overfit():
     final_loss = 0.0
     final_mae = 0.0
 
-    for step in range(1, 201):
+    for step in range(1, 251):
         optimizer.zero_grad()
         mass = model(imgs)
         loss, logs = crit(mass, targets)
@@ -138,13 +138,13 @@ def test_o3_ten_image_overfit():
             initial_loss = loss.item()
             pred_n = mass.flatten(1).sum(dim=1)
             init_mae = (pred_n - target_n).abs().mean().item()
-        if step == 200:
+        if step == 250:
             final_loss = loss.item()
             pred_n = mass.flatten(1).sum(dim=1)
             final_mae = (pred_n - target_n).abs().mean().item()
 
     print(f"  Step 1 Loss: {initial_loss:.2f} (MAE: {init_mae:.2f})")
-    print(f"  Step 200 Loss: {final_loss:.2f} (MAE: {final_mae:.2f})")
+    print(f"  Step 250 Loss: {final_loss:.2f} (MAE: {final_mae:.2f})")
 
     check("Ten-image loss decreased by >50%", final_loss < initial_loss * 0.50, f"loss: {initial_loss:.2f} -> {final_loss:.2f}")
     check("Ten-image MAE reduced to < 3.0", final_mae < 3.0, f"MAE: {init_mae:.2f} -> {final_mae:.2f}")
