@@ -24,7 +24,6 @@ model:
   use_p8_context: false
   use_repblock: false
   eps_d: 1.0e-8
-  truncate_backbone: true
   init_checkpoint: null
 
 statistics:

@@ -33,7 +33,6 @@ def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
         "flip_prob": float(aug_cfg.get("flip_prob", 0.5)) if is_train else 0.0,
         "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
-        "ntpc_only": True,
     }
 
 
@@ -230,7 +229,6 @@ def main() -> None:
         use_p8_context=bool(model_cfg.get("use_p8_context", False)),
         use_repblock=bool(model_cfg.get("use_repblock", False)),
         eps_d=float(model_cfg.get("eps_d", 1e-8)),
-        truncate_backbone=bool(model_cfg.get("truncate_backbone", True)),
     ).to(device)
     model.init_head_bias_from_data(
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4

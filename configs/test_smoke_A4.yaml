@@ -46,7 +46,6 @@ model:
   name: hpc_lite
   neck_width: 32
   pretrained: false
-  truncate_backbone: true
   use_p8_context: true
   use_repblock: false
 optimizer:

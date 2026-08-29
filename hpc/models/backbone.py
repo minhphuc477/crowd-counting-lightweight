@@ -1,4 +1,7 @@
-import warnings
+from __future__ import annotations
+
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 
@@ -6,34 +9,21 @@ import torch.nn as nn
 class MobileNetV4Backbone(nn.Module):
     """MobileNetV4 feature backbone returning features at reductions 4, 8, 16.
 
-    The ``truncate`` parameter controls whether stages beyond ``max(target_reductions)``
-    are omitted. In practice, timm's ``features_only=True`` with explicit ``out_indices``
-    already achieves this: stages beyond the last selected index are not instantiated or
-    executed.
+    Uses timm's ``features_only=True`` with explicit ``out_indices`` to instantiate
+    and execute only the required feature stages.
     """
 
     def __init__(
         self,
         model_name: str = "mobilenetv4_conv_small_050",
         pretrained: bool = False,
-        target_reductions: tuple = (4, 8, 16),
-        truncate: bool = True,
+        target_reductions: Tuple[int, ...] = (4, 8, 16),
     ):
         super().__init__()
         import timm
 
-        if truncate is False:
-            warnings.warn(
-                "MobileNetV4Backbone(truncate=False) has no effect; "
-                "timm out_indices handles truncation automatically. "
-                "This parameter will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self.model_name = model_name
         self.target_reductions = tuple(int(r) for r in target_reductions)
-        self.truncate = bool(truncate)
 
         # Isolate RNG state when creating the probe model so feature inspection does not consume RNG
         with torch.random.fork_rng(devices=[]):

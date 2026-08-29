@@ -1,13 +1,22 @@
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
+from PIL import Image
 import scipy.io as sio
 
 from .common import BaseCrowdDataset
 
 
-def _validate_points(points, source: str) -> np.ndarray:
+def _validate_points(
+    points,
+    source: str,
+    coordinate_base: int = 1,
+    image_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """Validate and convert coordinates to 0-based pixel-center coordinates [0, W-1] x [0, H-1]."""
     arr = np.asarray(points, dtype=np.float32)
     if arr.size == 0:
         return np.empty((0, 2), dtype=np.float32)
@@ -18,11 +27,29 @@ def _validate_points(points, source: str) -> np.ndarray:
         raise ValueError(f"Invalid point array in {source}: shape={arr.shape}")
     if not np.isfinite(arr).all():
         raise ValueError(f"Non-finite point coordinate in {source}")
-    return arr.astype(np.float32, copy=False)
+
+    arr = arr.astype(np.float32, copy=True)
+    if coordinate_base == 1:
+        # Standard MATLAB 1-based coordinates [1, W] x [1, H] -> 0-based [0, W-1] x [0, H-1]
+        arr -= 1.0
+    elif coordinate_base != 0:
+        raise ValueError(f"Unsupported coordinate_base={coordinate_base}; must be 0 or 1")
+
+    if image_shape is not None:
+        w, h = image_shape
+        # Guarantee points lie within image bounds [0, W-1] x [0, H-1]
+        arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
+        arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
+
+    return arr
 
 
-def load_sha_mat_points(mat_path: str) -> np.ndarray:
-    """Strict ShanghaiTech annotation loader; parse failures are never converted to negatives."""
+def load_sha_mat_points(
+    mat_path: str,
+    coordinate_base: int = 1,
+    image_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """Strict ShanghaiTech annotation loader with explicit coordinate base conversion."""
     if not os.path.exists(mat_path):
         raise FileNotFoundError(f"ShanghaiTech annotation not found: {mat_path}")
     try:
@@ -35,35 +62,35 @@ def load_sha_mat_points(mat_path: str) -> np.ndarray:
             points = mat["points"]
         else:
             candidates = [
-                v for k, v in mat.items()
+                v
+                for k, v in mat.items()
                 if not k.startswith("__") and isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2
             ]
             if len(candidates) != 1:
                 raise KeyError(f"Could not uniquely find point array in {mat_path}")
             points = candidates[0]
-        return _validate_points(points, mat_path)
+        return _validate_points(points, mat_path, coordinate_base=coordinate_base, image_shape=image_shape)
     except Exception as exc:
         raise RuntimeError(f"Failed to parse ShanghaiTech annotation {mat_path}: {exc}") from exc
 
 
 class ShanghaiTechDataset(BaseCrowdDataset):
+    """ShanghaiTech Part A and Part B dataset loader for NTPC."""
+
     def __init__(
         self,
         root: str,
         part: str = "part_A",
         split: str = "train_data",
-        crop_size: int = 448,
-        hnb_blocks: List[int] = (8, 16, 32, 64),
-        allocation_block: int = 16,
+        crop_size: int = 256,
         is_train: bool = True,
-        scale_range: Tuple[float, float] = (0.75, 2.0),
+        scale_range: Tuple[float, float] = (0.7, 1.3),
         flip_prob: float = 0.5,
-        second_view_prob: float = 0.30,
-        photometric_cfg: Optional[Dict[str, Any]] = None,
-        image_mean: Optional[Tuple[float, float, float]] = None,
-        image_std: Optional[Tuple[float, float, float]] = None,
-        crop_sampling: str = "safe_mixture",
-        ntpc_only: bool = False,
+        image_mean: Optional[Sequence[float]] = None,
+        image_std: Optional[Sequence[float]] = None,
+        coordinate_base: int = 1,
+        # Accepted as keyword arguments for backwards-compatibility callers but ignored:
+        **kwargs,
     ):
         candidates = [
             os.path.join(root, part, split),
@@ -86,7 +113,8 @@ class ShanghaiTechDataset(BaseCrowdDataset):
         if gt_dir is None:
             raise FileNotFoundError(f"ShanghaiTech GT directory not found; tried: {gt_candidates}")
 
-        image_paths, points_list = [], []
+        image_paths: List[str] = []
+        points_list: List[np.ndarray] = []
         for img_name in sorted(os.listdir(img_dir)):
             if not img_name.lower().endswith((".jpg", ".png", ".jpeg")):
                 continue
@@ -96,8 +124,13 @@ class ShanghaiTechDataset(BaseCrowdDataset):
             mat_path = next((p for p in gt_paths if os.path.exists(p)), None)
             if mat_path is None:
                 raise FileNotFoundError(f"Missing annotation for {img_path}; tried {gt_paths}")
+
+            with Image.open(img_path) as im:
+                img_shape = im.size  # (W, H)
+
+            pts = load_sha_mat_points(mat_path, coordinate_base=coordinate_base, image_shape=img_shape)
             image_paths.append(img_path)
-            points_list.append(load_sha_mat_points(mat_path))
+            points_list.append(pts)
 
         if not image_paths:
             raise RuntimeError(f"No images found in {img_dir}")
@@ -106,15 +139,9 @@ class ShanghaiTechDataset(BaseCrowdDataset):
             image_paths=image_paths,
             points_list=points_list,
             crop_size=crop_size,
-            hnb_blocks=hnb_blocks,
-            allocation_block=allocation_block,
             is_train=is_train,
             scale_range=scale_range,
             flip_prob=flip_prob,
-            second_view_prob=second_view_prob,
-            photometric_cfg=photometric_cfg,
             image_mean=image_mean,
             image_std=image_std,
-            crop_sampling=crop_sampling,
-            ntpc_only=ntpc_only,
         )

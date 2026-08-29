@@ -23,7 +23,6 @@ model:
   context_dilations: [1, 2, 3]
   use_p8_context: true
   eps_d: 1.0e-6
-  truncate_backbone: true
   init_checkpoint: ./runs/mobilenetv4_ms_mae/best.pt
 
 loss:

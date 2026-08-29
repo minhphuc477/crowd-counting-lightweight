@@ -58,7 +58,6 @@ def visualize_crowd_localization(
         use_p8_context=bool(m_cfg.get("use_p8_context", False)),
         use_repblock=bool(m_cfg.get("use_repblock", False)),
         eps_d=float(m_cfg.get("eps_d", 1e-8)),
-        truncate_backbone=m_cfg.get("truncate_backbone", True),
     ).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)

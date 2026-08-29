@@ -35,13 +35,6 @@ class BaseCrowdDataset(Dataset):
         has_ground_truth: Optional[Sequence[bool]] = None,
         image_mean: Optional[Sequence[float]] = None,
         image_std: Optional[Sequence[float]] = None,
-        ntpc_only: bool = True,
-        # Accepted for backward config compatibility but unused:
-        hnb_blocks: Optional[Any] = None,
-        allocation_block: Optional[Any] = None,
-        second_view_prob: Optional[Any] = None,
-        photometric_cfg: Optional[Any] = None,
-        crop_sampling: Optional[Any] = None,
     ):
         if len(image_paths) != len(points_list):
             raise ValueError("image_paths and points_list must have the same length")

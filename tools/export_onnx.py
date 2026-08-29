@@ -25,7 +25,6 @@ def export_model_to_onnx(
         pretrained=False,
         neck_width=m_cfg.get("neck_width", 32),
         context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
-        truncate_backbone=m_cfg.get("truncate_backbone", True),
     )
     
     if os.path.exists(checkpoint_path):

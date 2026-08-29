@@ -121,7 +121,6 @@ def main() -> None:
         use_p8_context=bool(model_cfg.get("use_p8_context", False)),
         use_repblock=bool(model_cfg.get("use_repblock", False)),
         eps_d=float(model_cfg.get("eps_d", 1e-8)),
-        truncate_backbone=bool(model_cfg.get("truncate_backbone", True)),
     )
     profile = profile_model_efficiency(
         model,

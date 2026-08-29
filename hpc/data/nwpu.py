@@ -1,14 +1,22 @@
+from __future__ import annotations
+
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
+from PIL import Image
 import scipy.io as sio
 
 from .common import BaseCrowdDataset
 
 
-def _validate_points(points, source: str) -> np.ndarray:
+def _validate_points(
+    points,
+    source: str,
+    coordinate_base: int = 0,
+    image_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
     arr = np.asarray(points)
     if arr.dtype == object and arr.shape == ():
         arr = arr.item()
@@ -26,11 +34,27 @@ def _validate_points(points, source: str) -> np.ndarray:
         raise ValueError(f"Invalid NWPU point array in {source}: shape={arr.shape}")
     if not np.isfinite(arr).all():
         raise ValueError(f"Non-finite NWPU coordinate in {source}")
-    return arr.astype(np.float32, copy=False)
+
+    arr = arr.astype(np.float32, copy=True)
+    if coordinate_base == 1:
+        arr -= 1.0
+    elif coordinate_base != 0:
+        raise ValueError(f"Unsupported coordinate_base={coordinate_base}; must be 0 or 1")
+
+    if image_shape is not None:
+        w, h = image_shape
+        arr[:, 0] = np.clip(arr[:, 0], 0.0, float(w - 1.0))
+        arr[:, 1] = np.clip(arr[:, 1], 0.0, float(h - 1.0))
+
+    return arr
 
 
-def load_nwpu_points(ann_path: str) -> np.ndarray:
-    """Strict NWPU loader. A valid empty annotation returns (0,2); missing/corrupt files raise."""
+def load_nwpu_points(
+    ann_path: str,
+    coordinate_base: int = 0,
+    image_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """Strict NWPU loader."""
     if not os.path.exists(ann_path):
         raise FileNotFoundError(f"NWPU annotation not found: {ann_path}")
     ext = os.path.splitext(ann_path)[1].lower()
@@ -43,7 +67,8 @@ def load_nwpu_points(ann_path: str) -> np.ndarray:
                 pts = mat["points"]
             else:
                 candidates = [
-                    v for k, v in mat.items()
+                    v
+                    for k, v in mat.items()
                     if not k.startswith("__") and isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == 2
                 ]
                 if len(candidates) != 1:
@@ -65,7 +90,7 @@ def load_nwpu_points(ann_path: str) -> np.ndarray:
                 pts = np.loadtxt(ann_path, dtype=np.float32)
         else:
             raise ValueError(f"Unsupported NWPU annotation extension: {ext}")
-        return _validate_points(pts, ann_path)
+        return _validate_points(pts, ann_path, coordinate_base=coordinate_base, image_shape=image_shape)
     except Exception as exc:
         raise RuntimeError(f"Failed to parse NWPU annotation {ann_path}: {exc}") from exc
 
@@ -80,35 +105,35 @@ def _find_annotation(stem: str, gt_dirs: List[str]) -> Optional[str]:
 
 
 class NWPUDataset(BaseCrowdDataset):
+    """NWPU-Crowd dataset loader for NTPC."""
+
     def __init__(
         self,
         root: str,
         split: str = "train",
-        crop_size: int = 672,
-        hnb_blocks: List[int] = (16, 32, 96),
-        allocation_block: int = 16,
+        crop_size: int = 256,
         is_train: bool = True,
-        scale_range: Tuple[float, float] = (0.75, 2.0),
+        scale_range: Tuple[float, float] = (0.7, 1.3),
         flip_prob: float = 0.5,
-        second_view_prob: float = 0.30,
-        photometric_cfg: Optional[Dict[str, Any]] = None,
         split_file: Optional[str] = None,
-        image_mean: Optional[Tuple[float, float, float]] = None,
-        image_std: Optional[Tuple[float, float, float]] = None,
-        crop_sampling: str = "safe_mixture",
-        ntpc_only: bool = False,
+        image_mean: Optional[Sequence[float]] = None,
+        image_std: Optional[Sequence[float]] = None,
+        coordinate_base: int = 0,
+        **kwargs,
     ):
         img_dir = os.path.join(root, "images")
         if not os.path.isdir(img_dir):
             raise FileNotFoundError(f"NWPU image directory not found: {img_dir}")
 
         gt_dirs = [
-            p for p in [
+            p
+            for p in [
                 os.path.join(root, "mats"),
                 os.path.join(root, "ground_truth"),
                 os.path.join(root, "jsons"),
                 root,
-            ] if os.path.isdir(p)
+            ]
+            if os.path.isdir(p)
         ]
 
         if split_file is None:
@@ -128,8 +153,6 @@ class NWPUDataset(BaseCrowdDataset):
                 ids = [line.split()[0] for line in f if line.strip()]
             image_names = [x if x.lower().endswith((".jpg", ".png", ".jpeg")) else f"{x}.jpg" for x in ids]
         else:
-            # Do not silently treat the full image directory as a requested train/val split
-            # when a split file is expected.
             if split.lower() not in {"all", "test"}:
                 raise FileNotFoundError(
                     f"No split file for split='{split}'. Provide split_file explicitly to avoid split leakage."
@@ -144,13 +167,17 @@ class NWPUDataset(BaseCrowdDataset):
                 raise FileNotFoundError(f"NWPU image listed but missing: {img_path}")
             stem = os.path.splitext(img_name)[0]
             ann_path = _find_annotation(stem, gt_dirs)
+
+            with Image.open(img_path) as im:
+                img_shape = im.size
+
             if ann_path is None:
                 if not allow_missing_gt:
                     raise FileNotFoundError(f"Missing NWPU annotation for {img_path}")
                 pts = np.empty((0, 2), dtype=np.float32)
                 has_gt = False
             else:
-                pts = load_nwpu_points(ann_path)
+                pts = load_nwpu_points(ann_path, coordinate_base=coordinate_base, image_shape=img_shape)
                 has_gt = True
             image_paths.append(img_path)
             points_list.append(pts)
@@ -163,16 +190,10 @@ class NWPUDataset(BaseCrowdDataset):
             image_paths=image_paths,
             points_list=points_list,
             crop_size=crop_size,
-            hnb_blocks=hnb_blocks,
-            allocation_block=allocation_block,
             is_train=is_train,
             scale_range=scale_range,
             flip_prob=flip_prob,
-            second_view_prob=second_view_prob,
-            photometric_cfg=photometric_cfg,
             has_ground_truth=has_gt_list,
             image_mean=image_mean,
             image_std=image_std,
-            crop_sampling=crop_sampling,
-            ntpc_only=ntpc_only,
         )

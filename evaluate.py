@@ -23,7 +23,6 @@ def build_evaluation_dataset(cfg: dict, split: str | None = None):
         "is_train": False,
         "image_mean": ds_cfg.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": ds_cfg.get("image_std", [0.229, 0.224, 0.225]),
-        "ntpc_only": True,
     }
 
     if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
@@ -66,7 +65,6 @@ def evaluate_model(
         pretrained=False,
         neck_width=int(m_cfg.get("neck_width", 32)),
         context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
-        truncate_backbone=bool(m_cfg.get("truncate_backbone", True)),
     ).to(device)
 
     if os.path.exists(checkpoint_path):

@@ -1,9 +1,11 @@
 import numpy as np
 import pytest
+import scipy.io as sio
 import torch
 from PIL import Image
 
 from hpc.data.common import BaseCrowdDataset
+from hpc.data.sha import ShanghaiTechDataset, _validate_points, load_sha_mat_points
 from hpc.data.transforms import NTPCGeometricTransform
 
 
@@ -51,6 +53,30 @@ def test_transform_bounds_invariant():
             assert np.all(crop_pts[:, 0] <= float(crop_size - 1.0))
             assert np.all(crop_pts[:, 1] >= 0.0)
             assert np.all(crop_pts[:, 1] <= float(crop_size - 1.0))
+
+
+def test_sha_coordinate_base_conversion():
+    """1-based MATLAB coordinates [1, W] x [1, H] must convert to 0-based [0, W-1] x [0, H-1]."""
+    w, h = 400, 300
+    # Boundary points in 1-based MATLAB system: (1, 1), (W, H), (200, 150)
+    mat_pts_1based = np.array([
+        [1.0, 1.0],
+        [float(w), float(h)],
+        [200.0, 150.0],
+    ], dtype=np.float32)
+
+    converted = _validate_points(mat_pts_1based, source="test", coordinate_base=1, image_shape=(w, h))
+
+    # Expect: (0, 0), (W-1, H-1), (199, 149)
+    expected = np.array([
+        [0.0, 0.0],
+        [float(w - 1.0), float(h - 1.0)],
+        [199.0, 149.0],
+    ], dtype=np.float32)
+
+    np.testing.assert_allclose(converted, expected, atol=1e-6)
+    assert np.all(converted[:, 0] >= 0.0) and np.all(converted[:, 0] <= float(w - 1.0))
+    assert np.all(converted[:, 1] >= 0.0) and np.all(converted[:, 1] <= float(h - 1.0))
 
 
 def test_dataset_sample_point_tree_match(tmp_path):

@@ -1,4 +1,4 @@
-"""HPC-Lite Lightweight Crowd Counter (~0.352M Parameters).
+"""HPC-Lite / NTPC Lightweight Crowd Counter (~0.35M Parameters).
 
 Architecture:
   Image -> MobileNetV4 features (C4, C8, C16)
@@ -39,11 +39,11 @@ class HPCLite(nn.Module):
         use_p8_context: bool = False,
         use_repblock: bool = False,
         eps_d: float = 1e-8,
-        truncate_backbone: bool = True,
         output_stride: int = 4,
     ):
         super().__init__()
         from .blocks import RepDWBlock
+
         self.eps_d = float(eps_d)
         self.neck_width = int(neck_width)
         self.output_stride = int(output_stride)
@@ -59,7 +59,6 @@ class HPCLite(nn.Module):
             model_name=backbone_name,
             pretrained=pretrained,
             target_reductions=(4, 8, 16),
-            truncate=truncate_backbone,
         )
 
         self.neck = AdditiveFPNNeck(
@@ -164,7 +163,3 @@ class HPCLite(nn.Module):
         d_valid = d_padded[..., :out_h, :out_w]
         count = d_valid.sum(dim=(-1, -2, -3))
         return count, d_valid
-
-
-# Backward-compatible alias
-HPCLiteSR48 = HPCLite

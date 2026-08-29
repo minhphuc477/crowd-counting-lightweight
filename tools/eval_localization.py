@@ -51,8 +51,6 @@ def build_evaluation_dataset(cfg: dict):
     name = str(data.get("name", "sha")).lower().replace("-", "_")
     common = {
         "crop_size": int(data.get("crop_size", 256)),
-        "hnb_blocks": [int(x) for x in data.get("hnb_blocks", [8, 16, 32, 64])],
-        "allocation_block": int(data.get("allocation_block", 16)),
         "is_train": False,
         "image_mean": data.get("image_mean", [0.485, 0.456, 0.406]),
         "image_std": data.get("image_std", [0.229, 0.224, 0.225]),
@@ -81,7 +79,6 @@ def build_model(cfg: dict, checkpoint_path: str, device: torch.device) -> HPCLit
         use_p8_context=bool(model_cfg.get("use_p8_context", False)),
         use_repblock=bool(model_cfg.get("use_repblock", False)),
         eps_d=float(model_cfg.get("eps_d", 1e-8)),
-        truncate_backbone=bool(model_cfg.get("truncate_backbone", True)),
     ).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = checkpoint.get("model_state_dict", checkpoint)
