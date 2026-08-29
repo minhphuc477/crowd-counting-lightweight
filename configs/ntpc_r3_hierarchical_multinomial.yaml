@@ -50,7 +50,7 @@ optimizer:
   grad_clip: 5.0
 
 schedule:
-  epochs: 1000
+  epochs: 1500
   warmup_epochs: 25
 
 training:
