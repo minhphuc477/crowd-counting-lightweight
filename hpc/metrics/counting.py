@@ -48,9 +48,15 @@ def compute_nae(
     return float(np.mean(np.abs(preds - gts) / np.maximum(gts, 1.0)))
 
 
+def compute_bias(predictions: Union[np.ndarray, torch.Tensor], targets: Union[np.ndarray, torch.Tensor]) -> float:
+    preds, gts = _validate_pair(predictions, targets)
+    return float(np.mean(preds - gts)) if len(preds) else 0.0
+
+
 def evaluate_counting_metrics(predictions, targets) -> Dict[str, float]:
     return {
         "mae": compute_mae(predictions, targets),
         "rmse": compute_rmse(predictions, targets),
+        "bias": compute_bias(predictions, targets),
         "nae": compute_nae(predictions, targets, ignore_zero=True),
     }

@@ -355,7 +355,7 @@ class HPCLite(nn.Module):
             h = self.head_act(self.head_norm(self.head_dw(p4)))
 
         z = self.head_out(h)
-        d_map = F.softplus(z) + self.eps_d
+        d_map = F.softplus(z.float()).clamp_min(1e-12)
         if return_aux:
             return d_map, aux
         return d_map

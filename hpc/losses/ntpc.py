@@ -1,12 +1,12 @@
 """Neural Tree-Pólya Crowd Counting (NTPC) Loss Module.
 
-Implements the 6 formal research ablation formulations from the NTPC specification:
+Implements the exact joint probabilistic Tree-Pólya NLL and controlled ablation formulations:
   - R0: Multi-Scale Exact Regional L1 Regression (Baseline)
   - R1: Deterministic Conserved Allocation (Prior-Art Match / S-DC style)
   - R2: Flat Dirichlet-Multinomial at Leaf 16 (No Hierarchy)
   - R3: Hierarchical Multinomial Tree: 64 -> 32 -> 16 (Hierarchy without Overdispersion)
-  - R4: Neural DTM Tree: 64 -> 32 -> 16 (Proposed Core Contribution)
-  - R5: Full NTPC: R4 + Density-Adaptive Fine-Level 16 -> 8 (Proposed Full Method)
+  - R4: Neural DTM Tree: 64 -> 32 -> 16 (Base Joint Dirichlet-Tree Likelihood)
+  - R5: Full NTPC: R4 + Density-Adaptive Fine-Level 16 -> 8 Auxiliary
 """
 
 from __future__ import annotations
@@ -18,8 +18,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .dirichlet_multinomial import dirichlet_multinomial_nll, multinomial_nll, normalize_positive_mass
 from .negative_binomial import negative_binomial_nll_mean_dispersion
+
+
+def block_sum(x: torch.Tensor, k: int) -> torch.Tensor:
+    """Non-overlapping exact block sum via reshape."""
+    has_channel = (x.ndim == 4)
+    if not has_channel:
+        x = x.unsqueeze(1)
+        
+    B, C, H, W = x.shape
+    if H % k != 0 or W % k != 0:
+        raise ValueError(f"Shape ({H}, {W}) not divisible by factor {k}")
+        
+    out = x.reshape(B, C, H // k, k, W // k, k).sum(dim=(3, 5))
+    return out if has_channel else out.squeeze(1)
 
 
 def sum_pool_mass_pyramid(
@@ -27,7 +40,20 @@ def sum_pool_mass_pyramid(
     block_sizes: Tuple[int, ...] = (8, 16, 32, 64),
     stride: int = 4,
 ) -> Dict[int, torch.Tensor]:
-    """Extract spatial count pyramid via linear sum-pooling from single mass map."""
+    """Extract spatial count pyramid via non-overlapping block sums from single mass map.
+    
+    Args:
+        mass: (B, 1, H/4, W/4) or (B, H/4, W/4) positive mass density map.
+        block_sizes: image pixel block sizes.
+        stride: stride of mass map relative to original image (default 4).
+        
+    Returns:
+        dict: {block_size: (B, H_b, W_b)} pooled counts.
+    """
+    mass = mass.float()
+    if mass.ndim == 3:
+        mass = mass.unsqueeze(1)
+        
     pyramid: Dict[int, torch.Tensor] = {}
     for bs in block_sizes:
         scale_factor = bs // stride
@@ -36,27 +62,127 @@ def sum_pool_mass_pyramid(
         if scale_factor == 1:
             pooled = mass.squeeze(1)
         else:
-            pooled = F.avg_pool2d(
-                mass,
-                kernel_size=scale_factor,
-                stride=scale_factor,
-            ).squeeze(1) * (scale_factor ** 2)
+            pooled = block_sum(mass, scale_factor).squeeze(1)
         pyramid[bs] = pooled
     return pyramid
 
 
-def group_four_children(
-    child_grid: torch.Tensor,
-) -> torch.Tensor:
-    """Group a 2D child grid (B, 2H, 2W) into (B, H, W, 4) under 2x2 parent blocks.
+def group_2x2_flat(x: torch.Tensor) -> torch.Tensor:
+    """Group a 2D child grid (B, 2H, 2W) into (B, P, 4) where P = H * W.
     
     Child ordering in 4-vector: [top-left, top-right, bottom-left, bottom-right].
     """
-    b, h2, w2 = child_grid.shape
-    h, w = h2 // 2, w2 // 2
-    x = child_grid.view(b, h, 2, w, 2)
-    x = x.permute(0, 1, 3, 2, 4).contiguous()
-    return x.view(b, h, w, 4)
+    if x.ndim == 4 and x.shape[1] == 1:
+        x = x.squeeze(1)
+    B, H2, W2 = x.shape
+    if H2 % 2 != 0 or W2 % 2 != 0:
+        raise ValueError("Grid height and width must be even")
+        
+    tl = x[:, 0::2, 0::2]
+    tr = x[:, 0::2, 1::2]
+    bl = x[:, 1::2, 0::2]
+    br = x[:, 1::2, 1::2]
+    
+    children = torch.stack([tl, tr, bl, br], dim=-1)  # (B, H, W, 4)
+    return children.reshape(B, -1, 4)                 # (B, P, 4)
+
+
+group_four_children = group_2x2_flat
+
+
+def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 1e-12) -> torch.Tensor:
+    """Normalize positive mass into probability simplex without adding independent eps."""
+    m = mass.float().clamp_min(tiny)
+    return m / m.sum(dim=-1, keepdim=True)
+
+
+def alpha_from_mass(mass: torch.Tensor, kappa: float, tiny: float = 1e-12) -> torch.Tensor:
+    """Compute Dirichlet concentration vector alpha = kappa * pi."""
+    pi = probs_from_positive_mass(mass, tiny=tiny)
+    return float(kappa) * pi
+
+
+def dm_nll_none(
+    y: torch.Tensor,
+    alpha: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Per-element Dirichlet-Multinomial NLL.
+    
+    Args:
+        y: [..., K] non-negative exact integer counts.
+        alpha: [..., K] strictly positive concentration parameters.
+        
+    Returns:
+        [...] unreduced NLL tensor (float32). For n=0, NLL is mathematically exactly 0.
+    """
+    y = y.float()
+    alpha = alpha.float().clamp_min(eps)
+
+    n = y.sum(dim=-1)
+    alpha0 = alpha.sum(dim=-1)
+
+    log_prob = (
+        torch.lgamma(n + 1.0)
+        - torch.lgamma(y + 1.0).sum(dim=-1)
+        + torch.lgamma(alpha0)
+        - torch.lgamma(n + alpha0)
+        + (torch.lgamma(y + alpha) - torch.lgamma(alpha)).sum(dim=-1)
+    )
+
+    nll = -log_prob
+    # Zero counts contribute exactly zero loss
+    zero_mask = (n == 0)
+    if zero_mask.any():
+        nll = torch.where(zero_mask, torch.zeros_like(nll), nll)
+    return nll
+
+
+def multinomial_nll_none(
+    y: torch.Tensor,
+    pi: torch.Tensor,
+    eps: float = 1e-12,
+) -> torch.Tensor:
+    """Per-element Multinomial NLL (DM limit as kappa -> infinity)."""
+    y = y.float()
+    pi = pi.float().clamp_min(eps)
+    n = y.sum(dim=-1)
+
+    log_prob = (
+        torch.lgamma(n + 1.0)
+        - torch.lgamma(y + 1.0).sum(dim=-1)
+        + (y * torch.log(pi)).sum(dim=-1)
+    )
+    nll = -log_prob
+    zero_mask = (n == 0)
+    if zero_mask.any():
+        nll = torch.where(zero_mask, torch.zeros_like(nll), nll)
+    return nll
+
+
+def tree_level_nll_per_image(
+    y_child_map: torch.Tensor,
+    mu_child_map: torch.Tensor,
+    kappa: float,
+) -> torch.Tensor:
+    """Compute per-image sum of node DM NLLs for a tree level. Returns (B,)."""
+    y = group_2x2_flat(y_child_map)
+    m = group_2x2_flat(mu_child_map)
+    alpha = alpha_from_mass(m, kappa)
+    node_nll = dm_nll_none(y, alpha)  # (B, P)
+    return node_nll.sum(dim=1)        # (B,)
+
+
+def root_grid_nll_per_image(
+    y64: torch.Tensor,
+    mu64: torch.Tensor,
+    kappa64: float,
+) -> torch.Tensor:
+    """Compute root-to-64 DM NLL per image. Returns (B,)."""
+    y = y64.float().flatten(1)
+    m = mu64.float().flatten(1)
+    alpha = alpha_from_mass(m, kappa64)
+    return dm_nll_none(y, alpha)      # (B,)
 
 
 @dataclass
@@ -102,13 +228,22 @@ class NTPCLoss(nn.Module):
         mass: torch.Tensor,
         target_pyramid: Dict[int | str, torch.Tensor],
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """Compute loss and detailed diagnostics."""
+        """Compute loss and detailed diagnostics.
+        
+        Args:
+            mass: (B, 1, H/4, W/4) predicted positive mass density map.
+            target_pyramid: dictionary containing ground-truth integer counts
+                            for blocks {8, 16, 32, 64} and total count 'N'.
+        """
         mass = mass.float()
         pred_pyramid = sum_pool_mass_pyramid(mass, block_sizes=(8, 16, 32, 64), stride=4)
         
-        pred_n = mass.sum(dim=(1, 2, 3))  # (B,)
-        target_n = target_pyramid["N"].to(device=mass.device, dtype=torch.float32)  # (B,)
+        pred_n = mass.flatten(1).sum(dim=1).reshape(-1)  # (B,)
+        target_n = target_pyramid["N"].to(device=mass.device, dtype=torch.float32).reshape(-1)  # (B,)
         b = mass.shape[0]
+
+        if pred_n.shape != target_n.shape:
+            raise RuntimeError(f"Shape mismatch: pred_n {pred_n.shape} vs target_n {target_n.shape}")
 
         logs: Dict[str, torch.Tensor] = {
             "root_nb": torch.tensor(0.0, device=mass.device),
@@ -140,192 +275,151 @@ class NTPCLoss(nn.Module):
         # -------------------------------------------------------------
         # ALL PROBABILISTIC / S-DC MODES (R1-R5) INCLUDE ROOT NB
         # -------------------------------------------------------------
-        l_root_nb = negative_binomial_nll_mean_dispersion(
+        l_root_nb_per_image = negative_binomial_nll_mean_dispersion(
             target=target_n,
             mean=pred_n,
             dispersion=self.cfg.root_dispersion,
-            reduction="mean",
-        )
-        logs["root_nb"] = l_root_nb.detach()
-        total = self.cfg.w_root_nb * l_root_nb
+            reduction="none",
+        )  # (B,)
+        logs["root_nb"] = l_root_nb_per_image.mean().detach()
 
         # -------------------------------------------------------------
         # MODE R1: Deterministic Conserved Allocation (S-DCNet style)
         # L_det = (1/|V|) * sum_{p in V} (sum_c |Y_{p,c} - Y_p * pi_{p,c}|) / (Y_p + eps)
         # -------------------------------------------------------------
         if self.cfg.mode == "r1_deterministic":
-            # 64 -> 32 deterministic allocation
             y64 = target_pyramid[64].float()
-            y32 = target_pyramid[32].float()
-            m32 = pred_pyramid[32].float()
+            y32_grouped = group_2x2_flat(target_pyramid[32].float())
+            m32_grouped = group_2x2_flat(pred_pyramid[32].float())
+            pi32 = probs_from_positive_mass(m32_grouped)
             
-            y32_grouped = group_four_children(y32)  # (B, H64, W64, 4)
-            m32_grouped = group_four_children(m32)  # (B, H64, W64, 4)
-            pi32 = normalize_positive_mass(m32_grouped, dim=-1, eps=self.cfg.eps)
-            
-            expected_y32 = y64.unsqueeze(-1) * pi32
-            mask_64 = y64 > 0
+            y64_flat = y64.reshape(b, -1)
+            expected_y32 = y64_flat.unsqueeze(-1) * pi32
+            mask_64 = y64_flat > 0
             if mask_64.any():
                 diff_64 = (expected_y32[mask_64] - y32_grouped[mask_64]).abs().sum(dim=-1)
-                norm_64 = diff_64 / y64[mask_64].clamp_min(1.0)
-                l_det_64_32 = norm_64.mean()
+                l_det_64_32 = (diff_64 / y64_flat[mask_64].clamp_min(1.0)).mean()
             else:
                 l_det_64_32 = torch.tensor(0.0, device=mass.device)
 
-            # 32 -> 16 deterministic allocation
-            y16 = target_pyramid[16].float()
-            m16 = pred_pyramid[16].float()
-            y16_grouped = group_four_children(y16)  # (B, H32, W32, 4)
-            m16_grouped = group_four_children(m16)  # (B, H32, W32, 4)
-            pi16 = normalize_positive_mass(m16_grouped, dim=-1, eps=self.cfg.eps)
+            y32_flat = target_pyramid[32].float().reshape(b, -1)
+            y16_grouped = group_2x2_flat(target_pyramid[16].float())
+            m16_grouped = group_2x2_flat(pred_pyramid[16].float())
+            pi16 = probs_from_positive_mass(m16_grouped)
             
-            expected_y16 = y32.unsqueeze(-1) * pi16
-            mask_32 = y32 > 0
+            expected_y16 = y32_flat.unsqueeze(-1) * pi16
+            mask_32 = y32_flat > 0
             if mask_32.any():
                 diff_32 = (expected_y16[mask_32] - y16_grouped[mask_32]).abs().sum(dim=-1)
-                norm_32 = diff_32 / y32[mask_32].clamp_min(1.0)
-                l_det_32_16 = norm_32.mean()
+                l_det_32_16 = (diff_32 / y32_flat[mask_32].clamp_min(1.0)).mean()
             else:
                 l_det_32_16 = torch.tensor(0.0, device=mass.device)
 
             l_det = l_det_64_32 + l_det_32_16
-            total = total + self.cfg.w_deterministic_alloc * l_det
+            total = self.cfg.w_root_nb * l_root_nb_per_image.mean() + self.cfg.w_deterministic_alloc * l_det
             logs["deterministic_alloc"] = l_det.detach()
             logs["total"] = total.detach()
             return total, logs
 
         # -------------------------------------------------------------
         # MODE R2: Flat Dirichlet-Multinomial at Leaf 16 (No Hierarchy)
-        # N -> 28x28 (784 leaf blocks)
+        # N -> all leaf 16x16 blocks
         # -------------------------------------------------------------
         if self.cfg.mode == "r2_flat_dm":
-            y16_flat = target_pyramid[16].reshape(b, -1).float()  # (B, 784)
-            m16_flat = pred_pyramid[16].reshape(b, -1).float()    # (B, 784)
-            pi16_flat = normalize_positive_mass(m16_flat, dim=-1, eps=self.cfg.eps)
+            y16_flat = target_pyramid[16].float().flatten(1)
+            m16_flat = pred_pyramid[16].float().flatten(1)
+            alpha_flat = alpha_from_mass(m16_flat, self.cfg.kappa_flat16)
+            l_flat16_per_image = dm_nll_none(y16_flat, alpha_flat)  # (B,)
             
-            l_flat16 = dirichlet_multinomial_nll(
-                target_counts=y16_flat,
-                probs=pi16_flat,
-                concentration=self.cfg.kappa_flat16,
-                valid_mask=target_n > 0,
-                reduction="mean",
-            )
-            total = total + self.cfg.w_flat_16 * l_flat16
-            logs["flat_16"] = l_flat16.detach()
+            total_per_image = self.cfg.w_root_nb * l_root_nb_per_image + self.cfg.w_flat_16 * l_flat16_per_image
+            total = total_per_image.mean()
+            logs["flat_16"] = l_flat16_per_image.mean().detach()
             logs["total"] = total.detach()
             return total, logs
 
         # -------------------------------------------------------------
         # MODE R3: Hierarchical Multinomial Tree (64 -> 32 -> 16)
-        # Tests tree hierarchy WITHOUT Dirichlet overdispersion
         # -------------------------------------------------------------
         if self.cfg.mode == "r3_multinomial_tree":
-            # Root -> 64 Multinomial
-            y64_flat = target_pyramid[64].reshape(b, -1).float()
-            m64_flat = pred_pyramid[64].reshape(b, -1).float()
-            pi64_flat = normalize_positive_mass(m64_flat, dim=-1, eps=self.cfg.eps)
-            l_multi_r64 = multinomial_nll(y64_flat, pi64_flat, valid_mask=target_n > 0)
+            # Root -> 64
+            y64_flat = target_pyramid[64].float().flatten(1)
+            m64_flat = pred_pyramid[64].float().flatten(1)
+            pi64_flat = probs_from_positive_mass(m64_flat)
+            l_multi_r64_per_image = multinomial_nll_none(y64_flat, pi64_flat)  # (B,)
 
-            # 64 -> 32 Multinomial
-            y64 = target_pyramid[64].float()
-            y32 = target_pyramid[32].float()
-            m32 = pred_pyramid[32].float()
-            y32_grouped = group_four_children(y32)
-            m32_grouped = group_four_children(m32)
-            pi32 = normalize_positive_mass(m32_grouped, dim=-1, eps=self.cfg.eps)
-            l_multi_64_32 = multinomial_nll(y32_grouped, pi32, valid_mask=y64 > 0)
+            # 64 -> 32
+            y32_grouped = group_2x2_flat(target_pyramid[32].float())
+            m32_grouped = group_2x2_flat(pred_pyramid[32].float())
+            pi32 = probs_from_positive_mass(m32_grouped)
+            l_multi_64_32_per_image = multinomial_nll_none(y32_grouped, pi32).sum(dim=1)  # (B,)
 
-            # 32 -> 16 Multinomial
-            y16 = target_pyramid[16].float()
-            m16 = pred_pyramid[16].float()
-            y16_grouped = group_four_children(y16)
-            m16_grouped = group_four_children(m16)
-            pi16 = normalize_positive_mass(m16_grouped, dim=-1, eps=self.cfg.eps)
-            l_multi_32_16 = multinomial_nll(y16_grouped, pi16, valid_mask=y32 > 0)
+            # 32 -> 16
+            y16_grouped = group_2x2_flat(target_pyramid[16].float())
+            m16_grouped = group_2x2_flat(pred_pyramid[16].float())
+            pi16 = probs_from_positive_mass(m16_grouped)
+            l_multi_32_16_per_image = multinomial_nll_none(y16_grouped, pi16).sum(dim=1)  # (B,)
 
-            l_multi_tree = l_multi_r64 + l_multi_64_32 + l_multi_32_16
-            total = total + l_multi_tree
-            logs["multinomial_tree"] = l_multi_tree.detach()
+            l_tree_multi_per_image = l_multi_r64_per_image + l_multi_64_32_per_image + l_multi_32_16_per_image
+            total_per_image = self.cfg.w_root_nb * l_root_nb_per_image + l_tree_multi_per_image
+            total = total_per_image.mean()
+            logs["multinomial_tree"] = l_tree_multi_per_image.mean().detach()
             logs["total"] = total.detach()
             return total, logs
 
         # -------------------------------------------------------------
-        # MODE R4 & R5: Neural DTM Tree Allocation (64 -> 32 -> 16)
+        # MODE R4 & R5: Base Joint Neural DTM Tree Likelihood (Per-Image Joint NLL)
+        # L_i = L_NB,i + L_root64,i + sum_p L_{64->32,i} + sum_p L_{32->16,i}
         # -------------------------------------------------------------
-        # Level 1: Root N -> 64 blocks
-        y64_flat = target_pyramid[64].reshape(b, -1).float()  # (B, 49)
-        m64_flat = pred_pyramid[64].reshape(b, -1).float()    # (B, 49)
-        pi64_flat = normalize_positive_mass(m64_flat, dim=-1, eps=self.cfg.eps)
-        
-        l_root64 = dirichlet_multinomial_nll(
-            target_counts=y64_flat,
-            probs=pi64_flat,
-            concentration=self.cfg.kappa_root64,
-            valid_mask=target_n > 0,
-            reduction="mean",
-        )
-        logs["root_to_64"] = l_root64.detach()
-        total = total + self.cfg.w_root64 * l_root64
+        l_root64_per_image = root_grid_nll_per_image(
+            target_pyramid[64],
+            pred_pyramid[64],
+            self.cfg.kappa_root64,
+        )  # (B,)
 
-        # Level 2: 64 -> 32 blocks (conditional on 64 parent count)
-        y64 = target_pyramid[64].float()
-        y32 = target_pyramid[32].float()
-        m32 = pred_pyramid[32].float()
-        
-        y32_grouped = group_four_children(y32)  # (B, H64, W64, 4)
-        m32_grouped = group_four_children(m32)  # (B, H64, W64, 4)
-        pi32 = normalize_positive_mass(m32_grouped, dim=-1, eps=self.cfg.eps)
-        
-        l_64_32 = dirichlet_multinomial_nll(
-            target_counts=y32_grouped,
-            probs=pi32,
-            concentration=self.cfg.kappa_64_32,
-            valid_mask=y64 > 0,
-            reduction="mean",
-        )
-        logs["64_to_32"] = l_64_32.detach()
-        total = total + self.cfg.w_64_32 * l_64_32
+        l_64_32_per_image = tree_level_nll_per_image(
+            target_pyramid[32],
+            pred_pyramid[32],
+            self.cfg.kappa_64_32,
+        )  # (B,)
 
-        # Level 3: 32 -> 16 blocks (conditional on 32 parent count)
-        y16 = target_pyramid[16].float()
-        m16 = pred_pyramid[16].float()
-        
-        y16_grouped = group_four_children(y16)  # (B, H32, W32, 4)
-        m16_grouped = group_four_children(m16)  # (B, H32, W32, 4)
-        pi16 = normalize_positive_mass(m16_grouped, dim=-1, eps=self.cfg.eps)
-        
-        l_32_16 = dirichlet_multinomial_nll(
-            target_counts=y16_grouped,
-            probs=pi16,
-            concentration=self.cfg.kappa_32_16,
-            valid_mask=y32 > 0,
-            reduction="mean",
-        )
-        logs["32_to_16"] = l_32_16.detach()
-        total = total + self.cfg.w_32_16 * l_32_16
+        l_32_16_per_image = tree_level_nll_per_image(
+            target_pyramid[16],
+            pred_pyramid[16],
+            self.cfg.kappa_32_16,
+        )  # (B,)
+
+        l_base_joint_per_image = (
+            self.cfg.w_root_nb * l_root_nb_per_image
+            + self.cfg.w_root64 * l_root64_per_image
+            + self.cfg.w_64_32 * l_64_32_per_image
+            + self.cfg.w_32_16 * l_32_16_per_image
+        )  # (B,)
+
+        logs["root_to_64"] = l_root64_per_image.mean().detach()
+        logs["64_to_32"] = l_64_32_per_image.mean().detach()
+        logs["32_to_16"] = l_32_16_per_image.mean().detach()
+
+        total = l_base_joint_per_image.mean()
 
         # -------------------------------------------------------------
-        # MODE R5: Dense-Adaptive Fine-Level Allocation (16 -> 8)
-        # Evaluated ONLY on congested parent blocks: Y_p^(16) >= tau_D
+        # MODE R5: Dense-Adaptive Fine-Level Auxiliary (16 -> 8)
+        # Composite training objective: L_total = L_base_joint + lambda_8 * L_dense8
         # -------------------------------------------------------------
         if self.cfg.mode in ("r5_full_ntpc", "r4_full_ntpc") and 8 in target_pyramid:
-            y8 = target_pyramid[8].float()
-            m8 = pred_pyramid[8].float()
-            
-            y8_grouped = group_four_children(y8)  # (B, H16, W16, 4)
-            m8_grouped = group_four_children(m8)  # (B, H16, W16, 4)
-            pi8 = normalize_positive_mass(m8_grouped, dim=-1, eps=self.cfg.eps)
-            
-            dense_mask = y16 >= self.cfg.dense_threshold_16
-            l_16_8 = dirichlet_multinomial_nll(
-                target_counts=y8_grouped,
-                probs=pi8,
-                concentration=self.cfg.kappa_16_8,
-                valid_mask=dense_mask,
-                reduction="mean",
-            )
-            logs["16_to_8_dense"] = l_16_8.detach()
-            total = total + self.cfg.w_16_8 * l_16_8
+            y8_grouped = group_2x2_flat(target_pyramid[8].float())
+            m8_grouped = group_2x2_flat(pred_pyramid[8].float())
+            alpha8 = alpha_from_mass(m8_grouped, self.cfg.kappa_16_8)
+
+            node_nll_8 = dm_nll_none(y8_grouped, alpha8)  # (B, P)
+            dense_mask = (target_pyramid[16].float().reshape(b, -1) >= float(self.cfg.dense_threshold_16))
+
+            if dense_mask.any():
+                l_dense8 = node_nll_8[dense_mask].mean()
+            else:
+                l_dense8 = torch.tensor(0.0, device=mass.device)
+
+            logs["16_to_8_dense"] = l_dense8.detach()
+            total = total + self.cfg.w_16_8 * l_dense8
 
         logs["total"] = total.detach()
         return total, logs

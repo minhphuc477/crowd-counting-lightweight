@@ -47,8 +47,8 @@ def test_mass_pyramid_and_grouping():
 
     # Child grouping layout
     g32 = group_four_children(pyramid[32])
-    check("group_four_children(32) shape (2, 7, 7, 4)", g32.shape == torch.Size([2, 7, 7, 4]))
-    check("Sum of 4 grouped children == parent 64", torch.allclose(g32.sum(dim=-1), pyramid[64], atol=1e-4))
+    check("group_four_children(32) shape (2, 49, 4)", g32.shape == torch.Size([2, 49, 4]))
+    check("Sum of 4 grouped children == parent 64", torch.allclose(g32.sum(dim=-1), pyramid[64].flatten(1), atol=1e-4))
 
 
 def test_ntpc_modes():
