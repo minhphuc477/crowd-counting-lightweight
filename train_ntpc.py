@@ -218,6 +218,7 @@ def main():
         running_64_32 = 0.0
         running_32_16 = 0.0
         running_16_8 = 0.0
+        running_8_4 = 0.0
         running_flat = 0.0
         running_multi = 0.0
         running_det = 0.0
@@ -249,15 +250,16 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             running_loss += loss.item()
-            running_root += logs["root_nb"].item()
-            running_r64 += logs["root_to_64"].item()
-            running_64_32 += logs["64_to_32"].item()
-            running_32_16 += logs["32_to_16"].item()
-            running_16_8 += logs["16_to_8_dense"].item()
-            running_flat += logs["flat_16"].item()
-            running_multi += logs["multinomial_tree"].item()
-            running_det += logs["deterministic_alloc"].item()
-            running_exact += logs["exact_regression"].item()
+            running_root += logs.get("root_nb", torch.tensor(0.0)).item()
+            running_r64 += logs.get("root_to_64", torch.tensor(0.0)).item()
+            running_64_32 += logs.get("64_to_32", torch.tensor(0.0)).item()
+            running_32_16 += logs.get("32_to_16", torch.tensor(0.0)).item()
+            running_16_8 += logs.get("16_to_8", torch.tensor(0.0)).item()
+            running_8_4 += logs.get("8_to_4", torch.tensor(0.0)).item()
+            running_flat += logs.get("flat_16", torch.tensor(0.0)).item()
+            running_multi += logs.get("multinomial_tree", torch.tensor(0.0)).item()
+            running_det += logs.get("deterministic_alloc", torch.tensor(0.0)).item()
+            running_exact += logs.get("exact_regression", torch.tensor(0.0)).item()
 
         scheduler.step()
         n_steps = len(train_loader)
@@ -303,10 +305,12 @@ def main():
                 pieces = f"Root: {running_root/n_steps:.2f}, Flat16: {running_flat/n_steps:.2f}"
             elif ntpc_cfg.mode == "r3_multinomial_tree":
                 pieces = f"Root: {running_root/n_steps:.2f}, MultiTree: {running_multi/n_steps:.2f}"
-            elif ntpc_cfg.mode in ("r4_dtm_tree", "r3_tree_dtm"):
+            elif ntpc_cfg.mode in ("r4_dtm_tree16",):
                 pieces = f"Root: {running_root/n_steps:.2f}, R64: {running_r64/n_steps:.2f}, 64->32: {running_64_32/n_steps:.2f}, 32->16: {running_32_16/n_steps:.2f}"
-            else:
+            elif ntpc_cfg.mode in ("r4_dtm_tree8",):
                 pieces = f"Root: {running_root/n_steps:.2f}, R64: {running_r64/n_steps:.2f}, 64->32: {running_64_32/n_steps:.2f}, 32->16: {running_32_16/n_steps:.2f}, 16->8: {running_16_8/n_steps:.2f}"
+            else:
+                pieces = f"Root: {running_root/n_steps:.2f}, R64: {running_r64/n_steps:.2f}, 64->32: {running_64_32/n_steps:.2f}, 32->16: {running_32_16/n_steps:.2f}, 16->8: {running_16_8/n_steps:.2f}, 8->4: {running_8_4/n_steps:.2f}"
 
             print(
                 f"Epoch [{epoch:03d}/{total_epochs}] Loss: {avg_loss:.2f} ({pieces}) | "
