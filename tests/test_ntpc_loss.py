@@ -32,8 +32,9 @@ def test_dtm_scale_invariance():
 
 
 def test_is_exact_joint_nll():
-    """is_exact_joint_nll must be True for unweighted R2, R3, R4 (tree16, tree8, tree4) with NB or Poisson."""
+    """Exact likelihood modes, including final R6 NPAC, must identify themselves."""
     assert NTPCLoss(NTPCConfig(mode="r2_flat_dm", root_loss="nb")).is_exact_joint_nll
+    assert NTPCLoss(NTPCConfig(mode="r6_npac", root_loss="nb")).is_exact_joint_nll
     assert NTPCLoss(NTPCConfig(mode="r3_multinomial_tree", root_loss="nb")).is_exact_joint_nll
     assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree16", root_loss="nb")).is_exact_joint_nll
     assert NTPCLoss(NTPCConfig(mode="r4_dtm_tree8", root_loss="nb")).is_exact_joint_nll
@@ -89,6 +90,7 @@ def test_all_modes_backward_pass():
         "r0_exact",
         "r1_deterministic",
         "r2_flat_dm",
+        "r6_npac",
         "r3_multinomial_tree",
         "r4_dtm_tree16",
         "r4_dtm_tree8",
@@ -103,6 +105,16 @@ def test_all_modes_backward_pass():
         assert mass.grad is not None
         assert torch.isfinite(mass.grad).all()
         assert mass.grad.abs().sum() > 0
+
+
+def test_r6_npac_loss_is_exactly_r2_flat_dm16():
+    """R6 changes the carrier/crop recipe, not the frozen R2 probabilistic core."""
+    mass, targets = _case()
+    r2_loss, r2_logs = NTPCLoss(NTPCConfig(mode="r2_flat_dm"))(mass, targets)
+    r6_loss, r6_logs = NTPCLoss(NTPCConfig(mode="r6_npac"))(mass, targets)
+    torch.testing.assert_close(r6_loss, r2_loss, rtol=0, atol=0)
+    torch.testing.assert_close(r6_logs["root_magnitude"], r2_logs["root_magnitude"], rtol=0, atol=0)
+    torch.testing.assert_close(r6_logs["flat_16"], r2_logs["flat_16"], rtol=0, atol=0)
 
 
 def test_gradient_ratio_diagnostic_r1_vs_r4():
@@ -151,4 +163,3 @@ def test_r1_custom_eps_propagation():
     loss_eps1, _ = NTPCLoss(NTPCConfig(mode="r1_deterministic", eps=1e-3))(mass, targets)
     loss_eps2, _ = NTPCLoss(NTPCConfig(mode="r1_deterministic", eps=1e-1))(mass, targets)
     assert torch.isfinite(loss_eps1) and torch.isfinite(loss_eps2)
-

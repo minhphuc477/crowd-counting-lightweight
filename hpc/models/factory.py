@@ -16,7 +16,22 @@ _KNOWN_MODEL_KEYS = {
     "use_repblock",
     "eps_d",
     "output_stride",
+    "features",
 }
+
+
+def _parse_features(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ("C4", "C8", "C16")
+    if not isinstance(value, (list, tuple)):
+        raise TypeError("model.features must be a list such as [C4, C8, C16, C32]")
+    features = tuple(str(item).strip().upper() for item in value)
+    if features not in {("C4", "C8", "C16"), ("C4", "C8", "C16", "C32")}:
+        raise ValueError(
+            "model.features must be [C4, C8, C16] or [C4, C8, C16, C32], "
+            f"got {list(features)}"
+        )
+    return features
 
 
 def _parse_bool(val: Any, default: bool = False) -> bool:
@@ -47,6 +62,7 @@ def resolve_model_config(cfg: dict) -> dict:
         "use_repblock": _parse_bool(m.get("use_repblock", False)),
         "eps_d": float(m.get("eps_d", 1e-8)),
         "output_stride": int(m.get("output_stride", 4)),
+        "features": _parse_features(m.get("features")),
     }
 
 
@@ -144,6 +160,7 @@ def build_model_from_config(
         use_repblock=resolved["use_repblock"],
         eps_d=resolved["eps_d"],
         output_stride=resolved["output_stride"],
+        feature_reductions=tuple(int(name[1:]) for name in resolved["features"]),
     )
     model.pretrained_requested = requested_pretrained
     model.pretrained_loaded = effective_pretrained

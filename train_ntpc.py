@@ -1,4 +1,4 @@
-"""Train the Neural Tree-Polya crowd counter with matched R0--R5 protocols."""
+"""Train the NTPC ablations and the final R6 Neural Polya Allocation Counter."""
 
 from __future__ import annotations
 
@@ -218,6 +218,7 @@ def _grad_names_for_mode(mode: str) -> Tuple[str, ...]:
         "r0_exact": ("root_magnitude", "exact_regression"),
         "r1_deterministic": ("root_magnitude", "deterministic_alloc"),
         "r2_flat_dm": ("root_magnitude", "flat_16"),
+        "r6_npac": ("root_magnitude", "flat_16"),
         "r3_multinomial_tree": ("root_magnitude", "multinomial_tree"),
         "r4_dtm_tree16": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16"),
         "r4_dtm_tree8": ("root_magnitude", "root_to_64", "64_to_32", "32_to_16", "16_to_8"),

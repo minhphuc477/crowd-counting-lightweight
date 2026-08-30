@@ -40,6 +40,54 @@ def test_parameter_budget():
     assert len(model.backbone.backbone.blocks) == 3
 
 
+def test_r6_npac_uses_full_c32_fpn_under_parameter_budget():
+    """R6 must use the real C32 carrier and remain below the frozen 0.4M budget."""
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "configs/ntpc_r6_npac.yaml").read_text())
+    model = build_model_from_config(cfg, load_pretrained=False).eval()
+
+    assert model.feature_reductions == (4, 8, 16, 32)
+    assert model.backbone.target_reductions == (4, 8, 16, 32)
+    assert model.backbone.truncated_after == "blocks.4"
+    assert model.neck.use_p32 is True
+    assert sum(p.numel() for p in model.parameters()) < 400_000
+
+    with torch.no_grad():
+        mass, routes = model(torch.randn(1, 3, 448, 448), return_aux=True)
+    assert mass.shape == (1, 1, 112, 112)
+    assert tuple(routes) == ("p4", "p8", "p16", "p32")
+    assert routes["p32"].shape == (1, 32, 14, 14)
+    assert routes["p16"].shape == (1, 32, 28, 28)
+    assert mass.dtype == torch.float32
+    assert (mass >= 1e-8).all()
+
+
+def test_r6_config_freezes_final_npac_recipe():
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "configs/ntpc_r6_npac.yaml").read_text())
+
+    assert cfg["experiment"]["name"] == "ntpc_r6_npac"
+    assert cfg["dataset"]["crop_size"] == 448
+    assert cfg["model"]["features"] == ["C4", "C8", "C16", "C32"]
+    assert cfg["model"]["neck_width"] == 32
+    assert cfg["model"]["context_dilations"] == [1, 2, 3]
+    assert cfg["model"]["output_stride"] == 4
+    assert cfg["loss"] == {
+        "mode": "r6_npac",
+        "root_loss": "nb",
+        "kappa_flat16": 20.0,
+        "w_root_nb": 1.0,
+        "w_flat_16": 1.0,
+    }
+    assert cfg["statistics"]["root_dispersion"] == 50.0
+    assert cfg["optimizer"]["lr"] == pytest.approx(1e-4)
+    assert cfg["optimizer"]["backbone_lr_scale"] == pytest.approx(0.1)
+    assert cfg["optimizer"]["weight_decay"] == pytest.approx(1e-4)
+    assert cfg["optimizer"]["grad_clip"] == pytest.approx(500.0)
+    assert cfg["schedule"] == {"epochs": 1500, "warmup_epochs": 25}
+    assert cfg["training"]["amp"] is True
+
+
 def test_factory_build_model_equivalence():
     """build_model_from_config must build model with matching architecture."""
     cfg = {

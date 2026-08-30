@@ -1,4 +1,4 @@
-"""Losses for Neural Tree-Polya Crowd Counting (NTPC).
+"""Losses for Neural Tree-Polya Crowd Counting (NTPC) and NPAC.
 
 The proposed core is ``N -> 64 -> 32 -> 16``.  R5 adds only a
 dense-parent ``16 -> 8`` auxiliary term; stride-4 supervision is a depth-study
@@ -173,6 +173,7 @@ _VALID_MODES = {
     "r0_exact",
     "r1_deterministic",
     "r2_flat_dm",
+    "r6_npac",
     "r3_multinomial_tree",
     "r4_dtm_tree16",
     "r4_dtm_tree8",
@@ -249,7 +250,7 @@ class NTPCConfig:
 
 
 class NTPCLoss(nn.Module):
-    """Exact R0-R5 objectives with fail-fast target validation."""
+    """Exact R0-R6 objectives with fail-fast target validation."""
 
     def __init__(self, cfg: NTPCConfig | None = None):
         super().__init__()
@@ -258,7 +259,7 @@ class NTPCLoss(nn.Module):
     def _required_blocks(self) -> Tuple[int, ...]:
         if self.cfg.mode == "r0_exact":
             return (16, 32, 64)   # regional L1 at these three levels
-        if self.cfg.mode == "r2_flat_dm":
+        if self.cfg.mode in {"r2_flat_dm", "r6_npac"}:
             return (16,)
         if self.cfg.mode == "r5_full_ntpc" or self.cfg.mode == "r4_dtm_tree8":
             return (8, 16, 32, 64)
@@ -275,7 +276,7 @@ class NTPCLoss(nn.Module):
         if c.w_root_nb != 1.0:
             return False
 
-        if c.mode == "r2_flat_dm":
+        if c.mode in {"r2_flat_dm", "r6_npac"}:
             return c.w_flat_16 == 1.0
         if c.mode == "r3_multinomial_tree":
             return c.w_root64 == 1.0 and c.w_64_32 == 1.0 and c.w_32_16 == 1.0
@@ -447,7 +448,7 @@ class NTPCLoss(nn.Module):
             components["deterministic_alloc"] = self.cfg.w_deterministic_alloc * allocation
             return self._finish(root + components["deterministic_alloc"], components, return_components)
 
-        if self.cfg.mode == "r2_flat_dm":
+        if self.cfg.mode in {"r2_flat_dm", "r6_npac"}:
             flat = dm_from_mass(
                 target_pyramid[16].to(mass.device).float().flatten(1),
                 pred[16].flatten(1),

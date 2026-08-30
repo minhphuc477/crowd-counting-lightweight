@@ -31,6 +31,7 @@ All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu
 | `r4_dtm_tree8` | R4 + DTM supervision down to stride-8 (depth study) |
 | `r4_dtm_tree4` | R4 + DTM supervision down to stride-4 (depth study) |
 | `r5_full_ntpc` | R4 + dense-gate 16→8 auxiliary term **(optional adaptive extension)** |
+| `r6_npac` | **Final NPAC:** Root-NB + Flat-DM16 with full C32 carrier and 448 crop |
 
 ---
 
@@ -41,7 +42,7 @@ lightweightcrcn/
 ├── README.md
 ├── requirements.txt
 ├── pyproject.toml
-├── train_ntpc.py                # Single authoritative NTPC trainer (R0-R5)
+├── train_ntpc.py                # Single authoritative trainer (R0-R6)
 ├── evaluate.py                  # Standalone full-image counting evaluation
 ├── configs/
 │   ├── ntpc_sha.yaml            # Standard SHA default config
@@ -50,17 +51,18 @@ lightweightcrcn/
 │   ├── ntpc_r2_flat_dm16.yaml
 │   ├── ntpc_r3_hierarchical_multinomial.yaml
 │   ├── ntpc_r4_neural_dtm_tree.yaml
-│   └── ntpc_r5_full_adaptive_ntpc.yaml
+│   ├── ntpc_r5_full_adaptive_ntpc.yaml
+│   └── ntpc_r6_npac.yaml        # Final NPAC recipe (C32, Flat-DM16, crop 448)
 ├── hpc/
 │   ├── models/
-│   │   ├── backbone.py          # MobileNetV4 with reduction-16 truncation
+│   │   ├── backbone.py          # Configurable C16-truncated or full-C32 MobileNetV4
 │   │   ├── blocks.py            # ConvGNAct, DepthwiseDilated, DSResidual, RepDWBlock
 │   │   ├── neck.py              # 32-ch additive FPN with multi-dilation context
 │   │   ├── factory.py           # Unified model builder & checkpoint compatibility validator
 │   │   └── hpc_lite.py          # HPCLite model & data-driven head bias initialization
 │   ├── losses/
 │   │   ├── negative_binomial.py # Root NB and Poisson likelihoods
-│   │   └── ntpc.py              # NTPCLoss supporting R0-R5 objectives
+│   │   └── ntpc.py              # Exact objectives for R0-R6, including NPAC
 │   ├── data/
 │   │   ├── transforms.py        # NTPCGeometricTransform (scale, crop, flip, exact coords)
 │   │   ├── common.py            # BaseCrowdDataset with exact count pyramids

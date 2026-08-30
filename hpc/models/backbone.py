@@ -7,10 +7,11 @@ import torch.nn as nn
 
 
 class MobileNetV4Backbone(nn.Module):
-    """MobileNetV4 feature backbone returning features at reductions 4, 8, 16.
+    """MobileNetV4 feature backbone returning a configured feature pyramid.
 
-    Uses timm's ``features_only=True`` with explicit ``out_indices``, then
-    physically removes stages downstream of the last consumed C16 feature.
+    R0--R5 consume reductions 4, 8 and 16 and retain the original physical
+    truncation. R6/NPAC additionally consumes the final reduction-32 feature,
+    so the complete MobileNetV4 representation participates in the graph.
     """
 
     def __init__(
@@ -22,14 +23,16 @@ class MobileNetV4Backbone(nn.Module):
         super().__init__()
         import timm
 
-        if tuple(target_reductions) != (4, 8, 16):
+        target_reductions = tuple(int(r) for r in target_reductions)
+        if target_reductions not in {(4, 8, 16), (4, 8, 16, 32)}:
             raise ValueError(
-                f"MobileNetV4Backbone requires target_reductions=(4, 8, 16), got {target_reductions}"
+                "MobileNetV4Backbone requires target_reductions=(4, 8, 16) "
+                f"or (4, 8, 16, 32), got {target_reductions}"
             )
 
         self.model_name = model_name
         self.pretrained = bool(pretrained)
-        self.target_reductions = (4, 8, 16)
+        self.target_reductions = target_reductions
 
         # Isolate RNG state when creating the probe model so feature inspection does not consume RNG
         with torch.random.fork_rng(devices=[]):
@@ -58,10 +61,9 @@ class MobileNetV4Backbone(nn.Module):
         )
 
         # timm's features_only wrapper returns only the requested tensors but
-        # still executes every MobileNet stage. NTPC stops at C16, so stages
-        # after blocks.2 are provably dead: they cannot affect C4/C8/C16. Drop
-        # them after pretrained weights have loaded to remove dead parameters
-        # and computation from the deployed graph.
+        # still carries every MobileNet stage. Drop only stages downstream of
+        # the last requested feature. This preserves the compact R0--R5 C16
+        # graph while keeping all stages for R6's requested C32 feature.
         selected_module_names = list(self.backbone.feature_info.module_name())
         last_module = selected_module_names[-1]
         if not last_module.startswith("blocks."):
@@ -78,5 +80,4 @@ class MobileNetV4Backbone(nn.Module):
         self.truncated_after = last_module
 
     def forward(self, x: torch.Tensor):
-        features = self.backbone(x)
-        return features[0], features[1], features[2]
+        return tuple(self.backbone(x))

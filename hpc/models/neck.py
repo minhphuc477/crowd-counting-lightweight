@@ -6,10 +6,10 @@ from .blocks import ConvGNAct, DSResidual, DepthwiseDilated
 
 
 class AdditiveFPNNeck(nn.Module):
-    """Additive Depthwise-Separable FPN Neck with multi-dilation context blocks at reduction 16 and optional 8.
+    """Additive depthwise-separable FPN with optional C32/P32 carrier.
 
     Channels: width (default C=32)
-    Inputs: c4, c8, c16 from backbone (reductions 4, 8, 16)
+    Inputs: c4, c8, c16 and optionally c32 from the backbone
     Output: p4 feature map at reduction 4 with width channels
     """
 
@@ -21,14 +21,19 @@ class AdditiveFPNNeck(nn.Module):
         use_p8_context: bool = False,
     ):
         super().__init__()
-        c4, c8, c16 = in_channels
+        if len(in_channels) not in {3, 4}:
+            raise ValueError(f"AdditiveFPNNeck expects 3 or 4 input levels, got {len(in_channels)}")
+        c4, c8, c16 = in_channels[:3]
         self.width = width
         self.use_p8_context = use_p8_context
+        self.use_p32 = len(in_channels) == 4
 
         # Lateral 1x1 projections
         self.lat4 = ConvGNAct(c4, width, kernel_size=1)
         self.lat8 = ConvGNAct(c8, width, kernel_size=1)
         self.lat16 = ConvGNAct(c16, width, kernel_size=1)
+        if self.use_p32:
+            self.lat32 = ConvGNAct(in_channels[3], width, kernel_size=1)
 
         # Multi-dilation coarse context at reduction 16
         self.context_blocks = nn.ModuleList([
@@ -44,6 +49,8 @@ class AdditiveFPNNeck(nn.Module):
             nn.init.zeros_(self.context_p8_fuse.conv.weight)
 
         # DS Residual refinement blocks
+        if self.use_p32:
+            self.ref32 = DSResidual(width)
         self.ref16 = DSResidual(width)
         self.ref8 = DSResidual(width)
         self.ref4 = DSResidual(width)
@@ -53,15 +60,28 @@ class AdditiveFPNNeck(nn.Module):
         c4: torch.Tensor,
         c8: torch.Tensor,
         c16: torch.Tensor,
+        c32: torch.Tensor | None = None,
         return_routes: bool = False,
     ):
+        if self.use_p32 != (c32 is not None):
+            expected = "four (C4/C8/C16/C32)" if self.use_p32 else "three (C4/C8/C16)"
+            raise ValueError(f"Neck was constructed for {expected} feature tensors")
         l4 = self.lat4(c4)
         l8 = self.lat8(c8)
         l16 = self.lat16(c16)
 
-        # Coarse context aggregation at P16
-        ctx_sum = sum(ctx(l16) for ctx in self.context_blocks) if len(self.context_blocks) > 0 else 0
-        p16 = self.ref16(l16 + ctx_sum)
+        # R6 starts the top-down path at the true P32 representation. Context
+        # remains at P16, after C32 semantics have been fused into that level.
+        p32 = None
+        p16_in = l16
+        if self.use_p32:
+            p32 = self.ref32(self.lat32(c32))
+            p16_in = p16_in + F.interpolate(
+                p32, size=l16.shape[-2:], mode="bilinear", align_corners=False
+            )
+
+        ctx_sum = sum(ctx(p16_in) for ctx in self.context_blocks) if len(self.context_blocks) > 0 else 0
+        p16 = self.ref16(p16_in + ctx_sum)
 
         # Top-down additive fusion at P8
         up16_to_8 = F.interpolate(
@@ -81,9 +101,12 @@ class AdditiveFPNNeck(nn.Module):
         p4 = self.ref4(l4 + up8_to_4)
 
         if return_routes:
-            return p4, {
+            routes = {
                 "p4": p4,
                 "p8": p8,
                 "p16": p16,
             }
+            if p32 is not None:
+                routes["p32"] = p32
+            return p4, routes
         return p4

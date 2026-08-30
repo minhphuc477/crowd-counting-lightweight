@@ -1,4 +1,4 @@
-"""Summarize one-seed NTPC ablations and apply the first-pass decision rule."""
+"""Summarize R0--R5 evidence plus the final R6 NPAC run."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ RUNS = [
     ("R3: Hierarchical Multinomial Tree", "ntpc_r3_hierarchical_multinomial/val.csv"),
     ("R4: Neural DTM Tree Likelihood (Proposed Core)", "ntpc_r4_neural_dtm_tree/val.csv"),
     ("R5: Full NTPC (DTM Tree + Dense 16->8 Auxiliary)", "ntpc_r5_full_adaptive_ntpc/val.csv"),
+    ("R6: NPAC (Full C32 + NB/Flat-DM16)", "ntpc_r6_npac/val.csv"),
 ]
 
 

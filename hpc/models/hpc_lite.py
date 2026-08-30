@@ -1,7 +1,7 @@
-"""HPC-Lite / NTPC Lightweight Crowd Counter (~0.097M Parameters).
+"""HPC-Lite / NTPC/NPAC lightweight crowd counter.
 
 Architecture:
-  Image -> MobileNetV4 features (C4, C8, C16)
+  Image -> MobileNetV4 features (C4, C8, C16[, C32])
         -> Additive FPN Neck (32 channels, context dilations {1,2,3})
         -> GroupNorm + SiLU + 1x1 Conv mass head
         -> Continuous positive count-mass map D @ stride 4 (Float32).
@@ -40,6 +40,7 @@ class HPCLite(nn.Module):
         use_repblock: bool = False,
         eps_d: float = 1e-8,
         output_stride: int = 4,
+        feature_reductions: Tuple[int, ...] = (4, 8, 16),
     ):
         super().__init__()
         from .blocks import RepDWBlock
@@ -49,6 +50,7 @@ class HPCLite(nn.Module):
         self.output_stride = int(output_stride)
         self.use_p8_context = bool(use_p8_context)
         self.use_repblock = bool(use_repblock)
+        self.feature_reductions = tuple(int(r) for r in feature_reductions)
 
         if self.output_stride != 4:
             raise ValueError("Target and loss formulations assume output_stride=4")
@@ -58,7 +60,7 @@ class HPCLite(nn.Module):
         self.backbone = MobileNetV4Backbone(
             model_name=backbone_name,
             pretrained=pretrained,
-            target_reductions=(4, 8, 16),
+            target_reductions=self.feature_reductions,
         )
 
         self.neck = AdditiveFPNNeck(
@@ -114,8 +116,8 @@ class HPCLite(nn.Module):
 
     def forward_mass(self, x: torch.Tensor) -> torch.Tensor:
         """Branchless mass forward pass for clean tracing and ONNX deployment."""
-        c4, c8, c16 = self.backbone(x)
-        p4 = self.neck(c4, c8, c16)
+        features = self.backbone(x)
+        p4 = self.neck(*features)
         if self.use_repblock:
             h = self.head_refine(p4)
         else:
@@ -134,8 +136,8 @@ class HPCLite(nn.Module):
         if not return_aux:
             return self.forward_mass(x)
 
-        c4, c8, c16 = self.backbone(x)
-        p4, aux = self.neck(c4, c8, c16, return_routes=True)
+        features = self.backbone(x)
+        p4, aux = self.neck(*features, return_routes=True)
 
         if self.use_repblock:
             h = self.head_refine(p4)
@@ -195,21 +197,22 @@ class HPCLite(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Explicit memory-bounded inference using disjoint cores and context halos.
 
-        ``tile_size`` and ``halo`` are aligned to the backbone's maximum stride
-        (16), so stitched stride-4 cells retain a consistent global phase. Each
+        ``tile_size`` and ``halo`` are aligned to the backbone's maximum stride,
+        so stitched stride-4 cells retain a consistent global phase. Each
         output cell is written exactly once. GroupNorm statistics are tile-local,
         therefore this mode is deterministic but not numerically equivalent to
         full-image inference and must be reported as a separate protocol.
         """
         if x.ndim != 4:
             raise ValueError(f"Expected 4D tensor input, got {tuple(x.shape)}")
+        max_stride = max(self.feature_reductions)
         for name, value in (("tile_size", tile_size), ("halo", halo)):
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{name} must be an integer, got {value!r}")
-        if tile_size <= 0 or tile_size % 16 != 0:
-            raise ValueError("tile_size must be a positive multiple of 16")
-        if halo < 0 or halo % 16 != 0:
-            raise ValueError("halo must be a non-negative multiple of 16")
+        if tile_size <= 0 or tile_size % max_stride != 0:
+            raise ValueError(f"tile_size must be a positive multiple of {max_stride}")
+        if halo < 0 or halo % max_stride != 0:
+            raise ValueError(f"halo must be a non-negative multiple of {max_stride}")
 
         batch, _, height, width = x.shape
         if height <= tile_size and width <= tile_size:
