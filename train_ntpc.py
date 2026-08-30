@@ -471,6 +471,7 @@ def main() -> None:
         "grad_total_pre_clip", "grad_total_post_clip", "grad_pre_clip_p50",
         "grad_pre_clip_p95", "grad_pre_clip_max", "grad_backbone", "grad_task",
         "clip_fraction", "amp_scale_start", "amp_scale_end", "amp_skipped_steps",
+        "amp_skip_fraction", "overflow_gt_mean", "overflow_gt_max",
         "lr", "lr_backbone", "lr_task",
     ]
     overall_diagnostics = [
@@ -523,6 +524,9 @@ def main() -> None:
         task_grad_norms: list[float] = []
         clipped_steps = 0
         amp_skipped_steps = 0
+        consecutive_overflows = 0
+        overflow_gt_means: list[float] = []
+        overflow_gt_maxs: list[float] = []
         amp_scale_start = float(scaler.get_scale()) if amp_enabled else 1.0
         backbone_params = tuple(optimizer.param_groups[0]["params"])
         task_params = tuple(optimizer.param_groups[1]["params"])
@@ -558,32 +562,39 @@ def main() -> None:
                 bad_grads = nonfinite_gradient_report(model) if not bool(torch.isfinite(pre_clip)) else []
                 if bad_grads:
                     scale_before = float(scaler.get_scale())
-                    try:
-                        offending_component_grads = component_gradient_norms(
-                            components, model.parameters(), grad_names
-                        )
-                    except Exception as exc:
-                        offending_component_grads = {"error": str(exc)}
-                    # unscale_ has already recorded found_inf. Do not clip Inf gradients:
-                    # scaler.step() skips optimizer.step(), then update() lowers the scale.
                     scaler.step(optimizer)
                     scaler.update()
+                    scale_after = float(scaler.get_scale())
                     amp_skipped_steps += 1
-                    gt_n = targets["N"].float()
+                    consecutive_overflows += 1
+                    gt_n = targets["N"].detach().float()
+                    gt_min_val = float(gt_n.min())
+                    gt_mean_val = float(gt_n.mean())
+                    gt_max_val = float(gt_n.max())
+                    overflow_gt_means.append(gt_mean_val)
+                    overflow_gt_maxs.append(gt_max_val)
                     print(
                         f"[AMP overflow] epoch={epoch} step={step} "
                         f"loss={float(loss.detach()):.6g} "
-                        f"gt=[{float(gt_n.min()):.0f}, {float(gt_n.mean()):.1f}, {float(gt_n.max()):.0f}] "
-                        f"mass=[{float(mass.min()):.3e}, {float(mass.max()):.3e}] "
-                        f"scale={scale_before:g}->{float(scaler.get_scale()):g}; "
-                        f"component_grads={offending_component_grads}; "
+                        f"gt=[{gt_min_val:.0f}, {gt_mean_val:.1f}, {gt_max_val:.0f}] "
+                        f"mass=[{float(mass.detach().min()):.3e}, {float(mass.detach().max()):.3e}] "
+                        f"scale={scale_before:g}->{scale_after:g}; "
                         + "; ".join(bad_grads),
                         flush=True,
                     )
+                    if consecutive_overflows >= 3:
+                        print(
+                            f"[WARNING] consecutive_overflows={consecutive_overflows} >= 3! "
+                            f"Current scale={scale_after:g}. Check mixed-precision stability.",
+                            flush=True,
+                        )
+                    optimizer.zero_grad(set_to_none=True)
                     running_loss += loss.detach()
                     for name in component_names:
                         running[name] += logs.get(name, mass.new_zeros(()))
                     continue
+                else:
+                    consecutive_overflows = 0
                 pre_value = float(pre_clip.cpu())
                 backbone_value = float(gradient_norm(backbone_params).cpu())
                 task_value = float(gradient_norm(task_params).cpu())
@@ -618,23 +629,29 @@ def main() -> None:
             if tree_levels else {}
         )
         tensor_pre_clip = torch.tensor(pre_clip_norms) if pre_clip_norms else None
+        amp_skip_frac = amp_skipped_steps / max(1, steps)
+        ovf_gt_mean = (sum(overflow_gt_means) / len(overflow_gt_means)) if overflow_gt_means else float("nan")
+        ovf_gt_max = max(overflow_gt_maxs) if overflow_gt_maxs else float("nan")
         train_row = {
             "epoch": epoch,
             "loss": float((running_loss / steps).cpu()),
             **{name: float((running[name] / steps).cpu()) for name in component_names},
             **tree_metrics,
             **epoch_grads,
-            "grad_total_pre_clip": sum(pre_clip_norms) / max(1, len(pre_clip_norms)),
-            "grad_total_post_clip": sum(post_clip_norms) / max(1, len(post_clip_norms)),
+            "grad_total_pre_clip": sum(pre_clip_norms) / max(1, len(pre_clip_norms)) if pre_clip_norms else float("nan"),
+            "grad_total_post_clip": sum(post_clip_norms) / max(1, len(post_clip_norms)) if post_clip_norms else float("nan"),
             "grad_pre_clip_p50": float(torch.quantile(tensor_pre_clip, 0.50)) if tensor_pre_clip is not None else float("nan"),
             "grad_pre_clip_p95": float(torch.quantile(tensor_pre_clip, 0.95)) if tensor_pre_clip is not None else float("nan"),
             "grad_pre_clip_max": max(pre_clip_norms, default=float("nan")),
-            "grad_backbone": sum(backbone_grad_norms) / max(1, len(backbone_grad_norms)),
-            "grad_task": sum(task_grad_norms) / max(1, len(task_grad_norms)),
-            "clip_fraction": clipped_steps / max(1, len(pre_clip_norms)),
+            "grad_backbone": sum(backbone_grad_norms) / max(1, len(backbone_grad_norms)) if backbone_grad_norms else float("nan"),
+            "grad_task": sum(task_grad_norms) / max(1, len(task_grad_norms)) if task_grad_norms else float("nan"),
+            "clip_fraction": clipped_steps / max(1, len(pre_clip_norms)) if pre_clip_norms else float("nan"),
             "amp_scale_start": amp_scale_start,
             "amp_scale_end": float(scaler.get_scale()) if amp_enabled else 1.0,
             "amp_skipped_steps": amp_skipped_steps,
+            "amp_skip_fraction": amp_skip_frac,
+            "overflow_gt_mean": ovf_gt_mean,
+            "overflow_gt_max": ovf_gt_max,
             "lr": lr_used,
             "lr_backbone": learning_rates["backbone"],
             "lr_task": learning_rates["task"],
@@ -661,6 +678,11 @@ def main() -> None:
             active_comps.append(f"exact_reg={train_row['exact_regression']:.2f}")
         loss_decomp_str = " ".join(active_comps)
 
+        skipped_info = (
+            f"skipped={amp_skipped_steps}/{steps} ({amp_skip_frac*100:.1f}%) [gt_mean={ovf_gt_mean:.1f} max={ovf_gt_max:.0f}]"
+            if amp_skipped_steps > 0
+            else f"skipped=0"
+        )
         opt_str = (
             f"grad={train_row.get('grad_total_pre_clip', 0.0):.1f} "
             f"(p50={train_row.get('grad_pre_clip_p50', 0.0):.1f} "
@@ -670,7 +692,7 @@ def main() -> None:
             f"bb={train_row.get('grad_backbone', 0.0):.1f} "
             f"task={train_row.get('grad_task', 0.0):.1f} "
             f"scale={train_row.get('amp_scale_end', 1.0):g} "
-            f"skipped={train_row.get('amp_skipped_steps', 0)}"
+            f"{skipped_info}"
         )
 
         tree_str = ""
