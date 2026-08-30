@@ -662,15 +662,15 @@ def main() -> None:
         loss_decomp_str = " ".join(active_comps)
 
         opt_str = (
-            f"grad_mean={train_row.get('grad_total_pre_clip', 0.0):.1f} "
-            f"(p50={train_row.get('grad_pre_clip_p50', 0.0):.1f}, "
-            f"p95={train_row.get('grad_pre_clip_p95', 0.0):.1f}, "
+            f"grad={train_row.get('grad_total_pre_clip', 0.0):.1f} "
+            f"(p50={train_row.get('grad_pre_clip_p50', 0.0):.1f} "
+            f"p95={train_row.get('grad_pre_clip_p95', 0.0):.1f} "
             f"max={train_row.get('grad_pre_clip_max', 0.0):.1f}) "
-            f"clip={train_row.get('clip_fraction', 0.0)*100:.0f}% "
+            f"clip@{grad_clip:g}={clipped_steps}/{steps} ({train_row.get('clip_fraction', 0.0)*100:.1f}%) "
             f"bb={train_row.get('grad_backbone', 0.0):.1f} "
             f"task={train_row.get('grad_task', 0.0):.1f} "
-            f"scale={train_row.get('amp_scale_end', 1.0):g}"
-            + (f" (skipped={train_row['amp_skipped_steps']})" if train_row.get("amp_skipped_steps", 0) > 0 else "")
+            f"scale={train_row.get('amp_scale_end', 1.0):g} "
+            f"skipped={train_row.get('amp_skipped_steps', 0)}"
         )
 
         tree_str = ""

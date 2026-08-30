@@ -53,7 +53,7 @@ optimizer:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
-  grad_clip: 5.0
+  grad_clip: 500.0
 
 schedule:
   epochs: 1500
