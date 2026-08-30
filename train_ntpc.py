@@ -279,6 +279,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train Neural Tree-Polya Crowd Counting")
     parser.add_argument("--config", required=True)
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
+    parser.add_argument("--resume", nargs="?", const="auto", default=None, help="Resume training from checkpoint file or auto-detect in save_dir")
     args = parser.parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
@@ -286,7 +287,6 @@ def main() -> None:
     # Only timm backbone pretraining is supported. Resume/warm-start/distillation
     # are intentionally separate experiments and remain forbidden in this trainer.
     FORBIDDEN_INITIALIZATION_KEYS = {
-        "resume",
         "teacher_checkpoint",
         "distillation",
         "warm_start",
@@ -320,16 +320,32 @@ def main() -> None:
     seed_everything(seed)
     save_dir = os.path.abspath(exp_cfg.get("save_dir", "./runs/ntpc_experiment"))
 
-    if os.path.isdir(save_dir) and any(os.scandir(save_dir)):
+    is_resuming = args.resume is not None
+    resume_ckpt_path = None
+    if is_resuming:
+        if args.resume == "auto":
+            for cand in ("last.pt", "best.pt"):
+                cand_path = os.path.join(save_dir, cand)
+                if os.path.isfile(cand_path):
+                    resume_ckpt_path = cand_path
+                    break
+            if resume_ckpt_path is None:
+                raise FileNotFoundError(f"Cannot auto-resume: no last.pt or best.pt found in {save_dir}")
+        else:
+            resume_ckpt_path = os.path.abspath(args.resume)
+            if not os.path.isfile(resume_ckpt_path):
+                raise FileNotFoundError(f"Specified resume checkpoint does not exist: {resume_ckpt_path}")
+    elif os.path.isdir(save_dir) and any(os.scandir(save_dir)):
         if not args.overwrite:
             raise FileExistsError(
-                f"Run directory is not empty: {save_dir}. Use --overwrite explicitly."
+                f"Run directory is not empty: {save_dir}. Use --overwrite or --resume explicitly."
             )
         shutil.rmtree(save_dir)
 
     os.makedirs(save_dir, exist_ok=True)
-    with open(os.path.join(save_dir, "config.yaml"), "w", encoding="utf-8") as handle:
-        yaml.safe_dump(cfg, handle, sort_keys=False)
+    if not is_resuming:
+        with open(os.path.join(save_dir, "config.yaml"), "w", encoding="utf-8") as handle:
+            yaml.safe_dump(cfg, handle, sort_keys=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_ds, evaluation_ds, selection_split = build_datasets(cfg)
@@ -497,9 +513,39 @@ def main() -> None:
     ]
     val_fields = ["epoch", *val_metric_fields, "lr", "lr_backbone", "lr_task"]
     train_csv, val_csv = os.path.join(save_dir, "train.csv"), os.path.join(save_dir, "val.csv")
+    start_epoch = 1
+    best_mae, best_epoch = float("inf"), 0
+    if is_resuming:
+        print(f"Resuming training from checkpoint: {resume_ckpt_path}", flush=True)
+        ckpt = torch.load(resume_ckpt_path, map_location=device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if "scheduler_state_dict" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_epoch = int(ckpt.get("epoch", 0)) + 1
+        best_mae = float(ckpt.get("val_res", {}).get("mae", float("inf")))
+        best_epoch = int(ckpt.get("epoch", 0))
+        print(
+            f"Resumed at epoch {start_epoch}, previous best MAE={best_mae:.3f} at epoch {best_epoch}",
+            flush=True,
+        )
+
     for path, fields in ((train_csv, train_fields), (val_csv, val_fields)):
+        existing_rows = []
+        if is_resuming and os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    try:
+                        if int(row["epoch"]) < start_epoch:
+                            existing_rows.append(row)
+                    except (ValueError, KeyError):
+                        pass
         with open(path, "w", newline="", encoding="utf-8") as handle:
-            csv.DictWriter(handle, fieldnames=fields).writeheader()
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for row in existing_rows:
+                writer.writerow({f: row.get(f, "") for f in fields})
 
     print(
         f"Device={device}; params={sum(p.numel() for p in model.parameters()):,}; "
@@ -508,9 +554,8 @@ def main() -> None:
         f"initialization={'pretrained' if pretrained_spec else 'scratch'}",
         flush=True,
     )
-    best_mae, best_epoch = float("inf"), 0
     component_names = train_fields[2:13]
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         started = time.time()
         learning_rates = {str(group["name"]): float(group["lr"]) for group in optimizer.param_groups}
         lr_used = learning_rates["task"]
@@ -759,6 +804,21 @@ def main() -> None:
                 + (f"\n{tree_str}" if tree_str else ""),
                 flush=True,
             )
+
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "val_res": metrics if (epoch % evaluate_every == 0 or epoch == epochs) else {"mae": best_mae},
+            "config": cfg,
+            "resolved_crop_statistics": crop_stats,
+            "selection_split": selection_split,
+            "is_exact_joint_nll": criterion.is_exact_joint_nll,
+            "initialization_policy": "timm_pretrained" if pretrained_spec else "scratch",
+            "pretrained_spec": pretrained_spec,
+            "runtime": get_runtime_metadata(),
+        }, os.path.join(save_dir, "last.pt"))
         scheduler.step()
 
     print(f"Training complete. Best MAE={best_mae:.3f} at epoch {best_epoch} on {selection_split}.", flush=True)
