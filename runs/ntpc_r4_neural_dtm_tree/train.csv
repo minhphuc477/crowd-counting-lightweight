@@ -1,0 +1,1 @@
+epoch,loss,root_magnitude,root_to_64,64_to_32,32_to_16,16_to_8,16_to_8_dense,8_to_4,flat_16,multinomial_tree,deterministic_alloc,exact_regression,grad_root_magnitude,grad_root_to_64,grad_64_to_32,grad_32_to_16,lr,lr_backbone,lr_task

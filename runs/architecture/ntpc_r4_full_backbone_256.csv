@@ -1,0 +1,105 @@
+index,component,module,type,input_shape,output_shape,parameters,conv_macs,details
+1,backbone,backbone.backbone.conv_stem,Conv2d,1x3x256x256,1x32x128x128,864,14155776,"k=3x3, s=2, d=1, g=1"
+2,backbone,backbone.backbone.bn1,BatchNorm2d,1x32x128x128,1x32x128x128,64,0,features=32
+3,backbone,backbone.backbone.act1,ReLU,1x32x128x128,1x32x128x128,0,0,-
+4,backbone,backbone.backbone.blocks.0.0.conv,Conv2d,1x32x128x128,1x16x64x64,4608,18874368,"k=3x3, s=2, d=1, g=1"
+5,backbone,backbone.backbone.blocks.0.0.bn1.act,ReLU,1x16x64x64,1x16x64x64,0,0,-
+6,backbone,backbone.backbone.blocks.0.0.bn1,BatchNormAct2d,1x16x64x64,1x16x64x64,32,0,features=16
+7,backbone,backbone.backbone.blocks.0.1.conv,Conv2d,1x16x64x64,1x16x64x64,256,1048576,"k=1x1, s=1, d=1, g=1"
+8,backbone,backbone.backbone.blocks.0.1.bn1.act,ReLU,1x16x64x64,1x16x64x64,0,0,-
+9,backbone,backbone.backbone.blocks.0.1.bn1,BatchNormAct2d,1x16x64x64,1x16x64x64,32,0,features=16
+10,backbone,backbone.backbone.blocks.1.0.conv,Conv2d,1x16x64x64,1x48x32x32,6912,7077888,"k=3x3, s=2, d=1, g=1"
+11,backbone,backbone.backbone.blocks.1.0.bn1.act,ReLU,1x48x32x32,1x48x32x32,0,0,-
+12,backbone,backbone.backbone.blocks.1.0.bn1,BatchNormAct2d,1x48x32x32,1x48x32x32,96,0,features=48
+13,backbone,backbone.backbone.blocks.1.1.conv,Conv2d,1x48x32x32,1x32x32x32,1536,1572864,"k=1x1, s=1, d=1, g=1"
+14,backbone,backbone.backbone.blocks.1.1.bn1.act,ReLU,1x32x32x32,1x32x32x32,0,0,-
+15,backbone,backbone.backbone.blocks.1.1.bn1,BatchNormAct2d,1x32x32x32,1x32x32x32,64,0,features=32
+16,backbone,backbone.backbone.blocks.2.0.dw_start.conv,Conv2d,1x32x32x32,1x32x32x32,800,819200,"k=5x5, s=1, d=1, g=32"
+17,backbone,backbone.backbone.blocks.2.0.dw_start.bn,BatchNormAct2d,1x32x32x32,1x32x32x32,64,0,features=32
+18,backbone,backbone.backbone.blocks.2.0.pw_exp.conv,Conv2d,1x32x32x32,1x96x32x32,3072,3145728,"k=1x1, s=1, d=1, g=1"
+19,backbone,backbone.backbone.blocks.2.0.pw_exp.bn.act,ReLU,1x96x32x32,1x96x32x32,0,0,-
+20,backbone,backbone.backbone.blocks.2.0.pw_exp.bn,BatchNormAct2d,1x96x32x32,1x96x32x32,192,0,features=96
+21,backbone,backbone.backbone.blocks.2.0.dw_mid.conv,Conv2d,1x96x32x32,1x96x16x16,2400,614400,"k=5x5, s=2, d=1, g=96"
+22,backbone,backbone.backbone.blocks.2.0.dw_mid.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+23,backbone,backbone.backbone.blocks.2.0.dw_mid.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+24,backbone,backbone.backbone.blocks.2.0.pw_proj.conv,Conv2d,1x96x16x16,1x48x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+25,backbone,backbone.backbone.blocks.2.0.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+26,backbone,backbone.backbone.blocks.2.1.pw_exp.conv,Conv2d,1x48x16x16,1x96x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+27,backbone,backbone.backbone.blocks.2.1.pw_exp.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+28,backbone,backbone.backbone.blocks.2.1.pw_exp.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+29,backbone,backbone.backbone.blocks.2.1.dw_mid.conv,Conv2d,1x96x16x16,1x96x16x16,864,221184,"k=3x3, s=1, d=1, g=96"
+30,backbone,backbone.backbone.blocks.2.1.dw_mid.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+31,backbone,backbone.backbone.blocks.2.1.dw_mid.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+32,backbone,backbone.backbone.blocks.2.1.pw_proj.conv,Conv2d,1x96x16x16,1x48x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+33,backbone,backbone.backbone.blocks.2.1.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+34,backbone,backbone.backbone.blocks.2.2.pw_exp.conv,Conv2d,1x48x16x16,1x96x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+35,backbone,backbone.backbone.blocks.2.2.pw_exp.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+36,backbone,backbone.backbone.blocks.2.2.pw_exp.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+37,backbone,backbone.backbone.blocks.2.2.dw_mid.conv,Conv2d,1x96x16x16,1x96x16x16,864,221184,"k=3x3, s=1, d=1, g=96"
+38,backbone,backbone.backbone.blocks.2.2.dw_mid.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+39,backbone,backbone.backbone.blocks.2.2.dw_mid.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+40,backbone,backbone.backbone.blocks.2.2.pw_proj.conv,Conv2d,1x96x16x16,1x48x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+41,backbone,backbone.backbone.blocks.2.2.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+42,backbone,backbone.backbone.blocks.2.3.pw_exp.conv,Conv2d,1x48x16x16,1x96x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+43,backbone,backbone.backbone.blocks.2.3.pw_exp.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+44,backbone,backbone.backbone.blocks.2.3.pw_exp.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+45,backbone,backbone.backbone.blocks.2.3.dw_mid.conv,Conv2d,1x96x16x16,1x96x16x16,864,221184,"k=3x3, s=1, d=1, g=96"
+46,backbone,backbone.backbone.blocks.2.3.dw_mid.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+47,backbone,backbone.backbone.blocks.2.3.dw_mid.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+48,backbone,backbone.backbone.blocks.2.3.pw_proj.conv,Conv2d,1x96x16x16,1x48x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+49,backbone,backbone.backbone.blocks.2.3.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+50,backbone,backbone.backbone.blocks.2.4.pw_exp.conv,Conv2d,1x48x16x16,1x96x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+51,backbone,backbone.backbone.blocks.2.4.pw_exp.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+52,backbone,backbone.backbone.blocks.2.4.pw_exp.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+53,backbone,backbone.backbone.blocks.2.4.dw_mid.conv,Conv2d,1x96x16x16,1x96x16x16,864,221184,"k=3x3, s=1, d=1, g=96"
+54,backbone,backbone.backbone.blocks.2.4.dw_mid.bn.act,ReLU,1x96x16x16,1x96x16x16,0,0,-
+55,backbone,backbone.backbone.blocks.2.4.dw_mid.bn,BatchNormAct2d,1x96x16x16,1x96x16x16,192,0,features=96
+56,backbone,backbone.backbone.blocks.2.4.pw_proj.conv,Conv2d,1x96x16x16,1x48x16x16,4608,1179648,"k=1x1, s=1, d=1, g=1"
+57,backbone,backbone.backbone.blocks.2.4.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+58,backbone,backbone.backbone.blocks.2.5.dw_start.conv,Conv2d,1x48x16x16,1x48x16x16,432,110592,"k=3x3, s=1, d=1, g=48"
+59,backbone,backbone.backbone.blocks.2.5.dw_start.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+60,backbone,backbone.backbone.blocks.2.5.pw_exp.conv,Conv2d,1x48x16x16,1x192x16x16,9216,2359296,"k=1x1, s=1, d=1, g=1"
+61,backbone,backbone.backbone.blocks.2.5.pw_exp.bn.act,ReLU,1x192x16x16,1x192x16x16,0,0,-
+62,backbone,backbone.backbone.blocks.2.5.pw_exp.bn,BatchNormAct2d,1x192x16x16,1x192x16x16,384,0,features=192
+63,backbone,backbone.backbone.blocks.2.5.pw_proj.conv,Conv2d,1x192x16x16,1x48x16x16,9216,2359296,"k=1x1, s=1, d=1, g=1"
+64,backbone,backbone.backbone.blocks.2.5.pw_proj.bn,BatchNormAct2d,1x48x16x16,1x48x16x16,96,0,features=48
+65,neck,neck.lat4.conv,Conv2d,1x16x64x64,1x32x64x64,512,2097152,"k=1x1, s=1, d=1, g=1"
+66,neck,neck.lat4.norm,GroupNorm,1x32x64x64,1x32x64x64,64,0,groups=8
+67,neck,neck.lat4.act,SiLU,1x32x64x64,1x32x64x64,0,0,-
+68,neck,neck.lat8.conv,Conv2d,1x32x32x32,1x32x32x32,1024,1048576,"k=1x1, s=1, d=1, g=1"
+69,neck,neck.lat8.norm,GroupNorm,1x32x32x32,1x32x32x32,64,0,groups=8
+70,neck,neck.lat8.act,SiLU,1x32x32x32,1x32x32x32,0,0,-
+71,neck,neck.lat16.conv,Conv2d,1x48x16x16,1x32x16x16,1536,393216,"k=1x1, s=1, d=1, g=1"
+72,neck,neck.lat16.norm,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+73,neck,neck.lat16.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+74,neck,neck.context_blocks.0.conv,Conv2d,1x32x16x16,1x32x16x16,288,73728,"k=3x3, s=1, d=1, g=32"
+75,neck,neck.context_blocks.0.norm,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+76,neck,neck.context_blocks.0.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+77,neck,neck.context_blocks.1.conv,Conv2d,1x32x16x16,1x32x16x16,288,73728,"k=3x3, s=1, d=2, g=32"
+78,neck,neck.context_blocks.1.norm,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+79,neck,neck.context_blocks.1.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+80,neck,neck.context_blocks.2.conv,Conv2d,1x32x16x16,1x32x16x16,288,73728,"k=3x3, s=1, d=3, g=32"
+81,neck,neck.context_blocks.2.norm,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+82,neck,neck.context_blocks.2.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+83,neck,neck.ref16.dw,Conv2d,1x32x16x16,1x32x16x16,288,73728,"k=3x3, s=1, d=1, g=32"
+84,neck,neck.ref16.n1,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+85,neck,neck.ref16.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+86,neck,neck.ref16.pw,Conv2d,1x32x16x16,1x32x16x16,1024,262144,"k=1x1, s=1, d=1, g=1"
+87,neck,neck.ref16.n2,GroupNorm,1x32x16x16,1x32x16x16,64,0,groups=8
+88,neck,neck.ref16.act,SiLU,1x32x16x16,1x32x16x16,0,0,-
+89,neck,neck.ref8.dw,Conv2d,1x32x32x32,1x32x32x32,288,294912,"k=3x3, s=1, d=1, g=32"
+90,neck,neck.ref8.n1,GroupNorm,1x32x32x32,1x32x32x32,64,0,groups=8
+91,neck,neck.ref8.act,SiLU,1x32x32x32,1x32x32x32,0,0,-
+92,neck,neck.ref8.pw,Conv2d,1x32x32x32,1x32x32x32,1024,1048576,"k=1x1, s=1, d=1, g=1"
+93,neck,neck.ref8.n2,GroupNorm,1x32x32x32,1x32x32x32,64,0,groups=8
+94,neck,neck.ref8.act,SiLU,1x32x32x32,1x32x32x32,0,0,-
+95,neck,neck.ref4.dw,Conv2d,1x32x64x64,1x32x64x64,288,1179648,"k=3x3, s=1, d=1, g=32"
+96,neck,neck.ref4.n1,GroupNorm,1x32x64x64,1x32x64x64,64,0,groups=8
+97,neck,neck.ref4.act,SiLU,1x32x64x64,1x32x64x64,0,0,-
+98,neck,neck.ref4.pw,Conv2d,1x32x64x64,1x32x64x64,1024,4194304,"k=1x1, s=1, d=1, g=1"
+99,neck,neck.ref4.n2,GroupNorm,1x32x64x64,1x32x64x64,64,0,groups=8
+100,neck,neck.ref4.act,SiLU,1x32x64x64,1x32x64x64,0,0,-
+101,head,head_dw,Conv2d,1x32x64x64,1x32x64x64,288,1179648,"k=3x3, s=1, d=1, g=32"
+102,head,head_norm,GroupNorm,1x32x64x64,1x32x64x64,64,0,groups=8
+103,head,head_act,SiLU,1x32x64x64,1x32x64x64,0,0,-
+104,head,head_out,Conv2d,1x32x64x64,1x1x64x64,33,131072,"k=1x1, s=1, d=1, g=1"
