@@ -2,10 +2,10 @@
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
-- D-R / G-R: Sampling-phase and translation instability with padded-canvas support crop.
-- D-K / G-K: Inter-person separability decay (primary: pair-weighted inter-person dissimilarity across depth).
-- D-L / G-L: Normalized effective representation rank on strictly matched crowd points.
-- D-M / G-M: Area-normalized foreground crowd vs background gradient allocation.
+- D-R / G-R: Sampling-phase and translation instability on valid central support.
+- D-K / G-K: Far-pair normalized inter-person separability retention across depth.
+- D-L / G-L: Normalized scale-invariant effective rank on strictly matched crowd points.
+- D-M / G-M: Area-normalized foreground crowd vs background gradient allocation on unpadded support.
 """
 
 from __future__ import annotations
@@ -42,10 +42,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="test_data", help="Dataset split (train_data, test_data, val)")
     parser.add_argument("--max-samples", type=int, default=None, help="Max images to evaluate")
     parser.add_argument(
-        "--dr-pad-px",
+        "--dr-margin-px",
         type=int,
-        default=128,
-        help="Canvas padding for D-R phase-shift diagnostic",
+        default=96,
+        help="Border margin for D-R phase-shift diagnostic",
     )
     parser.add_argument(
         "--diagnostics",
@@ -114,7 +114,7 @@ def main() -> None:
         img_b = img_tensor.unsqueeze(0).to(device)
 
         if run_dr:
-            res_dr = evaluate_phase_shift_single_image(model, img_b, device=device, canvas_pad_px=args.dr_pad_px)
+            res_dr = evaluate_phase_shift_single_image(model, img_b, device=device, border_margin_px=args.dr_margin_px)
             res_dr["gt_count"] = float(len(pts))
             dr_results.append(res_dr)
 
@@ -148,7 +148,7 @@ def main() -> None:
             targets_b = {k: tree[k].to(device) for k in (4, 8, 16, 32, 64)}
             targets_b["N"] = tree["N"].to(device)
             res_dm = evaluate_gradient_allocation_single_batch(
-                model, criterion, img_padded, targets_b, points_list=[pts_clamped], device=device
+                model, criterion, img_padded, targets_b, points_list=[pts_clamped], valid_hw=(ih, iw), device=device
             )
             res_dm["gt_count"] = float(len(pts))
             dm_results.append(res_dm)
@@ -162,7 +162,7 @@ def main() -> None:
             "checkpoint": os.path.abspath(args.checkpoint),
             "split": args.split,
             "samples_evaluated": n_eval,
-            "dr_pad_px": args.dr_pad_px,
+            "dr_margin_px": args.dr_margin_px,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     }
@@ -183,7 +183,7 @@ def main() -> None:
                 np.mean([r["feature_c32_cos_sim_aligned"] for r in dr_results])
             )
 
-    # Aggregate D-K (Primary: Pair-Weighted Inter-Person Dissimilarity C4 -> C8 -> C16 -> C32)
+    # Aggregate D-K (Primary: Far-Pair Normalized Separability Retention)
     if run_dk and dk_results:
         dk_agg: Dict[str, Any] = {
             "mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))
@@ -211,7 +211,7 @@ def main() -> None:
                 "sample_count": total_pairs,
                 "median_peak_to_trough_ratio": float(np.median(ptr_values)) if ptr_values else float("nan"),
                 "mean_merged_fraction": float(merged_count / total_pairs) if total_pairs else float("nan"),
-                # PRIMARY representation metrics (pair-weighted dissimilarity)
+                # Pair-weighted raw dissimilarity
                 "c4_inter_person_dissimilarity": pair_weighted_metric("C4"),
                 "c8_inter_person_dissimilarity": pair_weighted_metric("C8"),
                 "c16_inter_person_dissimilarity": pair_weighted_metric("C16"),
@@ -219,21 +219,35 @@ def main() -> None:
             if any("C32_inter_person_dissimilarity_sum" in x for x in valid):
                 info["c32_inter_person_dissimilarity"] = pair_weighted_metric("C32")
 
-            # Separability retention ratios across depth
-            c4 = info["c4_inter_person_dissimilarity"]
-            c16 = info["c16_inter_person_dissimilarity"]
-            info["separability_retention_c16_over_c4"] = (
-                float(c16 / max(c4, 1e-8)) if np.isfinite(c4) and np.isfinite(c16) else float("nan")
-            )
-            if "c32_inter_person_dissimilarity" in info:
-                c32 = info["c32_inter_person_dissimilarity"]
-                info["separability_retention_c32_over_c16"] = (
-                    float(c32 / max(c16, 1e-8)) if np.isfinite(c16) and np.isfinite(c32) else float("nan")
-                )
-                info["separability_retention_c32_over_c4"] = (
-                    float(c32 / max(c4, 1e-8)) if np.isfinite(c4) and np.isfinite(c32) else float("nan")
-                )
             dk_agg[f"bin_{bname}"] = info
+
+        # Stage-specific far-pair baseline normalization (against gt32 control)
+        far = dk_agg.get("bin_gt32")
+        if far is not None:
+            for bname in ["le8", "8_16", "16_32"]:
+                info = dk_agg.get(f"bin_{bname}")
+                if info is None:
+                    continue
+                for stage in ["c4", "c8", "c16", "c32"]:
+                    key = f"{stage}_inter_person_dissimilarity"
+                    if key not in info or key not in far:
+                        continue
+                    info[f"{stage}_normalized_separability"] = float(
+                        info[key] / max(far[key], 1e-8)
+                    )
+                if "c4_normalized_separability" in info and "c16_normalized_separability" in info:
+                    info["normalized_retention_c16_over_c4"] = float(
+                        info["c16_normalized_separability"] / max(info["c4_normalized_separability"], 1e-8)
+                    )
+                if "c16_normalized_separability" in info and "c32_normalized_separability" in info:
+                    info["normalized_retention_c32_over_c16"] = float(
+                        info["c32_normalized_separability"] / max(info["c16_normalized_separability"], 1e-8)
+                    )
+                if "c4_normalized_separability" in info and "c32_normalized_separability" in info:
+                    info["normalized_retention_c32_over_c4"] = float(
+                        info["c32_normalized_separability"] / max(info["c4_normalized_separability"], 1e-8)
+                    )
+
         summary["D-K_separability"] = dk_agg
 
     # Aggregate D-L (Strictly crowd-point matched samples)
@@ -282,13 +296,14 @@ def main() -> None:
     if "D-K_separability" in summary:
         dk = summary["D-K_separability"]
         le8 = dk.get("bin_le8", {})
-        diag_synthesis["D-K (Separability Decay across Depth @ d<=8px)"] = {
-            "c4_dissimilarity": f"{le8.get('c4_inter_person_dissimilarity', float('nan')):.4f}",
-            "c8_dissimilarity": f"{le8.get('c8_inter_person_dissimilarity', float('nan')):.4f}",
-            "c16_dissimilarity": f"{le8.get('c16_inter_person_dissimilarity', float('nan')):.4f}",
-            "c32_dissimilarity": f"{le8.get('c32_inter_person_dissimilarity', float('nan')):.4f}" if "c32_inter_person_dissimilarity" in le8 else "N/A",
-            "separability_retention_c16_over_c4": f"{le8.get('separability_retention_c16_over_c4', float('nan'))*100:.1f}%",
-            "separability_retention_c32_over_c16": f"{le8.get('separability_retention_c32_over_c16', float('nan'))*100:.1f}%" if "separability_retention_c32_over_c16" in le8 else "N/A",
+        diag_synthesis["D-K (Normalized Separability Retention @ d<=8px)"] = {
+            "c4_norm_separability": f"{le8.get('c4_normalized_separability', float('nan'))*100:.1f}%",
+            "c8_norm_separability": f"{le8.get('c8_normalized_separability', float('nan'))*100:.1f}%",
+            "c16_norm_separability": f"{le8.get('c16_normalized_separability', float('nan'))*100:.1f}%",
+            "c32_norm_separability": f"{le8.get('c32_normalized_separability', float('nan'))*100:.1f}%" if "c32_normalized_separability" in le8 else "N/A",
+            "normalized_retention_c16_over_c4": f"{le8.get('normalized_retention_c16_over_c4', float('nan'))*100:.1f}%",
+            "normalized_retention_c32_over_c16": f"{le8.get('normalized_retention_c32_over_c16', float('nan'))*100:.1f}%" if "normalized_retention_c32_over_c16" in le8 else "N/A",
+            "normalized_retention_c32_over_c4": f"{le8.get('normalized_retention_c32_over_c4', float('nan'))*100:.1f}%" if "normalized_retention_c32_over_c4" in le8 else "N/A",
             "output_mass_merged_frac": f"{le8.get('mean_merged_fraction', float('nan'))*100:.1f}%",
         }
     if "D-L_effective_rank" in summary:

@@ -51,7 +51,8 @@ def compute_spectral_rank_metrics(x: torch.Tensor, eps: float = 1e-10) -> Dict[s
     s2 = s.square()
     total_energy = s2.sum()
 
-    if float(total_energy) <= eps:
+    tiny = torch.finfo(total_energy.dtype).tiny
+    if not bool(torch.isfinite(total_energy)) or float(total_energy) <= tiny:
         return {
             "nominal_channels": float(c),
             "sample_count": float(m),

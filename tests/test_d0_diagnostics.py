@@ -12,10 +12,9 @@ from hpc.diagnostics.effective_rank import (
 )
 from hpc.diagnostics.gradient_allocation import evaluate_gradient_allocation_single_batch
 from hpc.diagnostics.phase_shift import (
-    crop_original_support,
+    crop_valid_center,
     evaluate_phase_shift_single_image,
     inverse_align_feature,
-    shift_tensor,
 )
 from hpc.diagnostics.separability import (
     evaluate_separability_single_image,
@@ -25,34 +24,16 @@ from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.models.hpc_lite import HPCLite
 
 
-def test_shift_tensor_and_inverse_align_recovery():
-    # Synthetic impulse image: single non-zero pixel in the center
-    x = torch.zeros(1, 1, 32, 32)
-    x[0, 0, 16, 16] = 10.0
-    
-    # Shift right 2, down 1
-    dx, dy = 2, 1
-    shifted = shift_tensor(x, dx, dy, mode="replicate")
-    assert shifted[0, 0, 17, 18] == 10.0
-    
-    # Inverse align back with stride 1.0
-    inv = inverse_align_feature(shifted, dx, dy, stride=1.0, device=torch.device("cpu"))
-    
-    # Check that maximum peak is recovered at (16, 16)
-    peak_y, peak_x = torch.where(inv[0, 0] == inv[0, 0].max())
-    assert peak_y[0].item() == 16
-    assert peak_x[0].item() == 16
-
-
-def test_phase_shift_padded_canvas_recovery():
+def test_phase_shift_roll_and_center_recovery():
     x = torch.zeros(1, 1, 64, 64)
     x[..., 31, 31] = 1.0
 
-    padded = F.pad(x, (32, 32, 32, 32), mode="replicate")
-    shifted = shift_tensor(padded, dx=2, dy=-1, mode="replicate")
+    # Shift using torch.roll
+    shifted = torch.roll(x, shifts=(-1, 2), dims=(-2, -1))
     aligned = inverse_align_feature(shifted, dx_img=2, dy_img=-1, stride=1.0, device=torch.device("cpu"))
-    central = crop_original_support(aligned, original_h=64, original_w=64, pad_px=32, stride=1)
-    assert torch.allclose(central, x, atol=1e-5)
+    central = crop_valid_center(aligned, margin_px=16, stride=1)
+    central_x = crop_valid_center(x, margin_px=16, stride=1)
+    assert torch.allclose(central, central_x, atol=1e-5)
 
 
 def test_inter_person_dissimilarity_decreases_when_features_merge():

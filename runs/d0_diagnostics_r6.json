@@ -4,68 +4,77 @@
     "checkpoint": "F:\\lightweightcrcn\\runs\\ntpc_r6_npac\\best.pt",
     "split": "test_data",
     "samples_evaluated": 50,
-    "dr_pad_px": 128,
-    "timestamp": "2026-09-01 13:30:29"
+    "dr_margin_px": 96,
+    "timestamp": "2026-09-01 13:39:14"
   },
   "D-R_phase_shift": {
-    "mean_count_relative_std": 0.03745796499777939,
-    "median_count_relative_std": 0.030339891118177444,
-    "p90_count_relative_std": 0.07086169867232443,
-    "mean_mass_mae": 0.0036667880287374523,
-    "mean_c4_cos_sim_aligned": 0.9489654475450515,
-    "mean_c8_cos_sim_aligned": 0.9639300580819449,
-    "mean_c16_cos_sim_aligned": 0.9179306416710218,
-    "mean_c32_cos_sim_aligned": 0.8994108848770459
+    "mean_count_relative_std": 0.03693500952866959,
+    "median_count_relative_std": 0.030386899730281927,
+    "p90_count_relative_std": 0.05957804137222868,
+    "mean_mass_mae": 0.004942378968165333,
+    "mean_c4_cos_sim_aligned": 0.9451186099648474,
+    "mean_c8_cos_sim_aligned": 0.9618000783522924,
+    "mean_c16_cos_sim_aligned": 0.9106193214654923,
+    "mean_c32_cos_sim_aligned": 0.884759015540282
   },
   "D-K_separability": {
     "mean_knn_spacing_px": 19.44435422897339,
     "bin_le8": {
       "sample_count": 2013,
-      "median_peak_to_trough_ratio": 0.922694206237793,
-      "mean_merged_fraction": 0.8628912071535022,
-      "c4_inter_person_dissimilarity": 0.08269133688618281,
-      "c8_inter_person_dissimilarity": 0.047541704067707774,
-      "c16_inter_person_dissimilarity": 0.029472903268466348,
-      "c32_inter_person_dissimilarity": 0.012670524311018299,
-      "separability_retention_c16_over_c4": 0.3564206890140517,
-      "separability_retention_c32_over_c16": 0.429904179971803,
-      "separability_retention_c32_over_c4": 0.15322674403557093
+      "median_peak_to_trough_ratio": 0.9219397306442261,
+      "mean_merged_fraction": 0.8648782911077993,
+      "c4_inter_person_dissimilarity": 0.08175279308893287,
+      "c8_inter_person_dissimilarity": 0.04732028806144423,
+      "c16_inter_person_dissimilarity": 0.029677483583053308,
+      "c32_inter_person_dissimilarity": 0.012643252476731521,
+      "c4_normalized_separability": 1.220017766096441,
+      "c8_normalized_separability": 0.31809008144749085,
+      "c16_normalized_separability": 0.07341250641827976,
+      "c32_normalized_separability": 0.025597956096362073,
+      "normalized_retention_c16_over_c4": 0.06017330932251078,
+      "normalized_retention_c32_over_c16": 0.34868658414294607,
+      "normalized_retention_c32_over_c4": 0.020981625684243176
     },
     "bin_8_16": {
       "sample_count": 3332,
-      "median_peak_to_trough_ratio": 0.8355850577354431,
-      "mean_merged_fraction": 0.7974189675870348,
-      "c4_inter_person_dissimilarity": 0.08412088555734412,
-      "c8_inter_person_dissimilarity": 0.09912731250723442,
-      "c16_inter_person_dissimilarity": 0.10007231994694164,
-      "c32_inter_person_dissimilarity": 0.05674224032932112,
-      "separability_retention_c16_over_c4": 1.189625136301301,
-      "separability_retention_c32_over_c16": 0.5670123402695757,
-      "separability_retention_c32_over_c4": 0.6745321325777136
+      "median_peak_to_trough_ratio": 0.8346944451332092,
+      "mean_merged_fraction": 0.8004201680672269,
+      "c4_inter_person_dissimilarity": 0.08448562301507517,
+      "c8_inter_person_dissimilarity": 0.09895534287480746,
+      "c16_inter_person_dissimilarity": 0.09928335372854968,
+      "c32_inter_person_dissimilarity": 0.0565551284338389,
+      "c4_normalized_separability": 1.2608004835503477,
+      "c8_normalized_separability": 0.6651843081310104,
+      "c16_normalized_separability": 0.24559494144535607,
+      "c32_normalized_separability": 0.11450342365129913,
+      "normalized_retention_c16_over_c4": 0.19479286742798008,
+      "normalized_retention_c32_over_c16": 0.46622875445818457,
+      "normalized_retention_c32_over_c4": 0.09081803595828543
     },
     "bin_16_32": {
       "sample_count": 3440,
-      "median_peak_to_trough_ratio": 0.91432124376297,
-      "mean_merged_fraction": 0.5569767441860465,
-      "c4_inter_person_dissimilarity": 0.07939756980469061,
-      "c8_inter_person_dissimilarity": 0.1355886104321757,
-      "c16_inter_person_dissimilarity": 0.27803966103251593,
-      "c32_inter_person_dissimilarity": 0.1988042996719826,
-      "separability_retention_c16_over_c4": 3.501866136664677,
-      "separability_retention_c32_over_c16": 0.7150213711731328,
-      "separability_retention_c32_over_c4": 2.5039091267027387
+      "median_peak_to_trough_ratio": 0.9156396687030792,
+      "mean_merged_fraction": 0.5590116279069768,
+      "c4_inter_person_dissimilarity": 0.0794815756900366,
+      "c8_inter_person_dissimilarity": 0.13531154330040132,
+      "c16_inter_person_dissimilarity": 0.2780214404470699,
+      "c32_inter_person_dissimilarity": 0.1978481876642205,
+      "c4_normalized_separability": 1.1861238100293192,
+      "c8_normalized_separability": 0.9095730730405176,
+      "c16_normalized_separability": 0.6877352227024646,
+      "c32_normalized_separability": 0.400570124728125,
+      "normalized_retention_c16_over_c4": 0.5798173992354684,
+      "normalized_retention_c32_over_c16": 0.5824481741011889,
+      "normalized_retention_c32_over_c4": 0.3377135854967986
     },
     "bin_gt32": {
       "sample_count": 1463,
-      "median_peak_to_trough_ratio": 6.468876838684082,
-      "mean_merged_fraction": 0.2228298017771702,
-      "c4_inter_person_dissimilarity": 0.06722743720610665,
-      "c8_inter_person_dissimilarity": 0.14858446097585817,
-      "c16_inter_person_dissimilarity": 0.40463993411641047,
-      "c32_inter_person_dissimilarity": 0.4935848554844573,
-      "separability_retention_c16_over_c4": 6.0189700951392915,
-      "separability_retention_c32_over_c16": 1.2198125144575036,
-      "separability_retention_c32_over_c4": 7.342015046196379
+      "median_peak_to_trough_ratio": 6.505599021911621,
+      "mean_merged_fraction": 0.22419685577580314,
+      "c4_inter_person_dissimilarity": 0.06700951032090986,
+      "c8_inter_person_dissimilarity": 0.14876379623693387,
+      "c16_inter_person_dissimilarity": 0.4042565092923131,
+      "c32_inter_person_dissimilarity": 0.4939164841574345
     }
   },
   "D-L_effective_rank": {
@@ -82,30 +91,31 @@
     "mean_depth_decay_c32_to_c4": 0.22890062188107485
   },
   "D-M_gradient_allocation": {
-    "c4_fg_energy_fraction": 0.033460733919719154,
-    "c8_fg_energy_fraction": 0.1306346826845297,
-    "c16_fg_energy_fraction": 0.31227079172850436,
-    "c16_gradient_enrichment": 2.300630002735458,
-    "c16_gradient_density_ratio": 3.0594833507384305,
-    "c32_fg_energy_fraction": 0.6986008728682563,
-    "c32_gradient_enrichment": 2.1560150061758536,
-    "c32_gradient_density_ratio": 5.6173046138817195
+    "c4_fg_energy_fraction": 0.034789860265075745,
+    "c8_fg_energy_fraction": 0.13585297641551436,
+    "c16_fg_energy_fraction": 0.3204682724702652,
+    "c16_gradient_enrichment": 2.2198833422172912,
+    "c16_gradient_density_ratio": 2.921799033872739,
+    "c32_fg_energy_fraction": 0.7067129139281485,
+    "c32_gradient_enrichment": 2.104630337679036,
+    "c32_gradient_density_ratio": 5.393509735763163
   },
   "diagnostic_synthesis": {
     "D-R (Sampling Phase Shift)": {
-      "count_relative_std": "3.75% (p90=7.09%)",
-      "aligned_feature_c16_cos_sim": "0.9179",
-      "aligned_feature_c32_cos_sim": "0.8994",
-      "mass_mae": "0.00367"
+      "count_relative_std": "3.69% (p90=5.96%)",
+      "aligned_feature_c16_cos_sim": "0.9106",
+      "aligned_feature_c32_cos_sim": "0.8848",
+      "mass_mae": "0.00494"
     },
-    "D-K (Separability Decay across Depth @ d<=8px)": {
-      "c4_dissimilarity": "0.0827",
-      "c8_dissimilarity": "0.0475",
-      "c16_dissimilarity": "0.0295",
-      "c32_dissimilarity": "0.0127",
-      "separability_retention_c16_over_c4": "35.6%",
-      "separability_retention_c32_over_c16": "43.0%",
-      "output_mass_merged_frac": "86.3%"
+    "D-K (Normalized Separability Retention @ d<=8px)": {
+      "c4_norm_separability": "122.0%",
+      "c8_norm_separability": "31.8%",
+      "c16_norm_separability": "7.3%",
+      "c32_norm_separability": "2.6%",
+      "normalized_retention_c16_over_c4": "6.0%",
+      "normalized_retention_c32_over_c16": "34.9%",
+      "normalized_retention_c32_over_c4": "2.1%",
+      "output_mass_merged_frac": "86.5%"
     },
     "D-L (Effective Representation Rank on Crowd Points)": {
       "c4_norm_pr": "0.469",
@@ -115,10 +125,10 @@
       "depth_decay_c32_to_c16": "1.325"
     },
     "D-M (Gradient Allocation)": {
-      "c16_fg_energy": "31.2%",
-      "c16_gradient_enrichment": "2.30x",
-      "c16_gradient_density_ratio": "3.06x",
-      "c32_gradient_enrichment": "2.16x"
+      "c16_fg_energy": "32.0%",
+      "c16_gradient_enrichment": "2.22x",
+      "c16_gradient_density_ratio": "2.92x",
+      "c32_gradient_enrichment": "2.10x"
     }
   }
 }

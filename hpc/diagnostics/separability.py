@@ -103,9 +103,11 @@ def evaluate_separability_single_image(
                 break
 
     for bname, pairs in pairs_by_bin.items():
+        pairs = sorted(pairs, key=lambda x: (x[2], x[0], x[1]))
         if len(pairs) > max_pairs_per_bin:
             idx = np.linspace(0, len(pairs) - 1, max_pairs_per_bin, dtype=int)
-            pairs_by_bin[bname] = [pairs[k] for k in idx]
+            pairs = [pairs[k] for k in idx]
+        pairs_by_bin[bname] = pairs
 
     bin_results: Dict[str, Dict[str, Any]] = {}
     for bname, pair_list in pairs_by_bin.items():

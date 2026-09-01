@@ -1,8 +1,8 @@
 ﻿"""D-R / G-R: Sampling-phase and translation instability diagnostics.
 
 Evaluates whether small +/-1, +/-2 pixel translations induce count and mass map
-inconsistencies on the original physical support, using large-margin canvas padding
-to eliminate all boundary truncation and receptive-field edge artifacts.
+inconsistencies on the central valid support without distorting GroupNorm statistics
+via artificial canvas padding.
 """
 
 from __future__ import annotations
@@ -31,21 +31,6 @@ DEFAULT_SHIFTS: Tuple[Tuple[int, int], ...] = (
     (2, 2),
     (-2, -2),
 )
-
-
-def shift_tensor(x: torch.Tensor, dx: int, dy: int, mode: str = "replicate") -> torch.Tensor:
-    """Shift 2D spatial tensor (B, C, H, W) by integer (dx, dy) with padding."""
-    if dx == 0 and dy == 0:
-        return x
-    b, c, h, w = x.shape
-    pad_l = max(0, dx)
-    pad_r = max(0, -dx)
-    pad_t = max(0, dy)
-    pad_b = max(0, -dy)
-    padded = F.pad(x, (pad_l, pad_r, pad_t, pad_b), mode=mode)
-    start_y = 0 if dy >= 0 else -dy
-    start_x = 0 if dx >= 0 else -dx
-    return padded[:, :, start_y:start_y + h, start_x:start_x + w]
 
 
 def make_inverse_align_grid(
@@ -84,24 +69,18 @@ def inverse_align_feature(
     return F.grid_sample(feat, grid, mode="bilinear", padding_mode="border", align_corners=False)
 
 
-def crop_original_support(
+def crop_valid_center(
     feat: torch.Tensor,
-    original_h: int,
-    original_w: int,
-    pad_px: int,
+    margin_px: int,
     stride: int,
 ) -> torch.Tensor:
-    """Crop the physical support corresponding to the original unpadded image.
-    
-    pad_px must be divisible by stride.
-    """
-    if pad_px % stride != 0:
-        raise ValueError(f"pad_px={pad_px} must be divisible by stride={stride}")
-    y0 = pad_px // stride
-    x0 = pad_px // stride
-    out_h = math.ceil(original_h / stride)
-    out_w = math.ceil(original_w / stride)
-    return feat[..., y0:y0 + out_h, x0:x0 + out_w]
+    """Crop the interior region of feature map, safely removed from boundary wrap-around."""
+    m = math.ceil(margin_px / stride)
+    if feat.shape[-2] <= 2 * m or feat.shape[-1] <= 2 * m:
+        raise ValueError(
+            f"margin_px={margin_px} (m={m}) too large for feature map of shape {feat.shape[-2:]}"
+        )
+    return feat[..., m:-m, m:-m]
 
 
 def evaluate_phase_shift_single_image(
@@ -109,27 +88,20 @@ def evaluate_phase_shift_single_image(
     image: torch.Tensor,  # (1, 3, H, W)
     shifts: Tuple[Tuple[int, int], ...] = DEFAULT_SHIFTS,
     device: torch.device = torch.device("cpu"),
-    canvas_pad_px: int = 128,
+    border_margin_px: int = 96,
 ) -> Dict[str, float]:
-    """Compute phase shift variance and inverse-aligned consistency on original physical support."""
+    """Compute phase shift variance and inverse-aligned consistency on valid central support."""
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
     _, _, original_h, original_w = image.shape
     
-    reductions = getattr(model, "feature_reductions", (4, 8, 16))
-    max_stride = max(reductions) if reductions else 32
-    if canvas_pad_px % max_stride != 0:
-        raise ValueError(f"canvas_pad_px={canvas_pad_px} must be divisible by max_stride={max_stride}")
+    # Adaptive margin guard for smaller images
+    margin = border_margin_px
+    while margin > 16 and (original_h <= 2 * margin or original_w <= 2 * margin):
+        margin -= 16
         
-    # Pad image far away from canvas boundaries
-    padded_image = F.pad(
-        image,
-        (canvas_pad_px, canvas_pad_px, canvas_pad_px, canvas_pad_px),
-        mode="replicate",
-    )
-    
     inv_mass_maps: List[torch.Tensor] = []
     inv_c4_feats: List[torch.Tensor] = []
     inv_c8_feats: List[torch.Tensor] = []
@@ -139,33 +111,34 @@ def evaluate_phase_shift_single_image(
     
     with torch.no_grad():
         for dx, dy in shifts:
-            img_shifted = shift_tensor(padded_image, dx, dy, mode="replicate")
+            # Shift via torch.roll to maintain natural image spatial statistics
+            img_shifted = torch.roll(image, shifts=(dy, dx), dims=(-2, -1))
             feats = model.backbone(img_shifted)
             p4 = model.neck(*feats)
             mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
             mass = F.softplus(mass.float()) + model.eps_d
             
-            # Inverse-align and immediately crop to original unpadded support
+            # Inverse-align and crop valid center
             inv_mass = inverse_align_feature(mass, dx, dy, stride=4.0, device=device)
-            inv_mass = crop_original_support(inv_mass, original_h, original_w, canvas_pad_px, stride=4)
+            inv_mass = crop_valid_center(inv_mass, margin_px=margin, stride=4)
             inv_mass_maps.append(inv_mass)
             
             inv_c4 = inverse_align_feature(feats[0], dx, dy, stride=4.0, device=device)
-            inv_c4 = crop_original_support(inv_c4, original_h, original_w, canvas_pad_px, stride=4)
+            inv_c4 = crop_valid_center(inv_c4, margin_px=margin, stride=4)
             inv_c4_feats.append(inv_c4)
             
             inv_c8 = inverse_align_feature(feats[1], dx, dy, stride=8.0, device=device)
-            inv_c8 = crop_original_support(inv_c8, original_h, original_w, canvas_pad_px, stride=8)
+            inv_c8 = crop_valid_center(inv_c8, margin_px=margin, stride=8)
             inv_c8_feats.append(inv_c8)
             
             inv_c16 = inverse_align_feature(feats[2], dx, dy, stride=16.0, device=device)
-            inv_c16 = crop_original_support(inv_c16, original_h, original_w, canvas_pad_px, stride=16)
+            inv_c16 = crop_valid_center(inv_c16, margin_px=margin, stride=16)
             inv_c16_feats.append(inv_c16)
             
             if len(feats) >= 4:
                 has_c32 = True
                 inv_c32 = inverse_align_feature(feats[3], dx, dy, stride=32.0, device=device)
-                inv_c32 = crop_original_support(inv_c32, original_h, original_w, canvas_pad_px, stride=32)
+                inv_c32 = crop_valid_center(inv_c32, margin_px=margin, stride=32)
                 inv_c32_feats.append(inv_c32)
                 
     counts = [float(m.sum().item()) for m in inv_mass_maps]

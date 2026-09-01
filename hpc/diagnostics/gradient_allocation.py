@@ -1,4 +1,4 @@
-﻿"""D-M / G-M: Foreground crowd vs background gradient allocation diagnostics.
+"""D-M / G-M: Foreground crowd vs background gradient allocation diagnostics.
 
 Evaluates whether backward gradient energy is concentrated on crowd heads
 or diluted by background distractors in a frozen model state.
@@ -6,6 +6,7 @@ or diluted by background distractors in a frozen model state.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -20,6 +21,7 @@ def evaluate_gradient_allocation_single_batch(
     images: torch.Tensor,               # (B, 3, H, W)
     targets: Dict[int | str, torch.Tensor],
     points_list: Optional[List[np.ndarray]] = None,
+    valid_hw: Optional[Tuple[int, int]] = None,
     device: torch.device = torch.device("cpu"),
 ) -> Dict[str, float]:
     """Compute area-normalized gradient energy allocation in a strictly frozen model state."""
@@ -68,8 +70,18 @@ def evaluate_gradient_allocation_single_batch(
             else:
                 fg_mask = torch.ones_like(g_sq, dtype=torch.bool)
                 
-        bg_mask = ~fg_mask
-        n_total = float(g_sq.numel())
+        if valid_hw is not None:
+            valid_h = math.ceil(valid_hw[0] / stride)
+            valid_w = math.ceil(valid_hw[1] / stride)
+            valid_mask = torch.zeros_like(g_sq, dtype=torch.bool)
+            valid_mask[..., :valid_h, :valid_w] = True
+        else:
+            valid_mask = torch.ones_like(g_sq, dtype=torch.bool)
+
+        fg_mask = fg_mask & valid_mask
+        bg_mask = (~fg_mask) & valid_mask
+
+        n_total = float(valid_mask.sum().item())
         n_fg = float(fg_mask.sum().item())
         n_bg = float(bg_mask.sum().item())
         
