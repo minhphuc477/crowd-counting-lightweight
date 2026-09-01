@@ -60,3 +60,22 @@ def test_resume_rejects_statistics_drift():
         assert_resume_compatible(checkpoint, new_cfg)
 
 
+def test_resume_rejects_evaluation_cadence_drift():
+    import pytest
+    from hpc.models.factory import assert_resume_compatible
+
+    old_cfg = {
+        "dataset": {"name": "sha", "crop_size": 256},
+        "loss": {"mode": "r2_flat_dm"},
+        "training": {"evaluate_every": 5},
+    }
+    new_cfg = {
+        **old_cfg,
+        "training": {"evaluate_every": 20},
+    }
+
+    with pytest.raises(ValueError, match="Resume protocol mismatch in: training"):
+        assert_resume_compatible({"config": old_cfg}, new_cfg)
+
+
+

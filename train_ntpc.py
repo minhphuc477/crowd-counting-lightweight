@@ -395,17 +395,35 @@ def main() -> None:
         generator=loader_generator,
         persistent_workers=persistent_workers,
     )
-    if len(train_loader) == 0:
-        raise ValueError("Training loader has zero batches; reduce batch_size or disable drop_last")
+    ckpt = None
+    if is_resuming:
+        print(f"Loading checkpoint for resume validation: {resume_ckpt_path}", flush=True)
+        ckpt = torch.load(resume_ckpt_path, map_location=device)
+        assert_checkpoint_compatible(ckpt, cfg)
+        assert_resume_compatible(ckpt, cfg)
+
+        stored_crop_stats = ckpt.get("resolved_crop_statistics")
+        if stored_crop_stats is not None:
+            old_tau = int(stored_crop_stats.get("dense_threshold_q85", 0))
+            new_tau = int(crop_stats.get("dense_threshold_q85", 0))
+            if old_tau != new_tau:
+                raise ValueError(
+                    f"Resolved crop-statistics drift on resume: checkpoint dense_threshold_q85={old_tau}, current={new_tau}"
+                )
 
     model = build_model_from_config(cfg, load_pretrained=not is_resuming).to(device)
     model.init_head_bias_from_data(
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4
     )
 
+    criterion_crop_stats = (
+        ckpt["resolved_crop_statistics"]
+        if is_resuming and ckpt is not None and "resolved_crop_statistics" in ckpt
+        else crop_stats
+    )
     criterion = build_ntpc_criterion_from_config(
         cfg,
-        crop_statistics=crop_stats,
+        crop_statistics=criterion_crop_stats,
     ).to(device)
 
     optimizer_cfg = cfg["optimizer"]
@@ -493,11 +511,7 @@ def main() -> None:
     train_csv, val_csv = os.path.join(save_dir, "train.csv"), os.path.join(save_dir, "val.csv")
     start_epoch = 1
     best_mae, best_epoch = float("inf"), 0
-    if is_resuming:
-        print(f"Resuming training from checkpoint: {resume_ckpt_path}", flush=True)
-        ckpt = torch.load(resume_ckpt_path, map_location=device)
-        assert_checkpoint_compatible(ckpt, cfg)
-        assert_resume_compatible(ckpt, cfg)
+    if is_resuming and ckpt is not None:
         model.load_state_dict(ckpt["model_state_dict"], strict=True)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:

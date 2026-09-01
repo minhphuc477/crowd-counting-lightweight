@@ -195,6 +195,12 @@ def assert_checkpoint_compatible(checkpoint: dict, cfg: dict) -> None:
 def resume_protocol_signature(cfg: dict) -> dict:
     """Extract a complete scientific protocol signature for strictly validating resumes."""
     training = cfg.get("training", {})
+    evaluate_every = int(
+        training.get(
+            "evaluate_every",
+            training.get("validate_every", 5),
+        )
+    )
     return {
         "model": resolve_model_config(cfg),
         "dataset": resolve_dataset_config(cfg),
@@ -210,6 +216,7 @@ def resume_protocol_signature(cfg: dict) -> dict:
             "amp": training.get("amp"),
             "init_scale": training.get("init_scale"),
             "num_workers": training.get("num_workers", 0),
+            "evaluate_every": evaluate_every,
         },
     }
 
