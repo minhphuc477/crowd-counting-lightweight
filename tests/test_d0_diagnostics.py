@@ -12,6 +12,7 @@ from hpc.diagnostics.effective_rank import (
 )
 from hpc.diagnostics.gradient_allocation import evaluate_gradient_allocation_single_batch
 from hpc.diagnostics.phase_shift import (
+    crop_original_support,
     evaluate_phase_shift_single_image,
     inverse_align_feature,
     shift_tensor,
@@ -41,6 +42,27 @@ def test_shift_tensor_and_inverse_align_recovery():
     peak_y, peak_x = torch.where(inv[0, 0] == inv[0, 0].max())
     assert peak_y[0].item() == 16
     assert peak_x[0].item() == 16
+
+
+def test_phase_shift_padded_canvas_recovery():
+    x = torch.zeros(1, 1, 64, 64)
+    x[..., 31, 31] = 1.0
+
+    padded = F.pad(x, (32, 32, 32, 32), mode="replicate")
+    shifted = shift_tensor(padded, dx=2, dy=-1, mode="replicate")
+    aligned = inverse_align_feature(shifted, dx_img=2, dy_img=-1, stride=1.0, device=torch.device("cpu"))
+    central = crop_original_support(aligned, original_h=64, original_w=64, pad_px=32, stride=1)
+    assert torch.allclose(central, x, atol=1e-5)
+
+
+def test_inter_person_dissimilarity_decreases_when_features_merge():
+    f1 = torch.tensor([[1.0, 0.0]])
+    f2_distinct = torch.tensor([[0.0, 1.0]])
+    f2_merged = torch.tensor([[1.0, 0.0]])
+
+    distinct = 1.0 - F.cosine_similarity(f1, f2_distinct, dim=-1)
+    merged = 1.0 - F.cosine_similarity(f1, f2_merged, dim=-1)
+    assert distinct.item() > merged.item()
 
 
 def test_spectral_rank_metrics_sample_matched():

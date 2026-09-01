@@ -1,7 +1,7 @@
 ﻿"""D-L / G-L: Normalized effective representation rank collapse diagnostics.
 
 Evaluates singular-value spectrum, covariance-energy participation ratio,
-and spectral entropy of intermediate activations sampled at exact matched
+and spectral entropy of intermediate activations sampled strictly at matched
 crowd point locations across depth (C4 -> C8 -> C16 -> C32).
 """
 
@@ -81,7 +81,15 @@ def evaluate_effective_rank_single_image(
     device: torch.device = torch.device("cpu"),
     max_crowd_samples: int = 128,
 ) -> Dict[str, Any]:
-    """Evaluate effective rank at C4, C8, C16, C32 sampled at matched physical locations."""
+    """Evaluate effective rank at C4, C8, C16, C32 strictly sampled at matched crowd locations."""
+    if points is None or len(points) < 4:
+        return {
+            "valid": False,
+            "reason": "fewer_than_4_crowd_points",
+            "matched_sample_count": int(0 if points is None else len(points)),
+            "stages": {},
+        }
+        
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
@@ -99,26 +107,16 @@ def evaluate_effective_rank_single_image(
     if len(feats) >= 4:
         stages["C32"] = feats[3]
         
-    # Select matched physical coordinates for sampling across all stages
-    if points is not None and len(points) >= 4:
-        n_pts = len(points)
-        if n_pts > max_crowd_samples:
-            # Deterministic subset of crowd points
-            indices = np.linspace(0, n_pts - 1, max_crowd_samples, dtype=int)
-            sample_coords = points[indices]
-        else:
-            sample_coords = points
-        coords_t = torch.from_numpy(np.asarray(sample_coords, dtype=np.float32)).to(device)
+    n_pts = len(points)
+    if n_pts > max_crowd_samples:
+        indices = np.linspace(0, n_pts - 1, max_crowd_samples, dtype=int)
+        sample_coords = points[indices]
     else:
-        # Fallback to uniform grid of coordinates
-        gy = np.linspace(16.0, float(img_h - 16), 8, dtype=np.float32)
-        gx = np.linspace(16.0, float(img_w - 16), 8, dtype=np.float32)
-        grid_coords = np.stack(np.meshgrid(gx, gy), axis=-1).reshape(-1, 2)
-        coords_t = torch.from_numpy(grid_coords).to(device)
+        sample_coords = points
+    coords_t = torch.from_numpy(np.asarray(sample_coords, dtype=np.float32)).to(device)
         
     stage_metrics: Dict[str, Dict[str, float]] = {}
     for sname, sfeat in stages.items():
-        # Sample (M, C) features at exact identical physical coordinates
         sampled_feat = sample_feature_at_image_coord(sfeat, coords_t, img_h, img_w)
         stage_metrics[sname] = compute_spectral_rank_metrics(sampled_feat)
         
@@ -128,6 +126,8 @@ def evaluate_effective_rank_single_image(
     decay_16_4 = float(c16_pr / max(1e-6, c4_pr))
     
     res = {
+        "valid": True,
+        "sampling_mode": "crowd_points",
         "matched_sample_count": len(coords_t),
         "depth_decay_c16_to_c4": decay_16_4,
         "stages": stage_metrics,

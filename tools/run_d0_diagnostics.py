@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
-- D-R / G-R: Sampling-phase and translation instability with exact inverse alignment.
-- D-K / G-K: Inter-person separability collapse normalized by local head scale.
-- D-L / G-L: Normalized effective representation rank with sample-matched SVD.
+- D-R / G-R: Sampling-phase and translation instability with padded-canvas support crop.
+- D-K / G-K: Inter-person separability decay (primary: inter-person dissimilarity across depth).
+- D-L / G-L: Normalized effective representation rank on strictly matched crowd points.
 - D-M / G-M: Area-normalized foreground crowd vs background gradient allocation.
 """
 
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True, help="Path to config YAML")
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint .pt")
     parser.add_argument("--output", default=None, help="Output JSON path")
-    parser.add_argument("--split", default="test_data", help="Dataset split (train_data, val_data, test_data)")
+    parser.add_argument("--split", default="test_data", help="Dataset split (train_data, test_data, val)")
     parser.add_argument("--max-samples", type=int, default=None, help="Max images to evaluate")
     parser.add_argument(
         "--diagnostics",
@@ -118,8 +118,9 @@ def main() -> None:
 
         if run_dl:
             res_dl = evaluate_effective_rank_single_image(model, img_b, pts, device=device)
-            res_dl["gt_count"] = float(len(pts))
-            dl_results.append(res_dl)
+            if res_dl.get("valid", False):
+                res_dl["gt_count"] = float(len(pts))
+                dl_results.append(res_dl)
 
         if run_dm:
             _, _, ih, iw = img_b.shape
@@ -161,10 +162,10 @@ def main() -> None:
     # Aggregate D-R
     if run_dr and dr_results:
         summary["D-R_phase_shift"] = {
-            "mean_interior_count_relative_std": float(np.mean([r["interior_count_relative_std"] for r in dr_results])),
-            "median_interior_count_relative_std": float(np.median([r["interior_count_relative_std"] for r in dr_results])),
-            "p90_interior_count_relative_std": float(np.percentile([r["interior_count_relative_std"] for r in dr_results], 90)),
-            "mean_interior_mass_mae": float(np.mean([r["interior_mass_mae_mean"] for r in dr_results])),
+            "mean_count_relative_std": float(np.mean([r["count_relative_std"] for r in dr_results])),
+            "median_count_relative_std": float(np.median([r["count_relative_std"] for r in dr_results])),
+            "p90_count_relative_std": float(np.percentile([r["count_relative_std"] for r in dr_results], 90)),
+            "mean_mass_mae": float(np.mean([r["mass_mae_mean"] for r in dr_results])),
             "mean_c4_cos_sim_aligned": float(np.mean([r["feature_c4_cos_sim_aligned"] for r in dr_results])),
             "mean_c8_cos_sim_aligned": float(np.mean([r["feature_c8_cos_sim_aligned"] for r in dr_results])),
             "mean_c16_cos_sim_aligned": float(np.mean([r["feature_c16_cos_sim_aligned"] for r in dr_results])),
@@ -174,51 +175,59 @@ def main() -> None:
                 np.mean([r["feature_c32_cos_sim_aligned"] for r in dr_results])
             )
 
-    # Aggregate D-K
+    # Aggregate D-K (Primary: Inter-Person Dissimilarity C4 -> C8 -> C16 -> C32)
     if run_dk and dk_results:
-        dk_agg: Dict[str, Any] = {"mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))}
+        dk_agg: Dict[str, Any] = {
+            "mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))
+        }
         for bname in ["le8", "8_16", "16_32", "gt32"]:
-            ptrs = [
-                r["bins"][bname]["P4_mass_peak_to_trough_ratio"]
-                for r in dk_results
-                if bname in r.get("bins", {}) and "P4_mass_peak_to_trough_ratio" in r["bins"][bname]
-            ]
-            merged_fracs = [
-                r["bins"][bname]["P4_mass_merged_fraction"]
-                for r in dk_results
-                if bname in r.get("bins", {}) and "P4_mass_merged_fraction" in r["bins"][bname]
-            ]
-            c4_sims = [
-                r["bins"][bname]["C4_cos_sim_to_midpoint"]
-                for r in dk_results
-                if bname in r.get("bins", {}) and "C4_cos_sim_to_midpoint" in r["bins"][bname]
-            ]
-            c16_sims = [
-                r["bins"][bname]["C16_cos_sim_to_midpoint"]
-                for r in dk_results
-                if bname in r.get("bins", {}) and "C16_cos_sim_to_midpoint" in r["bins"][bname]
-            ]
-            c32_sims = [
-                r["bins"][bname]["C32_cos_sim_to_midpoint"]
-                for r in dk_results
-                if bname in r.get("bins", {}) and "C32_cos_sim_to_midpoint" in r["bins"][bname]
-            ]
-            if ptrs:
-                b_info: Dict[str, Any] = {
-                    "median_peak_to_trough_ratio": float(np.median(ptrs)),
-                    "mean_merged_fraction": float(np.mean(merged_fracs)),
-                    "mean_c4_midpoint_sim": float(np.mean(c4_sims)) if c4_sims else float("nan"),
-                    "mean_c16_midpoint_sim": float(np.mean(c16_sims)) if c16_sims else float("nan"),
-                    "sample_count": len(ptrs),
-                }
-                if c32_sims:
-                    b_info["mean_c32_midpoint_sim"] = float(np.mean(c32_sims))
-                dk_agg[f"bin_{bname}"] = b_info
+            valid = [r["bins"][bname] for r in dk_results if bname in r.get("bins", {})]
+            if not valid:
+                continue
+
+            def mean_metric(key: str) -> float:
+                vals = [x[key] for x in valid if key in x and np.isfinite(x[key])]
+                return float(np.mean(vals)) if vals else float("nan")
+
+            info: Dict[str, Any] = {
+                "sample_count": int(sum(x.get("num_pairs", 0) for x in valid)),
+                "median_peak_to_trough_ratio": float(np.median([
+                    x["P4_mass_peak_to_trough_ratio"] for x in valid if "P4_mass_peak_to_trough_ratio" in x
+                ])),
+                "mean_merged_fraction": mean_metric("P4_mass_merged_fraction"),
+                # PRIMARY representation metrics (1 - cosine similarity)
+                "c4_inter_person_dissimilarity": mean_metric("C4_inter_person_dissimilarity"),
+                "c8_inter_person_dissimilarity": mean_metric("C8_inter_person_dissimilarity"),
+                "c16_inter_person_dissimilarity": mean_metric("C16_inter_person_dissimilarity"),
+                # Secondary diagnostic only
+                "c4_midpoint_similarity": mean_metric("C4_cos_sim_to_midpoint"),
+                "c16_midpoint_similarity": mean_metric("C16_cos_sim_to_midpoint"),
+            }
+            if any("C32_inter_person_dissimilarity" in x for x in valid):
+                info["c32_inter_person_dissimilarity"] = mean_metric("C32_inter_person_dissimilarity")
+                info["c32_midpoint_similarity"] = mean_metric("C32_cos_sim_to_midpoint")
+
+            # Separability retention ratios across depth
+            c4 = info["c4_inter_person_dissimilarity"]
+            c16 = info["c16_inter_person_dissimilarity"]
+            info["separability_retention_c16_over_c4"] = (
+                float(c16 / max(c4, 1e-8)) if np.isfinite(c4) and np.isfinite(c16) else float("nan")
+            )
+            if "c32_inter_person_dissimilarity" in info:
+                c32 = info["c32_inter_person_dissimilarity"]
+                info["separability_retention_c32_over_c16"] = (
+                    float(c32 / max(c16, 1e-8)) if np.isfinite(c16) and np.isfinite(c32) else float("nan")
+                )
+                info["separability_retention_c32_over_c4"] = (
+                    float(c32 / max(c4, 1e-8)) if np.isfinite(c4) and np.isfinite(c32) else float("nan")
+                )
+            dk_agg[f"bin_{bname}"] = info
         summary["D-K_separability"] = dk_agg
 
-    # Aggregate D-L
+    # Aggregate D-L (Strictly crowd-point matched samples)
     if run_dl and dl_results:
         dl_agg: Dict[str, Any] = {
+            "crowd_images_evaluated": len(dl_results),
             "mean_depth_decay_c16_to_c4": float(np.mean([r["depth_decay_c16_to_c4"] for r in dl_results])),
             "c4_norm_participation_ratio": float(np.mean([r["stages"]["C4"]["normalized_participation_ratio"] for r in dl_results])),
             "c8_norm_participation_ratio": float(np.mean([r["stages"]["C8"]["normalized_participation_ratio"] for r in dl_results])),
@@ -226,7 +235,7 @@ def main() -> None:
             "c4_spectral_entropy_rank": float(np.mean([r["stages"]["C4"]["spectral_entropy_rank"] for r in dl_results])),
             "c16_spectral_entropy_rank": float(np.mean([r["stages"]["C16"]["spectral_entropy_rank"] for r in dl_results])),
         }
-        if "C32" in dl_results[0]["stages"]:
+        if dl_results and "C32" in dl_results[0]["stages"]:
             dl_agg["c32_norm_participation_ratio"] = float(np.mean([r["stages"]["C32"]["normalized_participation_ratio"] for r in dl_results]))
             dl_agg["c32_spectral_entropy_rank"] = float(np.mean([r["stages"]["C32"]["spectral_entropy_rank"] for r in dl_results]))
             dl_agg["mean_depth_decay_c32_to_c16"] = float(np.mean([r.get("depth_decay_c32_to_c16", float("nan")) for r in dl_results]))
@@ -253,23 +262,26 @@ def main() -> None:
     if "D-R_phase_shift" in summary:
         dr = summary["D-R_phase_shift"]
         diag_synthesis["D-R (Sampling Phase Shift)"] = {
-            "interior_count_relative_std": f"{dr['mean_interior_count_relative_std']*100:.2f}% (p90={dr['p90_interior_count_relative_std']*100:.2f}%)",
+            "count_relative_std": f"{dr['mean_count_relative_std']*100:.2f}% (p90={dr['p90_count_relative_std']*100:.2f}%)",
             "aligned_feature_c16_cos_sim": f"{dr['mean_c16_cos_sim_aligned']:.4f}",
             "aligned_feature_c32_cos_sim": f"{dr.get('mean_c32_cos_sim_aligned', float('nan')):.4f}" if "mean_c32_cos_sim_aligned" in dr else "N/A",
-            "interior_mass_mae": f"{dr['mean_interior_mass_mae']:.5f}",
+            "mass_mae": f"{dr['mean_mass_mae']:.5f}",
         }
     if "D-K_separability" in summary:
         dk = summary["D-K_separability"]
         le8 = dk.get("bin_le8", {})
-        diag_synthesis["D-K (Separability by Raw Spacing d_min)"] = {
-            "crowded_d<=8px_merged_frac": f"{le8.get('mean_merged_fraction', float('nan'))*100:.1f}%",
-            "crowded_d<=8px_ptr": f"{le8.get('median_peak_to_trough_ratio', float('nan')):.3f}",
-            "crowded_d<=8px_c16_midpoint_sim": f"{le8.get('mean_c16_midpoint_sim', float('nan')):.4f}",
-            "crowded_d<=8px_c32_midpoint_sim": f"{le8.get('mean_c32_midpoint_sim', float('nan')):.4f}" if "mean_c32_midpoint_sim" in le8 else "N/A",
+        diag_synthesis["D-K (Separability Decay across Depth @ d<=8px)"] = {
+            "c4_dissimilarity": f"{le8.get('c4_inter_person_dissimilarity', float('nan')):.4f}",
+            "c8_dissimilarity": f"{le8.get('c8_inter_person_dissimilarity', float('nan')):.4f}",
+            "c16_dissimilarity": f"{le8.get('c16_inter_person_dissimilarity', float('nan')):.4f}",
+            "c32_dissimilarity": f"{le8.get('c32_inter_person_dissimilarity', float('nan')):.4f}" if "c32_inter_person_dissimilarity" in le8 else "N/A",
+            "separability_retention_c16_over_c4": f"{le8.get('separability_retention_c16_over_c4', float('nan'))*100:.1f}%",
+            "separability_retention_c32_over_c16": f"{le8.get('separability_retention_c32_over_c16', float('nan'))*100:.1f}%" if "separability_retention_c32_over_c16" in le8 else "N/A",
+            "output_mass_merged_frac": f"{le8.get('mean_merged_fraction', float('nan'))*100:.1f}%",
         }
     if "D-L_effective_rank" in summary:
         dl = summary["D-L_effective_rank"]
-        diag_synthesis["D-L (Effective Representation Rank)"] = {
+        diag_synthesis["D-L (Effective Representation Rank on Crowd Points)"] = {
             "c4_norm_pr": f"{dl['c4_norm_participation_ratio']:.3f}",
             "c16_norm_pr": f"{dl['c16_norm_participation_ratio']:.3f}",
             "c32_norm_pr": f"{dl.get('c32_norm_participation_ratio', float('nan')):.3f}" if "c32_norm_participation_ratio" in dl else "N/A",

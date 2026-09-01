@@ -7,23 +7,14 @@ import csv
 import math
 import os
 import platform
+import random
 import shutil
 import subprocess
 import sys
 import time
 from typing import Any, Dict, Iterable, Tuple
 
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except Exception:
-        pass
-if hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(line_buffering=True)
-    except Exception:
-        pass
-
+import numpy as np
 import timm
 import torch
 import torch.nn as nn
@@ -771,6 +762,7 @@ def main() -> None:
                 f"nll/active={train_row.get('tree_32_16_nll_per_active_parent', 0.0):.2f}"
             )
 
+        is_best = False
         if epoch % evaluate_every == 0 or epoch == epochs:
             metrics = evaluate_counting(model, evaluation_ds, device)
             val_row = {
@@ -784,22 +776,6 @@ def main() -> None:
             is_best = metrics["mae"] < best_mae
             if is_best:
                 best_mae, best_epoch = metrics["mae"], epoch
-                torch.save({
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "scheduler_state_dict": scheduler.state_dict(),
-                    "scaler_state_dict": scaler.state_dict() if amp_enabled else None,
-                    "rng_state": get_rng_state(),
-                    "val_res": metrics,
-                    "config": cfg,
-                    "resolved_crop_statistics": crop_stats,
-                    "selection_split": selection_split,
-                    "is_exact_joint_nll": criterion.is_exact_joint_nll,
-                    "initialization_policy": "timm_pretrained" if pretrained_spec else "scratch",
-                    "pretrained_spec": pretrained_spec,
-                    "runtime": get_runtime_metadata(),
-                }, os.path.join(save_dir, "best.pt"))
 
             print(
                 f"Epoch {epoch:04d}/{epochs} loss={train_row['loss']:.2f} [{loss_decomp_str}] "
@@ -829,7 +805,10 @@ def main() -> None:
                 flush=True,
             )
 
-        torch.save({
+        # Advance scheduler to the LR that will be used by the NEXT epoch
+        scheduler.step()
+
+        checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
@@ -844,8 +823,10 @@ def main() -> None:
             "initialization_policy": "timm_pretrained" if pretrained_spec else "scratch",
             "pretrained_spec": pretrained_spec,
             "runtime": get_runtime_metadata(),
-        }, os.path.join(save_dir, "last.pt"))
-        scheduler.step()
+        }
+        torch.save(checkpoint, os.path.join(save_dir, "last.pt"))
+        if is_best:
+            torch.save(checkpoint, os.path.join(save_dir, "best.pt"))
 
     print(f"Training complete. Best MAE={best_mae:.3f} at epoch {best_epoch} on {selection_split}.", flush=True)
 
