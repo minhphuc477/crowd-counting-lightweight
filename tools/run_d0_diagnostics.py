@@ -88,6 +88,13 @@ def make_natural_dm_crop(
     return crop, pts
 
 
+def finite_mean(values: Any) -> float:
+    """Compute mean of finite values, returning NaN if empty."""
+    arr = np.asarray(values, dtype=np.float64)
+    arr = arr[np.isfinite(arr)]
+    return float(arr.mean()) if arr.size else float("nan")
+
+
 def main() -> None:
     args = parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
@@ -212,7 +219,9 @@ def main() -> None:
     # Aggregate D-K (Primary: Same-Scene Far-Pair Normalized Separability)
     if run_dk and dk_results:
         dk_agg: Dict[str, Any] = {
-            "mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))
+            "mean_knn_spacing_px": finite_mean([
+                r.get("mean_knn_spacing_px", float("nan")) for r in dk_results
+            ])
         }
         for bname in ["le8", "8_16", "16_32", "gt32"]:
             valid = [r["bins"][bname] for r in dk_results if bname in r.get("bins", {})]
@@ -318,11 +327,6 @@ def main() -> None:
 
     # Aggregate D-M
     if run_dm and dm_results:
-        def finite_mean(values: List[Any]) -> float:
-            arr = np.asarray(values, dtype=np.float64)
-            arr = arr[np.isfinite(arr)]
-            return float(arr.mean()) if len(arr) else float("nan")
-
         dm_agg: Dict[str, Any] = {
             "c4_fg_energy_fraction": finite_mean([r.get("C4_fg_energy_fraction") for r in dm_results]),
             "c8_fg_energy_fraction": finite_mean([r.get("C8_fg_energy_fraction") for r in dm_results]),

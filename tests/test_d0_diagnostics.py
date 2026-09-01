@@ -156,6 +156,25 @@ def test_feature_sampling_odd_image_extent():
     )
 
 
+def test_mass_map_block_center_mapping():
+    mass = torch.zeros(1, 1, 16, 16)
+    mass[0, 0, 4, 4] = 7.0
+
+    # Semantic center of stride-4 block (4, 4): 4*4 + 1.5 = 17.5
+    xy = torch.tensor([[17.5, 17.5]], dtype=torch.float32)
+    value = sample_feature_at_image_coord(
+        mass,
+        xy,
+        reduction=4,
+        origin_xy=(1.5, 1.5),
+    )
+    assert torch.allclose(
+        value,
+        torch.tensor([[7.0]]),
+        atol=1e-5,
+    )
+
+
 def test_dk_kdtree_matches_dense_knn_small_case():
     from scipy.spatial import cKDTree
 

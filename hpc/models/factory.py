@@ -198,6 +198,7 @@ def resume_protocol_signature(cfg: dict) -> dict:
     return {
         "model": resolve_model_config(cfg),
         "dataset": resolve_dataset_config(cfg),
+        "statistics": dict(cfg.get("statistics", {})),
         "loss": dict(cfg.get("loss", {})),
         "optimizer": dict(cfg.get("optimizer", {})),
         "schedule": dict(cfg.get("schedule", {})),
@@ -208,6 +209,7 @@ def resume_protocol_signature(cfg: dict) -> dict:
             "drop_last": training.get("drop_last"),
             "amp": training.get("amp"),
             "init_scale": training.get("init_scale"),
+            "num_workers": training.get("num_workers", 0),
         },
     }
 

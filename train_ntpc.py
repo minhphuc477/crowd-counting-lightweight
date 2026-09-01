@@ -380,6 +380,7 @@ def main() -> None:
         )
 
     num_workers = int(training_cfg.get("num_workers", 0))
+    persistent_workers = bool(training_cfg.get("persistent_workers", False)) if num_workers > 0 else False
     loader_generator = make_generator(seed)
     train_loader = DataLoader(
         train_ds,
@@ -392,7 +393,7 @@ def main() -> None:
         drop_last=bool(training_cfg.get("drop_last", True)),
         worker_init_fn=seed_worker if num_workers > 0 else None,
         generator=loader_generator,
-        persistent_workers=num_workers > 0,
+        persistent_workers=persistent_workers,
     )
     if len(train_loader) == 0:
         raise ValueError("Training loader has zero batches; reduce batch_size or disable drop_last")

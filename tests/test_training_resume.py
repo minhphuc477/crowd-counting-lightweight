@@ -40,3 +40,23 @@ def test_assert_resume_compatible_detects_crop_size_mismatch():
     with pytest.raises(ValueError, match="Resume protocol mismatch in: dataset"):
         assert_resume_compatible(ckpt_a, cfg_c)
 
+
+def test_resume_rejects_statistics_drift():
+    import pytest
+    from hpc.models.factory import assert_resume_compatible
+
+    old_cfg = {
+        "dataset": {"name": "sha", "crop_size": 256},
+        "loss": {"mode": "r5_full_ntpc", "dense_threshold_16": "auto"},
+        "statistics": {"seed": 12345, "crops_per_image": 3},
+    }
+    new_cfg = {
+        **old_cfg,
+        "statistics": {"seed": 999, "crops_per_image": 5},
+    }
+
+    checkpoint = {"config": old_cfg}
+    with pytest.raises(ValueError, match="Resume protocol mismatch in: statistics"):
+        assert_resume_compatible(checkpoint, new_cfg)
+
+

@@ -128,7 +128,11 @@ def evaluate_separability_single_image(
     """Evaluate inter-person separability across stages (C4, C8, C16, C32, P4) on one image."""
     model.eval()
     if len(points) < 2:
-        return {"num_points": len(points), "bins": {}}
+        return {
+            "num_points": int(len(points)),
+            "mean_knn_spacing_px": float("nan"),
+            "bins": {},
+        }
 
     if image.ndim == 3:
         image = image.unsqueeze(0)
@@ -139,14 +143,16 @@ def evaluate_separability_single_image(
         p4 = model.neck(*feats)
         mass = model.mass_from_p4(p4)
 
-    stages: Dict[str, Tuple[torch.Tensor, int]] = {
-        "C4": (feats[0], 4),
-        "C8": (feats[1], 8),
-        "C16": (feats[2], 16),
-        "P4_mass": (mass, 4),
+    stages: Dict[str, Tuple[torch.Tensor, int, Tuple[float, float]]] = {
+        # Convolution feature lattice: symmetric odd-kernel padding -> origin (0, 0)
+        "C4": (feats[0], 4, (0.0, 0.0)),
+        "C8": (feats[1], 8, (0.0, 0.0)),
+        "C16": (feats[2], 16, (0.0, 0.0)),
+        # Count-block semantic lattice: cell i represents [4i - 0.5, 4i + 3.5] with center 4i + 1.5
+        "P4_mass": (mass, 4, (1.5, 1.5)),
     }
     if len(feats) >= 4:
-        stages["C32"] = (feats[3], 32)
+        stages["C32"] = (feats[3], 32, (0.0, 0.0))
 
     points_np = np.asarray(points, dtype=np.float32)
     # Remove annotation-order dependence entirely
@@ -200,10 +206,10 @@ def evaluate_separability_single_image(
             "num_pairs": len(pair_list),
             "mean_raw_dist_px": float(np.mean([d for i, j, d in pair_list])),
         }
-        for sname, (sfeat, reduction) in stages.items():
-            f1 = sample_feature_at_image_coord(sfeat, p1_coords, reduction=reduction)
-            f2 = sample_feature_at_image_coord(sfeat, p2_coords, reduction=reduction)
-            f_mid = sample_feature_at_image_coord(sfeat, mid_coords, reduction=reduction)
+        for sname, (sfeat, reduction, origin_xy) in stages.items():
+            f1 = sample_feature_at_image_coord(sfeat, p1_coords, reduction=reduction, origin_xy=origin_xy)
+            f2 = sample_feature_at_image_coord(sfeat, p2_coords, reduction=reduction, origin_xy=origin_xy)
+            f_mid = sample_feature_at_image_coord(sfeat, mid_coords, reduction=reduction, origin_xy=origin_xy)
 
             if sname == "P4_mass":
                 # For scalar mass map: peak-to-trough ratio = min(m1, m2) / m_mid
