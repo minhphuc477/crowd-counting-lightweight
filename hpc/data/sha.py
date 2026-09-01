@@ -66,18 +66,11 @@ class ShanghaiTechDataset(BaseCrowdDataset):
         coordinate_base: int = 0,
         annotation_bounds_policy: str = "allow",
     ):
-        if split in {"val_data", "val", "val_split", "train_split"}:
-            candidates = [
-                os.path.join(root, part, "train_data"),
-                os.path.join(root, f"{part}_final", "train_data"),
-                os.path.join(root, "train_data"),
-            ]
-        else:
-            candidates = [
-                os.path.join(root, part, split),
-                os.path.join(root, f"{part}_final", split),
-                os.path.join(root, split),
-            ]
+        candidates = [
+            os.path.join(root, part, split),
+            os.path.join(root, f"{part}_final", split),
+            os.path.join(root, split),
+        ]
         data_dir = next((p for p in candidates if os.path.isdir(p)), None)
         if data_dir is None:
             raise FileNotFoundError(f"ShanghaiTech split directory not found; tried: {candidates}")
@@ -120,16 +113,6 @@ class ShanghaiTechDataset(BaseCrowdDataset):
 
         if not image_paths:
             raise RuntimeError(f"No images found in {img_dir}")
-
-        if split in {"val_data", "val", "val_split", "train_split"}:
-            perm = np.random.RandomState(42).permutation(len(image_paths))
-            n_val = max(1, int(len(image_paths) * 0.10))
-            if split in {"val_data", "val", "val_split"}:
-                sel_indices = sorted(perm[-n_val:])
-            else:
-                sel_indices = sorted(perm[:-n_val])
-            image_paths = [image_paths[i] for i in sel_indices]
-            points_list = [points_list[i] for i in sel_indices]
 
         super().__init__(
             image_paths=image_paths,

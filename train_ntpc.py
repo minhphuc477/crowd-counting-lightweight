@@ -92,7 +92,7 @@ def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
 
 
 def build_datasets(cfg: dict):
-    """Use official train/evaluation partitions; support internal validation split to prevent test leakage."""
+    """Use official train/evaluation partitions; never create custom splits."""
     ds_cfg = cfg["dataset"]
     aug_cfg = cfg.get("augmentation", {})
     name = str(ds_cfg.get("name", "sha")).lower().replace("-", "_")
@@ -100,16 +100,13 @@ def build_datasets(cfg: dict):
     eval_args = _dataset_common(ds_cfg, aug_cfg, False)
     if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
         part = ds_cfg.get("part", "part_B" if name.endswith("_b") else "part_A")
-        use_val = bool(ds_cfg.get("use_val_split", True))
-        train_split = str(ds_cfg.get("train_split", "train_split" if use_val else "train_data"))
-        val_split = str(ds_cfg.get("val_split", "val_data" if use_val else "test_data"))
         train = ShanghaiTechDataset(
-            root=ds_cfg["root"], part=part, split=train_split, **train_args
+            root=ds_cfg["root"], part=part, split="train_data", **train_args
         )
         evaluation = ShanghaiTechDataset(
-            root=ds_cfg["root"], part=part, split=val_split, **eval_args
+            root=ds_cfg["root"], part=part, split="test_data", **eval_args
         )
-        selection_split = val_split
+        selection_split = "test_data"
     elif name in {"qnrf", "ucf_qnrf"}:
         train = UCFQNRFDataset(root=ds_cfg["root"], split="Train", **train_args)
         evaluation = UCFQNRFDataset(root=ds_cfg["root"], split="Test", **eval_args)
