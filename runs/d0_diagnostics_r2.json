@@ -1,0 +1,81 @@
+{
+  "metadata": {
+    "config": "F:\\lightweightcrcn\\configs\\ntpc_r2_flat_dm16.yaml",
+    "checkpoint": "F:\\lightweightcrcn\\runs\\ntpc_r2_flat_dm16\\best.pt",
+    "split": "test_data",
+    "samples_evaluated": 50,
+    "timestamp": "2026-09-01 12:30:11"
+  },
+  "D-R_phase_shift": {
+    "mean_count_relative_std": 0.02504950537768904,
+    "median_count_relative_std": 0.021314365703316386,
+    "p90_count_relative_std": 0.0352796056646015,
+    "mean_interior_mass_mae": 0.0051339913256621605,
+    "mean_c4_cos_sim": 0.9619101250171661,
+    "mean_c8_cos_sim": 0.9751636934280395,
+    "mean_c16_cos_sim": 0.9379098320007324
+  },
+  "D-K_separability": {
+    "mean_knn_spacing": 19.44435422897339,
+    "bin_le8": {
+      "median_peak_to_trough_ratio": 0.8964641094207764,
+      "mean_merged_fraction": 0.921037972118365,
+      "mean_c16_midpoint_sim": 0.9993600176601876,
+      "sample_count": 41
+    },
+    "bin_8_16": {
+      "median_peak_to_trough_ratio": 0.8350158035755157,
+      "mean_merged_fraction": 0.7615070822686064,
+      "mean_c16_midpoint_sim": 0.992484749659248,
+      "sample_count": 46
+    },
+    "bin_16_32": {
+      "median_peak_to_trough_ratio": 0.9884490668773651,
+      "mean_merged_fraction": 0.5052600612462379,
+      "mean_c16_midpoint_sim": 0.9039269602298736,
+      "sample_count": 50
+    },
+    "bin_gt32": {
+      "median_peak_to_trough_ratio": 4.23496413230896,
+      "mean_merged_fraction": 0.249013226579323,
+      "mean_c16_midpoint_sim": 0.4359659369414051,
+      "sample_count": 48
+    }
+  },
+  "D-L_effective_rank": {
+    "mean_depth_decay_c16_to_c4": 0.2629049171538976,
+    "c4_norm_participation_ratio": 0.767662456035614,
+    "c8_norm_participation_ratio": 0.5224044281244278,
+    "c16_norm_participation_ratio": 0.19963886578877768,
+    "c4_spectral_entropy_rank": 0.8664926113756354,
+    "c16_spectral_entropy_rank": 0.34109408477005815
+  },
+  "D-M_gradient_allocation": {
+    "mean_c4_fg_energy_fraction": 0.03478265338029958,
+    "mean_c8_fg_energy_fraction": 0.13519366552961723,
+    "mean_c16_fg_energy_fraction": 0.5389514360397735,
+    "mean_c16_fg_to_bg_density_ratio": 2.5086704585593287
+  },
+  "falsification_gates": {
+    "G-R (Phase Shift Instability)": {
+      "metric_value": "RelStd=2.50%, C16_Cos=0.938",
+      "threshold": "RelStd > 2.0% or C16_Cos < 0.95",
+      "verdict": "ACTIVE BOTTLENECK"
+    },
+    "G-K (Separability Collapse)": {
+      "metric_value": "MergedFrac@<=8px=92.1%, PTR=0.90",
+      "threshold": "MergedFrac > 50% or PTR <= 1.0",
+      "verdict": "ACTIVE BOTTLENECK"
+    },
+    "G-L (Effective Rank Collapse)": {
+      "metric_value": "C16_NormPR=0.200, DepthDecay=0.263",
+      "threshold": "C16_NormPR < 0.20 or DepthDecay < 0.60",
+      "verdict": "ACTIVE BOTTLENECK"
+    },
+    "G-M (Gradient Dilution)": {
+      "metric_value": "C16_FG_Energy=53.9%",
+      "threshold": "C16_FG_Energy < 60%",
+      "verdict": "ACTIVE BOTTLENECK"
+    }
+  }
+}
