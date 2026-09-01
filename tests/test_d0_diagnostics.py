@@ -80,6 +80,18 @@ def test_spectral_rank_metrics_sample_matched():
     assert metrics_q["normalized_participation_ratio"] >= 0.85
 
 
+def test_spectral_rank_scale_invariant():
+    x = torch.randn(128, 32)
+    a = compute_spectral_rank_metrics(x)
+    b = compute_spectral_rank_metrics(x * 1e-5)
+    assert np.isclose(
+        a["normalized_participation_ratio"],
+        b["normalized_participation_ratio"],
+        rtol=1e-4,
+        atol=1e-6,
+    )
+
+
 def test_gradient_allocation_preserves_frozen_model_state():
     model = HPCLite(
         backbone_name="mobilenetv4_conv_small_050",

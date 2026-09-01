@@ -1,4 +1,4 @@
-﻿"""D-L / G-L: Normalized effective representation rank collapse diagnostics.
+"""D-L / G-L: Normalized effective representation rank collapse diagnostics.
 
 Evaluates singular-value spectrum, covariance-energy participation ratio,
 and spectral entropy of intermediate activations sampled strictly at matched
@@ -47,22 +47,32 @@ def compute_spectral_rank_metrics(x: torch.Tensor, eps: float = 1e-10) -> Dict[s
     except Exception:
         s = torch.from_numpy(np.linalg.svd(x_centered.cpu().numpy(), compute_uv=False))
         
-    s = s.clamp_min(eps)
-    s2 = s ** 2
-    sum_s2 = s2.sum()
-    sum_s4 = (s2 ** 2).sum()
-    
-    # Covariance-Energy Participation Ratio: (sum sigma^2)^2 / sum(sigma^4)
-    pr = float(((sum_s2 ** 2) / max(eps, sum_s4)).item())
-    norm_pr = float(pr / float(max_rank))
-    
-    # Spectral Entropy on normalized singular value energy p_i = sigma_i^2 / sum sigma^2
-    p = s2 / sum_s2
+    s = s.clamp_min(0.0)
+    s2 = s.square()
+    total_energy = s2.sum()
+
+    if float(total_energy) <= eps:
+        return {
+            "nominal_channels": float(c),
+            "sample_count": float(m),
+            "max_observable_rank": float(max_rank),
+            "participation_ratio": 0.0,
+            "normalized_participation_ratio": 0.0,
+            "spectral_entropy_rank": 0.0,
+            "top1_energy_ratio": 0.0,
+        }
+
+    # Scale-invariant spectral probabilities
+    p = s2 / total_energy
+
+    pr = float((1.0 / p.square().sum().clamp_min(eps)).item())
+    norm_pr = pr / float(max_rank)
+
     entropy = -float((p * torch.log(p.clamp_min(eps))).sum().item())
     entropy_rank = float(np.exp(entropy) / float(max_rank))
-    
-    top1 = float((s2[0] / sum_s2).item())
-    
+
+    top1 = float(p[0].item())
+
     return {
         "nominal_channels": float(c),
         "sample_count": float(m),

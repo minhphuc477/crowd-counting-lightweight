@@ -1,4 +1,4 @@
-﻿"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
+"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
 
 Measures whether compact encoders merge neighboring-person representations
 earlier in the depth hierarchy (C4 -> C8 -> C16 -> C32 -> P4) across raw
@@ -99,11 +99,15 @@ def evaluate_separability_single_image(
         d_raw = float(dists[i, j])
         for bname, (low, high) in RAW_SPACING_BINS.items():
             if low < d_raw <= high:
-                if len(pairs_by_bin[bname]) < max_pairs_per_bin:
-                    pairs_by_bin[bname].append((i, j, d_raw))
+                pairs_by_bin[bname].append((i, j, d_raw))
                 break
-                
-    bin_results: Dict[str, Dict[str, float]] = {}
+
+    for bname, pairs in pairs_by_bin.items():
+        if len(pairs) > max_pairs_per_bin:
+            idx = np.linspace(0, len(pairs) - 1, max_pairs_per_bin, dtype=int)
+            pairs_by_bin[bname] = [pairs[k] for k in idx]
+
+    bin_results: Dict[str, Dict[str, Any]] = {}
     for bname, pair_list in pairs_by_bin.items():
         if not pair_list:
             continue
@@ -111,7 +115,7 @@ def evaluate_separability_single_image(
         p2_coords = torch.from_numpy(np.array([points[j] for i, j, d in pair_list], dtype=np.float32)).to(device)
         mid_coords = 0.5 * (p1_coords + p2_coords)
         
-        stage_metrics: Dict[str, float] = {
+        stage_metrics: Dict[str, Any] = {
             "num_pairs": len(pair_list),
             "mean_raw_dist_px": float(np.mean([d for i, j, d in pair_list])),
         }
@@ -128,12 +132,15 @@ def evaluate_separability_single_image(
                 ptr = (torch.minimum(m1, m2) / mmid).cpu().numpy()
                 stage_metrics[f"{sname}_peak_to_trough_ratio"] = float(np.median(ptr))
                 stage_metrics[f"{sname}_merged_fraction"] = float(np.mean(ptr <= 1.0))
+                stage_metrics["P4_mass_merged_count"] = int(np.sum(ptr <= 1.0))
+                stage_metrics["P4_mass_peak_to_trough_values"] = ptr.astype(float).tolist()
             else:
                 f_avg = 0.5 * (f1 + f2)
                 cos_sim_mid = F.cosine_similarity(f_mid, f_avg, dim=-1)
                 cos_dissim_indiv = 1.0 - F.cosine_similarity(f1, f2, dim=-1)
                 stage_metrics[f"{sname}_cos_sim_to_midpoint"] = float(cos_sim_mid.mean().item())
                 stage_metrics[f"{sname}_inter_person_dissimilarity"] = float(cos_dissim_indiv.mean().item())
+                stage_metrics[f"{sname}_inter_person_dissimilarity_sum"] = float(cos_dissim_indiv.sum().item())
                 
         bin_results[bname] = stage_metrics
 

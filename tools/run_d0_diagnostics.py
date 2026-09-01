@@ -3,7 +3,7 @@
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
 - D-R / G-R: Sampling-phase and translation instability with padded-canvas support crop.
-- D-K / G-K: Inter-person separability decay (primary: inter-person dissimilarity across depth).
+- D-K / G-K: Inter-person separability decay (primary: pair-weighted inter-person dissimilarity across depth).
 - D-L / G-L: Normalized effective representation rank on strictly matched crowd points.
 - D-M / G-M: Area-normalized foreground crowd vs background gradient allocation.
 """
@@ -31,7 +31,7 @@ from hpc.diagnostics import (
     evaluate_separability_single_image,
 )
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
-from hpc.models.factory import build_model_from_config
+from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=None, help="Output JSON path")
     parser.add_argument("--split", default="test_data", help="Dataset split (train_data, test_data, val)")
     parser.add_argument("--max-samples", type=int, default=None, help="Max images to evaluate")
+    parser.add_argument(
+        "--dr-pad-px",
+        type=int,
+        default=128,
+        help="Canvas padding for D-R phase-shift diagnostic",
+    )
     parser.add_argument(
         "--diagnostics",
         default="all",
@@ -57,10 +63,11 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running D0 Diagnostic Suite on device: {device}", flush=True)
 
-    # Load model
-    model = build_model_from_config(cfg).to(device)
+    # Load model strictly from checkpoint without re-downloading ImageNet pretraining
     ckpt = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    assert_checkpoint_compatible(ckpt, cfg)
+    model = build_model_from_config(cfg, load_pretrained=False).to(device)
+    model.load_state_dict(ckpt["model_state_dict"], strict=True)
     model.eval()
     print(f"Loaded checkpoint: {args.checkpoint} (epoch={ckpt.get('epoch', 'N/A')})", flush=True)
 
@@ -107,7 +114,7 @@ def main() -> None:
         img_b = img_tensor.unsqueeze(0).to(device)
 
         if run_dr:
-            res_dr = evaluate_phase_shift_single_image(model, img_b, device=device)
+            res_dr = evaluate_phase_shift_single_image(model, img_b, device=device, canvas_pad_px=args.dr_pad_px)
             res_dr["gt_count"] = float(len(pts))
             dr_results.append(res_dr)
 
@@ -155,6 +162,7 @@ def main() -> None:
             "checkpoint": os.path.abspath(args.checkpoint),
             "split": args.split,
             "samples_evaluated": n_eval,
+            "dr_pad_px": args.dr_pad_px,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     }
@@ -175,7 +183,7 @@ def main() -> None:
                 np.mean([r["feature_c32_cos_sim_aligned"] for r in dr_results])
             )
 
-    # Aggregate D-K (Primary: Inter-Person Dissimilarity C4 -> C8 -> C16 -> C32)
+    # Aggregate D-K (Primary: Pair-Weighted Inter-Person Dissimilarity C4 -> C8 -> C16 -> C32)
     if run_dk and dk_results:
         dk_agg: Dict[str, Any] = {
             "mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))
@@ -185,27 +193,31 @@ def main() -> None:
             if not valid:
                 continue
 
-            def mean_metric(key: str) -> float:
-                vals = [x[key] for x in valid if key in x and np.isfinite(x[key])]
-                return float(np.mean(vals)) if vals else float("nan")
+            def pair_weighted_metric(stage: str) -> float:
+                total = 0.0
+                n = 0
+                for x in valid:
+                    key = f"{stage}_inter_person_dissimilarity_sum"
+                    if key in x:
+                        total += float(x[key])
+                        n += int(x["num_pairs"])
+                return float(total / n) if n > 0 else float("nan")
+
+            total_pairs = sum(int(x["num_pairs"]) for x in valid)
+            ptr_values = [val for x in valid for val in x.get("P4_mass_peak_to_trough_values", [])]
+            merged_count = sum(int(x.get("P4_mass_merged_count", 0)) for x in valid)
 
             info: Dict[str, Any] = {
-                "sample_count": int(sum(x.get("num_pairs", 0) for x in valid)),
-                "median_peak_to_trough_ratio": float(np.median([
-                    x["P4_mass_peak_to_trough_ratio"] for x in valid if "P4_mass_peak_to_trough_ratio" in x
-                ])),
-                "mean_merged_fraction": mean_metric("P4_mass_merged_fraction"),
-                # PRIMARY representation metrics (1 - cosine similarity)
-                "c4_inter_person_dissimilarity": mean_metric("C4_inter_person_dissimilarity"),
-                "c8_inter_person_dissimilarity": mean_metric("C8_inter_person_dissimilarity"),
-                "c16_inter_person_dissimilarity": mean_metric("C16_inter_person_dissimilarity"),
-                # Secondary diagnostic only
-                "c4_midpoint_similarity": mean_metric("C4_cos_sim_to_midpoint"),
-                "c16_midpoint_similarity": mean_metric("C16_cos_sim_to_midpoint"),
+                "sample_count": total_pairs,
+                "median_peak_to_trough_ratio": float(np.median(ptr_values)) if ptr_values else float("nan"),
+                "mean_merged_fraction": float(merged_count / total_pairs) if total_pairs else float("nan"),
+                # PRIMARY representation metrics (pair-weighted dissimilarity)
+                "c4_inter_person_dissimilarity": pair_weighted_metric("C4"),
+                "c8_inter_person_dissimilarity": pair_weighted_metric("C8"),
+                "c16_inter_person_dissimilarity": pair_weighted_metric("C16"),
             }
-            if any("C32_inter_person_dissimilarity" in x for x in valid):
-                info["c32_inter_person_dissimilarity"] = mean_metric("C32_inter_person_dissimilarity")
-                info["c32_midpoint_similarity"] = mean_metric("C32_cos_sim_to_midpoint")
+            if any("C32_inter_person_dissimilarity_sum" in x for x in valid):
+                info["c32_inter_person_dissimilarity"] = pair_weighted_metric("C32")
 
             # Separability retention ratios across depth
             c4 = info["c4_inter_person_dissimilarity"]

@@ -376,6 +376,7 @@ def main() -> None:
         )
 
     num_workers = int(training_cfg.get("num_workers", 0))
+    loader_generator = make_generator(seed)
     train_loader = DataLoader(
         train_ds,
         batch_size=int(training_cfg.get("batch_size", 16)),
@@ -386,7 +387,7 @@ def main() -> None:
         pin_memory=device.type == "cuda",
         drop_last=bool(training_cfg.get("drop_last", True)),
         worker_init_fn=seed_worker if num_workers > 0 else None,
-        generator=make_generator(seed),
+        generator=loader_generator,
         persistent_workers=num_workers > 0,
     )
     if len(train_loader) == 0:
@@ -535,9 +536,11 @@ def main() -> None:
                 np.random.set_state(rng_s["numpy"])
             if "python" in rng_s and rng_s["python"] is not None:
                 random.setstate(rng_s["python"])
+        if "loader_generator_state" in ckpt and ckpt["loader_generator_state"] is not None:
+            loader_generator.set_state(ckpt["loader_generator_state"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
-        best_mae = float(ckpt.get("val_res", {}).get("mae", float("inf")))
-        best_epoch = int(ckpt.get("epoch", 0))
+        best_mae = float(ckpt.get("best_mae", ckpt.get("val_res", {}).get("mae", float("inf"))))
+        best_epoch = int(ckpt.get("best_epoch", ckpt.get("epoch", 0)))
         print(
             f"Resumed at epoch {start_epoch}, previous best MAE={best_mae:.3f} at epoch {best_epoch}",
             flush=True,
@@ -810,11 +813,14 @@ def main() -> None:
 
         checkpoint = {
             "epoch": epoch,
+            "best_mae": float(best_mae),
+            "best_epoch": int(best_epoch),
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "scaler_state_dict": scaler.state_dict() if amp_enabled else None,
             "rng_state": get_rng_state(),
+            "loader_generator_state": loader_generator.get_state(),
             "val_res": metrics if (epoch % evaluate_every == 0 or epoch == epochs) else {"mae": best_mae},
             "config": cfg,
             "resolved_crop_statistics": crop_stats,
