@@ -1,16 +1,15 @@
-"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
+﻿"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
 
 Measures whether compact encoders merge neighboring-person representations
 earlier in the depth hierarchy (C4 -> C8 -> C16 -> C32 -> P4) across raw
 inter-person Euclidean spacing bins (d_min in pixels).
 
-Note: On point-only annotations (without head bounding boxes or perspective maps),
-spacing is reported as raw Euclidean pixel distance d_min, and scale is explicitly
-uncontrolled.
+Uses continuous aligned pixel-center coordinate mapping and same-scene far-control pairs.
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -25,29 +24,96 @@ RAW_SPACING_BINS = {
     "le8": (0.0, 8.0),       # <= 8px (high risk of receptive field overlap at stride 8/16)
     "8_16": (8.0, 16.0),     # 8px - 16px (stride 16 cell boundary)
     "16_32": (16.0, 32.0),   # 16px - 32px
-    "gt32": (32.0, 1e6),     # > 32px (isolated / well-separated)
+    "gt32": (32.0, 1e6),     # > 32px (isolated / well-separated nearest neighbours)
 }
 
 
 def sample_feature_at_image_coord(
     feat: torch.Tensor,
     xy: torch.Tensor,
-    img_h: int,
-    img_w: int,
+    reduction: int,
 ) -> torch.Tensor:
-    """Sample feature tensor (1, C, H_feat, W_feat) at continuous image-space coordinates (N, 2).
-    
-    Under align_corners=False pixel-center mapping:
-      Pixel center of continuous coordinate x in [0, img_w - 1] is x + 0.5.
-      Normalized coordinate: u = -1.0 + 2.0 * (x + 0.5) / img_w.
-      Similarly for y: v = -1.0 + 2.0 * (y + 0.5) / img_h.
-    Returns: (N, C) feature vectors.
+    """Sample a feature map at zero-based continuous image pixel-center coordinates
+    using the aligned pixel-area convention.
+
+    Image support: x in [-0.5, W - 0.5]
+    Feature coordinate: xf = (x + 0.5) / reduction - 0.5
+    grid_sample uses align_corners=False.
     """
-    norm_x = ((xy[:, 0] + 0.5) / float(img_w)) * 2.0 - 1.0
-    norm_y = ((xy[:, 1] + 0.5) / float(img_h)) * 2.0 - 1.0
-    grid = torch.stack((norm_x, norm_y), dim=-1).unsqueeze(0).unsqueeze(2)  # (1, N, 1, 2)
-    sampled = F.grid_sample(feat, grid, mode="bilinear", padding_mode="border", align_corners=False)
-    return sampled.squeeze(0).squeeze(-1).permute(1, 0)  # (N, C)
+    if feat.ndim != 4 or feat.shape[0] != 1:
+        raise ValueError(f"Expected feature shape (1,C,H,W), got {tuple(feat.shape)}")
+    if reduction <= 0:
+        raise ValueError(f"reduction must be positive, got {reduction}")
+
+    _, _, feat_h, feat_w = feat.shape
+    xy = xy.to(device=feat.device, dtype=torch.float32)
+
+    # Continuous aligned feature-map coordinates
+    feat_x = (xy[:, 0] + 0.5) / float(reduction) - 0.5
+    feat_y = (xy[:, 1] + 0.5) / float(reduction) - 0.5
+
+    # Feature index -> grid_sample coordinate, align_corners=False
+    norm_x = 2.0 * (feat_x + 0.5) / float(feat_w) - 1.0
+    norm_y = 2.0 * (feat_y + 0.5) / float(feat_h) - 1.0
+
+    grid = torch.stack((norm_x, norm_y), dim=-1).view(1, -1, 1, 2)
+    sampled = F.grid_sample(
+        feat,
+        grid,
+        mode="bilinear",
+        padding_mode="border",
+        align_corners=False,
+    )
+    return sampled[0, :, :, 0].transpose(0, 1).contiguous()
+
+
+def deterministic_far_control_pairs(
+    points: np.ndarray,
+    min_distance_px: float = 32.0,
+    max_pairs: int = 100,
+    oversample_factor: int = 10,
+) -> List[Tuple[int, int, float]]:
+    """Deterministically sample far pairs from the SAME image.
+
+    This is independent of nearest-neighbour membership and therefore acts as the
+    control pool for near-pair separability.
+    """
+    pts = np.asarray(points, dtype=np.float32)
+    n = len(pts)
+    if n < 2 or max_pairs <= 0:
+        return []
+
+    # Stable image-specific RNG seed; annotation ordering does not matter
+    # because evaluate_separability_single_image sorts points beforehand.
+    digest = hashlib.blake2b(pts.tobytes(), digest_size=8).digest()
+    seed = int.from_bytes(digest, byteorder="little", signed=False)
+    rng = np.random.default_rng(seed)
+
+    target_candidates = max(max_pairs, max_pairs * oversample_factor)
+    found: Dict[Tuple[int, int], float] = {}
+    max_trials = max(2000, target_candidates * 100)
+
+    for _ in range(max_trials):
+        if len(found) >= target_candidates:
+            break
+        i = int(rng.integers(0, n))
+        j = int(rng.integers(0, n - 1))
+        if j >= i:
+            j += 1
+        a, b = sorted((i, j))
+        key = (a, b)
+        if key in found:
+            continue
+        d = float(np.linalg.norm(pts[a] - pts[b]))
+        if d > min_distance_px:
+            found[key] = d
+
+    pairs = [(i, j, d) for (i, j), d in found.items()]
+    pairs.sort(key=lambda x: (x[2], x[0], x[1]))
+    if len(pairs) > max_pairs:
+        idx = np.linspace(0, len(pairs) - 1, max_pairs, dtype=int)
+        pairs = [pairs[k] for k in idx]
+    return pairs
 
 
 def evaluate_separability_single_image(
@@ -61,28 +127,31 @@ def evaluate_separability_single_image(
     model.eval()
     if len(points) < 2:
         return {"num_points": len(points), "bins": {}}
-    
+
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
-    _, _, img_h, img_w = image.shape
-    
+
     with torch.no_grad():
         feats = model.backbone(image)
         p4 = model.neck(*feats)
         mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
         mass = F.softplus(mass.float()) + model.eps_d
-        
-    stages: Dict[str, torch.Tensor] = {
-        "C4": feats[0],
-        "C8": feats[1],
-        "C16": feats[2],
-        "P4_mass": mass,
+
+    stages: Dict[str, Tuple[torch.Tensor, int]] = {
+        "C4": (feats[0], 4),
+        "C8": (feats[1], 8),
+        "C16": (feats[2], 16),
+        "P4_mass": (mass, 4),
     }
     if len(feats) >= 4:
-        stages["C32"] = feats[3]
+        stages["C32"] = (feats[3], 32)
 
     points_np = np.asarray(points, dtype=np.float32)
+    # Remove annotation-order dependence entirely
+    order = np.lexsort((points_np[:, 1], points_np[:, 0]))
+    points_np = points_np[order]
+
     tree = cKDTree(points_np)
     # k=2 because first neighbor is the query point itself
     nn_distances, nn_indices = tree.query(points_np, k=2)
@@ -111,23 +180,30 @@ def evaluate_separability_single_image(
             pairs = [pairs[k] for k in idx]
         pairs_by_bin[bname] = pairs
 
+    # Add independent same-scene far control pool
+    pairs_by_bin["far_control_gt32"] = deterministic_far_control_pairs(
+        points_np,
+        min_distance_px=32.0,
+        max_pairs=max_pairs_per_bin,
+    )
+
     bin_results: Dict[str, Dict[str, Any]] = {}
     for bname, pair_list in pairs_by_bin.items():
         if not pair_list:
             continue
-        p1_coords = torch.from_numpy(np.array([points[i] for i, j, d in pair_list], dtype=np.float32)).to(device)
-        p2_coords = torch.from_numpy(np.array([points[j] for i, j, d in pair_list], dtype=np.float32)).to(device)
+        p1_coords = torch.from_numpy(np.asarray([points_np[i] for i, j, d in pair_list], dtype=np.float32)).to(device)
+        p2_coords = torch.from_numpy(np.asarray([points_np[j] for i, j, d in pair_list], dtype=np.float32)).to(device)
         mid_coords = 0.5 * (p1_coords + p2_coords)
-        
+
         stage_metrics: Dict[str, Any] = {
             "num_pairs": len(pair_list),
             "mean_raw_dist_px": float(np.mean([d for i, j, d in pair_list])),
         }
-        for sname, sfeat in stages.items():
-            f1 = sample_feature_at_image_coord(sfeat, p1_coords, img_h, img_w)
-            f2 = sample_feature_at_image_coord(sfeat, p2_coords, img_h, img_w)
-            f_mid = sample_feature_at_image_coord(sfeat, mid_coords, img_h, img_w)
-            
+        for sname, (sfeat, reduction) in stages.items():
+            f1 = sample_feature_at_image_coord(sfeat, p1_coords, reduction=reduction)
+            f2 = sample_feature_at_image_coord(sfeat, p2_coords, reduction=reduction)
+            f_mid = sample_feature_at_image_coord(sfeat, mid_coords, reduction=reduction)
+
             if sname == "P4_mass":
                 # For scalar mass map: peak-to-trough ratio = min(m1, m2) / m_mid
                 m1 = f1.squeeze(-1).clamp_min(1e-8)
@@ -145,7 +221,7 @@ def evaluate_separability_single_image(
                 stage_metrics[f"{sname}_cos_sim_to_midpoint"] = float(cos_sim_mid.mean().item())
                 stage_metrics[f"{sname}_inter_person_dissimilarity"] = float(cos_dissim_indiv.mean().item())
                 stage_metrics[f"{sname}_inter_person_dissimilarity_sum"] = float(cos_dissim_indiv.sum().item())
-                
+
         bin_results[bname] = stage_metrics
 
     return {

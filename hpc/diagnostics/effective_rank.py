@@ -110,13 +110,13 @@ def evaluate_effective_rank_single_image(
     with torch.no_grad():
         feats = model.backbone(image)
         
-    stages: Dict[str, torch.Tensor] = {
-        "C4": feats[0],
-        "C8": feats[1],
-        "C16": feats[2],
+    stages: Dict[str, Tuple[torch.Tensor, int]] = {
+        "C4": (feats[0], 4),
+        "C8": (feats[1], 8),
+        "C16": (feats[2], 16),
     }
     if len(feats) >= 4:
-        stages["C32"] = feats[3]
+        stages["C32"] = (feats[3], 32)
         
     points_np = np.asarray(points, dtype=np.float32)
     # Make subset independent of annotation ordering
@@ -133,8 +133,8 @@ def evaluate_effective_rank_single_image(
     coords_t = torch.from_numpy(np.asarray(sample_coords, dtype=np.float32)).to(device)
         
     stage_metrics: Dict[str, Dict[str, float]] = {}
-    for sname, sfeat in stages.items():
-        sampled_feat = sample_feature_at_image_coord(sfeat, coords_t, img_h, img_w)
+    for sname, (sfeat, reduction) in stages.items():
+        sampled_feat = sample_feature_at_image_coord(sfeat, coords_t, reduction=reduction)
         stage_metrics[sname] = compute_spectral_rank_metrics(sampled_feat)
         
     # Depthwise decay ratios

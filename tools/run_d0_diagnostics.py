@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
@@ -30,7 +30,7 @@ from hpc.diagnostics import (
     evaluate_phase_shift_single_image,
     evaluate_separability_single_image,
 )
-from hpc.losses.ntpc import NTPCConfig, NTPCLoss
+from hpc.losses.factory import build_ntpc_criterion_from_config
 from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
 
 
@@ -110,13 +110,13 @@ def main() -> None:
     n_eval = min(n_total, args.max_samples) if args.max_samples is not None else n_total
     print(f"Loaded {resolved_split}: {n_total} images; evaluating {n_eval}", flush=True)
 
-    loss_cfg = cfg.get("loss", {})
-    criterion = NTPCLoss(NTPCConfig(
-        mode=loss_cfg.get("mode", "r2_flat_dm"),
-        root_loss=loss_cfg.get("root_loss", "nb"),
-        root_dispersion=float(cfg.get("statistics", {}).get("root_dispersion", 50.0)),
-        kappa_flat16=float(loss_cfg.get("kappa_flat16", 20.0)),
-    ))
+    # Build criterion strictly from checkpoint metadata to avoid configuration drift
+    criterion_cfg = ckpt.get("config", cfg)
+    criterion_crop_stats = ckpt.get("resolved_crop_statistics")
+    criterion = build_ntpc_criterion_from_config(
+        criterion_cfg,
+        crop_statistics=criterion_crop_stats,
+    ).to(device)
 
     # Parse diagnostic tokens safely
     tokens = {t.strip().lower() for t in args.diagnostics.split(",") if t.strip()}
@@ -262,7 +262,7 @@ def main() -> None:
             for r in dk_results:
                 bins = r.get("bins", {})
                 near = bins.get(bname)
-                far = bins.get("gt32")
+                far = bins.get("far_control_gt32")
                 if near is None or far is None:
                     continue
                 w = min(int(near.get("num_pairs", 0)), int(far.get("num_pairs", 0)))

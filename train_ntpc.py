@@ -27,6 +27,7 @@ from hpc.data.qnrf import UCFQNRFDataset
 from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
+from hpc.losses.factory import build_ntpc_criterion_from_config
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.metrics.tree import finalize_tree_diagnostics, tree_allocation_raw_diagnostics
 from hpc.models.factory import (
@@ -401,39 +402,10 @@ def main() -> None:
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4
     )
 
-    loss_cfg = cfg.get("loss", {})
-    shared_kappa = loss_cfg.get("kappa_shared")
-
-    def kappa(name: str, default: float = 20.0) -> float:
-        return float(loss_cfg.get(name, shared_kappa if shared_kappa is not None else default))
-
-    threshold_value = loss_cfg.get("dense_threshold_16", "auto")
-    dense_threshold = (
-        crop_stats["dense_threshold_q85"]
-        if threshold_value is None or str(threshold_value).lower() == "auto"
-        else float(threshold_value)
-    )
-    criterion = NTPCLoss(NTPCConfig(
-        mode=loss_cfg.get("mode", "r4_dtm_tree16"),
-        root_loss=loss_cfg.get("root_loss", "nb"),
-        root_dispersion=float(stats_cfg.get("root_dispersion", 50.0)),
-        kappa_root64=kappa("kappa_root64"),
-        kappa_64_32=kappa("kappa_64_32"),
-        kappa_32_16=kappa("kappa_32_16"),
-        kappa_16_8=kappa("kappa_16_8"),
-        kappa_8_4=kappa("kappa_8_4"),
-        kappa_flat16=kappa("kappa_flat16"),
-        dense_threshold_16=dense_threshold,
-        w_root_nb=float(loss_cfg.get("w_root_nb", 1.0)),
-        w_root64=float(loss_cfg.get("w_root64", 1.0)),
-        w_64_32=float(loss_cfg.get("w_64_32", 1.0)),
-        w_32_16=float(loss_cfg.get("w_32_16", 1.0)),
-        w_16_8=float(loss_cfg.get("w_16_8", 1.0)),
-        w_8_4=float(loss_cfg.get("w_8_4", 1.0)),
-        w_flat_16=float(loss_cfg.get("w_flat_16", 1.0)),
-        w_exact_regression=float(loss_cfg.get("w_exact_regression", 1.0)),
-        w_deterministic_alloc=float(loss_cfg.get("w_deterministic_alloc", 1.0)),
-    )).to(device)
+    criterion = build_ntpc_criterion_from_config(
+        cfg,
+        crop_statistics=crop_stats,
+    ).to(device)
 
     optimizer_cfg = cfg["optimizer"]
     optimizer = build_optimizer(model, optimizer_cfg)

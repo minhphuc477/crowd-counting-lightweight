@@ -107,13 +107,30 @@ def test_sample_feature_at_image_coord_impulse():
     
     # Query at exact image coordinate of feature cell (4, 4) center: (17.5, 17.5)
     query_exact = torch.tensor([[17.5, 17.5]], dtype=torch.float32)
-    val_exact = sample_feature_at_image_coord(feat, query_exact, img_h=64, img_w=64)
+    val_exact = sample_feature_at_image_coord(feat, query_exact, reduction=4)
     assert np.isclose(val_exact.item(), 10.0, atol=1e-2)
     
     # Query far away at (40.0, 40.0)
     query_far = torch.tensor([[40.0, 40.0]], dtype=torch.float32)
-    val_far = sample_feature_at_image_coord(feat, query_far, img_h=64, img_w=64)
+    val_far = sample_feature_at_image_coord(feat, query_far, reduction=4)
     assert np.isclose(val_far.item(), 0.0, atol=1e-3)
+
+
+def test_feature_sampling_odd_image_extent():
+    reduction = 16
+    # Equivalent to a feature map from an odd-sized input:
+    # image ~ 317 x 411 -> feature ~ 20 x 26.
+    feat = torch.zeros(1, 1, 20, 26)
+    fy = 7
+    fx = 10
+    feat[0, 0, fy, fx] = 9.0
+
+    # Aligned image-space center represented by that feature location
+    x = (fx + 0.5) * reduction - 0.5
+    y = (fy + 0.5) * reduction - 0.5
+    xy = torch.tensor([[x, y]], dtype=torch.float32)
+    value = sample_feature_at_image_coord(feat, xy, reduction=reduction)
+    assert torch.allclose(value, torch.tensor([[9.0]]), atol=1e-5)
 
 
 def test_dk_kdtree_matches_dense_knn_small_case():
@@ -203,4 +220,15 @@ def test_tool_imports():
     import tools.run_d0_diagnostics
     import tools.run_factorial_abcd
     import tools.summary_runs
+
+
+def test_python_sources_compile():
+    import compileall
+    for target in ["hpc", "tools", "legacy", "tests", "train_ntpc.py"]:
+        if target.endswith(".py"):
+            assert compileall.compile_file(target, quiet=1, force=True)
+        else:
+            assert compileall.compile_dir(target, quiet=1, force=True)
+
+
 
