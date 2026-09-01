@@ -1,4 +1,4 @@
-﻿"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
+"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
 
 Measures whether compact encoders merge neighboring-person representations
 earlier in the depth hierarchy (C4 -> C8 -> C16 -> C32 -> P4) across raw
@@ -32,12 +32,14 @@ def sample_feature_at_image_coord(
     feat: torch.Tensor,
     xy: torch.Tensor,
     reduction: int,
+    origin_xy: Tuple[float, float] = (0.0, 0.0),
 ) -> torch.Tensor:
-    """Sample a feature map at zero-based continuous image pixel-center coordinates
-    using the aligned pixel-area convention.
+    """Sample convolutional feature maps at zero-based image pixel-center coordinates.
 
-    Image support: x in [-0.5, W - 0.5]
-    Feature coordinate: xf = (x + 0.5) / reduction - 0.5
+    For the current timm MobileNetV4 with symmetric odd-kernel padding:
+        image_x = origin_x + feature_x * reduction
+        image_y = origin_y + feature_y * reduction
+
     grid_sample uses align_corners=False.
     """
     if feat.ndim != 4 or feat.shape[0] != 1:
@@ -47,12 +49,12 @@ def sample_feature_at_image_coord(
 
     _, _, feat_h, feat_w = feat.shape
     xy = xy.to(device=feat.device, dtype=torch.float32)
+    origin_x, origin_y = origin_xy
 
-    # Continuous aligned feature-map coordinates
-    feat_x = (xy[:, 0] + 0.5) / float(reduction) - 0.5
-    feat_y = (xy[:, 1] + 0.5) / float(reduction) - 0.5
+    feat_x = (xy[:, 0] - float(origin_x)) / float(reduction)
+    feat_y = (xy[:, 1] - float(origin_y)) / float(reduction)
 
-    # Feature index -> grid_sample coordinate, align_corners=False
+    # Feature-index coordinate -> grid_sample coordinate for align_corners=False
     norm_x = 2.0 * (feat_x + 0.5) / float(feat_w) - 1.0
     norm_y = 2.0 * (feat_y + 0.5) / float(feat_h) - 1.0
 
@@ -135,8 +137,7 @@ def evaluate_separability_single_image(
     with torch.no_grad():
         feats = model.backbone(image)
         p4 = model.neck(*feats)
-        mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
-        mass = F.softplus(mass.float()) + model.eps_d
+        mass = model.mass_from_p4(p4)
 
     stages: Dict[str, Tuple[torch.Tensor, int]] = {
         "C4": (feats[0], 4),

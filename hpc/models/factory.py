@@ -71,6 +71,7 @@ def resolve_dataset_config(cfg: dict) -> dict:
     return {
         "name": str(d.get("name", "")),
         "part": str(d.get("part", "part_A")),
+        "crop_size": int(d.get("crop_size", 256)),
         "coordinate_base": int(d.get("coordinate_base", 1)),
         "image_mean": tuple(float(x) for x in d.get("image_mean", [0.485, 0.456, 0.406])),
         "image_std": tuple(float(x) for x in d.get("image_std", [0.229, 0.224, 0.225])),
@@ -189,3 +190,38 @@ def assert_checkpoint_compatible(checkpoint: dict, cfg: dict) -> None:
                 raise ValueError(
                     f"Dataset config mismatch for '{k}': checkpoint has {old_ds[k]!r}, active config has {new_ds[k]!r}"
                 )
+
+
+def resume_protocol_signature(cfg: dict) -> dict:
+    """Extract a complete scientific protocol signature for strictly validating resumes."""
+    training = cfg.get("training", {})
+    return {
+        "model": resolve_model_config(cfg),
+        "dataset": resolve_dataset_config(cfg),
+        "loss": dict(cfg.get("loss", {})),
+        "optimizer": dict(cfg.get("optimizer", {})),
+        "schedule": dict(cfg.get("schedule", {})),
+        "augmentation": dict(cfg.get("augmentation", {})),
+        "sampler": dict(cfg.get("sampler", {})),
+        "training": {
+            "batch_size": training.get("batch_size"),
+            "drop_last": training.get("drop_last"),
+            "amp": training.get("amp"),
+            "init_scale": training.get("init_scale"),
+        },
+    }
+
+
+def assert_resume_compatible(checkpoint: dict, cfg: dict) -> None:
+    """Assert that a resumed training run matches the exact protocol signature of the checkpoint."""
+    trained = checkpoint.get("config")
+    if not isinstance(trained, dict):
+        raise ValueError("Resume checkpoint has no embedded config")
+
+    old = resume_protocol_signature(trained)
+    new = resume_protocol_signature(cfg)
+    if old != new:
+        differing = [key for key in old if old[key] != new[key]]
+        raise ValueError(
+            f"Resume protocol mismatch in: {', '.join(differing)}"
+        )

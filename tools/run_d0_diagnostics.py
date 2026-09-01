@@ -318,17 +318,24 @@ def main() -> None:
 
     # Aggregate D-M
     if run_dm and dm_results:
+        def finite_mean(values: List[Any]) -> float:
+            arr = np.asarray(values, dtype=np.float64)
+            arr = arr[np.isfinite(arr)]
+            return float(arr.mean()) if len(arr) else float("nan")
+
         dm_agg: Dict[str, Any] = {
-            "c4_fg_energy_fraction": float(np.mean([r.get("C4_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "c8_fg_energy_fraction": float(np.mean([r.get("C8_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "c16_fg_energy_fraction": float(np.mean([r.get("C16_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "c16_gradient_enrichment": float(np.mean([r.get("C16_gradient_enrichment", float("nan")) for r in dm_results])),
-            "c16_gradient_density_ratio": float(np.mean([r.get("C16_gradient_density_ratio", float("nan")) for r in dm_results])),
+            "c4_fg_energy_fraction": finite_mean([r.get("C4_fg_energy_fraction") for r in dm_results]),
+            "c8_fg_energy_fraction": finite_mean([r.get("C8_fg_energy_fraction") for r in dm_results]),
+            "c16_fg_energy_fraction": finite_mean([r.get("C16_fg_energy_fraction") for r in dm_results]),
+            "c16_gradient_enrichment": finite_mean([r.get("C16_gradient_enrichment") for r in dm_results]),
+            "c16_gradient_density_ratio": finite_mean([r.get("C16_gradient_density_ratio") for r in dm_results]),
+            "c16_valid_samples": sum(bool(r.get("C16_valid_fg_bg", False)) for r in dm_results),
         }
-        if "C32_fg_energy_fraction" in dm_results[0]:
-            dm_agg["c32_fg_energy_fraction"] = float(np.mean([r.get("C32_fg_energy_fraction", float("nan")) for r in dm_results]))
-            dm_agg["c32_gradient_enrichment"] = float(np.mean([r.get("C32_gradient_enrichment", float("nan")) for r in dm_results]))
-            dm_agg["c32_gradient_density_ratio"] = float(np.mean([r.get("C32_gradient_density_ratio", float("nan")) for r in dm_results]))
+        if any("C32_fg_energy_fraction" in r for r in dm_results):
+            dm_agg["c32_fg_energy_fraction"] = finite_mean([r.get("C32_fg_energy_fraction") for r in dm_results])
+            dm_agg["c32_gradient_enrichment"] = finite_mean([r.get("C32_gradient_enrichment") for r in dm_results])
+            dm_agg["c32_gradient_density_ratio"] = finite_mean([r.get("C32_gradient_density_ratio") for r in dm_results])
+            dm_agg["c32_valid_samples"] = sum(bool(r.get("C32_valid_fg_bg", False)) for r in dm_results)
         summary["D-M_gradient_allocation"] = dm_agg
 
     # Objective Diagnostic Synthesis

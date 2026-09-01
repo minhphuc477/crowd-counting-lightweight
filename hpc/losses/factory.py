@@ -1,10 +1,10 @@
-﻿"""Central factory for NTPC criteria to eliminate duplication and configuration drift."""
+"""Central factory for NTPC criteria to eliminate duplication and configuration drift."""
 
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from .ntpc import NTPCConfig, NTPCLoss
+from .ntpc import NTPCConfig, NTPCLoss, canonicalize_ntpc_mode
 
 
 def build_ntpc_criterion_from_config(
@@ -24,20 +24,21 @@ def build_ntpc_criterion_from_config(
             return float(shared_kappa)
         return float(default)
 
+    mode = canonicalize_ntpc_mode(str(loss_cfg.get("mode", "r4_dtm_tree16")))
+
     threshold_value = loss_cfg.get("dense_threshold_16", "auto")
     if threshold_value is None or str(threshold_value).lower() == "auto":
-        if crop_statistics is None:
-            mode = loss_cfg.get("mode", "r4_dtm_tree16")
-            if "r5" in mode:
-                raise ValueError("dense_threshold_16=auto requires resolved crop statistics")
-            dense_threshold = 0.0
+        if mode == "r5_full_ntpc":
+            if crop_statistics is None or "dense_threshold_q85" not in crop_statistics:
+                raise ValueError("r5_full_ntpc with dense_threshold_16=auto requires dense_threshold_q85")
+            dense_threshold = float(crop_statistics["dense_threshold_q85"])
         else:
-            dense_threshold = float(crop_statistics.get("dense_threshold_q85", 0.0))
+            dense_threshold = 2.0
     else:
         dense_threshold = float(threshold_value)
 
     config = NTPCConfig(
-        mode=loss_cfg.get("mode", "r4_dtm_tree16"),
+        mode=mode,
         root_loss=loss_cfg.get("root_loss", "nb"),
         root_dispersion=float(stats_cfg.get("root_dispersion", 50.0)),
         kappa_root64=kappa("kappa_root64"),

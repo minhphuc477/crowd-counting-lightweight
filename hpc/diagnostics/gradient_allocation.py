@@ -46,8 +46,7 @@ def evaluate_gradient_allocation_single_batch(
                 feats[idx].register_hook(make_hook(name))
                 
         p4 = model.neck(*feats)
-        mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
-        mass = F.softplus(mass.float()) + model.eps_d
+        mass = model.mass_from_p4(p4)
         
         loss, logs = criterion(mass, targets)
         loss.backward()
@@ -85,10 +84,20 @@ def evaluate_gradient_allocation_single_batch(
         n_fg = float(fg_mask.sum().item())
         n_bg = float(bg_mask.sum().item())
         
+        results[f"{sname}_fg_area_fraction"] = n_fg / max(1.0, n_total)
+        
+        if n_fg == 0 or n_bg == 0:
+            results[f"{sname}_valid_fg_bg"] = False
+            results[f"{sname}_fg_energy_fraction"] = float("nan")
+            results[f"{sname}_gradient_enrichment"] = float("nan")
+            results[f"{sname}_gradient_density_ratio"] = float("nan")
+            continue
+            
+        results[f"{sname}_valid_fg_bg"] = True
         fg_area_frac = n_fg / max(1.0, n_total)
         
-        fg_energy = float(g_sq[fg_mask].sum().item()) if n_fg > 0 else 0.0
-        bg_energy = float(g_sq[bg_mask].sum().item()) if n_bg > 0 else 0.0
+        fg_energy = float(g_sq[fg_mask].sum().item())
+        bg_energy = float(g_sq[bg_mask].sum().item())
         total_energy = fg_energy + bg_energy + 1e-12
         
         fg_energy_frac = fg_energy / total_energy
@@ -102,7 +111,6 @@ def evaluate_gradient_allocation_single_batch(
         mean_bg_density = (bg_energy / max(1.0, n_bg))
         density_ratio = mean_fg_density / max(1e-12, mean_bg_density)
         
-        results[f"{sname}_fg_area_fraction"] = fg_area_frac
         results[f"{sname}_fg_energy_fraction"] = fg_energy_frac
         results[f"{sname}_gradient_enrichment"] = enrichment
         results[f"{sname}_gradient_density_ratio"] = density_ratio

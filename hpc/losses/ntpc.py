@@ -169,6 +169,13 @@ _MODE_ALIASES = {
     "r4_dtm_tree": "r4_dtm_tree16",
     "r4_full_ntpc": "r5_full_ntpc",
 }
+
+
+def canonicalize_ntpc_mode(mode: str) -> str:
+    """Resolve mode aliases to canonical mode names."""
+    return _MODE_ALIASES.get(str(mode), str(mode))
+
+
 _VALID_MODES = {
     "r0_exact",
     "r1_deterministic",
@@ -208,7 +215,7 @@ class NTPCConfig:
     def __post_init__(self) -> None:
         import math
 
-        self.mode = _MODE_ALIASES.get(self.mode, self.mode)
+        self.mode = canonicalize_ntpc_mode(self.mode)
         if self.mode not in _VALID_MODES:
             raise ValueError(f"Unsupported NTPC mode: {self.mode}; must be one of {sorted(_VALID_MODES)}")
         if self.root_loss not in {"nb", "poisson", "l1"}:

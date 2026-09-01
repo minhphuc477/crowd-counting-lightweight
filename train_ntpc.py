@@ -28,10 +28,10 @@ from hpc.data.sampler import build_density_luminance_sampler
 from hpc.data.sha import ShanghaiTechDataset
 from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.factory import build_ntpc_criterion_from_config
-from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.metrics.tree import finalize_tree_diagnostics, tree_allocation_raw_diagnostics
 from hpc.models.factory import (
     assert_checkpoint_compatible,
+    assert_resume_compatible,
     build_model_from_config,
     validate_pretrained_normalization,
 )
@@ -496,6 +496,7 @@ def main() -> None:
         print(f"Resuming training from checkpoint: {resume_ckpt_path}", flush=True)
         ckpt = torch.load(resume_ckpt_path, map_location=device)
         assert_checkpoint_compatible(ckpt, cfg)
+        assert_resume_compatible(ckpt, cfg)
         model.load_state_dict(ckpt["model_state_dict"], strict=True)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:
@@ -544,7 +545,7 @@ def main() -> None:
     print(
         f"Device={device}; params={sum(p.numel() for p in model.parameters()):,}; "
         f"mode={criterion.cfg.mode}; selection={selection_split}; stats={crop_stats}; "
-        f"dense_threshold_16={dense_threshold:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}; "
+        f"dense_threshold_16={criterion.cfg.dense_threshold_16:.3f}; exact_joint_nll={criterion.is_exact_joint_nll}; "
         f"initialization={'pretrained' if pretrained_spec else 'scratch'}",
         flush=True,
     )

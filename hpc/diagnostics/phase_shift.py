@@ -1,4 +1,4 @@
-﻿"""D-R / G-R: Sampling-phase and translation instability diagnostics.
+"""D-R / G-R: Sampling-phase and translation instability diagnostics.
 
 Evaluates whether small +/-1, +/-2 pixel translations induce count and mass map
 inconsistencies on the central valid support using natural source crop shifts
@@ -134,8 +134,7 @@ def evaluate_phase_shift_single_image(
             img_shifted = natural_shift_view(image, dx=dx, dy=dy, max_shift=max_shift)
             feats = model.backbone(img_shifted)
             p4 = model.neck(*feats)
-            mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
-            mass = F.softplus(mass.float()) + model.eps_d
+            mass = model.mass_from_p4(p4)
             
             # Inverse-align and crop valid center
             inv_mass = inverse_align_feature(mass, dx, dy, stride=4.0, device=device)

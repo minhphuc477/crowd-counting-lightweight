@@ -114,16 +114,21 @@ class HPCLite(nn.Module):
         with torch.no_grad():
             nn.init.constant_(self.head_out.bias, inv_softplus(m0))
 
-    def forward_mass(self, x: torch.Tensor) -> torch.Tensor:
-        """Branchless mass forward pass for clean tracing and ONNX deployment."""
-        features = self.backbone(x)
-        p4 = self.neck(*features)
+    def mass_from_p4(self, p4: torch.Tensor) -> torch.Tensor:
+        """Apply the exact trained mass head to P4."""
         if self.use_repblock:
             h = self.head_refine(p4)
         else:
-            h = self.head_act(self.head_norm(self.head_dw(p4)))
+            h = self.head_dw(p4)
+            h = self.head_norm(h)
+            h = self.head_act(h)
         z = self.head_out(h)
         return F.softplus(z.float()).clamp_min(self.eps_d)
+
+    def forward_mass(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.backbone(x)
+        p4 = self.neck(*features)
+        return self.mass_from_p4(p4)
 
     def forward(
         self,
@@ -138,14 +143,7 @@ class HPCLite(nn.Module):
 
         features = self.backbone(x)
         p4, aux = self.neck(*features, return_routes=True)
-
-        if self.use_repblock:
-            h = self.head_refine(p4)
-        else:
-            h = self.head_act(self.head_norm(self.head_dw(p4)))
-
-        z = self.head_out(h)
-        d_map = F.softplus(z.float()).clamp_min(self.eps_d)
+        d_map = self.mass_from_p4(p4)
         return d_map, aux
 
     @torch.no_grad()
