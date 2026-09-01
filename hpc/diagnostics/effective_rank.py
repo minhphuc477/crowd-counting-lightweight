@@ -1,8 +1,8 @@
 ﻿"""D-L / G-L: Normalized effective representation rank collapse diagnostics.
 
-Evaluates singular-value spectrum, participation ratio, and spectral entropy
-of intermediate activations across depth (C4 -> C8 -> C16 -> C32) and across
-density/foreground regions.
+Evaluates singular-value spectrum, covariance-energy participation ratio,
+and spectral entropy of intermediate activations with sample-count matched
+normalization across depth (C4 -> C8 -> C16 -> C32).
 """
 
 from __future__ import annotations
@@ -16,61 +16,59 @@ import torch.nn.functional as F
 
 
 def compute_spectral_rank_metrics(x: torch.Tensor, eps: float = 1e-10) -> Dict[str, float]:
-    """Compute SVD spectrum, Participation Ratio, and Spectral Entropy on matrix X (N, C).
+    """Compute SVD spectrum, Covariance-Energy Participation Ratio, and Spectral Entropy.
     
-    Returns:
-      nominal_channels: C
-      participation_ratio: (sum sigma)^2 / sum(sigma^2)
-      normalized_participation_ratio: PR / C  (in range [1/C, 1.0])
-      spectral_entropy_rank: exp(entropy) / C (in range [1/C, 1.0])
-      top1_energy_ratio: sigma_1 / sum(sigma)
-      top5_energy_ratio: sum(sigma[:5]) / sum(sigma)
+    x: Matrix of shape (M, C) where M is sample count, C is nominal channels.
+    Normalized by min(M - 1, C) to eliminate spatial resolution bias across depth.
     """
     if x.ndim != 2:
-        raise ValueError(f"Expected 2D matrix (N, C), got shape {tuple(x.shape)}")
-    n, c = x.shape
-    if n < 2 or c < 2:
+        raise ValueError(f"Expected 2D matrix (M, C), got shape {tuple(x.shape)}")
+    m, c = x.shape
+    max_rank = max(1, min(m - 1, c))
+    
+    if m < 2 or c < 2:
         return {
             "nominal_channels": float(c),
+            "sample_count": float(m),
+            "max_observable_rank": float(max_rank),
             "participation_ratio": 1.0,
-            "normalized_participation_ratio": 1.0 / max(1, c),
-            "spectral_entropy_rank": 1.0 / max(1, c),
+            "normalized_participation_ratio": 1.0 / float(max_rank),
+            "spectral_entropy_rank": 1.0 / float(max_rank),
             "top1_energy_ratio": 1.0,
-            "top5_energy_ratio": 1.0,
         }
+        
     # Center features along sample dimension
     x_centered = x.float() - x.float().mean(dim=0, keepdim=True)
-    # SVD: singular values of X
-    # Using torch.linalg.svdvals for fast spectrum computation
+    
     try:
         s = torch.linalg.svdvals(x_centered)
     except Exception:
-        # Fallback to numpy if torch SVD fails on edge case
         s = torch.from_numpy(np.linalg.svd(x_centered.cpu().numpy(), compute_uv=False))
         
     s = s.clamp_min(eps)
-    sum_s = s.sum()
-    sum_s2 = (s ** 2).sum()
+    s2 = s ** 2
+    sum_s2 = s2.sum()
+    sum_s4 = (s2 ** 2).sum()
     
-    # Participation Ratio
-    pr = float(((sum_s ** 2) / sum_s2).item())
-    norm_pr = pr / float(c)
+    # Covariance-Energy Participation Ratio: (sum sigma^2)^2 / sum(sigma^4)
+    pr = float(((sum_s2 ** 2) / max(eps, sum_s4)).item())
+    norm_pr = float(pr / float(max_rank))
     
-    # Spectral Entropy
-    p = s / sum_s
+    # Spectral Entropy on normalized singular value energy p_i = sigma_i^2 / sum sigma^2
+    p = s2 / sum_s2
     entropy = -float((p * torch.log(p.clamp_min(eps))).sum().item())
-    entropy_rank = float(np.exp(entropy) / c)
+    entropy_rank = float(np.exp(entropy) / float(max_rank))
     
-    top1 = float((s[0] / sum_s).item())
-    top5 = float((s[:min(5, len(s))].sum() / sum_s).item())
+    top1 = float((s2[0] / sum_s2).item())
     
     return {
         "nominal_channels": float(c),
+        "sample_count": float(m),
+        "max_observable_rank": float(max_rank),
         "participation_ratio": pr,
         "normalized_participation_ratio": norm_pr,
         "spectral_entropy_rank": entropy_rank,
         "top1_energy_ratio": top1,
-        "top5_energy_ratio": top5,
     }
 
 
@@ -79,68 +77,54 @@ def evaluate_effective_rank_single_image(
     image: torch.Tensor,          # (1, 3, H, W)
     points: Optional[np.ndarray], # (N, 2)
     device: torch.device = torch.device("cpu"),
-    fg_radius: float = 16.0,
+    num_samples_matched: int = 256,
 ) -> Dict[str, Any]:
-    """Evaluate effective rank at C4, C8, C16, C32 in foreground vs whole image."""
+    """Evaluate effective rank at C4, C8, C16, C32 with matched spatial sample count."""
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
-    _, _, h, w = image.shape
     
     with torch.no_grad():
         feats = model.backbone(image)
         
-    stages: Dict[str, Tuple[torch.Tensor, float]] = {
-        "C4": (feats[0], 4.0),
-        "C8": (feats[1], 8.0),
-        "C16": (feats[2], 16.0),
+    stages: Dict[str, torch.Tensor] = {
+        "C4": feats[0],
+        "C8": feats[1],
+        "C16": feats[2],
     }
     if len(feats) >= 4:
-        stages["C32"] = (feats[3], 32.0)
+        stages["C32"] = feats[3]
         
     stage_metrics: Dict[str, Dict[str, float]] = {}
     
-    for sname, (sfeat, s_stride) in stages.items():
+    for sname, sfeat in stages.items():
         _, c, sh, sw = sfeat.shape
-        # Flatten feature map to (H*W, C)
-        feat_flat = sfeat.squeeze(0).permute(1, 2, 0).reshape(-1, c)
+        feat_flat = sfeat.squeeze(0).permute(1, 2, 0).reshape(-1, c)  # (H*W, C)
+        n_spatial = feat_flat.shape[0]
         
-        # Whole-image spectral metrics
-        whole_metrics = compute_spectral_rank_metrics(feat_flat)
-        
-        # Foreground spectral metrics (if points exist)
-        fg_metrics: Dict[str, float] = {}
-        if points is not None and len(points) > 0:
-            # Create boolean mask on feature grid
-            # Coordinates in feature space: (pts / stride)
-            pts_feat = points / s_stride
-            grid_y, grid_x = torch.meshgrid(
-                torch.arange(sh, device=device, dtype=torch.float32),
-                torch.arange(sw, device=device, dtype=torch.float32),
-                indexing="ij",
-            )
-            # Compute distance to nearest point
-            pts_t = torch.tensor(pts_feat, dtype=torch.float32, device=device)
-            # Reshape for broadcast: grid is (sh, sw, 1, 2), pts is (1, 1, N, 2)
-            grid_pos = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(2)
-            pts_pos = pts_t.unsqueeze(0).unsqueeze(0)
-            dists = torch.sqrt(((grid_pos - pts_pos) ** 2).sum(dim=-1))
-            min_dist, _ = dists.min(dim=-1)
-            fg_mask = (min_dist <= (fg_radius / s_stride)).flatten()
+        # Subsample exactly num_samples_matched vectors (or all if fewer)
+        if n_spatial > num_samples_matched:
+            # Deterministic subsampling across spatial grid
+            indices = torch.linspace(0, n_spatial - 1, num_samples_matched, device=device).long()
+            sampled_feat = feat_flat[indices]
+        else:
+            sampled_feat = feat_flat
             
-            if fg_mask.sum() >= 4:
-                fg_flat = feat_flat[fg_mask]
-                fg_metrics = {f"fg_{k}": v for k, v in compute_spectral_rank_metrics(fg_flat).items()}
-                
-        stage_metrics[sname] = {**whole_metrics, **fg_metrics}
+        stage_metrics[sname] = compute_spectral_rank_metrics(sampled_feat)
         
-    # Depthwise rank decay: C16 rank / C4 rank
+    # Depthwise decay ratios
     c4_pr = stage_metrics["C4"]["normalized_participation_ratio"]
     c16_pr = stage_metrics["C16"]["normalized_participation_ratio"]
-    depth_decay = c16_pr / max(1e-6, c4_pr)
+    decay_16_4 = float(c16_pr / max(1e-6, c4_pr))
     
-    return {
-        "depth_decay_c16_to_c4": depth_decay,
+    res = {
+        "depth_decay_c16_to_c4": decay_16_4,
         "stages": stage_metrics,
     }
+    if "C32" in stage_metrics:
+        c32_pr = stage_metrics["C32"]["normalized_participation_ratio"]
+        res["depth_decay_c32_to_c16"] = float(c32_pr / max(1e-6, c16_pr))
+        res["depth_decay_c32_to_c4"] = float(c32_pr / max(1e-6, c4_pr))
+        
+    return res

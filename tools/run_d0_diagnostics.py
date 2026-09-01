@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
-- D-R / G-R: +/-1, +/-2 px translation / sampling-phase instability.
-- D-K / G-K: Inter-person separability collapse across encoder depth.
-- D-L / G-L: Normalized effective representation rank collapse.
-- D-M / G-M: Foreground crowd vs background gradient allocation.
+- D-R / G-R: Sampling-phase and translation instability with exact inverse alignment.
+- D-K / G-K: Inter-person separability collapse normalized by local head scale.
+- D-L / G-L: Normalized effective representation rank with sample-matched SVD.
+- D-M / G-M: Area-normalized foreground crowd vs background gradient allocation.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
-from torch.utils.data import DataLoader
 
 from hpc.data import ShanghaiTechDataset, ntpc_collate_fn
+from hpc.data.point_counts import build_exact_count_pyramid
 from hpc.diagnostics import (
     evaluate_effective_rank_single_image,
     evaluate_gradient_allocation_single_batch,
@@ -81,7 +81,6 @@ def main() -> None:
     part_name = ds_cfg.get("part", "part_A")
     print(f"Loaded dataset: {part_name}/{args.split} with {n_total} images (evaluating {n_eval})", flush=True)
 
-    # Prepare criterion for D-M
     loss_cfg = cfg.get("loss", {})
     criterion = NTPCLoss(NTPCConfig(
         mode=loss_cfg.get("mode", "r2_flat_dm"),
@@ -99,8 +98,6 @@ def main() -> None:
     dk_results: List[Dict[str, Any]] = []
     dl_results: List[Dict[str, Any]] = []
     dm_results: List[Dict[str, float]] = []
-
-    from hpc.data.point_counts import build_exact_count_pyramid
 
     start_time = time.time()
     for idx in range(n_eval):
@@ -151,7 +148,6 @@ def main() -> None:
         if (idx + 1) % 10 == 0 or (idx + 1) == n_eval:
             print(f"Evaluated [{idx + 1}/{n_eval}] images ({time.time() - start_time:.1f}s)...", flush=True)
 
-    # Aggregations
     summary: Dict[str, Any] = {
         "metadata": {
             "config": os.path.abspath(args.config),
@@ -169,15 +165,19 @@ def main() -> None:
             "median_count_relative_std": float(np.median([r["count_relative_std"] for r in dr_results])),
             "p90_count_relative_std": float(np.percentile([r["count_relative_std"] for r in dr_results], 90)),
             "mean_interior_mass_mae": float(np.mean([r["interior_mass_mae_mean"] for r in dr_results])),
-            "mean_c4_cos_sim": float(np.mean([r["feature_c4_cos_sim"] for r in dr_results])),
-            "mean_c8_cos_sim": float(np.mean([r["feature_c8_cos_sim"] for r in dr_results])),
-            "mean_c16_cos_sim": float(np.mean([r["feature_c16_cos_sim"] for r in dr_results])),
+            "mean_c4_cos_sim_aligned": float(np.mean([r["feature_c4_cos_sim_aligned"] for r in dr_results])),
+            "mean_c8_cos_sim_aligned": float(np.mean([r["feature_c8_cos_sim_aligned"] for r in dr_results])),
+            "mean_c16_cos_sim_aligned": float(np.mean([r["feature_c16_cos_sim_aligned"] for r in dr_results])),
         }
+        if "feature_c32_cos_sim_aligned" in dr_results[0]:
+            summary["D-R_phase_shift"]["mean_c32_cos_sim_aligned"] = float(
+                np.mean([r["feature_c32_cos_sim_aligned"] for r in dr_results])
+            )
 
     # Aggregate D-K
     if run_dk and dk_results:
-        dk_agg: Dict[str, Any] = {"mean_knn_spacing": float(np.mean([r["knn_spacing_mean"] for r in dk_results]))}
-        for bname in ["le8", "8_16", "16_32", "gt32"]:
+        dk_agg: Dict[str, Any] = {"mean_head_scale_proxy": float(np.mean([r["head_scale_proxy_mean"] for r in dk_results]))}
+        for bname in ["le_0p5", "0p5_1p0", "1p0_2p0", "gt_2p0"]:
             ptrs = [
                 r["bins"][bname]["P4_mass_peak_to_trough_ratio"]
                 for r in dk_results
@@ -188,23 +188,37 @@ def main() -> None:
                 for r in dk_results
                 if bname in r.get("bins", {}) and "P4_mass_merged_fraction" in r["bins"][bname]
             ]
+            c4_sims = [
+                r["bins"][bname]["C4_cos_sim_to_midpoint"]
+                for r in dk_results
+                if bname in r.get("bins", {}) and "C4_cos_sim_to_midpoint" in r["bins"][bname]
+            ]
             c16_sims = [
                 r["bins"][bname]["C16_cos_sim_to_midpoint"]
                 for r in dk_results
                 if bname in r.get("bins", {}) and "C16_cos_sim_to_midpoint" in r["bins"][bname]
             ]
+            c32_sims = [
+                r["bins"][bname]["C32_cos_sim_to_midpoint"]
+                for r in dk_results
+                if bname in r.get("bins", {}) and "C32_cos_sim_to_midpoint" in r["bins"][bname]
+            ]
             if ptrs:
-                dk_agg[f"bin_{bname}"] = {
+                b_info: Dict[str, Any] = {
                     "median_peak_to_trough_ratio": float(np.median(ptrs)),
                     "mean_merged_fraction": float(np.mean(merged_fracs)),
+                    "mean_c4_midpoint_sim": float(np.mean(c4_sims)) if c4_sims else float("nan"),
                     "mean_c16_midpoint_sim": float(np.mean(c16_sims)) if c16_sims else float("nan"),
                     "sample_count": len(ptrs),
                 }
+                if c32_sims:
+                    b_info["mean_c32_midpoint_sim"] = float(np.mean(c32_sims))
+                dk_agg[f"bin_{bname}"] = b_info
         summary["D-K_separability"] = dk_agg
 
     # Aggregate D-L
     if run_dl and dl_results:
-        summary["D-L_effective_rank"] = {
+        dl_agg: Dict[str, Any] = {
             "mean_depth_decay_c16_to_c4": float(np.mean([r["depth_decay_c16_to_c4"] for r in dl_results])),
             "c4_norm_participation_ratio": float(np.mean([r["stages"]["C4"]["normalized_participation_ratio"] for r in dl_results])),
             "c8_norm_participation_ratio": float(np.mean([r["stages"]["C8"]["normalized_participation_ratio"] for r in dl_results])),
@@ -212,67 +226,75 @@ def main() -> None:
             "c4_spectral_entropy_rank": float(np.mean([r["stages"]["C4"]["spectral_entropy_rank"] for r in dl_results])),
             "c16_spectral_entropy_rank": float(np.mean([r["stages"]["C16"]["spectral_entropy_rank"] for r in dl_results])),
         }
+        if "C32" in dl_results[0]["stages"]:
+            dl_agg["c32_norm_participation_ratio"] = float(np.mean([r["stages"]["C32"]["normalized_participation_ratio"] for r in dl_results]))
+            dl_agg["c32_spectral_entropy_rank"] = float(np.mean([r["stages"]["C32"]["spectral_entropy_rank"] for r in dl_results]))
+            dl_agg["mean_depth_decay_c32_to_c16"] = float(np.mean([r.get("depth_decay_c32_to_c16", float("nan")) for r in dl_results]))
+            dl_agg["mean_depth_decay_c32_to_c4"] = float(np.mean([r.get("depth_decay_c32_to_c4", float("nan")) for r in dl_results]))
+        summary["D-L_effective_rank"] = dl_agg
 
     # Aggregate D-M
     if run_dm and dm_results:
-        summary["D-M_gradient_allocation"] = {
-            "mean_c4_fg_energy_fraction": float(np.mean([r.get("C4_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "mean_c8_fg_energy_fraction": float(np.mean([r.get("C8_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "mean_c16_fg_energy_fraction": float(np.mean([r.get("C16_fg_energy_fraction", float("nan")) for r in dm_results])),
-            "mean_c16_fg_to_bg_density_ratio": float(np.mean([r.get("C16_fg_to_bg_density_ratio", float("nan")) for r in dm_results])),
+        dm_agg: Dict[str, Any] = {
+            "c4_fg_energy_fraction": float(np.mean([r.get("C4_fg_energy_fraction", float("nan")) for r in dm_results])),
+            "c8_fg_energy_fraction": float(np.mean([r.get("C8_fg_energy_fraction", float("nan")) for r in dm_results])),
+            "c16_fg_energy_fraction": float(np.mean([r.get("C16_fg_energy_fraction", float("nan")) for r in dm_results])),
+            "c16_gradient_enrichment": float(np.mean([r.get("C16_gradient_enrichment", float("nan")) for r in dm_results])),
+            "c16_gradient_density_ratio": float(np.mean([r.get("C16_gradient_density_ratio", float("nan")) for r in dm_results])),
         }
+        if "C32_fg_energy_fraction" in dm_results[0]:
+            dm_agg["c32_fg_energy_fraction"] = float(np.mean([r.get("C32_fg_energy_fraction", float("nan")) for r in dm_results]))
+            dm_agg["c32_gradient_enrichment"] = float(np.mean([r.get("C32_gradient_enrichment", float("nan")) for r in dm_results]))
+            dm_agg["c32_gradient_density_ratio"] = float(np.mean([r.get("C32_gradient_density_ratio", float("nan")) for r in dm_results]))
+        summary["D-M_gradient_allocation"] = dm_agg
 
-    # Falsification Gate Matrix Verdicts
-    gates: Dict[str, Dict[str, Any]] = {}
-    if run_dr and "D-R_phase_shift" in summary:
-        rel_std = summary["D-R_phase_shift"]["mean_count_relative_std"]
-        c16_cos = summary["D-R_phase_shift"]["mean_c16_cos_sim"]
-        # Gate G-R: Significant phase shift instability if relative count std > 2.0% or c16 cos sim < 0.95
-        gates["G-R (Phase Shift Instability)"] = {
-            "metric_value": f"RelStd={rel_std*100:.2f}%, C16_Cos={c16_cos:.3f}",
-            "threshold": "RelStd > 2.0% or C16_Cos < 0.95",
-            "verdict": "ACTIVE BOTTLENECK" if (rel_std > 0.02 or c16_cos < 0.95) else "REJECTED (ROBUST)",
+    # Objective Diagnostic Synthesis
+    diag_synthesis: Dict[str, Any] = {}
+    if "D-R_phase_shift" in summary:
+        dr = summary["D-R_phase_shift"]
+        diag_synthesis["D-R (Sampling Phase Shift)"] = {
+            "count_relative_std": f"{dr['mean_count_relative_std']*100:.2f}% (p90={dr['p90_count_relative_std']*100:.2f}%)",
+            "aligned_feature_c16_cos_sim": f"{dr['mean_c16_cos_sim_aligned']:.4f}",
+            "aligned_feature_c32_cos_sim": f"{dr.get('mean_c32_cos_sim_aligned', float('nan')):.4f}" if "mean_c32_cos_sim_aligned" in dr else "N/A",
+            "interior_mass_mae": f"{dr['mean_interior_mass_mae']:.5f}",
         }
-
-    if run_dk and "D-K_separability" in summary:
-        bin_le8 = summary["D-K_separability"].get("bin_le8", {})
-        merged_frac = bin_le8.get("mean_merged_fraction", 0.0)
-        ptr = bin_le8.get("median_peak_to_trough_ratio", 1.0)
-        gates["G-K (Separability Collapse)"] = {
-            "metric_value": f"MergedFrac@<=8px={merged_frac*100:.1f}%, PTR={ptr:.2f}",
-            "threshold": "MergedFrac > 50% or PTR <= 1.0",
-            "verdict": "ACTIVE BOTTLENECK" if (merged_frac > 0.50 or ptr <= 1.0) else "REJECTED (SEPARABLE)",
+    if "D-K_separability" in summary:
+        dk = summary["D-K_separability"]
+        le_0p5 = dk.get("bin_le_0p5", {})
+        diag_synthesis["D-K (Separability by Normalized Spacing r=d/s_head)"] = {
+            "crowded_r<=0.5_merged_frac": f"{le_0p5.get('mean_merged_fraction', float('nan'))*100:.1f}%",
+            "crowded_r<=0.5_ptr": f"{le_0p5.get('median_peak_to_trough_ratio', float('nan')):.3f}",
+            "crowded_r<=0.5_c16_midpoint_sim": f"{le_0p5.get('mean_c16_midpoint_sim', float('nan')):.4f}",
+            "crowded_r<=0.5_c32_midpoint_sim": f"{le_0p5.get('mean_c32_midpoint_sim', float('nan')):.4f}" if "mean_c32_midpoint_sim" in le_0p5 else "N/A",
         }
-
-    if run_dl and "D-L_effective_rank" in summary:
-        c16_pr = summary["D-L_effective_rank"]["c16_norm_participation_ratio"]
-        decay = summary["D-L_effective_rank"]["mean_depth_decay_c16_to_c4"]
-        gates["G-L (Effective Rank Collapse)"] = {
-            "metric_value": f"C16_NormPR={c16_pr:.3f}, DepthDecay={decay:.3f}",
-            "threshold": "C16_NormPR < 0.20 or DepthDecay < 0.60",
-            "verdict": "ACTIVE BOTTLENECK" if (c16_pr < 0.20 or decay < 0.60) else "REJECTED (HIGH_RANK)",
+    if "D-L_effective_rank" in summary:
+        dl = summary["D-L_effective_rank"]
+        diag_synthesis["D-L (Effective Representation Rank)"] = {
+            "c4_norm_pr": f"{dl['c4_norm_participation_ratio']:.3f}",
+            "c16_norm_pr": f"{dl['c16_norm_participation_ratio']:.3f}",
+            "c32_norm_pr": f"{dl.get('c32_norm_participation_ratio', float('nan')):.3f}" if "c32_norm_participation_ratio" in dl else "N/A",
+            "depth_decay_c16_to_c4": f"{dl['mean_depth_decay_c16_to_c4']:.3f}",
+            "depth_decay_c32_to_c16": f"{dl.get('mean_depth_decay_c32_to_c16', float('nan')):.3f}" if "mean_depth_decay_c32_to_c16" in dl else "N/A",
         }
-
-    if run_dm and "D-M_gradient_allocation" in summary:
-        c16_fg = summary["D-M_gradient_allocation"]["mean_c16_fg_energy_fraction"]
-        gates["G-M (Gradient Dilution)"] = {
-            "metric_value": f"C16_FG_Energy={c16_fg*100:.1f}%",
-            "threshold": "C16_FG_Energy < 60%",
-            "verdict": "ACTIVE BOTTLENECK" if c16_fg < 0.60 else "REJECTED (CONCENTRATED)",
+    if "D-M_gradient_allocation" in summary:
+        dm = summary["D-M_gradient_allocation"]
+        diag_synthesis["D-M (Gradient Allocation)"] = {
+            "c16_fg_energy": f"{dm['c16_fg_energy_fraction']*100:.1f}%",
+            "c16_gradient_enrichment": f"{dm['c16_gradient_enrichment']:.2f}x",
+            "c16_gradient_density_ratio": f"{dm['c16_gradient_density_ratio']:.2f}x",
+            "c32_gradient_enrichment": f"{dm.get('c32_gradient_enrichment', float('nan')):.2f}x" if "c32_gradient_enrichment" in dm else "N/A",
         }
+    summary["diagnostic_synthesis"] = diag_synthesis
 
-    summary["falsification_gates"] = gates
-
-    # Save output
     out_path = args.output or os.path.join("runs", f"d0_diagnostics_{os.path.splitext(os.path.basename(args.config))[0]}.json")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
 
     print("\n" + "=" * 70, flush=True)
-    print("           D0 DIAGNOSTIC SUITE SUMMARY & FALSIFICATION GATES          ", flush=True)
+    print("                 D0 DIAGNOSTIC SUITE SUMMARY REPORT                   ", flush=True)
     print("=" * 70, flush=True)
-    print(json.dumps(gates, indent=2), flush=True)
+    print(json.dumps(diag_synthesis, indent=2), flush=True)
     print(f"\nDetailed diagnostics saved to: {out_path}", flush=True)
 
 

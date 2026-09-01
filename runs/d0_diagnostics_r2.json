@@ -4,78 +4,88 @@
     "checkpoint": "F:\\lightweightcrcn\\runs\\ntpc_r2_flat_dm16\\best.pt",
     "split": "test_data",
     "samples_evaluated": 50,
-    "timestamp": "2026-09-01 12:30:11"
+    "timestamp": "2026-09-01 12:44:08"
   },
   "D-R_phase_shift": {
-    "mean_count_relative_std": 0.02504950537768904,
-    "median_count_relative_std": 0.021314365703316386,
-    "p90_count_relative_std": 0.0352796056646015,
-    "mean_interior_mass_mae": 0.0051339913256621605,
-    "mean_c4_cos_sim": 0.9619101250171661,
-    "mean_c8_cos_sim": 0.9751636934280395,
-    "mean_c16_cos_sim": 0.9379098320007324
+    "mean_count_relative_std": 0.030683201068992617,
+    "median_count_relative_std": 0.026314918267513258,
+    "p90_count_relative_std": 0.050563336797929403,
+    "mean_interior_mass_mae": 0.0042830957654708375,
+    "mean_c4_cos_sim_aligned": 0.9470069142182668,
+    "mean_c8_cos_sim_aligned": 0.963637703061104,
+    "mean_c16_cos_sim_aligned": 0.9045025198658309
   },
   "D-K_separability": {
-    "mean_knn_spacing": 19.44435422897339,
-    "bin_le8": {
-      "median_peak_to_trough_ratio": 0.8964641094207764,
-      "mean_merged_fraction": 0.921037972118365,
-      "mean_c16_midpoint_sim": 0.9993600176601876,
-      "sample_count": 41
+    "mean_head_scale_proxy": 25.5294061088562,
+    "bin_le_0p5": {
+      "median_peak_to_trough_ratio": 0.8452423512935638,
+      "mean_merged_fraction": 0.8875843694321113,
+      "mean_c4_midpoint_sim": 0.9657584794543006,
+      "mean_c16_midpoint_sim": 0.9875070520422675,
+      "sample_count": 44
     },
-    "bin_8_16": {
-      "median_peak_to_trough_ratio": 0.8350158035755157,
-      "mean_merged_fraction": 0.7615070822686064,
-      "mean_c16_midpoint_sim": 0.992484749659248,
-      "sample_count": 46
-    },
-    "bin_16_32": {
-      "median_peak_to_trough_ratio": 0.9884490668773651,
-      "mean_merged_fraction": 0.5052600612462379,
-      "mean_c16_midpoint_sim": 0.9039269602298736,
+    "bin_0p5_1p0": {
+      "median_peak_to_trough_ratio": 0.9075537323951721,
+      "mean_merged_fraction": 0.6139537828876958,
+      "mean_c4_midpoint_sim": 0.9290706562995911,
+      "mean_c16_midpoint_sim": 0.858822979927063,
       "sample_count": 50
     },
-    "bin_gt32": {
-      "median_peak_to_trough_ratio": 4.23496413230896,
-      "mean_merged_fraction": 0.249013226579323,
-      "mean_c16_midpoint_sim": 0.4359659369414051,
-      "sample_count": 48
+    "bin_1p0_2p0": {
+      "median_peak_to_trough_ratio": 0.9743217825889587,
+      "mean_merged_fraction": 0.495993048899736,
+      "mean_c4_midpoint_sim": 0.9192940580844879,
+      "mean_c16_midpoint_sim": 0.7556827908754349,
+      "sample_count": 50
+    },
+    "bin_gt_2p0": {
+      "median_peak_to_trough_ratio": 1.4001487493515015,
+      "mean_merged_fraction": 0.4207818930041152,
+      "mean_c4_midpoint_sim": 0.9043215270395633,
+      "mean_c16_midpoint_sim": 0.5735635376638837,
+      "sample_count": 27
     }
   },
   "D-L_effective_rank": {
-    "mean_depth_decay_c16_to_c4": 0.2629049171538976,
-    "c4_norm_participation_ratio": 0.767662456035614,
-    "c8_norm_participation_ratio": 0.5224044281244278,
-    "c16_norm_participation_ratio": 0.19963886578877768,
-    "c4_spectral_entropy_rank": 0.8664926113756354,
-    "c16_spectral_entropy_rank": 0.34109408477005815
+    "mean_depth_decay_c16_to_c4": 0.15331009332131842,
+    "c4_norm_participation_ratio": 0.45623852878808974,
+    "c8_norm_participation_ratio": 0.2099088890850544,
+    "c16_norm_participation_ratio": 0.06366657177607218,
+    "c4_spectral_entropy_rank": 0.6173969445783317,
+    "c16_spectral_entropy_rank": 0.10558509494299578
   },
   "D-M_gradient_allocation": {
-    "mean_c4_fg_energy_fraction": 0.03478265338029958,
-    "mean_c8_fg_energy_fraction": 0.13519366552961723,
-    "mean_c16_fg_energy_fraction": 0.5389514360397735,
-    "mean_c16_fg_to_bg_density_ratio": 2.5086704585593287
+    "c4_fg_energy_fraction": 0.038167105374537054,
+    "c8_fg_energy_fraction": 0.14607379191388684,
+    "c16_fg_energy_fraction": 0.58795200510978,
+    "c16_gradient_enrichment": 4.841203004675353,
+    "c16_gradient_density_ratio": 10.603155784542732
   },
-  "falsification_gates": {
-    "G-R (Phase Shift Instability)": {
-      "metric_value": "RelStd=2.50%, C16_Cos=0.938",
-      "threshold": "RelStd > 2.0% or C16_Cos < 0.95",
-      "verdict": "ACTIVE BOTTLENECK"
+  "diagnostic_synthesis": {
+    "D-R (Sampling Phase Shift)": {
+      "count_relative_std": "3.07% (p90=5.06%)",
+      "aligned_feature_c16_cos_sim": "0.9045",
+      "aligned_feature_c32_cos_sim": "N/A",
+      "interior_mass_mae": "0.00428"
     },
-    "G-K (Separability Collapse)": {
-      "metric_value": "MergedFrac@<=8px=92.1%, PTR=0.90",
-      "threshold": "MergedFrac > 50% or PTR <= 1.0",
-      "verdict": "ACTIVE BOTTLENECK"
+    "D-K (Separability by Normalized Spacing r=d/s_head)": {
+      "crowded_r<=0.5_merged_frac": "88.8%",
+      "crowded_r<=0.5_ptr": "0.845",
+      "crowded_r<=0.5_c16_midpoint_sim": "0.9875",
+      "crowded_r<=0.5_c32_midpoint_sim": "N/A"
     },
-    "G-L (Effective Rank Collapse)": {
-      "metric_value": "C16_NormPR=0.200, DepthDecay=0.263",
-      "threshold": "C16_NormPR < 0.20 or DepthDecay < 0.60",
-      "verdict": "ACTIVE BOTTLENECK"
+    "D-L (Effective Representation Rank)": {
+      "c4_norm_pr": "0.456",
+      "c16_norm_pr": "0.064",
+      "c32_norm_pr": "N/A",
+      "depth_decay_c16_to_c4": "0.153",
+      "depth_decay_c32_to_c16": "N/A"
     },
-    "G-M (Gradient Dilution)": {
-      "metric_value": "C16_FG_Energy=53.9%",
-      "threshold": "C16_FG_Energy < 60%",
-      "verdict": "ACTIVE BOTTLENECK"
+    "D-M (Gradient Allocation)": {
+      "c16_fg_energy": "58.8%",
+      "c16_gradient_enrichment": "4.84x",
+      "c16_gradient_density_ratio": "10.60x",
+      "c32_gradient_enrichment": "N/A"
     }
   }
 }

@@ -1,4 +1,4 @@
-"""Unit tests for D0 Diagnostic Suite (D-R, D-K, D-L, D-M)."""
+﻿"""Unit tests for D0 Diagnostic Suite (D-R, D-K, D-L, D-M)."""
 
 import numpy as np
 import pytest
@@ -10,56 +10,66 @@ from hpc.diagnostics.effective_rank import (
     compute_spectral_rank_metrics,
     evaluate_effective_rank_single_image,
 )
+from hpc.diagnostics.gradient_allocation import evaluate_gradient_allocation_single_batch
 from hpc.diagnostics.phase_shift import (
     evaluate_phase_shift_single_image,
+    inverse_align_feature,
     shift_tensor,
 )
 from hpc.diagnostics.separability import (
-    compute_knn_spacing,
+    compute_head_scale_proxies,
     evaluate_separability_single_image,
-    sample_feature_at_coord,
+    sample_feature_at_image_coord,
 )
+from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.models.hpc_lite import HPCLite
 
 
-def test_shift_tensor_identity_and_shifts():
-    x = torch.randn(2, 3, 32, 32)
-    shifted_zero = shift_tensor(x, 0, 0)
-    assert torch.allclose(x, shifted_zero)
+def test_shift_tensor_and_inverse_align_recovery():
+    # Synthetic impulse image: single non-zero pixel in the center
+    x = torch.zeros(1, 1, 32, 32)
+    x[0, 0, 16, 16] = 10.0
     
-    shifted_1_1 = shift_tensor(x, 1, 1)
-    assert shifted_1_1.shape == x.shape
-    # Check that pixel at (0, 0) shifted into (1, 1)
-    assert torch.allclose(shifted_1_1[:, :, 1:, 1:], x[:, :, :-1, :-1])
-
-
-def test_compute_knn_spacing():
-    # 3 points: (0,0), (3,4) dist=5, (0,10) dist=6 from (0,4)
-    pts = np.array([[0.0, 0.0], [3.0, 4.0], [0.0, 10.0]], dtype=np.float32)
-    knn = compute_knn_spacing(pts)
-    assert knn.shape == (3,)
-    assert np.isclose(knn[0], 5.0, atol=1e-4)
-    assert np.isclose(knn[1], 5.0, atol=1e-4)
-    assert np.isclose(knn[2], 6.7082, atol=1e-3)
-
-
-def test_spectral_rank_metrics_bounds():
-    # Identity matrix (maximal rank C, centered is C-1)
-    eye = torch.eye(16)
-    metrics_eye = compute_spectral_rank_metrics(eye)
-    assert metrics_eye["normalized_participation_ratio"] >= 0.90
-    assert metrics_eye["spectral_entropy_rank"] >= 0.90
+    # Shift right 2, down 1
+    dx, dy = 2, 1
+    shifted = shift_tensor(x, dx, dy, mode="replicate")
+    assert shifted[0, 0, 17, 18] == 10.0
     
+    # Inverse align back with stride 1.0
+    inv = inverse_align_feature(shifted, dx, dy, stride=1.0, device=torch.device("cpu"))
+    
+    # Check that maximum peak is recovered at (16, 16)
+    peak_y, peak_x = torch.where(inv[0, 0] == inv[0, 0].max())
+    assert peak_y[0].item() == 16
+    assert peak_x[0].item() == 16
+
+
+def test_head_scale_proxies():
+    # 4 collinear points separated by 10 px
+    pts = np.array([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]], dtype=np.float32)
+    s_heads = compute_head_scale_proxies(pts, k=2)
+    assert len(s_heads) == 4
+    # Middle points (10, 0) and (20, 0) have 2 nearest neighbors at distance 10 px
+    assert np.isclose(s_heads[1], 10.0, atol=1e-3)
+    assert np.isclose(s_heads[2], 10.0, atol=1e-3)
+
+
+def test_spectral_rank_metrics_sample_matched():
     # Rank-1 matrix with variance (outer product u @ v)
-    u = torch.randn(32, 1)
-    v = torch.randn(1, 16)
+    u = torch.randn(256, 1)
+    v = torch.randn(1, 32)
     rank1 = u @ v
     metrics_rank1 = compute_spectral_rank_metrics(rank1)
-    assert metrics_rank1["normalized_participation_ratio"] <= 0.15
+    assert metrics_rank1["normalized_participation_ratio"] <= 0.10
     assert metrics_rank1["top1_energy_ratio"] >= 0.95
+    
+    # Random orthogonal matrix of 32 channels
+    q, _ = torch.linalg.qr(torch.randn(256, 32))
+    metrics_q = compute_spectral_rank_metrics(q)
+    assert metrics_q["normalized_participation_ratio"] >= 0.85
 
 
-def test_phase_shift_and_separability_with_model():
+def test_gradient_allocation_preserves_frozen_model_state():
     model = HPCLite(
         backbone_name="mobilenetv4_conv_small_050",
         pretrained=False,
@@ -68,25 +78,18 @@ def test_phase_shift_and_separability_with_model():
     )
     model.eval()
     
-    image = torch.randn(1, 3, 64, 64)
-    pts = np.array([[16.0, 16.0], [20.0, 20.0], [48.0, 48.0]], dtype=np.float32)
+    # Snapshot buffer states (BatchNorm running mean/var if any)
+    orig_buffers = {k: v.clone() for k, v in model.named_buffers()}
     
-    # Test D-R
-    dr_res = evaluate_phase_shift_single_image(model, image, shifts=((0, 0), (1, 0), (0, 1)))
-    assert "count_relative_std" in dr_res
-    assert "interior_mass_mae_mean" in dr_res
-    assert "feature_c4_cos_sim" in dr_res
-    assert np.isfinite(dr_res["count_relative_std"])
+    criterion = NTPCLoss(NTPCConfig(mode="r2_flat_dm", root_loss="nb"))
+    img = torch.randn(1, 3, 64, 64)
+    targets = {4: torch.zeros(1, 16, 16), 16: torch.zeros(1, 4, 4), "N": torch.zeros(1)}
     
-    # Test D-K
-    dk_res = evaluate_separability_single_image(model, image, pts)
-    assert "num_points" in dk_res
-    assert dk_res["num_points"] == 3
-    assert "bins" in dk_res
+    res = evaluate_gradient_allocation_single_batch(model, criterion, img, targets)
+    assert "C16_fg_energy_fraction" in res
+    assert "C16_gradient_enrichment" in res
     
-    # Test D-L
-    dl_res = evaluate_effective_rank_single_image(model, image, pts)
-    assert "stages" in dl_res
-    assert "C4" in dl_res["stages"]
-    assert "C16" in dl_res["stages"]
-    assert np.isfinite(dl_res["depth_decay_c16_to_c4"])
+    # Check that model remains in eval mode and buffers are unchanged
+    assert not model.training
+    for k, v in model.named_buffers():
+        assert torch.equal(v, orig_buffers[k])
