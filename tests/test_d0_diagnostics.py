@@ -1,4 +1,4 @@
-﻿"""Unit tests for D0 Diagnostic Suite (D-R, D-K, D-L, D-M)."""
+"""Unit tests for D0 Diagnostic Suite (D-R, D-K, D-L, D-M)."""
 
 import numpy as np
 import pytest
@@ -17,7 +17,6 @@ from hpc.diagnostics.phase_shift import (
     shift_tensor,
 )
 from hpc.diagnostics.separability import (
-    compute_head_scale_proxies,
     evaluate_separability_single_image,
     sample_feature_at_image_coord,
 )
@@ -42,16 +41,6 @@ def test_shift_tensor_and_inverse_align_recovery():
     peak_y, peak_x = torch.where(inv[0, 0] == inv[0, 0].max())
     assert peak_y[0].item() == 16
     assert peak_x[0].item() == 16
-
-
-def test_head_scale_proxies():
-    # 4 collinear points separated by 10 px
-    pts = np.array([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]], dtype=np.float32)
-    s_heads = compute_head_scale_proxies(pts, k=2)
-    assert len(s_heads) == 4
-    # Middle points (10, 0) and (20, 0) have 2 nearest neighbors at distance 10 px
-    assert np.isclose(s_heads[1], 10.0, atol=1e-3)
-    assert np.isclose(s_heads[2], 10.0, atol=1e-3)
 
 
 def test_spectral_rank_metrics_sample_matched():
@@ -93,3 +82,20 @@ def test_gradient_allocation_preserves_frozen_model_state():
     assert not model.training
     for k, v in model.named_buffers():
         assert torch.equal(v, orig_buffers[k])
+
+
+def test_sample_feature_at_image_coord_impulse():
+    # Feature map of shape (1, 1, 16, 16) representing stride 4 on 64x64 image
+    feat = torch.zeros(1, 1, 16, 16)
+    # Feature cell (4, 4) center in image space is at: (4 + 0.5)*4 - 0.5 = 17.5
+    feat[0, 0, 4, 4] = 10.0
+    
+    # Query at exact image coordinate of feature cell (4, 4) center: (17.5, 17.5)
+    query_exact = torch.tensor([[17.5, 17.5]], dtype=torch.float32)
+    val_exact = sample_feature_at_image_coord(feat, query_exact, img_h=64, img_w=64)
+    assert np.isclose(val_exact.item(), 10.0, atol=1e-2)
+    
+    # Query far away at (40.0, 40.0)
+    query_far = torch.tensor([[40.0, 40.0]], dtype=torch.float32)
+    val_far = sample_feature_at_image_coord(feat, query_far, img_h=64, img_w=64)
+    assert np.isclose(val_far.item(), 0.0, atol=1e-3)

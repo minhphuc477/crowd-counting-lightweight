@@ -1,8 +1,12 @@
 ﻿"""D-K / G-K: Inter-person separability collapse diagnostics across encoder depth.
 
 Measures whether compact encoders merge neighboring-person representations
-earlier in the depth hierarchy (C8 / C16 / C32) after normalizing for local head scale,
-causing local counting and localization failure.
+earlier in the depth hierarchy (C4 -> C8 -> C16 -> C32 -> P4) across raw
+inter-person Euclidean spacing bins (d_min in pixels).
+
+Note: On point-only annotations (without head bounding boxes or perspective maps),
+spacing is reported as raw Euclidean pixel distance d_min, and scale is explicitly
+uncontrolled.
 """
 
 from __future__ import annotations
@@ -15,31 +19,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# Normalized spacing bins: r = d_ij / min(s_head_i, s_head_j)
-NORMALIZED_SPACING_BINS = {
-    "le_0p5": (0.0, 0.5),     # Severe physical crowding / overlapping heads
-    "0p5_1p0": (0.5, 1.0),    # Touching / immediate neighbors
-    "1p0_2p0": (1.0, 2.0),    # Near neighbors
-    "gt_2p0": (2.0, 1e6),     # Isolated / well-separated heads
+# Raw Euclidean spacing bins (in image pixels)
+RAW_SPACING_BINS = {
+    "le8": (0.0, 8.0),       # <= 8px (high risk of receptive field overlap at stride 8/16)
+    "8_16": (8.0, 16.0),     # 8px - 16px (stride 16 cell boundary)
+    "16_32": (16.0, 32.0),   # 16px - 32px
+    "gt32": (32.0, 1e6),     # > 32px (isolated / well-separated)
 }
-
-
-def compute_head_scale_proxies(points: np.ndarray, k: int = 3) -> np.ndarray:
-    """Compute local head-scale proxy s_head for each point as mean distance to k-nearest neighbors.
-    
-    Standard proxy in crowd counting when explicit bounding boxes are unavailable.
-    """
-    n = len(points)
-    if n <= 1:
-        return np.full(n, 50.0, dtype=np.float32)
-    k_actual = min(k, n - 1)
-    diff = points[:, None, :] - points[None, :, :]
-    dists = np.sqrt(np.sum(diff ** 2, axis=-1))
-    np.fill_diagonal(dists, np.inf)
-    # Sort distances for each point
-    sorted_dists = np.sort(dists, axis=-1)
-    knn_mean = np.mean(sorted_dists[:, :k_actual], axis=-1)
-    return knn_mean.astype(np.float32)
 
 
 def sample_feature_at_image_coord(
@@ -50,13 +36,14 @@ def sample_feature_at_image_coord(
 ) -> torch.Tensor:
     """Sample feature tensor (1, C, H_feat, W_feat) at continuous image-space coordinates (N, 2).
     
-    Under align_corners=False:
-      u = -1.0 + (2.0 * x) / img_w
-      v = -1.0 + (2.0 * y) / img_h
+    Under align_corners=False pixel-center mapping:
+      Pixel center of continuous coordinate x in [0, img_w - 1] is x + 0.5.
+      Normalized coordinate: u = -1.0 + 2.0 * (x + 0.5) / img_w.
+      Similarly for y: v = -1.0 + 2.0 * (y + 0.5) / img_h.
     Returns: (N, C) feature vectors.
     """
-    norm_x = (xy[:, 0] / float(img_w)) * 2.0 - 1.0
-    norm_y = (xy[:, 1] / float(img_h)) * 2.0 - 1.0
+    norm_x = ((xy[:, 0] + 0.5) / float(img_w)) * 2.0 - 1.0
+    norm_y = ((xy[:, 1] + 0.5) / float(img_h)) * 2.0 - 1.0
     grid = torch.stack((norm_x, norm_y), dim=-1).unsqueeze(0).unsqueeze(2)  # (1, N, 1, 2)
     sampled = F.grid_sample(feat, grid, mode="bilinear", padding_mode="border", align_corners=False)
     return sampled.squeeze(0).squeeze(-1).permute(1, 0)  # (N, C)
@@ -94,15 +81,12 @@ def evaluate_separability_single_image(
     if len(feats) >= 4:
         stages["C32"] = feats[3]
         
-    # Compute local head-scale proxies
-    s_heads = compute_head_scale_proxies(points, k=3)
-    
     diff = points[:, None, :] - points[None, :, :]
     dists = np.sqrt(np.sum(diff ** 2, axis=-1))
     np.fill_diagonal(dists, np.inf)
     
-    # Deduplicate neighbor pairs and bin by normalized spacing r = d_ij / min(s_i, s_j)
-    pairs_by_bin: Dict[str, List[Tuple[int, int, float, float]]] = {k: [] for k in NORMALIZED_SPACING_BINS}
+    # Deduplicate neighbor pairs and bin by raw Euclidean distance d_ij
+    pairs_by_bin: Dict[str, List[Tuple[int, int, float]]] = {k: [] for k in RAW_SPACING_BINS}
     seen_pairs = set()
     n_pts = len(points)
     for i in range(n_pts):
@@ -113,27 +97,23 @@ def evaluate_separability_single_image(
         seen_pairs.add(pair_key)
         
         d_raw = float(dists[i, j])
-        s_min = max(1e-4, float(min(s_heads[i], s_heads[j])))
-        r_norm = d_raw / s_min
-        
-        for bname, (low, high) in NORMALIZED_SPACING_BINS.items():
-            if low < r_norm <= high:
+        for bname, (low, high) in RAW_SPACING_BINS.items():
+            if low < d_raw <= high:
                 if len(pairs_by_bin[bname]) < max_pairs_per_bin:
-                    pairs_by_bin[bname].append((i, j, d_raw, r_norm))
+                    pairs_by_bin[bname].append((i, j, d_raw))
                 break
                 
     bin_results: Dict[str, Dict[str, float]] = {}
     for bname, pair_list in pairs_by_bin.items():
         if not pair_list:
             continue
-        p1_coords = torch.from_numpy(np.array([points[i] for i, j, d, r in pair_list], dtype=np.float32)).to(device)
-        p2_coords = torch.from_numpy(np.array([points[j] for i, j, d, r in pair_list], dtype=np.float32)).to(device)
+        p1_coords = torch.from_numpy(np.array([points[i] for i, j, d in pair_list], dtype=np.float32)).to(device)
+        p2_coords = torch.from_numpy(np.array([points[j] for i, j, d in pair_list], dtype=np.float32)).to(device)
         mid_coords = 0.5 * (p1_coords + p2_coords)
         
         stage_metrics: Dict[str, float] = {
             "num_pairs": len(pair_list),
-            "mean_raw_dist_px": float(np.mean([d for i, j, d, r in pair_list])),
-            "mean_norm_ratio": float(np.mean([r for i, j, d, r in pair_list])),
+            "mean_raw_dist_px": float(np.mean([d for i, j, d in pair_list])),
         }
         for sname, sfeat in stages.items():
             f1 = sample_feature_at_image_coord(sfeat, p1_coords, img_h, img_w)
@@ -159,6 +139,6 @@ def evaluate_separability_single_image(
 
     return {
         "num_points": len(points),
-        "head_scale_proxy_mean": float(np.mean(s_heads)),
+        "mean_knn_spacing_px": float(np.mean(np.min(dists, axis=-1))),
         "bins": bin_results,
     }

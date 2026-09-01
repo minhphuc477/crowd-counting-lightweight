@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
@@ -161,9 +161,9 @@ def main() -> None:
     # Aggregate D-R
     if run_dr and dr_results:
         summary["D-R_phase_shift"] = {
-            "mean_count_relative_std": float(np.mean([r["count_relative_std"] for r in dr_results])),
-            "median_count_relative_std": float(np.median([r["count_relative_std"] for r in dr_results])),
-            "p90_count_relative_std": float(np.percentile([r["count_relative_std"] for r in dr_results], 90)),
+            "mean_interior_count_relative_std": float(np.mean([r["interior_count_relative_std"] for r in dr_results])),
+            "median_interior_count_relative_std": float(np.median([r["interior_count_relative_std"] for r in dr_results])),
+            "p90_interior_count_relative_std": float(np.percentile([r["interior_count_relative_std"] for r in dr_results], 90)),
             "mean_interior_mass_mae": float(np.mean([r["interior_mass_mae_mean"] for r in dr_results])),
             "mean_c4_cos_sim_aligned": float(np.mean([r["feature_c4_cos_sim_aligned"] for r in dr_results])),
             "mean_c8_cos_sim_aligned": float(np.mean([r["feature_c8_cos_sim_aligned"] for r in dr_results])),
@@ -176,8 +176,8 @@ def main() -> None:
 
     # Aggregate D-K
     if run_dk and dk_results:
-        dk_agg: Dict[str, Any] = {"mean_head_scale_proxy": float(np.mean([r["head_scale_proxy_mean"] for r in dk_results]))}
-        for bname in ["le_0p5", "0p5_1p0", "1p0_2p0", "gt_2p0"]:
+        dk_agg: Dict[str, Any] = {"mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))}
+        for bname in ["le8", "8_16", "16_32", "gt32"]:
             ptrs = [
                 r["bins"][bname]["P4_mass_peak_to_trough_ratio"]
                 for r in dk_results
@@ -253,19 +253,19 @@ def main() -> None:
     if "D-R_phase_shift" in summary:
         dr = summary["D-R_phase_shift"]
         diag_synthesis["D-R (Sampling Phase Shift)"] = {
-            "count_relative_std": f"{dr['mean_count_relative_std']*100:.2f}% (p90={dr['p90_count_relative_std']*100:.2f}%)",
+            "interior_count_relative_std": f"{dr['mean_interior_count_relative_std']*100:.2f}% (p90={dr['p90_interior_count_relative_std']*100:.2f}%)",
             "aligned_feature_c16_cos_sim": f"{dr['mean_c16_cos_sim_aligned']:.4f}",
             "aligned_feature_c32_cos_sim": f"{dr.get('mean_c32_cos_sim_aligned', float('nan')):.4f}" if "mean_c32_cos_sim_aligned" in dr else "N/A",
             "interior_mass_mae": f"{dr['mean_interior_mass_mae']:.5f}",
         }
     if "D-K_separability" in summary:
         dk = summary["D-K_separability"]
-        le_0p5 = dk.get("bin_le_0p5", {})
-        diag_synthesis["D-K (Separability by Normalized Spacing r=d/s_head)"] = {
-            "crowded_r<=0.5_merged_frac": f"{le_0p5.get('mean_merged_fraction', float('nan'))*100:.1f}%",
-            "crowded_r<=0.5_ptr": f"{le_0p5.get('median_peak_to_trough_ratio', float('nan')):.3f}",
-            "crowded_r<=0.5_c16_midpoint_sim": f"{le_0p5.get('mean_c16_midpoint_sim', float('nan')):.4f}",
-            "crowded_r<=0.5_c32_midpoint_sim": f"{le_0p5.get('mean_c32_midpoint_sim', float('nan')):.4f}" if "mean_c32_midpoint_sim" in le_0p5 else "N/A",
+        le8 = dk.get("bin_le8", {})
+        diag_synthesis["D-K (Separability by Raw Spacing d_min)"] = {
+            "crowded_d<=8px_merged_frac": f"{le8.get('mean_merged_fraction', float('nan'))*100:.1f}%",
+            "crowded_d<=8px_ptr": f"{le8.get('median_peak_to_trough_ratio', float('nan')):.3f}",
+            "crowded_d<=8px_c16_midpoint_sim": f"{le8.get('mean_c16_midpoint_sim', float('nan')):.4f}",
+            "crowded_d<=8px_c32_midpoint_sim": f"{le8.get('mean_c32_midpoint_sim', float('nan')):.4f}" if "mean_c32_midpoint_sim" in le8 else "N/A",
         }
     if "D-L_effective_rank" in summary:
         dl = summary["D-L_effective_rank"]

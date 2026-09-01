@@ -1,8 +1,8 @@
 ﻿"""D-R / G-R: Sampling-phase and translation instability diagnostics.
 
 Evaluates whether small +/-1, +/-2 pixel translations induce count and mass map
-inconsistencies, and whether feature representations change under exact
-inverse geometric alignment.
+inconsistencies on the common valid interior support, eliminating border truncation
+artifacts.
 """
 
 from __future__ import annotations
@@ -33,15 +33,10 @@ DEFAULT_SHIFTS: Tuple[Tuple[int, int], ...] = (
 
 
 def shift_tensor(x: torch.Tensor, dx: int, dy: int, mode: str = "replicate") -> torch.Tensor:
-    """Shift 2D spatial tensor (B, C, H, W) by integer (dx, dy) with padding.
-    
-    Positive dx shifts image to the right (pixel at (x, y) moves to (x + dx, y + dy)).
-    """
+    """Shift 2D spatial tensor (B, C, H, W) by integer (dx, dy) with padding."""
     if dx == 0 and dy == 0:
         return x
     b, c, h, w = x.shape
-    # If dx > 0: pad left by dx, slice [:w]
-    # If dx < 0: pad right by -dx, slice [abs(dx):abs(dx)+w]
     pad_l = max(0, dx)
     pad_r = max(0, -dx)
     pad_t = max(0, dy)
@@ -59,14 +54,7 @@ def make_inverse_align_grid(
     dy_feat: float,
     device: torch.device,
 ) -> torch.Tensor:
-    """Build grid_sample grid (1, H, W, 2) for inverse-aligning a tensor shifted by (dx_feat, dy_feat).
-    
-    Under align_corners=False:
-      Pixel center i in [0, W-1] has normalized coordinate u_i = -1.0 + (2.0 * i + 1.0) / W.
-      If original feature f(x) was shifted by (dx, dy) -> g(x) = f(x - dx),
-      to resample back to f(x), we query g at (x + dx).
-      Normalized offset: delta_u = 2.0 * dx_feat / W.
-    """
+    """Build grid_sample grid (1, H, W, 2) for inverse-aligning under align_corners=False."""
     u = -1.0 + (2.0 * torch.arange(w_feat, device=device, dtype=torch.float32) + 1.0) / float(w_feat)
     v = -1.0 + (2.0 * torch.arange(h_feat, device=device, dtype=torch.float32) + 1.0) / float(h_feat)
     grid_y, grid_x = torch.meshgrid(v, u, indexing="ij")
@@ -100,16 +88,15 @@ def evaluate_phase_shift_single_image(
     image: torch.Tensor,  # (1, 3, H, W)
     shifts: Tuple[Tuple[int, int], ...] = DEFAULT_SHIFTS,
     device: torch.device = torch.device("cpu"),
-    border_margin: int = 16,
+    border_margin_px: int = 8,
 ) -> Dict[str, float]:
-    """Compute phase shift variance and inverse-aligned feature/mass consistency on one image."""
+    """Compute phase shift variance and inverse-aligned consistency on common valid interior support."""
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
     _, _, h, w = image.shape
     
-    counts: List[float] = []
     inv_mass_maps: List[torch.Tensor] = []
     inv_c4_feats: List[torch.Tensor] = []
     inv_c8_feats: List[torch.Tensor] = []
@@ -124,9 +111,6 @@ def evaluate_phase_shift_single_image(
             p4 = model.neck(*feats)
             mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
             mass = F.softplus(mass.float()) + model.eps_d
-            
-            cnt = float(mass.sum().item())
-            counts.append(cnt)
             
             # Inverse-align mass map at stride 4
             inv_mass = inverse_align_feature(mass, dx, dy, stride=4.0, device=device)
@@ -145,38 +129,44 @@ def evaluate_phase_shift_single_image(
                 inv_c32 = inverse_align_feature(feats[3], dx, dy, stride=32.0, device=device)
                 inv_c32_feats.append(inv_c32)
                 
-    base_count = counts[0]
-    counts_arr = np.array(counts, dtype=np.float64)
-    count_std = float(np.std(counts_arr))
-    count_mean = float(np.mean(counts_arr))
-    count_relative_std = float(count_std / max(1.0, count_mean))
-    count_max_delta = float(np.max(np.abs(counts_arr - base_count)))
-    count_max_rel_delta = float(count_max_delta / max(1.0, base_count))
-    
-    # Interior mask (exclude boundary to eliminate padding artifacts)
+    # Define common valid interior mask on mass map (stride 4)
     base_mass = inv_mass_maps[0]
     _, _, mh, mw = base_mass.shape
-    b_margin_m = max(1, border_margin // 4)
+    b_margin_m = max(1, border_margin_px // 4)
     interior_mask = torch.zeros((1, 1, mh, mw), dtype=torch.bool, device=device)
     if mh > 2 * b_margin_m and mw > 2 * b_margin_m:
         interior_mask[:, :, b_margin_m:-b_margin_m, b_margin_m:-b_margin_m] = True
     else:
         interior_mask[:] = True
         
+    # Measure interior count on common valid support for all shifts
+    interior_counts: List[float] = []
     mass_diffs: List[float] = []
     interior_mass_diffs: List[float] = []
-    for m in inv_mass_maps[1:]:
-        diff = torch.abs(m - base_mass)
-        mass_diffs.append(float(diff.mean().item()))
-        interior_mass_diffs.append(float(diff[interior_mask].mean().item()))
-        
+    
+    for m in inv_mass_maps:
+        int_cnt = float(m[interior_mask].sum().item())
+        interior_counts.append(int_cnt)
+        if len(interior_counts) > 1:
+            diff = torch.abs(m - base_mass)
+            mass_diffs.append(float(diff.mean().item()))
+            interior_mass_diffs.append(float(diff[interior_mask].mean().item()))
+            
+    base_count = interior_counts[0]
+    counts_arr = np.array(interior_counts, dtype=np.float64)
+    count_std = float(np.std(counts_arr))
+    count_mean = float(np.mean(counts_arr))
+    count_relative_std = float(count_std / max(1.0, count_mean))
+    count_max_delta = float(np.max(np.abs(counts_arr - base_count)))
+    count_max_rel_delta = float(count_max_delta / max(1.0, base_count))
+    
     # Helper to compute aligned feature cosine similarity on interior
     def compute_aligned_cos_sim(feat_list: List[torch.Tensor], stride: float) -> float:
         if len(feat_list) <= 1:
             return 1.0
         base_f = feat_list[0]
         _, _, fh, fw = base_f.shape
-        f_margin = max(1, border_margin // int(stride))
+        f_margin = max(1, border_margin_px // int(stride))
         if fh > 2 * f_margin and fw > 2 * f_margin:
             f_mask = (slice(None), slice(None), slice(f_margin, -f_margin), slice(f_margin, -f_margin))
         else:
@@ -196,13 +186,11 @@ def evaluate_phase_shift_single_image(
     c32_cos = compute_aligned_cos_sim(inv_c32_feats, stride=32.0) if has_c32 else float("nan")
 
     res = {
-        "base_count": base_count,
-        "count_mean": count_mean,
-        "count_std": count_std,
-        "count_relative_std": count_relative_std,
-        "count_max_delta": count_max_delta,
-        "count_max_rel_delta": count_max_rel_delta,
-        "mass_mae_mean": float(np.mean(mass_diffs)) if mass_diffs else 0.0,
+        "interior_base_count": base_count,
+        "interior_count_mean": count_mean,
+        "interior_count_std": count_std,
+        "interior_count_relative_std": count_relative_std,
+        "interior_count_max_rel_delta": count_max_rel_delta,
         "interior_mass_mae_mean": float(np.mean(interior_mass_diffs)) if interior_mass_diffs else 0.0,
         "feature_c4_cos_sim_aligned": c4_cos,
         "feature_c8_cos_sim_aligned": c8_cos,

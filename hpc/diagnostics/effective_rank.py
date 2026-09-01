@@ -1,8 +1,8 @@
 ﻿"""D-L / G-L: Normalized effective representation rank collapse diagnostics.
 
 Evaluates singular-value spectrum, covariance-energy participation ratio,
-and spectral entropy of intermediate activations with sample-count matched
-normalization across depth (C4 -> C8 -> C16 -> C32).
+and spectral entropy of intermediate activations sampled at exact matched
+crowd point locations across depth (C4 -> C8 -> C16 -> C32).
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .separability import sample_feature_at_image_coord
 
 
 def compute_spectral_rank_metrics(x: torch.Tensor, eps: float = 1e-10) -> Dict[str, float]:
@@ -77,13 +79,14 @@ def evaluate_effective_rank_single_image(
     image: torch.Tensor,          # (1, 3, H, W)
     points: Optional[np.ndarray], # (N, 2)
     device: torch.device = torch.device("cpu"),
-    num_samples_matched: int = 256,
+    max_crowd_samples: int = 128,
 ) -> Dict[str, Any]:
-    """Evaluate effective rank at C4, C8, C16, C32 with matched spatial sample count."""
+    """Evaluate effective rank at C4, C8, C16, C32 sampled at matched physical locations."""
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
+    _, _, img_h, img_w = image.shape
     
     with torch.no_grad():
         feats = model.backbone(image)
@@ -96,21 +99,27 @@ def evaluate_effective_rank_single_image(
     if len(feats) >= 4:
         stages["C32"] = feats[3]
         
-    stage_metrics: Dict[str, Dict[str, float]] = {}
-    
-    for sname, sfeat in stages.items():
-        _, c, sh, sw = sfeat.shape
-        feat_flat = sfeat.squeeze(0).permute(1, 2, 0).reshape(-1, c)  # (H*W, C)
-        n_spatial = feat_flat.shape[0]
-        
-        # Subsample exactly num_samples_matched vectors (or all if fewer)
-        if n_spatial > num_samples_matched:
-            # Deterministic subsampling across spatial grid
-            indices = torch.linspace(0, n_spatial - 1, num_samples_matched, device=device).long()
-            sampled_feat = feat_flat[indices]
+    # Select matched physical coordinates for sampling across all stages
+    if points is not None and len(points) >= 4:
+        n_pts = len(points)
+        if n_pts > max_crowd_samples:
+            # Deterministic subset of crowd points
+            indices = np.linspace(0, n_pts - 1, max_crowd_samples, dtype=int)
+            sample_coords = points[indices]
         else:
-            sampled_feat = feat_flat
-            
+            sample_coords = points
+        coords_t = torch.from_numpy(np.asarray(sample_coords, dtype=np.float32)).to(device)
+    else:
+        # Fallback to uniform grid of coordinates
+        gy = np.linspace(16.0, float(img_h - 16), 8, dtype=np.float32)
+        gx = np.linspace(16.0, float(img_w - 16), 8, dtype=np.float32)
+        grid_coords = np.stack(np.meshgrid(gx, gy), axis=-1).reshape(-1, 2)
+        coords_t = torch.from_numpy(grid_coords).to(device)
+        
+    stage_metrics: Dict[str, Dict[str, float]] = {}
+    for sname, sfeat in stages.items():
+        # Sample (M, C) features at exact identical physical coordinates
+        sampled_feat = sample_feature_at_image_coord(sfeat, coords_t, img_h, img_w)
         stage_metrics[sname] = compute_spectral_rank_metrics(sampled_feat)
         
     # Depthwise decay ratios
@@ -119,6 +128,7 @@ def evaluate_effective_rank_single_image(
     decay_16_4 = float(c16_pr / max(1e-6, c4_pr))
     
     res = {
+        "matched_sample_count": len(coords_t),
         "depth_decay_c16_to_c4": decay_16_4,
         "stages": stage_metrics,
     }

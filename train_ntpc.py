@@ -67,6 +67,16 @@ def get_runtime_metadata() -> dict:
     }
 
 
+def get_rng_state() -> dict:
+    """Capture full PyTorch, CUDA, NumPy, and Python RNG states."""
+    return {
+        "torch": torch.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        "numpy": np.random.get_state(),
+        "python": random.getstate(),
+    }
+
+
 def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
     res = {
         "crop_size": int(ds_cfg.get("crop_size", 256)),
@@ -82,7 +92,7 @@ def _dataset_common(ds_cfg: dict, aug_cfg: dict, is_train: bool) -> dict:
 
 
 def build_datasets(cfg: dict):
-    """Use official train/evaluation partitions; never create a custom split."""
+    """Use official train/evaluation partitions; support internal validation split to prevent test leakage."""
     ds_cfg = cfg["dataset"]
     aug_cfg = cfg.get("augmentation", {})
     name = str(ds_cfg.get("name", "sha")).lower().replace("-", "_")
@@ -90,13 +100,16 @@ def build_datasets(cfg: dict):
     eval_args = _dataset_common(ds_cfg, aug_cfg, False)
     if name in {"sha", "shanghaitech", "shanghaitech_a", "shanghaitech_b"}:
         part = ds_cfg.get("part", "part_B" if name.endswith("_b") else "part_A")
+        use_val = bool(ds_cfg.get("use_val_split", True))
+        train_split = str(ds_cfg.get("train_split", "train_split" if use_val else "train_data"))
+        val_split = str(ds_cfg.get("val_split", "val_data" if use_val else "test_data"))
         train = ShanghaiTechDataset(
-            root=ds_cfg["root"], part=part, split="train_data", **train_args
+            root=ds_cfg["root"], part=part, split=train_split, **train_args
         )
         evaluation = ShanghaiTechDataset(
-            root=ds_cfg["root"], part=part, split="test_data", **eval_args
+            root=ds_cfg["root"], part=part, split=val_split, **eval_args
         )
-        selection_split = "test_data"
+        selection_split = val_split
     elif name in {"qnrf", "ucf_qnrf"}:
         train = UCFQNRFDataset(root=ds_cfg["root"], split="Train", **train_args)
         evaluation = UCFQNRFDataset(root=ds_cfg["root"], split="Test", **eval_args)
@@ -522,6 +535,18 @@ def main() -> None:
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if amp_enabled and "scaler_state_dict" in ckpt and ckpt["scaler_state_dict"] is not None:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        if "rng_state" in ckpt:
+            rng_s = ckpt["rng_state"]
+            if "torch" in rng_s and rng_s["torch"] is not None:
+                torch.set_rng_state(rng_s["torch"])
+            if "cuda" in rng_s and rng_s["cuda"] is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(rng_s["cuda"])
+            if "numpy" in rng_s and rng_s["numpy"] is not None:
+                np.random.set_state(rng_s["numpy"])
+            if "python" in rng_s and rng_s["python"] is not None:
+                random.setstate(rng_s["python"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
         best_mae = float(ckpt.get("val_res", {}).get("mae", float("inf")))
         best_epoch = int(ckpt.get("epoch", 0))
@@ -767,6 +792,8 @@ def main() -> None:
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scheduler_state_dict": scheduler.state_dict(),
+                    "scaler_state_dict": scaler.state_dict() if amp_enabled else None,
+                    "rng_state": get_rng_state(),
                     "val_res": metrics,
                     "config": cfg,
                     "resolved_crop_statistics": crop_stats,
@@ -810,6 +837,8 @@ def main() -> None:
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict() if amp_enabled else None,
+            "rng_state": get_rng_state(),
             "val_res": metrics if (epoch % evaluate_every == 0 or epoch == epochs) else {"mae": best_mae},
             "config": cfg,
             "resolved_crop_statistics": crop_stats,
