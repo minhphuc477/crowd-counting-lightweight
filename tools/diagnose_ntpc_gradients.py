@@ -16,32 +16,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from hpc.data.common import ntpc_collate_fn
-from hpc.losses.ntpc import NTPCConfig, NTPCLoss
+from hpc.losses.factory import build_ntpc_criterion_from_config
 from hpc.models.factory import build_model_from_config
 from hpc.utils.seed import make_generator, seed_everything
 from train_ntpc import build_datasets, build_optimizer, estimate_crop_statistics
-
-
-def _criterion(cfg: dict, dense_threshold: float) -> NTPCLoss:
-    loss_cfg = cfg.get("loss", {})
-    stats_cfg = cfg.get("statistics", {})
-    shared = loss_cfg.get("kappa_shared")
-
-    def kappa(name: str) -> float:
-        return float(loss_cfg.get(name, shared if shared is not None else 20.0))
-
-    return NTPCLoss(NTPCConfig(
-        mode=loss_cfg.get("mode", "r4_dtm_tree16"),
-        root_loss=loss_cfg.get("root_loss", "nb"),
-        root_dispersion=float(stats_cfg.get("root_dispersion", 50.0)),
-        kappa_root64=kappa("kappa_root64"),
-        kappa_64_32=kappa("kappa_64_32"),
-        kappa_32_16=kappa("kappa_32_16"),
-        kappa_16_8=kappa("kappa_16_8"),
-        kappa_8_4=kappa("kappa_8_4"),
-        kappa_flat16=kappa("kappa_flat16"),
-        dense_threshold_16=dense_threshold,
-    ))
 
 
 def _grad_report(model: torch.nn.Module) -> tuple[float, list[str]]:
@@ -91,14 +69,17 @@ def main() -> None:
     targets["N"] = batch["gt_count"].to(device)
     model = build_model_from_config(cfg).to(device)
     model.init_head_bias_from_data(stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4)
-    threshold = cfg.get("loss", {}).get("dense_threshold_16", "auto")
-    dense_threshold = stats["dense_threshold_q85"] if threshold is None or str(threshold).lower() == "auto" else float(threshold)
-    criterion = _criterion(cfg, dense_threshold).to(device)
+    criterion = build_ntpc_criterion_from_config(cfg, crop_statistics=stats).to(device)
 
     print(f"device={device} gt_min={float(targets['N'].min())} gt_max={float(targets['N'].max())} stats={stats}")
+    reference_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+
     for amp in (False, True):
         if amp and device.type != "cuda":
             continue
+        model.load_state_dict(reference_state, strict=True)
+        model.train()
+        model.zero_grad(set_to_none=True)
         with torch.amp.autocast(device_type=device.type, enabled=amp):
             mass = model(images)
             loss, logs, components = criterion(mass, targets, return_components=True, validate_targets=True)
@@ -120,6 +101,7 @@ def main() -> None:
         model.zero_grad(set_to_none=True)
 
     if args.train_steps > 0:
+        model.load_state_dict(reference_state, strict=True)
         # Recreate the loader iterator because the first iterator above advances the
         # shared augmentation RNG even though it does not mutate model weights.
         seed_everything(seed)

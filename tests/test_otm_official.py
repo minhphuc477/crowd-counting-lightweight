@@ -147,3 +147,16 @@ def test_otm_fullres_initialization_guard_and_explicit_stride_grid_mode():
     assert len(points) == 1
     assert diagnostics["config_initialization_mode"] == "stride_grid"
 
+
+def test_otm_tall_map_tiny_source_cap():
+    from hpc.metrics.otm import OTMConfig, _source_distribution
+
+    mass = torch.ones(100, 1, dtype=torch.float32)
+    cfg = OTMConfig(max_source_points=1)
+    weights, coords, diag = _source_distribution(mass, cfg, image_hw=(400, 4))
+    assert len(weights) == 1
+    assert len(coords) == 1
+    assert diag["source_coarse_height"] >= 1
+    assert diag["source_coarse_width"] >= 1
+
+

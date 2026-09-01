@@ -402,6 +402,13 @@ def main() -> None:
         assert_checkpoint_compatible(ckpt, cfg)
         assert_resume_compatible(ckpt, cfg)
 
+        if persistent_workers:
+            raise ValueError(
+                "Exact resume does not support persistent_workers=True because "
+                "worker-local Python/NumPy RNG state is not checkpointed. "
+                "Use persistent_workers=False."
+            )
+
         stored_crop_stats = ckpt.get("resolved_crop_statistics")
         if stored_crop_stats is not None:
             old_tau = int(stored_crop_stats.get("dense_threshold_q85", 0))

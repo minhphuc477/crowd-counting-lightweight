@@ -64,15 +64,15 @@ def summarize_all():
             sub = data.get("subgroups", {})
             loc = data.get("localization", {}).get("otm", {})
             
-            mae = c.get("mae", 0.0)
-            rmse = c.get("rmse", 0.0)
-            bias = c.get("bias", 0.0)
-            ratio = sub.get("pred_gt_ratio", 0.0)
-            sparse = sub.get("bin_sparse_mae", 0.0)
-            mid = sub.get("bin_medium_mae", 0.0)
-            dense = sub.get("bin_dense_mae", 0.0)
-            f1_8 = loc.get("sigma_8_f1", 0.0) * 100.0
-            f1_4 = loc.get("sigma_4_f1", 0.0) * 100.0
+            mae = c.get("mae", float("nan"))
+            rmse = c.get("rmse", float("nan"))
+            bias = c.get("bias", float("nan"))
+            ratio = sub.get("pred_gt_ratio", float("nan"))
+            sparse = sub.get("bin_sparse_mae", float("nan"))
+            mid = sub.get("bin_medium_mae", float("nan"))
+            dense = sub.get("bin_dense_mae", float("nan"))
+            f1_8 = loc.get("sigma_8_f1", float("nan")) * 100.0 if "sigma_8_f1" in loc else float("nan")
+            f1_4 = loc.get("sigma_4_f1", float("nan")) * 100.0 if "sigma_4_f1" in loc else float("nan")
             
             row_str = f"{name:<24} | {mae:<7.2f} {rmse:<7.2f} {bias:<8.2f} {ratio:<6.3f} | {sparse:<7.2f} {mid:<7.2f} {dense:<7.2f} | {f1_8:<10.2f} {f1_4:<7.2f}"
             print(row_str)

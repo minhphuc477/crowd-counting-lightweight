@@ -166,11 +166,15 @@ def _source_distribution(
     if config.max_source_points is not None and indices.numel() > config.max_source_points:
         # Aggregate the complete thresholded measure into a deterministic
         # coarse grid. Preserves total source mass and represents each bin at its mass-weighted barycenter.
-        aspect = height / max(width, 1)
-        coarse_height = min(height, max(1, int(np.sqrt(config.max_source_points * aspect))))
-        coarse_width = min(width, max(1, config.max_source_points // coarse_height))
-        while coarse_height * coarse_width > config.max_source_points:
-            coarse_width -= 1
+        max_points = int(config.max_source_points)
+        aspect = float(height) / max(float(width), 1.0)
+        target_height = max(1, int(round(math.sqrt(max_points * aspect))))
+        coarse_height = min(height, max_points, target_height)
+        coarse_width = min(width, max(1, max_points // coarse_height))
+        assert coarse_height >= 1
+        assert coarse_width >= 1
+        assert coarse_height * coarse_width <= max_points
+
         row_bucket = torch.clamp((rows * coarse_height / height).long(), max=coarse_height - 1)
         col_bucket = torch.clamp((columns * coarse_width / width).long(), max=coarse_width - 1)
         bucket = row_bucket * coarse_width + col_bucket

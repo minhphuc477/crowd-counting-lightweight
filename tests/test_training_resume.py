@@ -78,4 +78,34 @@ def test_resume_rejects_evaluation_cadence_drift():
         assert_resume_compatible({"config": old_cfg}, new_cfg)
 
 
+def test_dataset_resolver_matches_loader_defaults():
+    from hpc.models.factory import resolve_dataset_config
+
+    assert resolve_dataset_config({"dataset": {"name": "sha"}})["coordinate_base"] == 0
+    assert resolve_dataset_config({"dataset": {"name": "qnrf"}})["coordinate_base"] == 1
+    assert resolve_dataset_config({"dataset": {"name": "nwpu"}})["coordinate_base"] == 0
+
+    shb = resolve_dataset_config({"dataset": {"name": "shanghaitech_b"}})
+    assert shb["part"] == "part_B"
+    assert shb["coordinate_base"] == 0
+
+
+def test_resume_rejects_persistent_workers_drift():
+    import pytest
+    from hpc.models.factory import assert_resume_compatible
+
+    old_cfg = {
+        "dataset": {"name": "sha"},
+        "training": {"num_workers": 2, "persistent_workers": False},
+    }
+    new_cfg = {
+        "dataset": {"name": "sha"},
+        "training": {"num_workers": 2, "persistent_workers": True},
+    }
+
+    with pytest.raises(ValueError, match="Resume protocol mismatch in: training"):
+        assert_resume_compatible({"config": old_cfg}, new_cfg)
+
+
+
 

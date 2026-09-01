@@ -68,11 +68,29 @@ def resolve_model_config(cfg: dict) -> dict:
 
 def resolve_dataset_config(cfg: dict) -> dict:
     d = cfg.get("dataset", {})
+    name = str(d.get("name", "")).lower().replace("-", "_")
+
+    if name in {"sha", "shanghaitech", "shanghaitech_a"}:
+        default_part = "part_A"
+        default_coordinate_base = 0
+    elif name == "shanghaitech_b":
+        default_part = "part_B"
+        default_coordinate_base = 0
+    elif name in {"qnrf", "ucf_qnrf"}:
+        default_part = "part_A"
+        default_coordinate_base = 1
+    elif name == "nwpu":
+        default_part = "part_A"
+        default_coordinate_base = 0
+    else:
+        default_part = "part_A"
+        default_coordinate_base = 1
+
     return {
-        "name": str(d.get("name", "")),
-        "part": str(d.get("part", "part_A")),
+        "name": name,
+        "part": str(d.get("part", default_part)),
         "crop_size": int(d.get("crop_size", 256)),
-        "coordinate_base": int(d.get("coordinate_base", 1)),
+        "coordinate_base": int(d.get("coordinate_base", default_coordinate_base)),
         "image_mean": tuple(float(x) for x in d.get("image_mean", [0.485, 0.456, 0.406])),
         "image_std": tuple(float(x) for x in d.get("image_std", [0.229, 0.224, 0.225])),
     }
@@ -201,7 +219,13 @@ def resume_protocol_signature(cfg: dict) -> dict:
             training.get("validate_every", 5),
         )
     )
+    num_workers = int(training.get("num_workers", 0))
+    persistent_workers = (
+        bool(training.get("persistent_workers", False)) if num_workers > 0 else False
+    )
+
     return {
+        "experiment_seed": int(cfg.get("experiment", {}).get("seed", 42)),
         "model": resolve_model_config(cfg),
         "dataset": resolve_dataset_config(cfg),
         "statistics": dict(cfg.get("statistics", {})),
@@ -215,7 +239,8 @@ def resume_protocol_signature(cfg: dict) -> dict:
             "drop_last": training.get("drop_last"),
             "amp": training.get("amp"),
             "init_scale": training.get("init_scale"),
-            "num_workers": training.get("num_workers", 0),
+            "num_workers": num_workers,
+            "persistent_workers": persistent_workers,
             "evaluate_every": evaluate_every,
         },
     }
