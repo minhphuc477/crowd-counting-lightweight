@@ -398,7 +398,7 @@ def main() -> None:
     ckpt = None
     if is_resuming:
         print(f"Loading checkpoint for resume validation: {resume_ckpt_path}", flush=True)
-        ckpt = torch.load(resume_ckpt_path, map_location=device)
+        ckpt = torch.load(resume_ckpt_path, map_location=device, weights_only=False)
         assert_checkpoint_compatible(ckpt, cfg)
         assert_resume_compatible(ckpt, cfg)
 

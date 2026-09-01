@@ -104,7 +104,7 @@ def main() -> None:
     print(f"Running D0 Diagnostic Suite on device: {device}", flush=True)
 
     # Load model strictly from checkpoint without re-downloading ImageNet pretraining
-    ckpt = torch.load(args.checkpoint, map_location=device)
+    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     assert_checkpoint_compatible(ckpt, cfg)
     model = build_model_from_config(cfg, load_pretrained=False).to(device)
     model.load_state_dict(ckpt["model_state_dict"], strict=True)
