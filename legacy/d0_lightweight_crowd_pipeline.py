@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""D0 bottleneck pipeline for lightweight crowd counting.
+"""D0 bottleneck pipeline for lightweight crowd counting (ARCHIVED PROTOTYPE)."""
 
-Implements:
-- D-R / G-R: 1-2 px sampling-phase / shift instability.
-- D-K / G-K: inter-person separability collapse through encoder depth.
-- D-L / G-L: normalized effective-rank collapse.
-- D1: zoom-recovery control.
-
-This carrier is a diagnostic baseline, NOT the final proposed model.
-
-Manifest CSV columns:
-  image,points,split[,sizes]
-points: Nx2 [x,y] in .npy/.npz/.txt/.json/.mat
-sizes: optional Nx1 diameter or Nx2 [w,h]. Definitive D-K needs real head-size proxies.
-"""
+raise RuntimeError(
+    "Archived prototype. Use tools/run_d0_diagnostics.py with hpc/diagnostics/* for scientific results."
+)
 from __future__ import annotations
 import argparse, json, math, random, warnings
 from pathlib import Path

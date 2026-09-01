@@ -1,8 +1,8 @@
 ﻿"""D-R / G-R: Sampling-phase and translation instability diagnostics.
 
 Evaluates whether small +/-1, +/-2 pixel translations induce count and mass map
-inconsistencies on the central valid support without distorting GroupNorm statistics
-via artificial canvas padding.
+inconsistencies on the central valid support using natural source crop shifts
+to avoid all artificial padding and GroupNorm wrap-around boundary distortions.
 """
 
 from __future__ import annotations
@@ -31,6 +31,23 @@ DEFAULT_SHIFTS: Tuple[Tuple[int, int], ...] = (
     (2, 2),
     (-2, -2),
 )
+
+
+def natural_shift_view(
+    image: torch.Tensor,
+    dx: int,
+    dy: int,
+    max_shift: int,
+) -> torch.Tensor:
+    """Crop a shifted sub-window from original image canvas without boundary wrap-around."""
+    _, _, h, w = image.shape
+    out_h = h - 2 * max_shift
+    out_w = w - 2 * max_shift
+    if out_h <= 0 or out_w <= 0:
+        raise ValueError(f"Image of size ({h}, {w}) too small for max_shift={max_shift}")
+    y0 = max_shift - dy
+    x0 = max_shift - dx
+    return image[..., y0:y0 + out_h, x0:x0 + out_w]
 
 
 def make_inverse_align_grid(
@@ -90,16 +107,19 @@ def evaluate_phase_shift_single_image(
     device: torch.device = torch.device("cpu"),
     border_margin_px: int = 96,
 ) -> Dict[str, float]:
-    """Compute phase shift variance and inverse-aligned consistency on valid central support."""
+    """Compute phase shift variance and inverse-aligned consistency using natural shifted sub-windows."""
     model.eval()
     if image.ndim == 3:
         image = image.unsqueeze(0)
     image = image.to(device)
     _, _, original_h, original_w = image.shape
     
-    # Adaptive margin guard for smaller images
+    max_shift = max(max(abs(dx), abs(dy)) for dx, dy in shifts)
+    view_h = original_h - 2 * max_shift
+    view_w = original_w - 2 * max_shift
+    
     margin = border_margin_px
-    while margin > 16 and (original_h <= 2 * margin or original_w <= 2 * margin):
+    while margin > 16 and (view_h <= 2 * margin or view_w <= 2 * margin):
         margin -= 16
         
     inv_mass_maps: List[torch.Tensor] = []
@@ -111,8 +131,7 @@ def evaluate_phase_shift_single_image(
     
     with torch.no_grad():
         for dx, dy in shifts:
-            # Shift via torch.roll to maintain natural image spatial statistics
-            img_shifted = torch.roll(image, shifts=(dy, dx), dims=(-2, -1))
+            img_shifted = natural_shift_view(image, dx=dx, dy=dy, max_shift=max_shift)
             feats = model.backbone(img_shifted)
             p4 = model.neck(*feats)
             mass = model.head_out(model.head_act(model.head_norm(model.head_dw(p4))) if not model.use_repblock else model.head_refine(p4))
@@ -177,6 +196,7 @@ def evaluate_phase_shift_single_image(
         "feature_c4_cos_sim_aligned": c4_cos,
         "feature_c8_cos_sim_aligned": c8_cos,
         "feature_c16_cos_sim_aligned": c16_cos,
+        "effective_margin_px": float(margin),
     }
     if has_c32:
         res["feature_c32_cos_sim_aligned"] = c32_cos

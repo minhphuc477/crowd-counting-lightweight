@@ -114,3 +114,93 @@ def test_sample_feature_at_image_coord_impulse():
     query_far = torch.tensor([[40.0, 40.0]], dtype=torch.float32)
     val_far = sample_feature_at_image_coord(feat, query_far, img_h=64, img_w=64)
     assert np.isclose(val_far.item(), 0.0, atol=1e-3)
+
+
+def test_dk_kdtree_matches_dense_knn_small_case():
+    from scipy.spatial import cKDTree
+
+    rng = np.random.default_rng(42)
+    pts = rng.uniform(0, 100, size=(25, 2)).astype(np.float32)
+
+    # Brute-force pairwise distance matrix
+    diff = pts[:, None, :] - pts[None, :, :]
+    dists = np.sqrt(np.sum(diff ** 2, axis=-1))
+    np.fill_diagonal(dists, np.inf)
+    brute_nn_idx = np.argmin(dists, axis=-1)
+    brute_nn_dist = np.min(dists, axis=-1)
+
+    # cKDTree query
+    tree = cKDTree(pts)
+    nn_dist, nn_idx = tree.query(pts, k=2)
+
+    np.testing.assert_array_equal(nn_idx[:, 1], brute_nn_idx)
+    np.testing.assert_allclose(nn_dist[:, 1], brute_nn_dist, rtol=1e-5)
+
+
+def test_factorial_configs_are_exact_2x2():
+    import yaml
+
+    cfgs = {}
+    for letter, fname in [
+        ("A", "configs/factorial_a_crop256_c16.yaml"),
+        ("B", "configs/factorial_b_crop256_c32.yaml"),
+        ("C", "configs/factorial_c_crop448_c16.yaml"),
+        ("D", "configs/factorial_d_crop448_c32.yaml"),
+    ]:
+        with open(fname, "r", encoding="utf-8") as f:
+            cfgs[letter] = yaml.safe_load(f)
+
+    # All must use mode: r2_flat_dm with kappa_flat16: 20
+    for letter, cfg in cfgs.items():
+        assert cfg["loss"]["mode"] == "r2_flat_dm"
+        assert cfg["loss"]["kappa_flat16"] == 20.0
+        assert cfg["optimizer"]["lr"] == 1e-4
+        assert cfg["optimizer"]["grad_clip"] == 500.0
+
+    # Check 2x2 factor isolation
+    assert cfgs["A"]["dataset"]["crop_size"] == 256
+    assert cfgs["A"]["model"]["features"] == ["C4", "C8", "C16"]
+
+    assert cfgs["B"]["dataset"]["crop_size"] == 256
+    assert cfgs["B"]["model"]["features"] == ["C4", "C8", "C16", "C32"]
+
+    assert cfgs["C"]["dataset"]["crop_size"] == 448
+    assert cfgs["C"]["model"]["features"] == ["C4", "C8", "C16"]
+
+    assert cfgs["D"]["dataset"]["crop_size"] == 448
+    assert cfgs["D"]["model"]["features"] == ["C4", "C8", "C16", "C32"]
+
+
+def test_dm_diagnostic_uses_unpadded_natural_crop():
+    from tools.run_d0_diagnostics import make_natural_dm_crop
+
+    img = torch.randn(1, 3, 300, 400)
+    pts = np.array([[10.0, 20.0], [200.0, 150.0], [390.0, 290.0]], dtype=np.float32)
+
+    crop_sample = make_natural_dm_crop(img, pts, max_crop=256)
+    assert crop_sample is not None
+    crop_img, crop_pts = crop_sample
+
+    # Dimensions must be divisible by 64 and <= max_crop
+    _, _, ch, cw = crop_img.shape
+    assert ch % 64 == 0
+    assert cw % 64 == 0
+    assert ch <= 256
+    assert cw <= 256
+
+    # All cropped points must lie within the crop bounds
+    if len(crop_pts) > 0:
+        assert np.all(crop_pts[:, 0] >= -0.5)
+        assert np.all(crop_pts[:, 0] <= cw - 0.5)
+        assert np.all(crop_pts[:, 1] >= -0.5)
+        assert np.all(crop_pts[:, 1] <= ch - 0.5)
+
+
+def test_tool_imports():
+    import tools.architecture_table
+    import tools.eval_localization
+    import tools.run_all_ablations
+    import tools.run_d0_diagnostics
+    import tools.run_factorial_abcd
+    import tools.summary_runs
+

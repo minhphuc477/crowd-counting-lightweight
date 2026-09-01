@@ -44,9 +44,9 @@ def summarize(runs_root: str = "runs") -> dict[str, float]:
         print(f" Best Selection RMSE   : {float(best['rmse']):.2f}")
         print(
             " Breakdown at Best MAE : "
-            f"Sparse={float(best.get('sparse_mae', 0.0)):.2f} | "
-            f"Med={float(best.get('medium_mae', 0.0)):.2f} | "
-            f"Dense={float(best.get('dense_mae', 0.0)):.2f}"
+            f"Sparse={float(best.get('bin_sparse_mae', best.get('sparse_mae', float('nan')))):.2f} | "
+            f"Med={float(best.get('bin_medium_mae', best.get('medium_mae', float('nan')))):.2f} | "
+            f"Dense={float(best.get('bin_dense_mae', best.get('dense_mae', float('nan')))):.2f}"
         )
         print(f" Latest MAE (Ep {last['epoch']}) : {float(last['mae']):.2f}")
 

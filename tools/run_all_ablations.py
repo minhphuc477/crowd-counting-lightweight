@@ -1,4 +1,4 @@
-﻿"""Sequential runner for NTPC Ablation Study (R0, R1, R2, R3).
+"""Sequential runner for NTPC Ablation Study (R0, R1, R2, R3).
 
 Runs each model sequentially with exact matched protocol, runs localization evaluation,
 and compiles a unified comparison table with R4 and R5.
@@ -26,7 +26,7 @@ ALL_RUNS = [
     ("R1_SDC_Deterministic", "runs/ntpc_r1_sdc_deterministic"),
     ("R2_Flat_DM16", "runs/ntpc_r2_flat_dm16"),
     ("R3_Multinomial_Tree", "runs/ntpc_r3_hierarchical_multinomial"),
-    ("R4_Neural_DTM_Tree16", "runs/ntpc_sha"),
+    ("R4_Neural_DTM_Tree16", "runs/ntpc_r4_neural_dtm_tree"),
     ("R5_Full_Adaptive_NTPC", "runs/ntpc_r5_full_adaptive_ntpc"),
 ]
 
@@ -99,12 +99,19 @@ def summarize_all():
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Run all NTPC ablations sequentially")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing runs")
+    args = parser.parse_args()
+
     python_exe = sys.executable
     for tag, config_path, run_dir in EXPERIMENTS:
         print(f"\n{'='*70}\nSTARTING ABLATION: {tag}\nConfig: {config_path}\n{'='*70}", flush=True)
         
         # 1. Run training
-        train_cmd = [python_exe, "-u", "train_ntpc.py", "--config", config_path, "--overwrite"]
+        train_cmd = [python_exe, "-u", "train_ntpc.py", "--config", config_path]
+        if args.overwrite:
+            train_cmd.append("--overwrite")
         run_command(train_cmd)
         
         # 2. Run localization eval

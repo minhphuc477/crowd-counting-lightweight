@@ -30,6 +30,7 @@ from hpc.evaluation.counting import evaluate_counting
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.metrics.tree import finalize_tree_diagnostics, tree_allocation_raw_diagnostics
 from hpc.models.factory import (
+    assert_checkpoint_compatible,
     build_model_from_config,
     validate_pretrained_normalization,
 )
@@ -364,15 +365,17 @@ def main() -> None:
     seed_everything(seed)
 
     sampler = None
+    sampler_generator = None
     if cfg.get("sampler", {}).get("weighted", False):
         sampler_cfg = cfg["sampler"]
+        sampler_generator = make_generator(seed)
         sampler, _ = build_density_luminance_sampler(
             train_ds.image_paths,
             train_ds.points_list,
             num_density_bins=int(sampler_cfg.get("density_bins", 5)),
             num_luminance_bins=int(sampler_cfg.get("luminance_bins", 4)),
             power=float(sampler_cfg.get("power", 0.5)),
-            generator=make_generator(seed),
+            generator=sampler_generator,
         )
 
     num_workers = int(training_cfg.get("num_workers", 0))
@@ -393,7 +396,7 @@ def main() -> None:
     if len(train_loader) == 0:
         raise ValueError("Training loader has zero batches; reduce batch_size or disable drop_last")
 
-    model = build_model_from_config(cfg).to(device)
+    model = build_model_from_config(cfg, load_pretrained=not is_resuming).to(device)
     model.init_head_bias_from_data(
         crop_stats["mean_crop_count"], int(cfg["dataset"].get("crop_size", 256)), 4
     )
@@ -520,7 +523,8 @@ def main() -> None:
     if is_resuming:
         print(f"Resuming training from checkpoint: {resume_ckpt_path}", flush=True)
         ckpt = torch.load(resume_ckpt_path, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
+        assert_checkpoint_compatible(ckpt, cfg)
+        model.load_state_dict(ckpt["model_state_dict"], strict=True)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
@@ -538,6 +542,8 @@ def main() -> None:
                 random.setstate(rng_s["python"])
         if "loader_generator_state" in ckpt and ckpt["loader_generator_state"] is not None:
             loader_generator.set_state(ckpt["loader_generator_state"])
+        if sampler_generator is not None and ckpt.get("sampler_generator_state") is not None:
+            sampler_generator.set_state(ckpt["sampler_generator_state"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
         best_mae = float(ckpt.get("best_mae", ckpt.get("val_res", {}).get("mae", float("inf"))))
         best_epoch = int(ckpt.get("best_epoch", ckpt.get("epoch", 0)))
@@ -821,6 +827,9 @@ def main() -> None:
             "scaler_state_dict": scaler.state_dict() if amp_enabled else None,
             "rng_state": get_rng_state(),
             "loader_generator_state": loader_generator.get_state(),
+            "sampler_generator_state": (
+                sampler_generator.get_state() if sampler_generator is not None else None
+            ),
             "val_res": metrics if (epoch % evaluate_every == 0 or epoch == epochs) else {"mae": best_mae},
             "config": cfg,
             "resolved_crop_statistics": crop_stats,

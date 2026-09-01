@@ -116,12 +116,18 @@ def collect_architecture(cfg: dict, height: int, width: int) -> dict:
         ("Backbone C4", backbone_shapes[0], "4"),
         ("Backbone C8", backbone_shapes[1], "8"),
         ("Backbone C16", backbone_shapes[2], "16"),
+    ]
+    if len(backbone_shapes) >= 4:
+        flow.append(("Backbone C32", backbone_shapes[3], "32"))
+    if "p32" in aux:
+        flow.append(("Neck P32", _shape(aux["p32"]), "32"))
+    flow.extend([
         ("Neck P16", _shape(aux["p16"]), "16"),
         ("Neck P8", _shape(aux["p8"]), "8"),
         ("Neck P4", _shape(aux["p4"]), "4"),
         ("Positive mass D", _shape(mass), "4"),
         ("Count", "1", "global sum(D)"),
-    ]
+    ])
     return {
         "model": model,
         "resolved": resolve_model_config(cfg),

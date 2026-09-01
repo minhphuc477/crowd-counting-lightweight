@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+from scipy.spatial import cKDTree
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -80,26 +81,27 @@ def evaluate_separability_single_image(
     }
     if len(feats) >= 4:
         stages["C32"] = feats[3]
-        
-    diff = points[:, None, :] - points[None, :, :]
-    dists = np.sqrt(np.sum(diff ** 2, axis=-1))
-    np.fill_diagonal(dists, np.inf)
-    
+
+    points_np = np.asarray(points, dtype=np.float32)
+    tree = cKDTree(points_np)
+    # k=2 because first neighbor is the query point itself
+    nn_distances, nn_indices = tree.query(points_np, k=2)
+    nearest_dist = nn_distances[:, 1].astype(np.float32)
+    nearest_idx = nn_indices[:, 1].astype(np.int64)
+
     # Deduplicate neighbor pairs and bin by raw Euclidean distance d_ij
     pairs_by_bin: Dict[str, List[Tuple[int, int, float]]] = {k: [] for k in RAW_SPACING_BINS}
     seen_pairs = set()
-    n_pts = len(points)
-    for i in range(n_pts):
-        j = int(np.argmin(dists[i]))
+    for i, (j, d_raw) in enumerate(zip(nearest_idx.tolist(), nearest_dist.tolist())):
+        j = int(j)
         pair_key = tuple(sorted((i, j)))
         if pair_key in seen_pairs:
             continue
         seen_pairs.add(pair_key)
-        
-        d_raw = float(dists[i, j])
+
         for bname, (low, high) in RAW_SPACING_BINS.items():
             if low < d_raw <= high:
-                pairs_by_bin[bname].append((i, j, d_raw))
+                pairs_by_bin[bname].append((i, j, float(d_raw)))
                 break
 
     for bname, pairs in pairs_by_bin.items():
@@ -148,6 +150,6 @@ def evaluate_separability_single_image(
 
     return {
         "num_points": len(points),
-        "mean_knn_spacing_px": float(np.mean(np.min(dists, axis=-1))),
+        "mean_knn_spacing_px": float(nearest_dist.mean()),
         "bins": bin_results,
     }

@@ -118,12 +118,18 @@ def evaluate_effective_rank_single_image(
     if len(feats) >= 4:
         stages["C32"] = feats[3]
         
-    n_pts = len(points)
+    points_np = np.asarray(points, dtype=np.float32)
+    # Make subset independent of annotation ordering
+    order = np.lexsort((points_np[:, 1], points_np[:, 0]))
+    points_sorted = points_np[order]
+    n_pts = len(points_sorted)
+
     if n_pts > max_crowd_samples:
-        indices = np.linspace(0, n_pts - 1, max_crowd_samples, dtype=int)
-        sample_coords = points[indices]
+        rng = np.random.default_rng(20260901)
+        indices = np.sort(rng.choice(n_pts, size=max_crowd_samples, replace=False))
+        sample_coords = points_sorted[indices]
     else:
-        sample_coords = points
+        sample_coords = points_sorted
     coords_t = torch.from_numpy(np.asarray(sample_coords, dtype=np.float32)).to(device)
         
     stage_metrics: Dict[str, Dict[str, float]] = {}

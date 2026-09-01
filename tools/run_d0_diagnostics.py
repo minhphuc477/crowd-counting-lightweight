@@ -2,10 +2,10 @@
 """Run D0 Pre-Model Diagnostic Suite (D-R, D-K, D-L, D-M).
 
 Evaluates candidate bottlenecks on trained checkpoints or baseline models:
-- D-R / G-R: Sampling-phase and translation instability on valid central support.
-- D-K / G-K: Far-pair normalized inter-person separability retention across depth.
-- D-L / G-L: Normalized scale-invariant effective rank on strictly matched crowd points.
-- D-M / G-M: Area-normalized foreground crowd vs background gradient allocation on unpadded support.
+- D-R / G-R: Sampling-phase and translation instability via natural shifted views.
+- D-K / G-K: Same-scene far-pair normalized inter-person separability retention across depth.
+- D-L / G-L: Normalized scale-invariant effective rank on lexicographically sorted matched crowd points.
+- D-M / G-M: Area-normalized foreground crowd vs background gradient allocation on natural unpadded crops.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import argparse
 import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 
-from hpc.data import ShanghaiTechDataset, ntpc_collate_fn
+from hpc.data.factory import build_evaluation_dataset
 from hpc.data.point_counts import build_exact_count_pyramid
 from hpc.diagnostics import (
     evaluate_effective_rank_single_image,
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True, help="Path to config YAML")
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint .pt")
     parser.add_argument("--output", default=None, help="Output JSON path")
-    parser.add_argument("--split", default="test_data", help="Dataset split (train_data, test_data, val)")
+    parser.add_argument("--split", default=None, help="Dataset split override (test_data, Train, Test, val)")
     parser.add_argument("--max-samples", type=int, default=None, help="Max images to evaluate")
     parser.add_argument(
         "--dr-margin-px",
@@ -53,6 +53,39 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated diagnostics to run: dr,dk,dl,dm or all",
     )
     return parser.parse_args()
+
+
+def make_natural_dm_crop(
+    image: torch.Tensor,
+    points: np.ndarray,
+    max_crop: int = 256,
+) -> Optional[Tuple[torch.Tensor, np.ndarray]]:
+    """Extract a centered, natural multiple-of-64 crop without artificial canvas padding."""
+    _, _, h, w = image.shape
+    crop_h = min(h, max_crop)
+    crop_w = min(w, max_crop)
+    crop_h = (crop_h // 64) * 64
+    crop_w = (crop_w // 64) * 64
+    if crop_h < 64 or crop_w < 64:
+        return None
+
+    y0 = (h - crop_h) // 2
+    x0 = (w - crop_w) // 2
+    crop = image[..., y0:y0 + crop_h, x0:x0 + crop_w]
+
+    pts = np.asarray(points, dtype=np.float32).copy()
+    if len(pts):
+        pts[:, 0] -= x0
+        pts[:, 1] -= y0
+        keep = (
+            (pts[:, 0] >= -0.5)
+            & (pts[:, 0] <= crop_w - 0.5)
+            & (pts[:, 1] >= -0.5)
+            & (pts[:, 1] <= crop_h - 0.5)
+        )
+        pts = pts[keep]
+
+    return crop, pts
 
 
 def main() -> None:
@@ -71,22 +104,11 @@ def main() -> None:
     model.eval()
     print(f"Loaded checkpoint: {args.checkpoint} (epoch={ckpt.get('epoch', 'N/A')})", flush=True)
 
-    # Build dataset
-    ds_cfg = cfg["dataset"]
-    dataset = ShanghaiTechDataset(
-        root=ds_cfg["root"],
-        part=ds_cfg.get("part", "part_A"),
-        split=args.split,
-        crop_size=int(ds_cfg.get("crop_size", 256)),
-        is_train=False,
-        coordinate_base=int(ds_cfg.get("coordinate_base", 0)),
-        image_mean=tuple(ds_cfg.get("image_mean", [0.5, 0.5, 0.5])),
-        image_std=tuple(ds_cfg.get("image_std", [0.5, 0.5, 0.5])),
-    )
+    # Build dataset generic factory
+    dataset, resolved_split = build_evaluation_dataset(cfg, split=args.split)
     n_total = len(dataset)
     n_eval = min(n_total, args.max_samples) if args.max_samples is not None else n_total
-    part_name = ds_cfg.get("part", "part_A")
-    print(f"Loaded dataset: {part_name}/{args.split} with {n_total} images (evaluating {n_eval})", flush=True)
+    print(f"Loaded {resolved_split}: {n_total} images; evaluating {n_eval}", flush=True)
 
     loss_cfg = cfg.get("loss", {})
     criterion = NTPCLoss(NTPCConfig(
@@ -96,10 +118,18 @@ def main() -> None:
         kappa_flat16=float(loss_cfg.get("kappa_flat16", 20.0)),
     ))
 
-    run_dr = args.diagnostics == "all" or "dr" in args.diagnostics.lower()
-    run_dk = args.diagnostics == "all" or "dk" in args.diagnostics.lower()
-    run_dl = args.diagnostics == "all" or "dl" in args.diagnostics.lower()
-    run_dm = args.diagnostics == "all" or "dm" in args.diagnostics.lower()
+    # Parse diagnostic tokens safely
+    tokens = {t.strip().lower() for t in args.diagnostics.split(",") if t.strip()}
+    if "all" in tokens:
+        tokens = {"dr", "dk", "dl", "dm"}
+    unknown = tokens - {"dr", "dk", "dl", "dm"}
+    if unknown:
+        raise ValueError(f"Unknown diagnostics: {sorted(unknown)}")
+
+    run_dr = "dr" in tokens
+    run_dk = "dk" in tokens
+    run_dl = "dl" in tokens
+    run_dm = "dm" in tokens
 
     dr_results: List[Dict[str, float]] = []
     dk_results: List[Dict[str, Any]] = []
@@ -130,28 +160,24 @@ def main() -> None:
                 dl_results.append(res_dl)
 
         if run_dm:
-            _, _, ih, iw = img_b.shape
-            pts_clamped = pts.copy() if len(pts) > 0 else pts
-            if len(pts_clamped) > 0:
-                pts_clamped[:, 0] = np.clip(pts_clamped[:, 0], -0.5, iw - 0.5)
-                pts_clamped[:, 1] = np.clip(pts_clamped[:, 1], -0.5, ih - 0.5)
-            hp = ((ih + 63) // 64) * 64
-            wp = ((iw + 63) // 64) * 64
-            img_padded = F.pad(img_b, (0, wp - iw, 0, hp - ih), mode="replicate")
-            tree = build_exact_count_pyramid(
-                [torch.from_numpy(pts_clamped).float()],
-                height=ih,
-                width=iw,
-                block_sizes=(4, 8, 16, 32, 64),
-                pad_multiple=64,
-            )
-            targets_b = {k: tree[k].to(device) for k in (4, 8, 16, 32, 64)}
-            targets_b["N"] = tree["N"].to(device)
-            res_dm = evaluate_gradient_allocation_single_batch(
-                model, criterion, img_padded, targets_b, points_list=[pts_clamped], valid_hw=(ih, iw), device=device
-            )
-            res_dm["gt_count"] = float(len(pts))
-            dm_results.append(res_dm)
+            dm_sample = make_natural_dm_crop(img_b, pts, max_crop=int(cfg["dataset"].get("crop_size", 256)))
+            if dm_sample is not None:
+                dm_image, dm_points = dm_sample
+                _, _, dh, dw = dm_image.shape
+                tree = build_exact_count_pyramid(
+                    [torch.from_numpy(dm_points).float()],
+                    height=dh,
+                    width=dw,
+                    block_sizes=(4, 8, 16, 32, 64),
+                    pad_multiple=64,
+                )
+                targets_b = {k: tree[k].to(device) for k in (4, 8, 16, 32, 64)}
+                targets_b["N"] = tree["N"].to(device)
+                res_dm = evaluate_gradient_allocation_single_batch(
+                    model, criterion, dm_image, targets_b, points_list=[dm_points], valid_hw=None, device=device
+                )
+                res_dm["gt_count"] = float(len(dm_points))
+                dm_results.append(res_dm)
 
         if (idx + 1) % 10 == 0 or (idx + 1) == n_eval:
             print(f"Evaluated [{idx + 1}/{n_eval}] images ({time.time() - start_time:.1f}s)...", flush=True)
@@ -160,7 +186,7 @@ def main() -> None:
         "metadata": {
             "config": os.path.abspath(args.config),
             "checkpoint": os.path.abspath(args.checkpoint),
-            "split": args.split,
+            "split": resolved_split,
             "samples_evaluated": n_eval,
             "dr_margin_px": args.dr_margin_px,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -183,7 +209,7 @@ def main() -> None:
                 np.mean([r["feature_c32_cos_sim_aligned"] for r in dr_results])
             )
 
-    # Aggregate D-K (Primary: Far-Pair Normalized Separability Retention)
+    # Aggregate D-K (Primary: Same-Scene Far-Pair Normalized Separability)
     if run_dk and dk_results:
         dk_agg: Dict[str, Any] = {
             "mean_knn_spacing_px": float(np.mean([r["mean_knn_spacing_px"] for r in dk_results]))
@@ -211,7 +237,6 @@ def main() -> None:
                 "sample_count": total_pairs,
                 "median_peak_to_trough_ratio": float(np.median(ptr_values)) if ptr_values else float("nan"),
                 "mean_merged_fraction": float(merged_count / total_pairs) if total_pairs else float("nan"),
-                # Pair-weighted raw dissimilarity
                 "c4_inter_person_dissimilarity": pair_weighted_metric("C4"),
                 "c8_inter_person_dissimilarity": pair_weighted_metric("C8"),
                 "c16_inter_person_dissimilarity": pair_weighted_metric("C16"),
@@ -221,32 +246,55 @@ def main() -> None:
 
             dk_agg[f"bin_{bname}"] = info
 
-        # Stage-specific far-pair baseline normalization (against gt32 control)
-        far = dk_agg.get("bin_gt32")
-        if far is not None:
-            for bname in ["le8", "8_16", "16_32"]:
-                info = dk_agg.get(f"bin_{bname}")
-                if info is None:
+        # Same-scene normalization (each image's near pair normalized by its own gt32 far pair)
+        def pair_mean(info_d: dict, stage: str) -> float:
+            n = int(info_d.get("num_pairs", 0))
+            total = info_d.get(f"{stage}_inter_person_dissimilarity_sum")
+            if n <= 0 or total is None:
+                return float("nan")
+            return float(total) / float(n)
+
+        for bname in ["le8", "8_16", "16_32"]:
+            same_scene: Dict[str, List[Tuple[float, int]]] = {
+                "C4": [], "C8": [], "C16": [], "C32": []
+            }
+            matched_images = 0
+            for r in dk_results:
+                bins = r.get("bins", {})
+                near = bins.get(bname)
+                far = bins.get("gt32")
+                if near is None or far is None:
                     continue
-                for stage in ["c4", "c8", "c16", "c32"]:
-                    key = f"{stage}_inter_person_dissimilarity"
-                    if key not in info or key not in far:
+                w = min(int(near.get("num_pairs", 0)), int(far.get("num_pairs", 0)))
+                if w <= 0:
+                    continue
+                matched_images += 1
+                for stage in same_scene:
+                    near_v = pair_mean(near, stage)
+                    far_v = pair_mean(far, stage)
+                    if np.isfinite(near_v) and np.isfinite(far_v) and far_v > 1e-8:
+                        same_scene[stage].append((near_v / far_v, w))
+
+            info = dk_agg.get(f"bin_{bname}")
+            if info is not None:
+                for stage, values in same_scene.items():
+                    if not values:
                         continue
-                    info[f"{stage}_normalized_separability"] = float(
-                        info[key] / max(far[key], 1e-8)
-                    )
-                if "c4_normalized_separability" in info and "c16_normalized_separability" in info:
-                    info["normalized_retention_c16_over_c4"] = float(
-                        info["c16_normalized_separability"] / max(info["c4_normalized_separability"], 1e-8)
-                    )
-                if "c16_normalized_separability" in info and "c32_normalized_separability" in info:
-                    info["normalized_retention_c32_over_c16"] = float(
-                        info["c32_normalized_separability"] / max(info["c16_normalized_separability"], 1e-8)
-                    )
-                if "c4_normalized_separability" in info and "c32_normalized_separability" in info:
-                    info["normalized_retention_c32_over_c4"] = float(
-                        info["c32_normalized_separability"] / max(info["c4_normalized_separability"], 1e-8)
-                    )
+                    num = sum(v * w for v, w in values)
+                    den = sum(w for _, w in values)
+                    info[f"{stage.lower()}_same_scene_normalized_separability"] = float(num / den)
+                info["same_scene_matched_images"] = matched_images
+                
+                # Retention ratios
+                c4_ss = info.get("c4_same_scene_normalized_separability")
+                c16_ss = info.get("c16_same_scene_normalized_separability")
+                c32_ss = info.get("c32_same_scene_normalized_separability")
+                if c4_ss is not None and c16_ss is not None:
+                    info["same_scene_retention_c16_over_c4"] = float(c16_ss / max(c4_ss, 1e-8))
+                if c16_ss is not None and c32_ss is not None:
+                    info["same_scene_retention_c32_over_c16"] = float(c32_ss / max(c16_ss, 1e-8))
+                if c4_ss is not None and c32_ss is not None:
+                    info["same_scene_retention_c32_over_c4"] = float(c32_ss / max(c4_ss, 1e-8))
 
         summary["D-K_separability"] = dk_agg
 
@@ -296,14 +344,15 @@ def main() -> None:
     if "D-K_separability" in summary:
         dk = summary["D-K_separability"]
         le8 = dk.get("bin_le8", {})
-        diag_synthesis["D-K (Normalized Separability Retention @ d<=8px)"] = {
-            "c4_norm_separability": f"{le8.get('c4_normalized_separability', float('nan'))*100:.1f}%",
-            "c8_norm_separability": f"{le8.get('c8_normalized_separability', float('nan'))*100:.1f}%",
-            "c16_norm_separability": f"{le8.get('c16_normalized_separability', float('nan'))*100:.1f}%",
-            "c32_norm_separability": f"{le8.get('c32_normalized_separability', float('nan'))*100:.1f}%" if "c32_normalized_separability" in le8 else "N/A",
-            "normalized_retention_c16_over_c4": f"{le8.get('normalized_retention_c16_over_c4', float('nan'))*100:.1f}%",
-            "normalized_retention_c32_over_c16": f"{le8.get('normalized_retention_c32_over_c16', float('nan'))*100:.1f}%" if "normalized_retention_c32_over_c16" in le8 else "N/A",
-            "normalized_retention_c32_over_c4": f"{le8.get('normalized_retention_c32_over_c4', float('nan'))*100:.1f}%" if "normalized_retention_c32_over_c4" in le8 else "N/A",
+        diag_synthesis["D-K (Same-Scene Separability Retention @ d<=8px)"] = {
+            "c4_same_scene_norm_separability": f"{le8.get('c4_same_scene_normalized_separability', float('nan'))*100:.1f}%",
+            "c8_same_scene_norm_separability": f"{le8.get('c8_same_scene_normalized_separability', float('nan'))*100:.1f}%",
+            "c16_same_scene_norm_separability": f"{le8.get('c16_same_scene_normalized_separability', float('nan'))*100:.1f}%",
+            "c32_same_scene_norm_separability": f"{le8.get('c32_same_scene_normalized_separability', float('nan'))*100:.1f}%" if "c32_same_scene_normalized_separability" in le8 else "N/A",
+            "same_scene_retention_c16_over_c4": f"{le8.get('same_scene_retention_c16_over_c4', float('nan'))*100:.1f}%",
+            "same_scene_retention_c32_over_c16": f"{le8.get('same_scene_retention_c32_over_c16', float('nan'))*100:.1f}%" if "same_scene_retention_c32_over_c16" in le8 else "N/A",
+            "same_scene_retention_c32_over_c4": f"{le8.get('same_scene_retention_c32_over_c4', float('nan'))*100:.1f}%" if "same_scene_retention_c32_over_c4" in le8 else "N/A",
+            "same_scene_matched_images": le8.get("same_scene_matched_images", 0),
             "output_mass_merged_frac": f"{le8.get('mean_merged_fraction', float('nan'))*100:.1f}%",
         }
     if "D-L_effective_rank" in summary:
@@ -317,7 +366,7 @@ def main() -> None:
         }
     if "D-M_gradient_allocation" in summary:
         dm = summary["D-M_gradient_allocation"]
-        diag_synthesis["D-M (Gradient Allocation)"] = {
+        diag_synthesis["D-M (Gradient Allocation - Natural Unpadded Crops)"] = {
             "c16_fg_energy": f"{dm['c16_fg_energy_fraction']*100:.1f}%",
             "c16_gradient_enrichment": f"{dm['c16_gradient_enrichment']:.2f}x",
             "c16_gradient_density_ratio": f"{dm['c16_gradient_density_ratio']:.2f}x",
