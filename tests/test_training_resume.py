@@ -291,6 +291,51 @@ def test_exact_resume_continuation():
     ]
 
 
+def test_checkpoint_serialization_roundtrip_py26(tmp_path):
+    import random
+    import numpy as np
+    import torch
+    from train_ntpc import get_rng_state
+
+    checkpoint = {
+        "epoch": 7,
+        "best_mae": 72.5,
+        "model_state_dict": {
+            "dummy": torch.tensor([1.0, 2.0]),
+        },
+        "rng_state": get_rng_state(),
+        "config": {
+            "dataset": {
+                "name": "sha",
+                "crop_size": 256,
+            },
+            "loss": {
+                "mode": "r2_flat_dm",
+            },
+        },
+    }
+
+    path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, path)
+
+    loaded = torch.load(
+        path,
+        map_location="cpu",
+        weights_only=False,
+    )
+
+    assert loaded["epoch"] == 7
+    assert loaded["best_mae"] == 72.5
+    assert torch.equal(
+        loaded["model_state_dict"]["dummy"],
+        checkpoint["model_state_dict"]["dummy"],
+    )
+    assert isinstance(loaded["rng_state"]["torch"], torch.Tensor)
+    assert isinstance(loaded["rng_state"]["numpy"], tuple)
+    assert isinstance(loaded["rng_state"]["python"], tuple)
+
+
+
 
 
 
