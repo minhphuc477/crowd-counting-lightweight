@@ -23,6 +23,8 @@ ENV/
 
 # Training Checkpoints & Runs
 runs/
+!runs/e0_v2/
+!runs/e0_v2/**
 analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
