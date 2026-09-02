@@ -37,6 +37,13 @@ from .objective_mechanism_audit import (
     summarize_audit_group_v2,
     sweep_kappa_on_crop_v2,
 )
+from .tail_support import (
+    compute_dataset_support_profile,
+    compute_image_spatial_statistics,
+    compute_relative_percentiles,
+)
+from .fg_bg_decomposition import decompose_fg_bg_errors
+from .multiplicity_calibration import MultiplicityAccumulator
 
 __all__ = [
     "evaluate_phase_shift_single_image",
@@ -75,4 +82,10 @@ __all__ = [
     "sweep_kappa_on_crop_v2",
     "stratify_by_local_crop_count",
     "summarize_audit_group_v2",
+    # failure attribution audit
+    "compute_image_spatial_statistics",
+    "compute_dataset_support_profile",
+    "compute_relative_percentiles",
+    "decompose_fg_bg_errors",
+    "MultiplicityAccumulator",
 ]
