@@ -38,11 +38,16 @@ from .objective_mechanism_audit import (
     sweep_kappa_on_crop_v2,
 )
 from .tail_support import (
+    compute_crop_percentile,
     compute_dataset_support_profile,
     compute_image_spatial_statistics,
     compute_relative_percentiles,
+    profile_crop_support_distribution,
 )
-from .fg_bg_decomposition import decompose_fg_bg_errors
+from .fg_bg_decomposition import (
+    decompose_cell_occupancy_errors,
+    decompose_fg_bg_errors,
+)
 from .multiplicity_calibration import MultiplicityAccumulator
 
 __all__ = [
@@ -86,6 +91,9 @@ __all__ = [
     "compute_image_spatial_statistics",
     "compute_dataset_support_profile",
     "compute_relative_percentiles",
+    "profile_crop_support_distribution",
+    "compute_crop_percentile",
+    "decompose_cell_occupancy_errors",
     "decompose_fg_bg_errors",
     "MultiplicityAccumulator",
 ]

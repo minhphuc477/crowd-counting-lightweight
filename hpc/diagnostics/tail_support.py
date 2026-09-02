@@ -132,3 +132,39 @@ def compute_relative_percentiles(
                 row[f"{k}_pctl"] = float(rank / len(ref_arrays[k]) * 100.0)
         pctl_records.append(row)
     return pctl_records
+
+
+def profile_crop_support_distribution(
+    dataset: Sequence[Any],
+    crop_size: int = 256,
+    step: int = 128,
+) -> np.ndarray:
+    """Profile sliding crop count distribution across a dataset."""
+    crop_counts: List[int] = []
+    for idx in range(len(dataset)):
+        sample = dataset[idx]
+        pts = np.asarray(sample["gt_points"], dtype=np.float32).reshape(-1, 2)
+        h, w = int(sample["image"].shape[-2]), int(sample["image"].shape[-1])
+        if len(pts) == 0:
+            continue
+        for y in range(0, max(1, h - crop_size + 1), step):
+            for x in range(0, max(1, w - crop_size + 1), step):
+                in_crop = (
+                    (pts[:, 0] >= x)
+                    & (pts[:, 0] < x + crop_size)
+                    & (pts[:, 1] >= y)
+                    & (pts[:, 1] < y + crop_size)
+                )
+                crop_counts.append(int(in_crop.sum()))
+    return np.sort(np.asarray(crop_counts, dtype=np.float64))
+
+
+def compute_crop_percentile(
+    crop_count: float,
+    sorted_train_crops: np.ndarray,
+) -> float:
+    """Compute empirical percentile of a given crop count relative to training crops."""
+    if len(sorted_train_crops) == 0:
+        return float("nan")
+    rank = np.searchsorted(sorted_train_crops, crop_count, side="right")
+    return float(rank / len(sorted_train_crops) * 100.0)
