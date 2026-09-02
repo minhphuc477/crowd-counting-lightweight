@@ -190,6 +190,8 @@ def main() -> None:
                 "component_metrics": audit_r2_native["component_metrics"],
                 "pairwise_cosines": audit_r2_native["pairwise_cosines"],
                 "pairwise_cancellations": audit_r2_native["pairwise_cancellations"],
+                "pairwise_destructive_interferences": audit_r2_native.get("pairwise_destructive_interferences", {}),
+                "pairwise_excess_cancellations": audit_r2_native.get("pairwise_excess_cancellations", {}),
                 "param_metrics": audit_r2_native["param_metrics"],
             },
         }
@@ -220,6 +222,8 @@ def main() -> None:
                 "component_metrics": audit_r4_native["component_metrics"],
                 "pairwise_cosines": audit_r4_native["pairwise_cosines"],
                 "pairwise_cancellations": audit_r4_native["pairwise_cancellations"],
+                "pairwise_destructive_interferences": audit_r4_native.get("pairwise_destructive_interferences", {}),
+                "pairwise_excess_cancellations": audit_r4_native.get("pairwise_excess_cancellations", {}),
                 "param_metrics": audit_r4_native["param_metrics"],
             },
         }
@@ -241,6 +245,53 @@ def main() -> None:
 
     elapsed = time.time() - t0
     print(f"Audit computation completed in {elapsed:.1f}s.", flush=True)
+
+    # -----------------------------------------------------------------------
+    # Causal Correlation Analysis: I_destructive vs Error Gap (R4 vs R2)
+    # -----------------------------------------------------------------------
+    from scipy import stats
+    i_dest_all = []
+    c_excess_all = []
+    abs_gap_all = []
+    signed_gap_all = []
+    e_r4_all = []
+
+    for r2, r4 in zip(records_r2_native, records_r4_native):
+        e4 = r4["signed_error"]
+        e2 = r2["signed_error"]
+        i_dest = r4["r4"]["pairwise_destructive_interferences"].get("64_to_32_vs_32_to_16", 0.0)
+        c_ex = r4["r4"]["pairwise_excess_cancellations"].get("64_to_32_vs_32_to_16", 0.0)
+        i_dest_all.append(i_dest)
+        c_excess_all.append(c_ex)
+        abs_gap_all.append(abs(e4) - abs(e2))
+        signed_gap_all.append(e4 - e2)
+        e_r4_all.append(abs(e4))
+
+    i_dest_arr = np.array(i_dest_all)
+    c_excess_arr = np.array(c_excess_all)
+    abs_gap_arr = np.array(abs_gap_all)
+    signed_gap_arr = np.array(signed_gap_all)
+
+    rho_abs, p_abs = stats.spearmanr(i_dest_arr, abs_gap_arr)
+    r_abs, pr_abs = stats.pearsonr(i_dest_arr, abs_gap_arr)
+    rho_sgn, p_sgn = stats.spearmanr(i_dest_arr, signed_gap_arr)
+    r_sgn, pr_sgn = stats.pearsonr(i_dest_arr, signed_gap_arr)
+    rho_cex, p_cex = stats.spearmanr(c_excess_arr, abs_gap_arr)
+
+    causal_correlations = {
+        "spearman_rho_I_dest_vs_abs_error_gap": float(rho_abs),
+        "p_value_spearman_abs_error_gap": float(p_abs),
+        "pearson_r_I_dest_vs_abs_error_gap": float(r_abs),
+        "p_value_pearson_abs_error_gap": float(pr_abs),
+        "spearman_rho_I_dest_vs_signed_error_gap": float(rho_sgn),
+        "p_value_spearman_signed_error_gap": float(p_sgn),
+        "spearman_rho_C_excess_vs_abs_error_gap": float(rho_cex),
+        "p_value_spearman_C_excess": float(p_cex),
+        "i_destructive_mean": float(np.mean(i_dest_arr)),
+        "i_destructive_median": float(np.median(i_dest_arr)),
+        "i_destructive_pct_positive": float(np.mean(i_dest_arr > 0.0) * 100),
+        "c_excess_mean": float(np.mean(c_excess_arr)),
+    }
 
     # Density stratification (by local crop count)
     bins_r2 = stratify_by_local_crop_count(records_r2_native)
@@ -279,6 +330,7 @@ def main() -> None:
             "kappas_swept": kappas,
             "elapsed_seconds": elapsed,
         },
+        "causal_correlations": causal_correlations,
         "r2_native_summary": summary_r2,
         "r4_native_summary": summary_r4,
         "kappa_sweep_summary": kappa_summary,
@@ -356,6 +408,15 @@ def main() -> None:
         nf = ks["r2_flat16_norm_mean"]
         print(f"{k_val:<8} | {c_tr:>20.4f} {cr_tr:>11.1f}% {canc:>16.4f} | {n32:>15.2f} {nf:>15.2f}")
 
+    # Table 4: Causal Correlation Test
+    print("\n--- 4. Causal Correlation Test: Destructive Interference vs R4-R2 Performance Gap ---")
+    print(f"I_destructive = max(0, -2 <g_a, g_b>) / (||g_a||^2 + ||g_b||^2)  [Mean: {causal_correlations['i_destructive_mean']:.4f}, Median: {causal_correlations['i_destructive_median']:.4f}, >0: {causal_correlations['i_destructive_pct_positive']:.1f}%]")
+    print(f"C_excess = C - C_perp (excess above orthogonal baseline)           [Mean: {causal_correlations['c_excess_mean']:.4f}]")
+    print("-" * 80)
+    print(f"Spearman rho(I_destructive, |e_R4| - |e_R2|) : {causal_correlations['spearman_rho_I_dest_vs_abs_error_gap']:+.4f} (p = {causal_correlations['p_value_spearman_abs_error_gap']:.4f})")
+    print(f"Pearson r   (I_destructive, |e_R4| - |e_R2|) : {causal_correlations['pearson_r_I_dest_vs_abs_error_gap']:+.4f} (p = {causal_correlations['p_value_pearson_abs_error_gap']:.4f})")
+    print(f"Spearman rho(I_destructive,  e_R4  -  e_R2 ) : {causal_correlations['spearman_rho_I_dest_vs_signed_error_gap']:+.4f} (p = {causal_correlations['p_value_spearman_signed_error_gap']:.4f})")
+    print(f"Spearman rho(C_excess,      |e_R4| - |e_R2|) : {causal_correlations['spearman_rho_C_excess_vs_abs_error_gap']:+.4f} (p = {causal_correlations['p_value_spearman_C_excess']:.4f})")
     print("=" * 95 + "\n")
 
 

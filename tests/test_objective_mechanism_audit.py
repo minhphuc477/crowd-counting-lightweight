@@ -12,6 +12,8 @@ from hpc.diagnostics.objective_mechanism_audit import (
     compute_mass_gradient_metrics,
     compute_pairwise_cosine,
     compute_parameter_space_metrics,
+    destructive_interference_ratio,
+    excess_cancellation_ratio,
     stratify_by_local_crop_count,
     summarize_audit_group_v2,
     sweep_kappa_on_crop_v2,
@@ -60,6 +62,29 @@ class TestObjectiveMechanismAuditV2:
         b[:, :, 8:, :] = -a[:, :, :8, :]
         expected_ortho = 1.0 - math.sqrt(2.0) / 2.0
         assert abs(cancellation_ratio(a, b) - expected_ortho) < 1e-4
+
+    def test_destructive_interference_ratio(self):
+        a = torch.randn(1, 1, 16, 16)
+        # Aligned => I_dest = 0.0
+        assert abs(destructive_interference_ratio(a, a) - 0.0) < 1e-6
+        # Orthogonal => I_dest = 0.0
+        b = torch.zeros_like(a)
+        b[:, :, :8, :] = a[:, :, 8:, :]
+        b[:, :, 8:, :] = -a[:, :, :8, :]
+        assert abs(destructive_interference_ratio(a, b) - 0.0) < 1e-6
+        # Perfectly anti-aligned with equal norm: <a, -a> = -||a||^2 => -2<a, -a> = 2||a||^2
+        # denom = ||a||^2 + ||-a||^2 = 2||a||^2 => I_dest = 1.0!
+        assert abs(destructive_interference_ratio(a, -a) - 1.0) < 1e-6
+
+    def test_excess_cancellation_ratio(self):
+        a = torch.randn(1, 1, 16, 16)
+        # Orthogonal => C_excess = 0.0
+        b = torch.zeros_like(a)
+        b[:, :, :8, :] = a[:, :, 8:, :]
+        b[:, :, 8:, :] = -a[:, :, :8, :]
+        assert abs(excess_cancellation_ratio(a, b) - 0.0) < 1e-5
+        # Anti-aligned => C_excess > 0
+        assert excess_cancellation_ratio(a, -a) > 0.0
 
     def test_euler_scale_projection(self):
         m = torch.ones(1, 1, 4, 4) * 2.0

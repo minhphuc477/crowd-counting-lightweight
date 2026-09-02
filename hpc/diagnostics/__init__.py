@@ -31,6 +31,8 @@ from .objective_mechanism_audit import (
     compute_mass_gradient_metrics,
     compute_pairwise_cosine,
     compute_parameter_space_metrics,
+    destructive_interference_ratio,
+    excess_cancellation_ratio,
     stratify_by_local_crop_count,
     summarize_audit_group_v2,
     sweep_kappa_on_crop_v2,
@@ -63,6 +65,8 @@ __all__ = [
     "paired_seed_mlp_eval",
     # objective audit v2
     "cancellation_ratio",
+    "destructive_interference_ratio",
+    "excess_cancellation_ratio",
     "compute_component_gradients",
     "compute_mass_gradient_metrics",
     "compute_pairwise_cosine",

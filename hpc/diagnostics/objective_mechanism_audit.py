@@ -49,6 +49,47 @@ def cancellation_ratio(g1: torch.Tensor, g2: torch.Tensor, eps: float = 1e-12) -
     return float(ratio)
 
 
+def excess_cancellation_ratio(g1: torch.Tensor, g2: torch.Tensor, eps: float = 1e-12) -> float:
+    """Compute cancellation in excess of the orthogonal baseline C_perp.
+
+    C_excess = C - (1 - sqrt(||g1||^2 + ||g2||^2) / (||g1|| + ||g2||))
+    - C_excess > 0: truly destructive (<g1, g2> < 0).
+    - C_excess == 0: orthogonal or zero.
+    - C_excess < 0: constructively aligned (<g1, g2> > 0).
+    """
+    v1 = g1.detach().flatten().double()
+    v2 = g2.detach().flatten().double()
+    n1 = float(v1.norm().item())
+    n2 = float(v2.norm().item())
+    if n1 <= eps or n2 <= eps:
+        return 0.0
+    denom = n1 + n2
+    sum_norm = float((v1 + v2).norm().item())
+    ortho_norm = math.sqrt(n1**2 + n2**2)
+    c_raw = 1.0 - (sum_norm / denom)
+    c_ortho = 1.0 - (ortho_norm / denom)
+    return float(c_raw - c_ortho)
+
+
+def destructive_interference_ratio(g1: torch.Tensor, g2: torch.Tensor, eps: float = 1e-12) -> float:
+    """Compute normalized destructive interference cross-term energy ratio:
+
+    I_destructive = max(0, -2 <g1, g2>) / (||g1||^2 + ||g2||^2)
+    - Returns 0 if <g1, g2> >= 0 (orthogonal or aligned).
+    - Returns strictly positive value in (0, 1] when cross-term is destructive.
+    """
+    v1 = g1.detach().flatten().double()
+    v2 = g2.detach().flatten().double()
+    n1_sq = float((v1**2).sum().item())
+    n2_sq = float((v2**2).sum().item())
+    denom = n1_sq + n2_sq
+    if denom <= eps:
+        return 0.0
+    dot = float(torch.dot(v1, v2).item())
+    i_dest = max(0.0, -2.0 * dot) / denom
+    return float(min(1.0, i_dest))
+
+
 def compute_pairwise_cosine(
     g1: torch.Tensor,
     g2: torch.Tensor,
@@ -233,6 +274,8 @@ def compute_audit_for_mode_v2(
     # Pairwise cosines and cancellations among active components
     cosines: Dict[str, float] = {}
     cancellations: Dict[str, float] = {}
+    destructive_interferences: Dict[str, float] = {}
+    excess_cancellations: Dict[str, float] = {}
     valid_names = [n for n in active_components if n in grads]
     for i, name_a in enumerate(valid_names):
         for j, name_b in enumerate(valid_names):
@@ -240,6 +283,8 @@ def compute_audit_for_mode_v2(
                 pair_key = f"{name_a}_vs_{name_b}"
                 cosines[pair_key] = compute_pairwise_cosine(grads[name_a], grads[name_b])
                 cancellations[pair_key] = cancellation_ratio(grads[name_a], grads[name_b])
+                destructive_interferences[pair_key] = destructive_interference_ratio(grads[name_a], grads[name_b])
+                excess_cancellations[pair_key] = excess_cancellation_ratio(grads[name_a], grads[name_b])
 
     # Parameter-space metrics (if model and crop_img provided)
     param_metrics = None
@@ -252,6 +297,8 @@ def compute_audit_for_mode_v2(
         "component_metrics": component_metrics,
         "pairwise_cosines": cosines,
         "pairwise_cancellations": cancellations,
+        "pairwise_destructive_interferences": destructive_interferences,
+        "pairwise_excess_cancellations": excess_cancellations,
         "param_metrics": param_metrics,
         "raw_grads": {k: grads[k] for k in valid_names},
         "total_grad": g_total,
