@@ -25,13 +25,15 @@ from .cardinality_sufficiency_v3 import (
     paired_seed_mlp_eval,
 )
 from .objective_mechanism_audit import (
-    compute_audit_for_mode,
+    cancellation_ratio,
+    compute_audit_for_mode_v2,
     compute_component_gradients,
-    compute_gradient_metrics,
+    compute_mass_gradient_metrics,
     compute_pairwise_cosine,
-    stratify_by_density,
-    summarize_audit_group,
-    sweep_kappa_on_crop,
+    compute_parameter_space_metrics,
+    stratify_by_local_crop_count,
+    summarize_audit_group_v2,
+    sweep_kappa_on_crop_v2,
 )
 
 __all__ = [
@@ -59,12 +61,14 @@ __all__ = [
     "image_weighted_bootstrap_diff",
     "image_weighted_mean",
     "paired_seed_mlp_eval",
-    # objective audit
+    # objective audit v2
+    "cancellation_ratio",
     "compute_component_gradients",
-    "compute_gradient_metrics",
+    "compute_mass_gradient_metrics",
     "compute_pairwise_cosine",
-    "compute_audit_for_mode",
-    "sweep_kappa_on_crop",
-    "stratify_by_density",
-    "summarize_audit_group",
+    "compute_parameter_space_metrics",
+    "compute_audit_for_mode_v2",
+    "sweep_kappa_on_crop_v2",
+    "stratify_by_local_crop_count",
+    "summarize_audit_group_v2",
 ]

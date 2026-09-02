@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
-"""CLI runner for Objective Mechanism Audit: Flat-DM16 vs Hierarchical DTM Tree.
+"""CLI runner for Objective Mechanism Audit v2: Flat-DM16 vs Hierarchical DTM Tree.
 
-Executes on frozen model predictions to answer:
-Why does Flat-DM16 (R2) beat Hierarchical DTM Tree (R4/R5) in dense crowd counting?
+Evaluates on actual trained checkpoints:
+- R2 Flat-DM16 checkpoint: runs/factorial_a_crop256_c16/best.pt
+- R4 Neural DTM Tree checkpoint: runs/ntpc_sha/best.pt
+
+Evaluates:
+1. Exact component mass gradients d(L_k)/d(mass) and true total gradient (fixed bug: no root double-counting).
+2. Euler scale projection <g, m> and cos(g, m) (scale invariance test).
+3. Parameter-space count direction:
+   cos(grad_theta(N), grad_theta(L_k)) = <grad_theta(N), grad_theta(L_k)> / (||grad_theta(N)|| ||grad_theta(L_k)||)
+   - cos > 0 => parameter update along -grad_theta(L_k) decreases predicted count in model weight space!
+   - cos < 0 => parameter update increases count.
+4. Cancellation ratio:
+   C(g_a, g_b) = 1 - ||g_a + g_b|| / (||g_a|| + ||g_b||)
+5. Stratified by local crop count: Low (<50), Medium (50-150), High (>=150).
+6. Offline kappa sweep tracking tree cancellation C and cos(64->32, 32->16).
 """
 
 from __future__ import annotations
@@ -28,10 +41,11 @@ if _REPO_ROOT not in sys.path:
 from hpc.data.factory import build_evaluation_dataset
 from hpc.data.point_counts import build_exact_count_pyramid
 from hpc.diagnostics.objective_mechanism_audit import (
-    compute_audit_for_mode,
-    stratify_by_density,
-    summarize_audit_group,
-    sweep_kappa_on_crop,
+    cancellation_ratio,
+    compute_audit_for_mode_v2,
+    stratify_by_local_crop_count,
+    summarize_audit_group_v2,
+    sweep_kappa_on_crop_v2,
 )
 from hpc.losses.ntpc import NTPCConfig, NTPCLoss
 from hpc.models.factory import assert_checkpoint_compatible, build_model_from_config
@@ -39,14 +53,16 @@ from hpc.utils.seed import seed_everything
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Audit Objective Mechanism (R2 Flat-DM vs R4 DTM Tree)")
-    parser.add_argument("--config", required=True, help="Path to config YAML")
-    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint .pt")
-    parser.add_argument("--output", default="runs/objective_audit/audit_results.json", help="Output JSON path")
+    parser = argparse.ArgumentParser(description="Objective Mechanism Audit v2")
+    parser.add_argument("--config-r2", default="configs/factorial_a_crop256_c16.yaml", help="Path to R2 config YAML")
+    parser.add_argument("--checkpoint-r2", default="runs/factorial_a_crop256_c16/best.pt", help="Path to R2 checkpoint .pt")
+    parser.add_argument("--config-r4", default="configs/ntpc_sha.yaml", help="Path to R4 config YAML")
+    parser.add_argument("--checkpoint-r4", default="runs/ntpc_sha/best.pt", help="Path to R4 checkpoint .pt")
+    parser.add_argument("--output", default="runs/objective_audit/audit_v2_results.json", help="Output JSON path")
     parser.add_argument("--crop-size", type=int, default=256, help="Crop size for standardized spatial support")
     parser.add_argument("--max-samples", type=int, default=None, help="Max test images to evaluate (default: all)")
     parser.add_argument("--kappas", type=str, default="2,5,10,20,50,100", help="Comma-separated kappa values to sweep")
-    parser.add_argument("--sweep-samples", type=int, default=30, help="Number of crops to run full kappa sweep on")
+    parser.add_argument("--sweep-samples", type=int, default=40, help="Number of crops to run kappa sweep on")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -57,10 +73,8 @@ def make_centered_crop(
     points: np.ndarray,
     crop_size: int = 256,
 ) -> Optional[Tuple[torch.Tensor, np.ndarray]]:
-    """Extract a centered crop of exact size (crop_size x crop_size) without canvas padding."""
     _, _, h, w = image.shape
     if h < crop_size or w < crop_size:
-        # If image is smaller than crop_size, return None
         return None
     y0 = (h - crop_size) // 2
     x0 = (w - crop_size) // 2
@@ -81,30 +95,41 @@ def make_centered_crop(
     return crop, pts
 
 
+def load_model(cfg_path: str, ckpt_path: str, device: torch.device) -> Tuple[nn.Module, dict]:
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    model = build_model_from_config(cfg, load_pretrained=False).to(device)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    assert_checkpoint_compatible(ckpt, cfg)
+    model.load_state_dict(ckpt["model_state_dict"], strict=True)
+    model.eval()
+    return model, cfg
+
+
 def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
     device = torch.device(args.device)
 
-    with open(args.config, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    print("=" * 80)
+    print("STARTING OBJECTIVE MECHANISM AUDIT V2 (R2 vs R4)")
+    print("=" * 80, flush=True)
 
-    print(f"Loading checkpoint {args.checkpoint} ...", flush=True)
-    model = build_model_from_config(cfg, load_pretrained=False).to(device)
-    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    assert_checkpoint_compatible(ckpt, cfg)
-    model.load_state_dict(ckpt["model_state_dict"], strict=True)
-    model.eval()
+    print(f"Loading R2 model: {args.checkpoint_r2} ...", flush=True)
+    model_r2, cfg_r2 = load_model(args.config_r2, args.checkpoint_r2, device)
 
-    dataset, split = build_evaluation_dataset(cfg)
+    print(f"Loading R4 model: {args.checkpoint_r4} ...", flush=True)
+    model_r4, cfg_r4 = load_model(args.config_r4, args.checkpoint_r4, device)
+
+    dataset, split = build_evaluation_dataset(cfg_r2)
     total_images = len(dataset) if args.max_samples is None else min(len(dataset), args.max_samples)
     print(f"Dataset: {len(dataset)} images in split '{split}', evaluating on {total_images} images (crop={args.crop_size}x{args.crop_size})", flush=True)
 
     kappas = [float(k.strip()) for k in args.kappas.split(",") if k.strip()]
 
-    # Standard criteria for R2 and R4 at default kappa=20
-    crit_r2_default = NTPCLoss(NTPCConfig(mode="r2_flat_dm", root_loss="nb", kappa_flat16=20.0)).to(device)
-    crit_r4_default = NTPCLoss(NTPCConfig(
+    # Losses
+    crit_r2 = NTPCLoss(NTPCConfig(mode="r2_flat_dm", root_loss="nb", kappa_flat16=20.0)).to(device)
+    crit_r4 = NTPCLoss(NTPCConfig(
         mode="r4_dtm_tree16",
         root_loss="nb",
         kappa_root64=20.0,
@@ -112,7 +137,8 @@ def main() -> None:
         kappa_32_16=20.0,
     )).to(device)
 
-    records: List[Dict[str, Any]] = []
+    records_r2_native: List[Dict[str, Any]] = []
+    records_r4_native: List[Dict[str, Any]] = []
     sweep_records: List[Dict[str, Any]] = []
     skipped = 0
 
@@ -127,8 +153,9 @@ def main() -> None:
             skipped += 1
             continue
         crop_img, crop_pts = crop_res
+        crop_img = crop_img.to(device)
+        gt_count = float(len(crop_pts))
 
-        # Build exact target pyramid on crop
         target_pyramid = build_exact_count_pyramid(
             [torch.from_numpy(crop_pts).float()],
             height=args.crop_size,
@@ -138,165 +165,198 @@ def main() -> None:
             device=device,
         )
 
-        gt_count = float(len(crop_pts))
-        crop_img = crop_img.to(device)
-
-        # Forward pass on frozen model to obtain predicted mass map
+        # -------------------------------------------------------------------
+        # 1. Evaluate R2 Model Native State (Flat-DM16 trained)
+        # -------------------------------------------------------------------
         with torch.no_grad():
-            mass = model.forward_mass(crop_img)  # [1, 1, H/4, W/4]
-            pred_count = float(mass.sum().item())
+            mass_r2 = model_r2.forward_mass(crop_img)
+            pred_count_r2 = float(mass_r2.sum().item())
 
-        signed_error = pred_count - gt_count
-
-        # Compute R2 audit
-        audit_r2 = compute_audit_for_mode(
-            mass, target_pyramid, crit_r2_default,
+        audit_r2_native = compute_audit_for_mode_v2(
+            model=model_r2,
+            crop_img=crop_img,
+            mass=mass_r2,
+            targets=target_pyramid,
+            criterion=crit_r2,
             active_components=("root_magnitude", "flat_16"),
         )
-
-        # Compute R4 audit
-        audit_r4 = compute_audit_for_mode(
-            mass, target_pyramid, crit_r4_default,
-            active_components=("root_magnitude", "root_to_64", "64_to_32", "32_to_16"),
-        )
-
-        record = {
+        rec_r2 = {
             "image_index": idx,
             "img_path": sample.get("img_path", f"img_{idx}"),
             "gt_count": gt_count,
-            "pred_count": pred_count,
-            "signed_error": signed_error,
-            "abs_error": abs(signed_error),
+            "pred_count": pred_count_r2,
+            "signed_error": pred_count_r2 - gt_count,
             "r2": {
-                "component_metrics": audit_r2["component_metrics"],
-                "pairwise_cosines": audit_r2["pairwise_cosines"],
-            },
-            "r4": {
-                "component_metrics": audit_r4["component_metrics"],
-                "pairwise_cosines": audit_r4["pairwise_cosines"],
+                "component_metrics": audit_r2_native["component_metrics"],
+                "pairwise_cosines": audit_r2_native["pairwise_cosines"],
+                "pairwise_cancellations": audit_r2_native["pairwise_cancellations"],
+                "param_metrics": audit_r2_native["param_metrics"],
             },
         }
-        records.append(record)
+        records_r2_native.append(rec_r2)
 
-        # Offline kappa sweep on selected samples (or all if sweep_samples >= count)
+        # -------------------------------------------------------------------
+        # 2. Evaluate R4 Model Native State (DTM Tree trained)
+        # -------------------------------------------------------------------
+        with torch.no_grad():
+            mass_r4 = model_r4.forward_mass(crop_img)
+            pred_count_r4 = float(mass_r4.sum().item())
+
+        audit_r4_native = compute_audit_for_mode_v2(
+            model=model_r4,
+            crop_img=crop_img,
+            mass=mass_r4,
+            targets=target_pyramid,
+            criterion=crit_r4,
+            active_components=("root_magnitude", "root_to_64", "64_to_32", "32_to_16"),
+        )
+        rec_r4 = {
+            "image_index": idx,
+            "img_path": sample.get("img_path", f"img_{idx}"),
+            "gt_count": gt_count,
+            "pred_count": pred_count_r4,
+            "signed_error": pred_count_r4 - gt_count,
+            "r4": {
+                "component_metrics": audit_r4_native["component_metrics"],
+                "pairwise_cosines": audit_r4_native["pairwise_cosines"],
+                "pairwise_cancellations": audit_r4_native["pairwise_cancellations"],
+                "param_metrics": audit_r4_native["param_metrics"],
+            },
+        }
+        records_r4_native.append(rec_r4)
+
+        # -------------------------------------------------------------------
+        # 3. Kappa Sweep on R4 Native Mass Maps (tracking cancellation C)
+        # -------------------------------------------------------------------
         if len(sweep_records) < args.sweep_samples:
-            sweep_res = sweep_kappa_on_crop(mass, target_pyramid, kappas=kappas, device=device)
+            sweep_res = sweep_kappa_on_crop_v2(mass_r4, target_pyramid, kappas=kappas, device=device)
             sweep_records.append({
                 "image_index": idx,
                 "gt_count": gt_count,
-                "pred_count": pred_count,
                 "sweep": sweep_res,
             })
 
         if (idx + 1) % 30 == 0 or (idx + 1) == total_images:
-            print(f"Processed {idx + 1}/{total_images} images ({len(records)} valid crops, {skipped} skipped) ...", flush=True)
+            print(f"Processed {idx + 1}/{total_images} images ({len(records_r2_native)} valid crops, {skipped} skipped) ...", flush=True)
 
     elapsed = time.time() - t0
     print(f"Audit computation completed in {elapsed:.1f}s.", flush=True)
 
-    # Density stratification
-    density_bins = stratify_by_density(records)
-    summary_by_density = {
-        bin_name: summarize_audit_group(bin_records)
-        for bin_name, bin_records in density_bins.items()
-    }
+    # Density stratification (by local crop count)
+    bins_r2 = stratify_by_local_crop_count(records_r2_native)
+    summary_r2 = {b: summarize_audit_group_v2(r) for b, r in bins_r2.items()}
 
-    # Summarize kappa sweep across crops
+    bins_r4 = stratify_by_local_crop_count(records_r4_native)
+    summary_r4 = {b: summarize_audit_group_v2(r) for b, r in bins_r4.items()}
+
+    # Kappa sweep summary (on R4 native mass maps)
     kappa_summary = {}
     for kappa in kappas:
         k_str = f"k_{int(kappa) if kappa == int(kappa) else kappa}"
-        r2_mag_cos = [r["sweep"]["r2_flat"][k_str]["flat_16"]["magnitude_cosine"] for r in sweep_records]
-        r2_norm = [r["sweep"]["r2_flat"][k_str]["flat_16"]["norm"] for r in sweep_records]
-        r4_mag_cos = [r["sweep"]["r4_tree"][k_str]["32_to_16"]["magnitude_cosine"] for r in sweep_records]
-        r4_norm = [r["sweep"]["r4_tree"][k_str]["32_to_16"]["norm"] for r in sweep_records]
-        r4_cos_root_32 = [r["sweep"]["r4_tree"][k_str]["cos_root_vs_32_16"] for r in sweep_records if math.isfinite(r["sweep"]["r4_tree"][k_str]["cos_root_vs_32_16"])]
+        cos_tree = [r["sweep"]["r4_tree"][k_str]["cos_64_32_vs_32_16"] for r in sweep_records if math.isfinite(r["sweep"]["r4_tree"][k_str]["cos_64_32_vs_32_16"])]
+        canc_tree = [r["sweep"]["r4_tree"][k_str]["cancellation_64_32_vs_32_16"] for r in sweep_records if math.isfinite(r["sweep"]["r4_tree"][k_str]["cancellation_64_32_vs_32_16"])]
+        cos_r32 = [r["sweep"]["r4_tree"][k_str]["cos_root_vs_32_16"] for r in sweep_records if math.isfinite(r["sweep"]["r4_tree"][k_str]["cos_root_vs_32_16"])]
+        norm_32 = [r["sweep"]["r4_tree"][k_str]["32_to_16"]["norm"] for r in sweep_records]
+        norm_flat = [r["sweep"]["r2_flat"][k_str]["flat_16"]["norm"] for r in sweep_records]
 
         kappa_summary[k_str] = {
             "kappa": kappa,
-            "r2_flat16_mag_cos_mean": float(np.mean(r2_mag_cos)) if r2_mag_cos else float("nan"),
-            "r2_flat16_norm_mean": float(np.mean(r2_norm)) if r2_norm else float("nan"),
-            "r4_32_to_16_mag_cos_mean": float(np.mean(r4_mag_cos)) if r4_mag_cos else float("nan"),
-            "r4_32_to_16_norm_mean": float(np.mean(r4_norm)) if r4_norm else float("nan"),
-            "r4_cos_root_vs_32_16_mean": float(np.mean(r4_cos_root_32)) if r4_cos_root_32 else float("nan"),
+            "cos_64_32_vs_32_16_mean": float(np.mean(cos_tree)) if cos_tree else float("nan"),
+            "cancellation_64_32_vs_32_16_mean": float(np.mean(canc_tree)) if canc_tree else float("nan"),
+            "conflict_rate_64_32_vs_32_16": float(np.mean([1.0 if c < 0.0 else 0.0 for c in cos_tree])) if cos_tree else float("nan"),
+            "cos_root_vs_32_16_mean": float(np.mean(cos_r32)) if cos_r32 else float("nan"),
+            "r4_32_to_16_norm_mean": float(np.mean(norm_32)) if norm_32 else float("nan"),
+            "r2_flat16_norm_mean": float(np.mean(norm_flat)) if norm_flat else float("nan"),
         }
 
     output_data = {
         "metadata": {
-            "checkpoint": args.checkpoint,
-            "config": args.config,
+            "checkpoint_r2": args.checkpoint_r2,
+            "checkpoint_r4": args.checkpoint_r4,
             "crop_size": args.crop_size,
-            "valid_crops": len(records),
+            "valid_crops": len(records_r2_native),
             "skipped_images": skipped,
             "kappas_swept": kappas,
             "elapsed_seconds": elapsed,
         },
-        "density_stratified_summary": summary_by_density,
+        "r2_native_summary": summary_r2,
+        "r4_native_summary": summary_r4,
         "kappa_sweep_summary": kappa_summary,
-        "per_crop_records": records,
+        "records_r2": records_r2_native,
+        "records_r4": records_r4_native,
     }
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2, allow_nan=True)
-    print(f"\nWrote full audit results to {out_path}", flush=True)
+    print(f"\nWrote full audit v2 results to {out_path}", flush=True)
 
     # -----------------------------------------------------------------------
     # PRINT TERMINAL REPORT
     # -----------------------------------------------------------------------
-    print("\n" + "=" * 90)
-    print("OBJECTIVE MECHANISM AUDIT: FLAT-DM16 (R2) vs NEURAL DTM TREE (R4)")
-    print("=" * 90)
+    print("\n" + "=" * 95)
+    print("OBJECTIVE MECHANISM AUDIT V2 REPORT (EVALUATED ON BOTH R2 & R4 CHECKPOINTS)")
+    print("=" * 95)
 
-    # 1. Density Stratification Table
-    print("\n--- 1. Density-Stratified Magnitude Cosine rho_magnitude = cos(grad, 1) ---")
-    print("(rho > 0: loss pushes count DOWN / undercount; rho < 0: loss pushes count UP)")
-    header = f"{'Density Bin':<12} {'Crops':>6} {'Mean GT':>9} {'Bias':>8} | {'R2 Flat16':>10} {'R2 Total':>9} | {'R4 32->16':>10} {'R4 Total':>9}"
-    print(header)
-    print("-" * len(header))
-    for bname in ["all", "sparse", "medium", "dense"]:
-        s = summary_by_density[bname]
-        cnt = s["count"]
-        gt = s.get("mean_gt_count", float("nan"))
-        err = s.get("mean_count_error", float("nan"))
-        r2_f16 = s.get("r2", {}).get("flat16_mag_cos", float("nan"))
-        r2_tot = s.get("r2", {}).get("total_mag_cos", float("nan"))
-        r4_32 = s.get("r4", {}).get("32_to_16_mag_cos", float("nan"))
-        r4_tot = s.get("r4", {}).get("total_mag_cos", float("nan"))
-        print(f"{bname.capitalize():<12} {cnt:>6} {gt:>9.1f} {err:>8.1f} | {r2_f16:>10.4f} {r2_tot:>9.4f} | {r4_32:>10.4f} {r4_tot:>9.4f}")
+    # Table 1: Model Prediction & Parameter-Space Count Direction
+    print("\n--- 1. Parameter-Space Count Direction cos(grad_theta(N), grad_theta(L_k)) ---")
+    print("cos > 0: optimizer step (-grad_theta(L)) DECREASES predicted count in model weight space (undercount push)")
+    print("cos < 0: optimizer step INCREASES predicted count in model weight space")
+    print("cos ~ 0: count-neutral spatial allocation")
+    h1 = f"{'Model & Density':<22} {'Count':>6} {'Mean GT':>8} {'Bias':>8} | {'Root ParamCos':>14} {'Alloc ParamCos':>15} {'Total ParamCos':>15}"
+    print(h1)
+    print("-" * len(h1))
 
-    # 2. Gradient Conflicts Table
-    print("\n--- 2. Pairwise Component Gradient Cosine & Conflict Rate ---")
-    print("(Conflict rate = fraction of crops where cos(g_a, g_b) < 0, i.e., antagonistic gradients)")
-    header2 = f"{'Density Bin':<12} | {'R2: Root vs Flat16':^24} | {'R4: Root vs 32->16':^24} | {'R4: 64->32 vs 32->16':^24}"
-    print(header2)
-    print(f"{'':<12} | {'Mean Cos':>10} {'Conflict%':>12} | {'Mean Cos':>10} {'Conflict%':>12} | {'Mean Cos':>10} {'Conflict%':>12}")
-    print("-" * len(header2))
-    for bname in ["all", "sparse", "medium", "dense"]:
-        s = summary_by_density[bname]
-        r2_cos = s.get("r2", {}).get("cos_root_vs_flat16", float("nan"))
-        r2_cr = s.get("r2", {}).get("conflict_root_vs_flat16", float("nan")) * 100
-        r4_cos_r32 = s.get("r4", {}).get("cos_root_vs_32_16", float("nan"))
-        r4_cr_r32 = s.get("r4", {}).get("conflict_root_vs_32_16", float("nan")) * 100
-        r4_cos_tree = s.get("r4", {}).get("cos_64_32_vs_32_16", float("nan"))
-        r4_cr_tree = s.get("r4", {}).get("conflict_64_32_vs_32_16", float("nan")) * 100
-        print(f"{bname.capitalize():<12} | {r2_cos:>10.4f} {r2_cr:>11.1f}% | {r4_cos_r32:>10.4f} {r4_cr_r32:>11.1f}% | {r4_cos_tree:>10.4f} {r4_cr_tree:>11.1f}%")
+    for bname in ["all", "low (<50)", "medium (50-150)", "high (>=150)"]:
+        # R2
+        s2 = summary_r2[bname]
+        cnt2 = s2["count"]
+        gt2 = s2.get("mean_gt_count", float("nan"))
+        err2 = s2.get("mean_count_error", float("nan"))
+        r2_rt_pc = s2.get("r2", {}).get("root_param_cos", float("nan"))
+        r2_f16_pc = s2.get("r2", {}).get("flat16_param_cos", float("nan"))
+        r2_tot_pc = s2.get("r2", {}).get("total_param_cos", float("nan"))
+        print(f"R2 {bname:<19} {cnt2:>6} {gt2:>8.1f} {err2:>8.2f} | {r2_rt_pc:>14.4f} {r2_f16_pc:>15.4f} {r2_tot_pc:>15.4f}")
 
-    # 3. Kappa Sweep Table
-    print("\n--- 3. Offline Kappa Sweep (N=30 crops) ---")
-    header3 = f"{'Kappa':<8} | {'R2 Flat16 MagCos':>17} {'R2 Flat16 Norm':>15} | {'R4 32->16 MagCos':>17} {'R4 32->16 Norm':>15} {'R4 Root vs 32->16 Cos':>22}"
-    print(header3)
-    print("-" * len(header3))
+        # R4
+        s4 = summary_r4[bname]
+        err4 = s4.get("mean_count_error", float("nan"))
+        r4_rt_pc = s4.get("r4", {}).get("root_param_cos", float("nan"))
+        r4_32_pc = s4.get("r4", {}).get("32_16_param_cos", float("nan"))
+        r4_tot_pc = s4.get("r4", {}).get("total_param_cos", float("nan"))
+        print(f"R4 {bname:<19} {cnt2:>6} {gt2:>8.1f} {err4:>8.2f} | {r4_rt_pc:>14.4f} {r4_32_pc:>15.4f} {r4_tot_pc:>15.4f}")
+        print("-" * len(h1))
+
+    # Table 2: Tree Level Conflict & Actual Cancellation Ratio on R4 Native Checkpoint
+    print("\n--- 2. Tree Level Gradient Conflict & Cancellation Ratio on R4 Native Checkpoint ---")
+    print("Conflict% = fraction of crops where cos(g_64, g_32) < 0 (antagonistic)")
+    print("Cancellation C = 1 - ||g_a + g_b|| / (||g_a|| + ||g_b||) in [0, 1] (0 = no cancellation, 1 = 100% destroyed)")
+    h2 = f"{'Crop Density Bin':<22} | {'Mean Cos(64->32, 32->16)':^28} | {'Conflict%':^12} | {'Cancellation Ratio C':^22}"
+    print(h2)
+    print("-" * len(h2))
+    for bname in ["all", "low (<50)", "medium (50-150)", "high (>=150)"]:
+        s4 = summary_r4[bname]
+        cos_tr = s4.get("r4", {}).get("cos_64_32_vs_32_16", float("nan"))
+        cr_tr = s4.get("r4", {}).get("conflict_64_32_vs_32_16", float("nan")) * 100
+        c_tr = s4.get("r4", {}).get("cancellation_64_32_vs_32_16", float("nan"))
+        print(f"{bname:<22} | {cos_tr:^28.4f} | {cr_tr:^11.1f}% | {c_tr:^22.4f}")
+
+    # Table 3: Kappa Sweep on R4 Native Checkpoint
+    print("\n--- 3. Offline Kappa Sweep on R4 Native Checkpoint (N=40 crops) ---")
+    h3 = f"{'Kappa':<8} | {'Cos(64->32, 32->16)':>20} {'Conflict%':>12} {'Cancellation C':>16} | {'R4 32->16 Norm':>15} {'R2 Flat16 Norm':>15}"
+    print(h3)
+    print("-" * len(h3))
     for k_str, ks in kappa_summary.items():
         k_val = ks["kappa"]
-        r2_mc = ks["r2_flat16_mag_cos_mean"]
-        r2_nm = ks["r2_flat16_norm_mean"]
-        r4_mc = ks["r4_32_to_16_mag_cos_mean"]
-        r4_nm = ks["r4_32_to_16_norm_mean"]
-        r4_c = ks["r4_cos_root_vs_32_16_mean"]
-        print(f"{k_val:<8} | {r2_mc:>17.4f} {r2_nm:>15.2f} | {r4_mc:>17.4f} {r4_nm:>15.2f} {r4_c:>22.4f}")
+        c_tr = ks["cos_64_32_vs_32_16_mean"]
+        cr_tr = ks["conflict_rate_64_32_vs_32_16"] * 100
+        canc = ks["cancellation_64_32_vs_32_16_mean"]
+        n32 = ks["r4_32_to_16_norm_mean"]
+        nf = ks["r2_flat16_norm_mean"]
+        print(f"{k_val:<8} | {c_tr:>20.4f} {cr_tr:>11.1f}% {canc:>16.4f} | {n32:>15.2f} {nf:>15.2f}")
 
-    print("=" * 90 + "\n")
+    print("=" * 95 + "\n")
 
 
 if __name__ == "__main__":
