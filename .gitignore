@@ -27,6 +27,8 @@ runs/
 !runs/e0_v2/**
 !runs/e0_v3/
 !runs/e0_v3/**
+!runs/objective_audit/
+!runs/objective_audit/**
 analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
