@@ -17,6 +17,13 @@ from .cardinality_sufficiency_v2 import (
     pack_child_counts,
     summarize_prediction,
 )
+from .cardinality_sufficiency_v3 import (
+    ImageCellCollector,
+    compute_image_weighted_metrics,
+    image_weighted_bootstrap_diff,
+    image_weighted_mean,
+    paired_seed_mlp_eval,
+)
 
 __all__ = [
     "evaluate_phase_shift_single_image",
@@ -25,6 +32,7 @@ __all__ = [
     "evaluate_effective_rank_single_image",
     "compute_spectral_rank_metrics",
     "evaluate_gradient_allocation_single_batch",
+    # v2
     "PCAProjector",
     "TinyMLPProbe",
     "avgpool2x",
@@ -36,4 +44,10 @@ __all__ = [
     "pack_2x2_features",
     "pack_child_counts",
     "summarize_prediction",
+    # v3
+    "ImageCellCollector",
+    "compute_image_weighted_metrics",
+    "image_weighted_bootstrap_diff",
+    "image_weighted_mean",
+    "paired_seed_mlp_eval",
 ]
