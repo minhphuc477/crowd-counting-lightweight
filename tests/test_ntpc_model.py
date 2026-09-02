@@ -425,3 +425,48 @@ def test_arbitrary_resolution_padding_sensitivity():
     # Relative difference between direct unpadded inference and padded-crop inference should be very small
     rel_diff = abs(float(cnt_direct) - float(cnt_padded)) / max(float(cnt_direct), 1e-4)
     assert rel_diff < 0.05, f"Padding policy sensitivity too high: direct={cnt_direct.item()}, padded={cnt_padded.item()}, rel={rel_diff:.4f}"
+
+
+def test_c32_backward_gradient_scaling_invariance():
+    """c32_grad_scale must produce 100% bitwise identical forward output, while scaling backward grad."""
+    g = torch.Generator().manual_seed(42)
+    x = torch.randn(2, 3, 256, 256, generator=g)
+
+    model_base = HPCLite(pretrained=False, neck_width=32, feature_reductions=(4, 8, 16, 32), c32_grad_scale=1.0)
+    state = copy.deepcopy(model_base.state_dict())
+
+    # Forward check across alphas: forward pass is bitwise identical
+    with torch.no_grad():
+        out_base = model_base(x)
+        for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
+            m = HPCLite(pretrained=False, neck_width=32, feature_reductions=(4, 8, 16, 32), c32_grad_scale=alpha)
+            m.load_state_dict(state)
+            out_alpha = m(x)
+            assert torch.equal(out_base, out_alpha), f"Forward mismatch for alpha={alpha}"
+
+    # Backward gradient scaling check on backbone stage 4 (C32)
+    # Compare grad on backbone blocks[3] (the C32 stage) between alpha=1.0 and alpha=0.5 / alpha=0.0
+    model_10 = HPCLite(pretrained=False, neck_width=32, feature_reductions=(4, 8, 16, 32), c32_grad_scale=1.0)
+    model_10.load_state_dict(state)
+    loss_10 = model_10(x).sum()
+    loss_10.backward()
+
+    model_05 = HPCLite(pretrained=False, neck_width=32, feature_reductions=(4, 8, 16, 32), c32_grad_scale=0.5)
+    model_05.load_state_dict(state)
+    loss_05 = model_05(x).sum()
+    loss_05.backward()
+
+    model_00 = HPCLite(pretrained=False, neck_width=32, feature_reductions=(4, 8, 16, 32), c32_grad_scale=0.0)
+    model_00.load_state_dict(state)
+    loss_00 = model_00(x).sum()
+    loss_00.backward()
+
+    # The c32 stage weights in the backbone (blocks[3]) should have exactly 0.5x grad and 0.0x grad
+    p_c32_10 = next(model_10.backbone.backbone.blocks[3].parameters()).grad
+    p_c32_05 = next(model_05.backbone.backbone.blocks[3].parameters()).grad
+    p_c32_00 = next(model_00.backbone.backbone.blocks[3].parameters()).grad
+
+    assert p_c32_10 is not None and (p_c32_10.abs().sum() > 0)
+    torch.testing.assert_close(p_c32_05, p_c32_10 * 0.5, atol=1e-6, rtol=1e-5)
+    assert p_c32_00 is None or p_c32_00.abs().sum() == 0.0
+

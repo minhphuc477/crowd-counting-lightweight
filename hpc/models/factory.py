@@ -17,6 +17,7 @@ _KNOWN_MODEL_KEYS = {
     "eps_d",
     "output_stride",
     "features",
+    "c32_grad_scale",
 }
 
 
@@ -63,6 +64,7 @@ def resolve_model_config(cfg: dict) -> dict:
         "eps_d": float(m.get("eps_d", 1e-8)),
         "output_stride": int(m.get("output_stride", 4)),
         "features": _parse_features(m.get("features")),
+        "c32_grad_scale": float(m.get("c32_grad_scale", 1.0)),
     }
 
 
@@ -180,6 +182,7 @@ def build_model_from_config(
         eps_d=resolved["eps_d"],
         output_stride=resolved["output_stride"],
         feature_reductions=tuple(int(name[1:]) for name in resolved["features"]),
+        c32_grad_scale=resolved["c32_grad_scale"],
     )
     model.pretrained_requested = requested_pretrained
     model.pretrained_loaded = effective_pretrained

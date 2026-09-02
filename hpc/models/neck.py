@@ -5,6 +5,29 @@ import torch.nn.functional as F
 from .blocks import ConvGNAct, DSResidual, DepthwiseDilated
 
 
+class ScaleGradient(torch.autograd.Function):
+    """Autograd function that passes input through unchanged on forward, but scales gradient on backward."""
+
+    @staticmethod
+    def forward(ctx, x, scale):
+        ctx.scale = float(scale)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.scale == 0.0:
+            return torch.zeros_like(grad_output), None
+        if ctx.scale == 1.0:
+            return grad_output, None
+        return grad_output * ctx.scale, None
+
+
+def scale_gradient(x: torch.Tensor, scale: float) -> torch.Tensor:
+    if scale == 1.0:
+        return x
+    return ScaleGradient.apply(x, scale)
+
+
 class AdditiveFPNNeck(nn.Module):
     """Additive depthwise-separable FPN with optional C32/P32 carrier.
 
@@ -19,6 +42,7 @@ class AdditiveFPNNeck(nn.Module):
         width: int = 32,
         context_dilations: tuple = (1, 2, 3),
         use_p8_context: bool = False,
+        c32_grad_scale: float = 1.0,
     ):
         super().__init__()
         if len(in_channels) not in {3, 4}:
@@ -27,6 +51,7 @@ class AdditiveFPNNeck(nn.Module):
         self.width = width
         self.use_p8_context = use_p8_context
         self.use_p32 = len(in_channels) == 4
+        self.c32_grad_scale = float(c32_grad_scale)
 
         # Lateral 1x1 projections
         self.lat4 = ConvGNAct(c4, width, kernel_size=1)
@@ -75,7 +100,8 @@ class AdditiveFPNNeck(nn.Module):
         p32 = None
         p16_in = l16
         if self.use_p32:
-            p32 = self.ref32(self.lat32(c32))
+            c32_in = scale_gradient(c32, self.c32_grad_scale)
+            p32 = self.ref32(self.lat32(c32_in))
             p16_in = p16_in + F.interpolate(
                 p32, size=l16.shape[-2:], mode="bilinear", align_corners=False
             )

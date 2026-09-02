@@ -41,6 +41,7 @@ class HPCLite(nn.Module):
         eps_d: float = 1e-8,
         output_stride: int = 4,
         feature_reductions: Tuple[int, ...] = (4, 8, 16),
+        c32_grad_scale: float = 1.0,
     ):
         super().__init__()
         from .blocks import RepDWBlock
@@ -51,6 +52,7 @@ class HPCLite(nn.Module):
         self.use_p8_context = bool(use_p8_context)
         self.use_repblock = bool(use_repblock)
         self.feature_reductions = tuple(int(r) for r in feature_reductions)
+        self.c32_grad_scale = float(c32_grad_scale)
 
         if self.output_stride != 4:
             raise ValueError("Target and loss formulations assume output_stride=4")
@@ -68,6 +70,7 @@ class HPCLite(nn.Module):
             width=neck_width,
             context_dilations=context_dilations,
             use_p8_context=self.use_p8_context,
+            c32_grad_scale=self.c32_grad_scale,
         )
 
         if self.use_repblock:
