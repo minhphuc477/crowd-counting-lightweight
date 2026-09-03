@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-13%2F13%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-15%2F15%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
@@ -233,6 +233,11 @@ rectangle_mae_large,negative_cell_fraction,negative_mass_ratio,violation_magnitu
 ### 7.5 Run Capacity Sweep Config Generation
 ```powershell
 .venv\Scripts\python configs/generate_capacity_sweep.py
+```
+
+### 7.6 Run Receptive-Field Sweep Config Generation (Section 25)
+```powershell
+.venv\Scripts\python configs/generate_rf_sweep.py
 ```
 
 ---

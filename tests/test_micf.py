@@ -379,4 +379,50 @@ class TestMICFv2:
         # Random noise has much higher high frequency energy
         assert spec_noisy["high_freq_energy_ratio"] > spec_smooth["high_freq_energy_ratio"]
 
+    def test_extent_aware_micf_lite(self):
+        import pytest
+        # Error if extent_aware used with non-cumulative head
+        with pytest.raises(ValueError, match="only meaningful for head_type='cumulative'"):
+            MICFLite(head_type="local", extent_aware=True)
+
+        m_extent = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            output_stride=16,
+            extent_aware=True,
+        )
+        assert m_extent.extent_aware is True
+        assert m_extent.coord_proj is not None
+
+        x = torch.randn(2, 3, 128, 128)
+        field = m_extent(x)
+        assert field.shape == (2, 1, 8, 8)
+        assert torch.isfinite(field).all()
+        # Non-negativity guarantee by construction (area >= 0 and softplus >= 0)
+        assert (field >= 0.0).all()
+
+        # Check gradient flow to coord_proj and backbone
+        loss = field.sum()
+        loss.backward()
+        assert m_extent.coord_proj.weight.grad is not None
+        assert torch.isfinite(m_extent.coord_proj.weight.grad).all()
+
+    def test_micf_loss_sample_normalization(self):
+        loss_unnorm = MICFLoss(field_loss="smooth_l1", normalize_by="none")
+        loss_norm = MICFLoss(field_loss="smooth_l1", normalize_by="total_count")
+
+        pred_c = torch.tensor([[[[10.0, 20.0], [30.0, 50.0]]]]).float().requires_grad_()
+        target_c = torch.tensor([[[[8.0, 18.0], [28.0, 40.0]]]]).float()  # total count = 40.0
+
+        val_unnorm = loss_unnorm(pred_c, target_c)
+        val_norm = loss_norm(pred_c, target_c)
+
+        assert val_norm < val_unnorm
+        assert torch.isfinite(val_norm)
+        val_norm.backward()
+        assert pred_c.grad is not None
+        assert torch.isfinite(pred_c.grad).all()
+
 

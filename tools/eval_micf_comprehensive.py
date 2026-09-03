@@ -294,6 +294,7 @@ def main() -> None:
         context_type=str(m_cfg.get("context_type", "directional")),
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=output_stride,
+        extent_aware=bool(m_cfg.get("extent_aware", False)),
     ).to(device)
 
     # Load weights if available

@@ -30,6 +30,7 @@ def build_micf_model_from_config(cfg: dict) -> MICFLite:
         context_type=str(m_cfg.get("context_type", "directional")),
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=int(m_cfg.get("output_stride", 16)),
+        extent_aware=bool(m_cfg.get("extent_aware", False)),
     )
 
 

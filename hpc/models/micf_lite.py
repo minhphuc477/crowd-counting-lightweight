@@ -30,6 +30,22 @@ from .neck import AdditiveFPNNeck
 from hpc.losses.micf import discrete_mixed_difference
 
 
+def _prefix_area_tl(h: int, w: int, device, dtype) -> torch.Tensor:
+    """Prefix area (i+1)(j+1) for the TL cumulative field, shape [H, W]."""
+    i = torch.arange(1, h + 1, device=device, dtype=dtype)
+    j = torch.arange(1, w + 1, device=device, dtype=dtype)
+    return i[:, None] * j[None, :]
+
+
+def _normalized_coords(h: int, w: int, device, dtype) -> torch.Tensor:
+    """Normalized (row, col) prefix-position channels, shape [2, H, W], each in (0, 1]."""
+    i = torch.arange(1, h + 1, device=device, dtype=dtype) / h
+    j = torch.arange(1, w + 1, device=device, dtype=dtype) / w
+    ii = i[:, None].expand(h, w)
+    jj = j[None, :].expand(h, w)
+    return torch.stack([ii, jj], dim=0)
+
+
 def compose_tiled_cumulative_field(c_local: list[list[torch.Tensor]]) -> torch.Tensor:
     """Exact block-decomposed 2D prefix-sum composition (design doc sec.30, generalized).
 
@@ -118,6 +134,7 @@ class MICFLite(nn.Module):
         output_stride: int = 16,
         feature_reductions: Tuple[int, ...] = (4, 8, 16),
         eps_d: float = 1e-8,
+        extent_aware: bool = False,
     ) -> None:
         super().__init__()
         self.head_type = head_type.lower()
@@ -125,6 +142,10 @@ class MICFLite(nn.Module):
             raise ValueError(
                 f"head_type must be 'local', 'cumulative', or 'integrated_local', got {head_type}"
             )
+
+        self.extent_aware = bool(extent_aware)
+        if self.extent_aware and self.head_type != "cumulative":
+            raise ValueError("extent_aware=True is only meaningful for head_type='cumulative'")
 
         self.output_stride = int(output_stride)
         if self.output_stride not in {4, 8, 16}:
@@ -166,6 +187,15 @@ class MICFLite(nn.Module):
         else:
             self.context_module = nn.Identity()
 
+        # Extent-aware coordinate injection (fixes normalized-mean-context vs
+        # extensive-target mismatch demonstrated by the uniform-density
+        # counterexample: TL-mean context is ~constant even though C must
+        # grow with prefix area).
+        if self.extent_aware:
+            self.coord_proj = nn.Conv2d(self.neck_width + 2, self.neck_width, kernel_size=1, bias=False)
+        else:
+            self.coord_proj = None
+
         # 4. Mass Head (depthwise-separable 1-channel projection)
         self.head_dw = nn.Conv2d(
             self.neck_width, self.neck_width, kernel_size=3, padding=1, groups=self.neck_width, bias=False
@@ -189,6 +219,9 @@ class MICFLite(nn.Module):
         - Integrated Local head (Section 32):
             Predicts local M = softplus(z) >= 0, then computes C = Integral(M).
             Guarantees Delta_xy C >= 0 by construction.
+        - Extent-aware Cumulative head:
+            Predicts local average prefix intensity rho = softplus(z) >= 0,
+            then computes C_hat = area(i, j) * rho(i, j).
         """
         features = self.backbone(x)
         # Extract native multi-scale routes: p4, p8, p16 (with early-return at target_stride)
@@ -197,6 +230,12 @@ class MICFLite(nn.Module):
         p_feat = routes[route_key]
 
         p_context = self.context_module(p_feat)
+
+        if self.extent_aware:
+            h_o, w_o = p_context.shape[-2:]
+            coords = _normalized_coords(h_o, w_o, p_context.device, p_context.dtype)
+            coords = coords.unsqueeze(0).expand(p_context.shape[0], -1, -1, -1)
+            p_context = self.coord_proj(torch.cat([p_context, coords], dim=1))
 
         h = self.head_dw(p_context)
         h = self.head_norm(h)
@@ -208,6 +247,15 @@ class MICFLite(nn.Module):
         elif self.head_type == "integrated_local":
             m = F.softplus(z).clamp_min(self.eps_d)
             return torch.cumsum(torch.cumsum(m, dim=-2), dim=-1)
+        elif self.extent_aware:
+            # C_hat = area(i,j) * rho_hat(i,j)
+            # rho_hat = predicted average prefix intensity (softplus >= 0).
+            # A spatially-uniform rho now still yields C growing correctly
+            # with prefix area, unlike a raw linear head fed only
+            # mean-normalized context.
+            rho = F.softplus(z)
+            area = _prefix_area_tl(z.shape[-2], z.shape[-1], z.device, z.dtype)
+            return area.unsqueeze(0).unsqueeze(0) * rho
         else:
             return z
 

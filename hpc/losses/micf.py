@@ -133,12 +133,18 @@ class MICFLoss(nn.Module):
         lambda_valid: float = 1.0,
         lambda_local_recon: float = 0.0,
         beta_smooth: float = 1.0,
+        normalize_by: str = "none",   # "none" | "total_count"
+        norm_eps: float = 1.0,
     ) -> None:
         super().__init__()
         self.field_loss = field_loss.lower()
         self.lambda_valid = float(lambda_valid)
         self.lambda_local_recon = float(lambda_local_recon)
         self.beta_smooth = float(beta_smooth)
+        self.normalize_by = normalize_by.lower()
+        if self.normalize_by not in {"none", "total_count"}:
+            raise ValueError(f"normalize_by must be 'none' or 'total_count', got {normalize_by}")
+        self.norm_eps = float(norm_eps)
 
     def _field_nll(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         if self.field_loss == "smooth_l1":
@@ -171,7 +177,14 @@ class MICFLoss(nn.Module):
             target_c = target_c.unsqueeze(1)
 
         # 1. Field loss across all prefix entries (includes corner = N_total)
-        field_loss = self._field_nll(pred_c, target_c).mean()
+        #    Optionally normalized by a single per-sample scalar
+        #    (design doc sec.10: "one scalar shared by the entire crop/image,
+        #    not a position-dependent transform").
+        if self.normalize_by == "total_count":
+            scale = target_c[..., -1, -1].clamp_min(self.norm_eps).view(-1, 1, 1, 1)
+            field_loss = self._field_nll(pred_c / scale, target_c / scale).mean()
+        else:
+            field_loss = self._field_nll(pred_c, target_c).mean()
 
         # 2. Measure validity penalty: mean ReLU(-Delta_xy C_hat)
         y_recovered = discrete_mixed_difference(pred_c)

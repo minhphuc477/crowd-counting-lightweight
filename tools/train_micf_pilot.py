@@ -134,6 +134,8 @@ def build_criterion(cfg: dict) -> nn.Module:
             lambda_valid=float(l_cfg.get("lambda_valid", 1.0)),
             lambda_local_recon=float(l_cfg.get("lambda_local_recon", 0.0)),
             beta_smooth=float(l_cfg.get("beta_smooth", 1.0)),
+            normalize_by=l_cfg.get("normalize_by", "none"),
+            norm_eps=float(l_cfg.get("norm_eps", 1.0)),
         )
     else:
         raise ValueError(f"Unknown loss mode: {mode}")
@@ -370,6 +372,7 @@ def main() -> None:
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=int(m_cfg.get("output_stride", 16)),
         eps_d=float(m_cfg.get("eps_d", 1e-8)),
+        extent_aware=bool(m_cfg.get("extent_aware", False)),
     ).to(device)
 
     criterion = build_criterion(cfg)
