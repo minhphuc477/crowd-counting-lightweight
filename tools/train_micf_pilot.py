@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import yaml
 
@@ -131,6 +132,7 @@ def build_criterion(cfg: dict) -> nn.Module:
         return MICFLoss(
             field_loss=l_cfg.get("field_loss", "smooth_l1"),
             lambda_valid=float(l_cfg.get("lambda_valid", 1.0)),
+            lambda_local_recon=float(l_cfg.get("lambda_local_recon", 0.0)),
             beta_smooth=float(l_cfg.get("beta_smooth", 1.0)),
         )
     else:
@@ -147,50 +149,82 @@ def evaluate_model(
     val_loader: DataLoader,
     device: torch.device,
     max_samples: int | None = None,
+    crop_size: int = 256,
 ) -> Dict[str, float]:
-    """Evaluate model with MAE/RMSE + MICF-specific diagnostics.
+    """Evaluate model under Regime A (crop-level) and Regime B (full image).
 
-    Diagnostics (cumulative head only):
-    - violation_rate: fraction of Delta_xy C_hat < 0 cells (sec.22 f_-)
-    - violation_magnitude: mean(-Delta_xy C_hat)[<0] / cell (sec.22 V)
-    - neg_mass_ratio: sum[-Delta_xy C_hat]_+ / (sum|Delta_xy C_hat| + eps) (sec.22 r_-)
-    - corner_delta_gap: |N_corner - N_delta| where N_corner = C_hat[-1,-1],
-      N_delta = sum(Delta_xy C_hat) (sec.21 E_cons)
+    - Regime A (mae_crop): isolates representation geometry on fixed 256x256 crops
+      (matching training crop size, avoiding receptive-field mismatch).
+    - Regime B (mae_full): evaluates full scenes using hierarchical tile composition
+      for cumulative models (Section 30 of design doc).
+    - Measure Diagnostics (Section 22):
+      - violation_rate: fraction of cells where Delta_xy C_hat < 0 (f_-)
+      - violation_magnitude: mean(ReLU(-Delta_xy C_hat)) over full grid (V)
+      - neg_mass_ratio: negative mass fraction r_-
     """
     model.eval()
-    errors: List[float] = []
-    sq_errors: List[float] = []
+    crop_errors: List[float] = []
+    full_errors: List[float] = []
+    full_sq_errors: List[float] = []
     violation_rates: List[float] = []
     violation_magnitudes: List[float] = []
     neg_mass_ratios: List[float] = []
-    corner_delta_gaps: List[float] = []
 
-    is_cumulative = getattr(model, "head_type", "") == "cumulative"
+    is_cumulative = getattr(model, "head_type", "") in {"cumulative", "integrated_local"}
 
     for idx, batch in enumerate(val_loader):
         if max_samples is not None and idx >= max_samples:
             break
         img = batch["image"].to(device)
         gt_count = float(batch["gt_count"].item())
+        gt_pts = batch["gt_points"][0]
+        if isinstance(gt_pts, np.ndarray):
+            gt_pts = torch.from_numpy(gt_pts).float()
+        gt_pts = gt_pts.to(device)
 
-        pred_count, pred_map = model.predict(img, pad_multiple=64)
-        pred_val = float(pred_count.item())
+        _, _, H, W = img.shape
 
-        err = pred_val - gt_count
-        errors.append(abs(err))
-        sq_errors.append(err * err)
+        # -------------------------------------------------------------
+        # Regime A: Fixed 256x256 central crop evaluation
+        # -------------------------------------------------------------
+        top = max(0, (H - crop_size) // 2)
+        left = max(0, (W - crop_size) // 2)
+        crop_h = min(H, crop_size)
+        crop_w = min(W, crop_size)
+        crop_img = img[:, :, top:top + crop_h, left:left + crop_w]
+
+        if gt_pts.numel() > 0:
+            px = gt_pts[:, 0]
+            py = gt_pts[:, 1]
+            in_crop = (px >= left) & (px < left + crop_w) & (py >= top) & (py < top + crop_h)
+            gt_crop_count = float(in_crop.sum().item())
+        else:
+            gt_crop_count = 0.0
+
+        pred_crop_count, pred_crop_map = model.predict(crop_img, pad_multiple=64)
+        crop_errors.append(abs(float(pred_crop_count.item()) - gt_crop_count))
+
+        # -------------------------------------------------------------
+        # Regime B: Full-image evaluation (Hierarchical Tile Composition)
+        # -------------------------------------------------------------
+        if is_cumulative:
+            pred_full_count, _ = model.predict_tiled(img, tile_size=crop_size)
+        else:
+            pred_full_count, _ = model.predict(img, pad_multiple=64)
+
+        pred_full_val = float(pred_full_count.item())
+        err_full = pred_full_val - gt_count
+        full_errors.append(abs(err_full))
+        full_sq_errors.append(err_full * err_full)
 
         if is_cumulative:
-            # Recover local mass map via mixed difference
-            y_rec = discrete_mixed_difference(pred_map)          # [1, 1, H, W]
-
-            # f_-: fraction of invalid cells
-            neg_mask = y_rec < 0
-            viol_rate = float(neg_mask.float().mean().item())
+            # Measure diagnostics on the crop field
+            y_rec = discrete_mixed_difference(pred_crop_map)
+            viol_rate = float((y_rec < 0).float().mean().item())
             violation_rates.append(viol_rate)
 
-            # V: mean violation magnitude per cell
-            viol_mag = float(y_rec[neg_mask].abs().mean().item()) if neg_mask.any() else 0.0
+            # V: canonical mean(ReLU(-Y)) over the grid (Section 22)
+            viol_mag = float(F.relu(-y_rec).mean().item())
             violation_magnitudes.append(viol_mag)
 
             # r_-: negative mass ratio
@@ -198,22 +232,24 @@ def evaluate_model(
             total_abs = float(y_rec.abs().sum().item()) + 1e-6
             neg_mass_ratios.append(neg_mass / total_abs)
 
-            # E_cons: corner vs. sum-of-delta consistency
-            n_corner = float(pred_map[..., -1, -1].item())
-            n_delta = float(y_rec.sum().item())
-            corner_delta_gaps.append(abs(n_corner - n_delta))
+    mae_crop = float(np.mean(crop_errors)) if crop_errors else 0.0
+    mae_full = float(np.mean(full_errors)) if full_errors else 0.0
+    rmse_full = float(np.sqrt(np.mean(full_sq_errors))) if full_sq_errors else 0.0
 
-    mae = float(np.mean(errors))
-    rmse = float(np.sqrt(np.mean(sq_errors)))
-
-    metrics = {"mae": mae, "rmse": rmse}
+    metrics = {
+        "mae_crop": mae_crop,
+        "mae_full": mae_full,
+        "mae": mae_crop,      # Primary decision metric is Regime A (isolated geometry)
+        "rmse": rmse_full,
+    }
     if is_cumulative:
-        metrics["violation_rate"] = float(np.mean(violation_rates))
-        metrics["violation_magnitude"] = float(np.mean(violation_magnitudes))
-        metrics["neg_mass_ratio"] = float(np.mean(neg_mass_ratios))
-        metrics["corner_delta_gap"] = float(np.mean(corner_delta_gaps))
+        metrics["violation_rate"] = float(np.mean(violation_rates)) if violation_rates else 0.0
+        metrics["violation_magnitude"] = float(np.mean(violation_magnitudes)) if violation_magnitudes else 0.0
+        metrics["neg_mass_ratio"] = float(np.mean(neg_mass_ratios)) if neg_mass_ratios else 0.0
     else:
         metrics["violation_rate"] = 0.0
+        metrics["violation_magnitude"] = 0.0
+        metrics["neg_mass_ratio"] = 0.0
 
     return metrics
 
@@ -346,6 +382,10 @@ def main() -> None:
         weight_decay=weight_decay,
     )
 
+    # Store initial LRs BEFORE the epoch loop (fixes P0 catastrophic warmup decay)
+    for pg in optimizer.param_groups:
+        pg["initial_lr"] = pg["lr"]
+
     sched_cfg = cfg.get("schedule", {})
     total_epochs = args.epochs or int(sched_cfg.get("epochs", 1000))
     warmup_epochs = int(sched_cfg.get("warmup_epochs", 25))
@@ -359,7 +399,7 @@ def main() -> None:
     best_mae = float("inf")
     history: List[Dict[str, Any]] = []
 
-    is_cumulative = model.head_type == "cumulative"
+    is_cumulative = model.head_type in {"cumulative", "integrated_local"}
     print(
         f"Model: {m_cfg.get('head_type')} head | context={m_cfg.get('use_integral_context')} | "
         f"Training {total_epochs} epochs (warmup={warmup_epochs}) | grad_clip={grad_clip}"
@@ -375,14 +415,10 @@ def main() -> None:
         epoch_losses: List[float] = []
         t0 = time.time()
 
-        # Apply warmup + cosine LR scaling
+        # Apply warmup + cosine LR scaling from stored initial_lr
         lr_scale = get_lr_scale(epoch, warmup_epochs, total_epochs)
         for pg in optimizer.param_groups:
-            pg["lr"] = pg.get("initial_lr", pg["lr"]) * lr_scale
-        # Store initial LRs on first epoch
-        if epoch == 1:
-            for pg in optimizer.param_groups:
-                pg["initial_lr"] = pg["lr"]
+            pg["lr"] = pg["initial_lr"] * lr_scale
 
         for batch_idx, batch in enumerate(train_loader):
             images = batch["image"].to(device)
@@ -414,7 +450,7 @@ def main() -> None:
                 if is_cumulative:
                     # Build cumulative target from the (possibly flipped) Y
                     c_target = cell_counts_to_cumulative_field(y_target, orientation="TL")
-                    loss = criterion(pred_field, c_target)
+                    loss = criterion(pred_field, c_target, target_y=y_target)
                 elif isinstance(criterion, IntegralLossOnLocalCount):
                     loss = criterion(pred_field, y_target)
                 else:
@@ -435,7 +471,7 @@ def main() -> None:
         mean_loss = float(np.mean(epoch_losses))
 
         # ------------------------------------------------------------------
-        # 5. Evaluation + logging
+        # 5. Evaluation + logging (Regime A: Crop, Regime B: Full)
         # ------------------------------------------------------------------
         eval_every = 1 if args.smoke_test else int(t_cfg.get("evaluate_every", 5))
         if epoch % eval_every == 0 or epoch == total_epochs:
@@ -444,19 +480,23 @@ def main() -> None:
                 val_loader,
                 device,
                 max_samples=5 if args.smoke_test else None,
+                crop_size=int(ds_cfg.get("crop_size", 256)),
             )
-            mae = val_res["mae"]
-            rmse = val_res["rmse"]
+            mae_crop = val_res["mae_crop"]
+            mae_full = val_res["mae_full"]
+            rmse_full = val_res["rmse"]
             viol = val_res["violation_rate"]
 
-            is_best = mae < best_mae
+            is_best = mae_crop < best_mae
             if is_best:
-                best_mae = mae
+                best_mae = mae_crop
                 torch.save(
                     {
                         "epoch": epoch,
                         "state_dict": model.state_dict(),
                         "best_mae": best_mae,
+                        "mae_crop": mae_crop,
+                        "mae_full": mae_full,
                         "config": cfg,
                         "seed": seed,
                     },
@@ -467,14 +507,16 @@ def main() -> None:
                 "epoch": epoch,
                 "loss": mean_loss,
                 "lr": optimizer.param_groups[-1]["lr"],
-                "mae": mae,
-                "rmse": rmse,
+                "mae_crop": mae_crop,
+                "mae_full": mae_full,
+                "mae": mae_crop,
+                "rmse": rmse_full,
                 "violation_rate": viol,
                 "best_mae": best_mae,
                 "time_sec": epoch_time,
             }
             # Add MICF-specific diagnostics if present
-            for k in ("violation_magnitude", "neg_mass_ratio", "corner_delta_gap"):
+            for k in ("violation_magnitude", "neg_mass_ratio"):
                 if k in val_res:
                     log_entry[k] = val_res[k]
             history.append(log_entry)
@@ -485,13 +527,13 @@ def main() -> None:
                 diag_str = (
                     f" | ViolMag: {val_res.get('violation_magnitude', 0):.3f}"
                     f" | NegMass: {val_res.get('neg_mass_ratio', 0)*100:.1f}%"
-                    f" | CornerGap: {val_res.get('corner_delta_gap', 0):.1f}"
                 )
 
             print(
                 f"[Epoch {epoch:4d}/{total_epochs}] Loss: {mean_loss:.4f} | "
-                f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | Viol: {viol*100:.2f}%"
-                f"{diag_str} | Best: {best_mae:.2f} {'(*)' if is_best else ''} ({epoch_time:.1f}s)",
+                f"MAE_crop: {mae_crop:.2f} | MAE_full: {mae_full:.2f} | "
+                f"Viol: {viol*100:.2f}%{diag_str} | Best_crop: {best_mae:.2f} "
+                f"{'(*)' if is_best else ''} ({epoch_time:.1f}s)",
                 flush=True,
             )
         else:

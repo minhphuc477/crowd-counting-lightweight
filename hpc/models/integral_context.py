@@ -123,3 +123,65 @@ class DirectionalIntegralContext(nn.Module):
         if self.use_residual:
             return x + z
         return z
+
+
+class AxialIntegralContext(nn.Module):
+    """Axial Integral Context Block (Section 31 of design doc).
+
+    A cheaper alternative to the full 4-directional 2D context:
+    computes horizontal prefix average R and vertical prefix average V:
+        R_{ij} = (1 / (j + 1)) * sum_{b <= j} F_{ib}  (horizontal scan)
+        V_{ij} = (1 / (i + 1)) * sum_{a <= i} F_{aj}  (vertical scan)
+
+    Fused via: 1x1 Conv(3C -> C) + DW-Conv3x3 + 1x1 Conv(C -> C) + residual.
+    Requires only 3C concatenation instead of 5C.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        use_residual: bool = True,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.channels = channels
+        self.use_residual = use_residual
+
+        in_channels = channels * 3  # F + R + V
+
+        self.reduce = nn.Sequential(
+            nn.Conv2d(in_channels, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.SiLU(inplace=True),
+        )
+        self.dw = nn.Sequential(
+            nn.Conv2d(
+                channels, channels,
+                kernel_size=3, padding=1, groups=channels, bias=False,
+            ),
+            nn.BatchNorm2d(channels),
+            nn.SiLU(inplace=True),
+        )
+        self.project = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+        self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h, w = x.shape[-2:]
+        i_coords = torch.arange(1, h + 1, device=x.device, dtype=x.dtype).view(1, 1, h, 1)
+        j_coords = torch.arange(1, w + 1, device=x.device, dtype=x.dtype).view(1, 1, 1, w)
+
+        # Horizontal prefix average: R
+        r = x.cumsum(-1) / j_coords
+        # Vertical prefix average: V
+        v = x.cumsum(-2) / i_coords
+
+        z = torch.cat([x, r, v], dim=1)  # [B, 3C, H, W]
+        z = self.reduce(z)
+        z = self.dw(z)
+        z = self.project(z)
+        z = self.dropout(z)
+
+        if self.use_residual:
+            return x + z
+        return z
+

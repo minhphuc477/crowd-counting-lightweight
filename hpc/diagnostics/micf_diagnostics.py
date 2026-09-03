@@ -66,19 +66,17 @@ def compute_measure_diagnostics(
     abs_mass_total = float(y_rec.abs().sum().item()) + eps
     r_minus = float(neg_mass_total / abs_mass_total)
 
-    # V: mean violation magnitude across all cells
+    # V: mean violation magnitude across all cells: mean(ReLU(-Y))
     v_mag = float(neg_violations.mean().item())
 
-    # Count consistency: N_corner vs N_delta
+    # Total counts
     n_corner = float(c_pred[:, :, -1, -1].sum().item())
     n_delta = float(y_rec.sum().item())
-    e_cons = float(abs(n_corner - n_delta))
 
     return {
         "negative_cell_fraction": f_minus,
         "negative_mass_ratio": r_minus,
         "violation_magnitude": v_mag,
-        "corner_delta_count_gap": e_cons,
         "n_corner": n_corner,
         "n_delta": n_delta,
     }

@@ -113,7 +113,7 @@ def evaluate_comprehensive(
 
     f_minuses: List[float] = []
     r_minuses: List[float] = []
-    e_conses: List[float] = []
+    viol_mags: List[float] = []
 
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats(device)
@@ -126,8 +126,10 @@ def evaluate_comprehensive(
         gt_count = float(batch["gt_count"].item())
         gt_pts = [torch.as_tensor(pts, device=device, dtype=torch.float32) for pts in batch["gt_points"]]
 
-        _, _, H, W = img.shape
-        pred_count, pred_map = model.predict(img, pad_multiple=64)
+        if model.head_type in {"cumulative", "integrated_local"}:
+            pred_count, pred_map = model.predict_tiled(img, tile_size=256)
+        else:
+            pred_count, pred_map = model.predict(img, pad_multiple=64)
         pred_val = float(pred_count.item())
 
         err = pred_val - gt_count
@@ -158,7 +160,7 @@ def evaluate_comprehensive(
             diag = compute_measure_diagnostics(c_pred)
             f_minuses.append(diag["negative_cell_fraction"])
             r_minuses.append(diag["negative_mass_ratio"])
-            e_conses.append(diag["corner_delta_count_gap"])
+            viol_mags.append(diag["violation_magnitude"])
 
             # Prefix MAE across all grid cells
             prefix_err = (c_pred - c_target).abs().mean().item()
@@ -180,7 +182,7 @@ def evaluate_comprehensive(
             c_pred = cell_counts_to_cumulative_field(y_pred, orientation="TL")
             f_minuses.append(0.0)
             r_minuses.append(0.0)
-            e_conses.append(0.0)
+            viol_mags.append(0.0)
 
             prefix_err = (c_pred - c_target).abs().mean().item()
             prefix_maes.append(float(prefix_err))
@@ -214,7 +216,7 @@ def evaluate_comprehensive(
         "rectangle_mae_large": float(np.mean(rect_larges)),
         "negative_cell_fraction": float(np.mean(f_minuses)),
         "negative_mass_ratio": float(np.mean(r_minuses)),
-        "corner_delta_count_gap": float(np.mean(e_conses)),
+        "violation_magnitude": float(np.mean(viol_mags)),
         "peak_vram_mb": peak_vram_mb,
     }
 
@@ -320,7 +322,7 @@ def main() -> None:
         "rectangle_mae_large": round(res["rectangle_mae_large"], 3),
         "negative_cell_fraction": round(res["negative_cell_fraction"], 4),
         "negative_mass_ratio": round(res["negative_mass_ratio"], 4),
-        "corner_delta_count_gap": round(res["corner_delta_count_gap"], 4),
+        "violation_magnitude": round(res["violation_magnitude"], 4),
         "peak_vram_mb": round(res["peak_vram_mb"], 1),
     }
 

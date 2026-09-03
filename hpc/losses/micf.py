@@ -9,8 +9,9 @@ Key components:
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -101,8 +102,8 @@ def points_to_count_map(
         return y
 
     pts = torch.as_tensor(points_xy, device=device, dtype=torch.float32)
-    gx = torch.floor(pts[:, 0] / stride).long()
-    gy = torch.floor(pts[:, 1] / stride).long()
+    gx = torch.floor((pts[:, 0] + 0.5) / float(stride)).long()
+    gy = torch.floor((pts[:, 1] + 0.5) / float(stride)).long()
 
     valid = (gx >= 0) & (gx < out_w) & (gy >= 0) & (gy < out_h)
     gx = gx[valid]

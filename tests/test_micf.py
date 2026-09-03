@@ -195,15 +195,48 @@ class TestMICFv2:
         count_int, _ = m_int.predict(x, pad_multiple=64)
         assert count_int.item() > 0
 
+        # 6. Native Stride-8 and Stride-4 routing (verifying no downsampler waste)
+        m_s8 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            output_stride=8,
+        )
+        field_s8 = m_s8(x)
+        assert field_s8.shape == (1, 1, 16, 16), f"Expected (1, 1, 16, 16), got {field_s8.shape}"
+
+        m_s4 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="local",
+            output_stride=4,
+        )
+        field_s4 = m_s4(x)
+        assert field_s4.shape == (1, 1, 32, 32), f"Expected (1, 1, 32, 32), got {field_s4.shape}"
+
+        # 7. Hierarchical Tile Composition in predict_tiled
+        x_large = torch.randn(1, 3, 256, 512)
+        count_tiled, map_tiled = m_cum.predict_tiled(x_large, tile_size=256)
+        assert torch.isfinite(count_tiled)
+        assert map_tiled.shape == (1, 1, 16, 32)
+
+    def test_axial_integral_context(self):
+        from hpc.models.integral_context import AxialIntegralContext
+
+        block = AxialIntegralContext(channels=32, use_residual=True)
+        x = torch.ones(2, 32, 16, 16)
+        out = block(x)
+        assert out.shape == (2, 32, 16, 16)
+        assert torch.isfinite(out).all()
+
     def test_points_to_count_map(self):
         from hpc.losses.micf import points_to_count_map
 
-        # 4 points on a 64x64 image, stride 16 -> 4x4 grid
+        # Points on a 64x64 image, stride 16 -> 4x4 grid
+        # Pixel coordinates: (x, y) with boundary at (x+0.5)/16
         pts = torch.tensor([
-            [5.0, 5.0],    # cell (0, 0)
-            [10.0, 15.0],  # cell (0, 0)
-            [20.0, 35.0],  # x=20->col 1, y=35->row 2 -> cell (2, 1)
-            [55.0, 55.0],  # x=55->col 3, y=55->row 3 -> cell (3, 3)
+            [5.0, 5.0],    # (5+0.5)/16 = 0.34 -> cell (0, 0)
+            [10.0, 15.0],  # (10+0.5)/16 = 0.65 -> cell (0, 0)
+            [20.0, 35.0],  # x=20->(20.5)/16=1.28->col 1, y=35->(35.5)/16=2.21->row 2 -> cell (2, 1)
+            [55.0, 55.0],  # (55.5)/16=3.46 -> cell (3, 3)
         ])
         y = points_to_count_map(pts, out_h=4, out_w=4, stride=16)
         assert y.shape == (4, 4)
@@ -228,10 +261,6 @@ class TestMICFv2:
         c = cell_counts_to_cumulative_field(y.unsqueeze(0).unsqueeze(0), orientation="TL")[0, 0]
 
         # Query sub-rectangle (x in [1, 3], y in [1, 3]) (1-based cell coords)
-        # Original subgrid rows 1..2, cols 1..2 (0-indexed: row 1..2, col 1..2)
-        # Cells:
-        # row 1: [3, 1]
-        # row 2: [0, 4]
         # Expected sum: 3 + 1 + 0 + 4 = 8
         rec_count = query_rectangle_count(c, x1=1, y1=1, x2=3, y2=3)
         assert abs(rec_count - 8.0) < 1e-5
@@ -255,7 +284,6 @@ class TestMICFv2:
         assert diag["negative_cell_fraction"] == 0.0
         assert diag["negative_mass_ratio"] == 0.0
         assert diag["violation_magnitude"] == 0.0
-        assert diag["corner_delta_count_gap"] == 0.0
         assert diag["n_corner"] == 16.0
         assert diag["n_delta"] == 16.0
 

@@ -85,10 +85,12 @@ MobileNetV4-Conv-Small-0.50 (truncated C16, ~97k params, pretrained=True)
 Additive FPN Neck (32 channels, context dilations {1, 2, 3})
   │
   ▼
-Stride Downsampler (2x Conv3x3 stride-2 -> stride 16)
+Additive FPN Neck (32 channels, context dilations {1, 2, 3})
+  │  ├── Native multi-scale feature routes: P4 (stride 4), P8 (stride 8), P16 (stride 16)
+  │  └── Direct route selection matching output_stride (zero redundant downsampling)
   │
   ▼
-4-Directional Normalized Integral Context Block (Optional, B5 & B6)
+4-Directional Normalized Integral Context Block (Optional, B5 & B6; or Axial B7)
   │  ├── F_bar^TL = sum_{a<=i, b<=j} F_{ab} / ((i+1)(j+1))
   │  ├── F_bar^TR = sum_{a<=i, b>=j} F_{ab} / ((i+1)(W-j))
   │  ├── F_bar^BL = sum_{a>=i, b<=j} F_{ab} / ((H-i)(j+1))
@@ -133,21 +135,25 @@ guaranteeing equal expected gradient contribution across all spatial locations.
 
 ---
 
-## 5. Measure Diagnostics & Benchmark Suite
+## 5. Measure Diagnostics & Evaluation Regimes
 
-`hpc/diagnostics/micf_diagnostics.py` and `tools/eval_micf_comprehensive.py` implement the complete evaluation suite defined in Sections 21, 22, 23, 36, and 50 of the design document:
+### 5.1 Decoupled Evaluation Regimes (Sections 29 & 40)
+To avoid confounding representation geometry with receptive-field capacity:
+- **Regime A (Crop-level MAE):** Evaluates models on fixed $256 \times 256$ crops (matching training crop size). Because the full crop lies within the CNN's effective receptive field, this isolates the pure representation hypothesis: does $I \to \hat{C}$ train better than $I \to \hat{Y}$?
+- **Regime B (Full-image MAE):** Evaluates full uncropped images via **Hierarchical Tile Composition** (Section 30): divides images into non-overlapping tiles, predicts local cumulative fields $\hat{C}_t$, and sums tile counts $\sum_t \hat{C}_t[-1, -1]$.
 
-1. **Measure Validity Diagnostics:**
-   - Negative-cell fraction: $f_- = \frac{\#\{\hat{Y}_{ij} < 0\}}{HW}$
-   - Negative-mass ratio: $r_- = \frac{\sum [-\hat{Y}]_+}{\sum |\hat{Y}| + \epsilon}$
-   - Violation magnitude: $V = \frac{1}{HW} \sum [-\hat{Y}_{ij}]_+$
-   - Corner-Delta consistency gap: $E_{\text{cons}} = |\hat{N}_{corner} - \hat{N}_{\Delta}|$
-2. **Multi-Scale Rectangle Count Evaluation:**
-   - Evaluates count recovery error $N(R)$ across normalized area fractions:
-     $$\{1/64, \; 1/16, \; 1/4, \; 1.0\}.$$
-3. **2D Fourier Spectral Energy Analysis:**
-   - $E_{\text{high}}$: fraction of 2D real-FFT power at spatial frequency $\|\omega\| > \tau$.
-   - Energy retention quantiles: coefficient fractions capturing 90%, 95%, 99% spectral energy.
+### 5.2 Measure Validity Diagnostics
+- Negative-cell fraction: $f_- = \frac{\#\{\hat{Y}_{ij} < 0\}}{HW}$.
+- Negative-mass ratio: $r_- = \frac{\sum [-\hat{Y}]_+}{\sum |\hat{Y}| + \epsilon}$.
+- Violation magnitude: $V = \frac{1}{HW} \sum_{i,j} [-\hat{Y}_{ij}]_+ = \operatorname{mean}(\operatorname{ReLU}(-\hat{Y}))$.
+
+### 5.3 Multi-Scale Rectangle Count Evaluation
+Evaluates count recovery error $N(R) = C(y_2, x_2) - C(y_1, x_2) - C(y_2, x_1) + C(y_1, x_1)$ across normalized area fractions:
+$$\{1/64, \; 1/16, \; 1/4, \; 1.0\}.$$
+
+### 5.4 2D Fourier Spectral Energy Analysis
+- $E_{\text{high}}$: fraction of 2D real-FFT power at spatial frequency $\|\omega\| > \tau$.
+- Energy retention quantiles: coefficient fractions capturing 90%, 95%, 99% spectral energy.
 
 ---
 
@@ -173,15 +179,12 @@ lightweightcrcn/
 │   │   └── micf.py                     # discrete_mixed_difference, cell_counts_to_cumulative_field,
 │   │                                   # points_to_count_map, MICFLoss, IntegralLossOnLocalCount
 │   └── diagnostics/
-│       ├── micf_diagnostics.py         # Measure diagnostics, rectangle queries, 2D FFT spectral analysis
-│       ├── tail_support.py             # Extreme-tail failure crop analysis
-│       └── fg_bg_decomposition.py      # Occupancy error accounting
+│       └── micf_diagnostics.py         # Measure diagnostics, rectangle queries, 2D FFT spectral analysis
 ├── tools/
-│   ├── train_micf_pilot.py             # Authoritative trainer with orientation balancing & warmup
-│   └── eval_micf_comprehensive.py      # 19-field CSV benchmark evaluator (Section 50 schema)
+│   ├── train_micf_pilot.py             # Authoritative trainer with orientation balancing, warmup, & Regime A/B eval
+│   └── eval_micf_comprehensive.py      # Benchmark evaluator with hierarchical tile composition (Section 50 schema)
 └── tests/
-    ├── test_micf.py                    # 10 unit tests for all MICF mathematics, heads, losses, diagnostics
-    └── test_failure_attribution.py     # 5 tests for diagnostic and bootstrap tools
+    └── test_micf.py                    # 11 unit tests covering all MICF math, native strides, tiling, losses, diagnostics
 ```
 
 ---
@@ -190,9 +193,9 @@ lightweightcrcn/
 
 ### 7.1 Run Full Test Suite
 ```powershell
-.venv\Scripts\pytest tests/test_micf.py tests/test_failure_attribution.py -v
+.venv\Scripts\pytest tests/ -v
 ```
-*(All 15 tests pass in ~6.5s).*
+*(All 11 tests pass in ~6s).*
 
 ### 7.2 Run 1-Epoch Smoke Test (All 6 Models)
 ```powershell
