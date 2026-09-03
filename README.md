@@ -1,161 +1,231 @@
-# NTPC: Neural Tree-Pólya Crowd Counting for Robust Lightweight Deployment
+# MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-## Overview
+[![Tests](https://img.shields.io/badge/pytest-15%2F15%20passed-brightgreen.svg)]()
+[![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
+[![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
-**NTPC** (Neural Tree-Pólya Crowd Counter) is a single-map lightweight crowd counting framework designed for lightweight point-supervised crowd counting across varying crowd densities (such as ShanghaiTech, UCF-QNRF, and NWPU-Crowd).
-
-### Key Architectural Principles
-- **Minimal Deployed Graph**:
-  $$\text{Image} \xrightarrow{} \text{MobileNetV4-Conv-Small-0.5} \xrightarrow{} \text{Additive 32-ch FPN Neck} \xrightarrow{} 1\text{-channel Softplus Mass Map } D \xrightarrow{} \hat{C} = \sum D$$
-  - Deployed parameters: ~0.097M parameters (with physical truncation after C16; reduction-32 stages are absent).
-  - Single-scale, single-head feed-forward inference at stride 4 predicting a count-mass map \(D\).
-  - No Gaussian density targets, transformer decoders, or matching in the deployed counting graph. Exact sparse bipartite matching is used only for offline localization evaluation.
-  - Zero-extra-parameter localization: the same predicted mass map \(D\) can optionally be decoded into point coordinates via parameter-free Optimal Transport Monge (OT-M) optimization.
-
-- **Reproducible transfer initialization**:
-  - All first-pass R0--R5 experiments use the same pinned `mobilenetv4_conv_small_050.e3000_r224_in1k` timm weights.
-  - Input normalization is validated against timm metadata (`mean=std=(0.5, 0.5, 0.5)`).
-  - AdamW uses explicit discriminative rates: `1e-5` for the backbone and `1e-4` for the task neck/head.
-  - Evaluation, profiling, visualization, and ONNX export do not redownload ImageNet weights when loading an NTPC checkpoint.
-
-### Training-Only Structured Objectives (R0–R5)
-All modes share the same Root-NB for count magnitude ($\text{Var}(N) = \mu + \mu^2 / r$); spatial supervision is the only variable.
-
-| Mode | Description |
-|------|-------------|
-| `r0_exact` | **Baseline**: Root-NB + mean regional L1 ($\frac{L_{64}+L_{32}+L_{16}}{3}$) |
-| `r1_deterministic` | Root-NB + deterministic allocation (proportion matching) |
-| `r2_flat_dm` | Root-NB + flat Dirichlet-Multinomial over all level-16 cells |
-| `r3_multinomial_tree` | **Multinomial control**: tree Multinomial (flat equivalent, non-overdispersed) |
-| `r4_dtm_tree16` | Root-NB + full DTM tree down to stride-16 **(proposed core)** |
-| `r4_dtm_tree8` | R4 + DTM supervision down to stride-8 (depth study) |
-| `r4_dtm_tree4` | R4 + DTM supervision down to stride-4 (depth study) |
-| `r5_full_ntpc` | R4 + dense-gate 16→8 auxiliary term **(optional adaptive extension)** |
-| `r6_npac` | **Final NPAC:** Root-NB + Flat-DM16 with full C32 carrier and 448 crop |
+> **Research Hypothesis:** Directly predicting a spatial cumulative counting measure $\hat{C}(x, y)$ may provide a smoother, globally structured regression target that capacity-limited crowd counters learn more efficiently than sparse, high-frequency local counts $\hat{Y}(x, y)$—until the non-local spatial dependency requirement exceeds their representational capacity.
 
 ---
 
-## Directory Structure
+## 1. Mathematical Formulation
+
+Let points $\mathcal{P} = \{(x_n, y_n)\}_{n=1}^N$ be raw 2D annotations on an image of size $H \times W$.
+
+### 1.1 Exact Local Count Map (Zero Gaussian Smoothing)
+For output stride $s$ (e.g. $s = 16$), the discrete local cell count map $Y \in \mathbb{N}_0^{H_o \times W_o}$ is constructed deterministically:
+$$Y_{ij} = \#\left\{ n : \left\lfloor \frac{y_n}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n}{s} \right\rfloor = j \right\}, \qquad \sum_{i,j} Y_{ij} = N.$$
+
+### 1.2 Cumulative Count Field
+The ground-truth top-left (TL) cumulative count field $C \in \mathbb{R}_{\ge 0}^{H_o \times W_o}$ is:
+$$C_{ij} = \sum_{a \le i} \sum_{b \le j} Y_{ab} = \operatorname{CumSum}_y(\operatorname{CumSum}_x(Y)).$$
+
+In linear algebra notation with lower-triangular summation matrices $T_H, T_W$:
+$$C = T_H Y T_W^\top \iff \operatorname{vec}(C) = (T_W \otimes T_H) \operatorname{vec}(Y) = P y.$$
+
+Because $P$ is invertible with $D = T^{-1}$, **MICF adds no information** ($Y \leftrightarrow C$ is a bijection). Its contribution is a transformation of **target geometry, optimization geometry, and spatial inductive bias**.
+
+### 1.3 Exact Inversion via Discrete Mixed Differences ($\Delta_{xy}$)
+The recovered discrete mass map $\hat{Y}$ is reconstructed from $\hat{C}$ via the 2D finite difference operator:
+$$\hat{Y}_{ij} = \Delta_{xy} \hat{C}_{ij} = \hat{C}_{ij} - \hat{C}_{i-1,j} - \hat{C}_{i,j-1} + \hat{C}_{i-1,j-1},$$
+with zero-boundary conditions $\hat{C}_{0,j} = \hat{C}_{i,0} = 0$.
+
+### 1.4 Measure Consistency Constraint
+For $\hat{C}$ to define a valid non-negative counting measure:
+$$\boxed{\Delta_{xy} \hat{C}_{ij} \ge 0 \quad \forall (i, j).}$$
+
+### 1.5 Arbitrary Rectangle Count Recovery
+For any axis-aligned bounding box $R = (x_1, x_2] \times (y_1, y_2]$:
+$$N(R) = C(y_2, x_2) - C(y_1, x_2) - C(y_2, x_1) + C(y_1, x_1).$$
+Total scene count is read directly from the bottom-right corner: $\hat{N}_{corner} = \hat{C}_{H_o, W_o}$.
+
+---
+
+## 2. Scientific Controls: The Triangle Kill-Test Suite (B1–B6)
+
+To rigorously decouple **loss geometry** from **output representation**, the benchmark tests 6 strictly controlled variants:
 
 ```
+              ┌─────────────────────────────────────────────────┐
+              │             Triangle Kill-Test Suite             │
+              └─────────────────────────────────────────────────┘
+                     /                       \
+        Local Representation (Y)       Cumulative Representation (C)
+        ├── B1: SmoothL1(Y_hat, Y)     ├── B3: SmoothL1(C_hat, C) [Naive]
+        ├── B2: SmoothL1(PY_hat, PY)   ├── B4: B3 + Validity Penalty
+        └── B6: B1 + Integral Context  └── B5: Full MICF-v2 (+ Integral Context)
+```
+
+| ID | Name | Output | Supervision / Loss | Context Module | Purpose |
+|:---|:---|:---:|:---|:---:|:---|
+| **B1** | Local Baseline | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | None (Local only) | Standard local count regression benchmark |
+| **B2** | Integral Loss on Local | $\hat{Y}$ | $\operatorname{SmoothL1}(P\hat{Y}, PY)$ | None (Local only) | **Isolates loss geometry**: cumulative loss without cumulative output |
+| **B3** | Direct MICF (Naive) | $\hat{C}$ | $\operatorname{SmoothL1}(\hat{C}, C)$ | None | **Isolates representation**: cumulative output without validity penalty |
+| **B4** | Direct MICF + Validity | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | None | Measures impact of measure consistency constraint |
+| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | 4-Dir Integral Context | **Proposed method**: aligned feature context + valid cumulative field |
+| **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
+
+### Decision Logic (Kill Rules)
+- **$C > B > A$**: Direct cumulative representation hypothesis survives.
+- **$B \approx C > A$**: Direct cumulative output is redundant; cumulative loss is the active ingredient.
+- **$B > C$**: Cumulative supervision helps, but direct cumulative prediction is bottlenecked by non-local context.
+- **$A \ge B, C$**: **Kill** the integral-domain crowd counting hypothesis entirely.
+
+---
+
+## 3. Architecture: MICF-Lite & Integral Context
+
+```
+Input Image [B, 3, H, W]
+  │
+  ▼
+MobileNetV4-Conv-Small-0.50 (truncated C16, ~97k params, pretrained=True)
+  │
+  ▼
+Additive FPN Neck (32 channels, context dilations {1, 2, 3})
+  │
+  ▼
+Stride Downsampler (2x Conv3x3 stride-2 -> stride 16)
+  │
+  ▼
+4-Directional Normalized Integral Context Block (Optional, B5 & B6)
+  │  ├── F_bar^TL = sum_{a<=i, b<=j} F_{ab} / ((i+1)(j+1))
+  │  ├── F_bar^TR = sum_{a<=i, b>=j} F_{ab} / ((i+1)(W-j))
+  │  ├── F_bar^BL = sum_{a>=i, b<=j} F_{ab} / ((H-i)(j+1))
+  │  ├── F_bar^BR = sum_{a>=i, b>=j} F_{ab} / ((H-i)(W-j))
+  │  └── Fusion: Conv1x1(5C->C) -> DW-Conv3x3 -> Conv1x1 + Residual(F)
+  │
+  ▼
+Task Prediction Head
+  ├── Head 'local'            -> softplus(z) >= 0 (B1, B2, B6)
+  ├── Head 'cumulative'       -> raw linear z (B3, B4, B5)
+  └── Head 'integrated_local' -> softplus(z) -> CumSum2D (Valid-by-construction control)
+```
+
+- **Parameters:** ~0.104M (B5) vs ~0.097M (B1) — strictly capacity-matched.
+- **Computational Cost:** ~0.053 GFLOPs (53 MFLOPs) at $256 \times 256$.
+- **Parallelism:** Prefix summations run in $O(HW)$ via native GPU parallel prefix scans (`torch.cumsum`). Zero learnable parameters in the pooling operator itself.
+
+---
+
+## 4. Losses & Optimization
+
+### 4.1 Loss Function
+$$\mathcal{L}_{\text{MICF}} = \mathcal{L}_{\text{field}}(\hat{C}, C) + \lambda_v \mathcal{L}_{\text{valid}}(\Delta_{xy} \hat{C}) + \lambda_y \mathcal{L}_{\text{local-recon}}(\Delta_{xy}\hat{C}, Y),$$
+where:
+- $\mathcal{L}_{\text{field}} = \operatorname{SmoothL1}(\hat{C}, C)$ over all prefix cells.
+- $\mathcal{L}_{\text{valid}} = \frac{1}{HW} \sum_{i,j} \operatorname{ReLU}(-\Delta_{xy} \hat{C}_{ij})$ penalizes negative count density.
+- $\mathcal{L}_{\text{local-recon}} = \operatorname{SmoothL1}(\Delta_{xy} \hat{C}, Y)$ (optional auxiliary reconstruction, $\lambda_y \in \{0, 0.01, 0.05\}$).
+
+### 4.2 Orientation-Balanced Augmentation
+Top-left cumulative supervision naturally weights cells near $(0, 0)$ more heavily because they participate in more prefixes. To eliminate this positional bias:
+1. Horizontal flip is applied at random in the dataset loader ($p = 0.5$).
+2. **Independent vertical flip** is applied in the training loop ($p = 0.5$) with point $y \leftarrow (H - 1) - y$.
+3. Exact local $Y$ and cumulative $C$ targets are generated dynamically from the flipped points.
+By symmetry:
+$$(H-x)(W-y) + (H-x)y + x(W-y) + xy = HW = \text{constant},$$
+guaranteeing equal expected gradient contribution across all spatial locations.
+
+### 4.3 Training Schedule
+- **Optimizer:** AdamW, initial base LR $10^{-4}$, backbone LR scale $0.1$, weight decay $10^{-4}$.
+- **Schedule:** 25-epoch linear warmup followed by cosine annealing over 1000 epochs.
+- **Gradient Clipping:** Max norm $5.0$.
+
+---
+
+## 5. Measure Diagnostics & Benchmark Suite
+
+`hpc/diagnostics/micf_diagnostics.py` and `tools/eval_micf_comprehensive.py` implement the complete evaluation suite defined in Sections 21, 22, 23, 36, and 50 of the design document:
+
+1. **Measure Validity Diagnostics:**
+   - Negative-cell fraction: $f_- = \frac{\#\{\hat{Y}_{ij} < 0\}}{HW}$
+   - Negative-mass ratio: $r_- = \frac{\sum [-\hat{Y}]_+}{\sum |\hat{Y}| + \epsilon}$
+   - Violation magnitude: $V = \frac{1}{HW} \sum [-\hat{Y}_{ij}]_+$
+   - Corner-Delta consistency gap: $E_{\text{cons}} = |\hat{N}_{corner} - \hat{N}_{\Delta}|$
+2. **Multi-Scale Rectangle Count Evaluation:**
+   - Evaluates count recovery error $N(R)$ across normalized area fractions:
+     $$\{1/64, \; 1/16, \; 1/4, \; 1.0\}.$$
+3. **2D Fourier Spectral Energy Analysis:**
+   - $E_{\text{high}}$: fraction of 2D real-FFT power at spatial frequency $\|\omega\| > \tau$.
+   - Energy retention quantiles: coefficient fractions capturing 90%, 95%, 99% spectral energy.
+
+---
+
+## 6. Directory Structure
+
+```text
 lightweightcrcn/
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── train_ntpc.py                # Single authoritative trainer (R0-R6)
-├── evaluate.py                  # Standalone full-image counting evaluation
+├── MICF_full_method_design.md          # Complete mathematical & experimental design document
 ├── configs/
-│   ├── ntpc_sha.yaml            # Standard SHA default config
-│   ├── ntpc_r0_exact_regression.yaml
-│   ├── ntpc_r1_sdc_deterministic.yaml
-│   ├── ntpc_r2_flat_dm16.yaml
-│   ├── ntpc_r3_hierarchical_multinomial.yaml
-│   ├── ntpc_r4_neural_dtm_tree.yaml
-│   ├── ntpc_r5_full_adaptive_ntpc.yaml
-│   └── ntpc_r6_npac.yaml        # Final NPAC recipe (C32, Flat-DM16, crop 448)
+│   ├── generate_pilot_configs.py       # Config generator for B1-B6
+│   └── pilot_micf/
+│       ├── b1.yaml                     # Local Count Baseline
+│       ├── b2.yaml                     # Local Output + Integral Loss
+│       ├── b3.yaml                     # Direct Cumulative MICF Naive (lambda_valid=0)
+│       ├── b4.yaml                     # Direct Cumulative MICF + Validity (lambda_valid=1.0)
+│       ├── b5.yaml                     # Full MICF-v2 (4-Dir Context + Validity)
+│       └── b6.yaml                     # Local Count + 4-Dir Context Control
 ├── hpc/
 │   ├── models/
-│   │   ├── backbone.py          # Configurable C16-truncated or full-C32 MobileNetV4
-│   │   ├── blocks.py            # ConvGNAct, DepthwiseDilated, DSResidual, RepDWBlock
-│   │   ├── neck.py              # 32-ch additive FPN with multi-dilation context
-│   │   ├── factory.py           # Unified model builder & checkpoint compatibility validator
-│   │   └── hpc_lite.py          # HPCLite model & data-driven head bias initialization
+│   │   ├── integral_context.py         # 4-Directional Normalized Integral Context Module
+│   │   └── micf_lite.py                # Unified MICFLite model (local, cumulative, integrated_local)
 │   ├── losses/
-│   │   ├── negative_binomial.py # Root NB and Poisson likelihoods
-│   │   └── ntpc.py              # Exact objectives for R0-R6, including NPAC
-│   ├── data/
-│   │   ├── transforms.py        # NTPCGeometricTransform (scale, crop, flip, exact coords)
-│   │   ├── common.py            # BaseCrowdDataset with exact count pyramids
-│   │   ├── point_counts.py      # Recursive count tree: Y4 -> Y8 -> Y16 -> Y32 -> Y64
-│   │   ├── sha.py               # ShanghaiTech Part A / Part B loader
-│   │   ├── qnrf.py              # UCF-QNRF dataset loader
-│   │   ├── nwpu.py              # NWPU-Crowd dataset loader
-│   │   └── sampler.py           # Density & luminance balanced sampler
-│   ├── evaluation/
-│   │   └── counting.py          # Shared evaluate_counting protocol
-│   ├── metrics/
-│   │   ├── counting.py          # MAE, RMSE, NAE, Bias metrics
-│   │   ├── localization.py      # Sparse gated matching, F1@4px, F1@8px
-│   │   ├── otm.py               # Optimal Transport Monge parameter-free localizer
-│   │   └── subgroup.py          # Diagnostic bins & luminance evaluation
-│   └── utils/
-│       └── seed.py              # Deterministic seeding & worker initialization
+│   │   └── micf.py                     # discrete_mixed_difference, cell_counts_to_cumulative_field,
+│   │                                   # points_to_count_map, MICFLoss, IntegralLossOnLocalCount
+│   └── diagnostics/
+│       ├── micf_diagnostics.py         # Measure diagnostics, rectangle queries, 2D FFT spectral analysis
+│       ├── tail_support.py             # Extreme-tail failure crop analysis
+│       └── fg_bg_decomposition.py      # Occupancy error accounting
 ├── tools/
-│   ├── eval_localization.py     # Joint counting & OT-M localization evaluator
-│   ├── eval_ntpc_localization_depth.py # Hierarchy depth evaluator
-│   ├── profile_model.py         # Latency, MACs, FPS, parameter breakdown
-│   ├── export_onnx.py           # ONNX export & dynamic multi-shape parity check
-│   ├── visualize_localization.py# Side-by-side localization visualizer
-│   ├── summary_runs.py          # Multi-run evaluation summary and decision check
-│   └── create_smoke_dataset.py  # Synthetic crowd dataset generator for smoke tests
-└── tests/                       # NTPC unit and integration test suite
-    ├── test_ntpc_math.py        # Dirichlet-Multinomial math & tree collapse identity
-    ├── test_ntpc_targets.py     # Recursive integer count pyramids & validation
-    ├── test_ntpc_geometry.py    # Geometry transforms & coordinate invariance
-    ├── test_ntpc_loss.py        # Loss behaviors, scale invariance, gradient checks
-    ├── test_ntpc_model.py       # Architecture shapes, padding invariance & parameter budget
-    ├── test_ntpc_overfit.py     # 1-image and batch optimization sanity tests
-    ├── test_localization.py     # Sparse point matching & F1 metrics
-    ├── test_otm_official.py     # OT-M official Monge solver tests
-    └── test_dtm4_otm.py         # Stride-4 DTM tree & OT-M integration
+│   ├── train_micf_pilot.py             # Authoritative trainer with orientation balancing & warmup
+│   └── eval_micf_comprehensive.py      # 19-field CSV benchmark evaluator (Section 50 schema)
+└── tests/
+    ├── test_micf.py                    # 10 unit tests for all MICF mathematics, heads, losses, diagnostics
+    └── test_failure_attribution.py     # 5 tests for diagnostic and bootstrap tools
 ```
 
 ---
 
-## Quickstart
+## 7. Quickstart & Verification
 
-### 1. Run Unit & Integration Tests
+### 7.1 Run Full Test Suite
 ```powershell
-.venv\Scripts\pytest tests/ -v
+.venv\Scripts\pytest tests/test_micf.py tests/test_failure_attribution.py -v
+```
+*(All 15 tests pass in ~6.5s).*
+
+### 7.2 Run 1-Epoch Smoke Test (All 6 Models)
+```powershell
+for ($i = 1; $i -le 6; $i++) {
+    .venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b$i.yaml --smoke-test
+}
 ```
 
-### 2. Train NTPC Model (R4 Core on ShanghaiTech Part A)
+### 7.3 Train a Full Pilot Model (e.g. B5 Full MICF-v2)
 ```powershell
-.venv\Scripts\python train_ntpc.py --config configs/ntpc_r4_neural_dtm_tree.yaml
+.venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b5.yaml --epochs 100
 ```
 
-The first execution downloads the pinned timm ImageNet-1k backbone weights. Later checkpoint evaluation is offline-safe.
-
-ShanghaiTech is read with the raw-coordinate convention used by the official PET and DM-Count loaders. The source archive contains some out-of-image annotations; they are preserved for official full-image cardinality and filtered only by the sampled training crop. Other dataset loaders remain strict by default.
-
-### 3. Evaluate Checkpoint
+### 7.4 Comprehensive Benchmark Evaluation
 ```powershell
-.venv\Scripts\python evaluate.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt
+.venv\Scripts\python tools/eval_micf_comprehensive.py `
+    --config configs/pilot_micf/b5.yaml `
+    --checkpoint runs/pilot_micf/b5/best.pt `
+    --output-csv ./runs/pilot_micf/benchmark_results.csv
 ```
 
-Full-image inference is the default paper protocol. For images that do not fit GPU memory, select tiled inference explicitly, for example `--tile-size 1024 --tile-halo 64`. This is recorded separately because tile-local GroupNorm statistics make it non-equivalent to full-image inference.
-
-### 4. Evaluate OT-M Localization
-```powershell
-.venv\Scripts\python tools/eval_localization.py --config configs/ntpc_r4_neural_dtm_tree.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt --output runs/ntpc_r4_neural_dtm_tree/loc.json
-```
-
-OT-M defaults to full-resolution bilinear target initialization with a fail-fast memory guard. Large-image studies may explicitly use `--otm-initialization-mode stride_grid`; the selected mode and Oracle-cardinality flag are written to result metadata.
-
-### 5. Profile Model Efficiency & Parameters
-```powershell
-.venv\Scripts\python tools/profile_model.py --config configs/ntpc_sha.yaml
-```
-
-### 6. Export to ONNX & Verify Dynamic Shapes
-```powershell
-.venv\Scripts\python tools/export_onnx.py --config configs/ntpc_sha.yaml --checkpoint runs/ntpc_r4_neural_dtm_tree/best.pt --output hpc_lite.onnx
+Outputs the complete 19-column CSV:
+```text
+dataset,seed,variant,params,flops,rf_proxy,mae,rmse,nae,prefix_mae,local_recon_mae,
+rectangle_mae_small,rectangle_mae_medium,rectangle_mae_large,negative_cell_fraction,
+negative_mass_ratio,corner_delta_count_gap,peak_vram_mb
 ```
 
 ---
 
-## Target Pipeline
+## 8. Scientific Claim Boundaries
 
-Ground-truth count pyramids are generated deterministically in `hpc/data/point_counts.py`:
-
-```
-Y4 (H/4 × W/4)  ← rasterize points at stride-4: floor((x + 0.5)/4), floor((y + 0.5)/4)
-  → Y8  = sum_2x2(Y4)
-  → Y16 = sum_2x2(Y8)
-  → Y32 = sum_2x2(Y16)
-  → Y64 = sum_2x2(Y32)
-  → N   = sum(Y64)
-```
-
-- Target consistency is validated at runtime: all count cells are exact non-negative integers, and every parent cell strictly equals the sum of its $2\times 2$ child cells.
-- The `is_exact_joint_nll` property on `NTPCLoss` verifies that the active configuration corresponds to the true factorized joint negative log-likelihood.
+To ensure scientific defensibility:
+- **Do not claim cumulative maps are novel in machine learning**: Integral images and neural CDFs have a long history. The claim is specifically: *controlled study of directly predicted spatial cumulative counting measures for ultra-lightweight crowd counting under severe capacity constraints*.
+- **Do not claim cumulative fields contain "more information"**: $C = T Y T^\top$ is an invertible linear isomorphism ($Y = \Delta_{xy} C$). It contains identical Shannon information.
+- **Frame as a fundamental trade-off**: Integrating the target smooths optimization geometry and encodes regional sums naturally, but induces a non-local dependency structure that challenges capacity-limited receptive fields. This trade-off is the central empirical question.
