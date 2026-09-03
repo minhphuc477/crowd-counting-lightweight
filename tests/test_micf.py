@@ -620,4 +620,38 @@ class TestMICFv2:
         with pytest.raises(ValueError):
             _ = m.forward_field(x)
 
+    def test_fh_predict_tiled(self):
+        m = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=4,
+            output_stride=16,
+        )
+        m.eval()
+        x = torch.randn(1, 3, 512, 512)
+
+        # Divisible halo=64 (multiple of 16*4=64)
+        c_tile_halo, map_halo = m.predict_tiled(x, tile_size=256, halo=64)
+        assert c_tile_halo.ndim == 0
+        assert torch.isfinite(c_tile_halo)
+        assert map_halo.shape == (1, 1, 32, 32)
+
+        # Divisible halo=0
+        c_tile_nohalo, map_nohalo = m.predict_tiled(x, tile_size=256, halo=0)
+        assert torch.isfinite(c_tile_nohalo)
+
+        # Incompatible halo=32 should be caught cleanly by the validation check
+        with pytest.raises(ValueError, match="halo .* must be a multiple"):
+            _ = m.predict_tiled(x, tile_size=256, halo=32)
+
+    def test_micf_loss_2d_local_recon(self):
+        y2d = torch.tensor([[1.0, 0.0], [0.0, 2.0]])
+        c2d = cell_counts_to_cumulative_field(y2d)
+        loss_fn = MICFLoss(lambda_local_recon=0.5)
+        loss = loss_fn(c2d, c2d, target_y=y2d)
+        assert abs(loss.item()) < 1e-6
+
 

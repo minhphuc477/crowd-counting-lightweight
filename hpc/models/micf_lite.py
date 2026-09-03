@@ -468,10 +468,17 @@ class MICFLite(nn.Module):
         out_h_full = math.ceil(H / s)
         out_w_full = math.ceil(W / s)
 
-        if tile_size % s != 0:
-            raise ValueError(f"tile_size ({tile_size}) must be a multiple of output_stride ({s})")
-        if halo % s != 0:
-            raise ValueError(f"halo ({halo}) must be a multiple of output_stride ({s})")
+        req_multiple = s if self.finite_horizon is None else (s * self.finite_horizon)
+        if tile_size % req_multiple != 0:
+            raise ValueError(
+                f"tile_size ({tile_size}) must be a multiple of {req_multiple} "
+                f"(output_stride={s}" + (f", finite_horizon={self.finite_horizon})" if self.finite_horizon else ")")
+            )
+        if halo % req_multiple != 0:
+            raise ValueError(
+                f"halo ({halo}) must be a multiple of {req_multiple} "
+                f"(output_stride={s}" + (f", finite_horizon={self.finite_horizon})" if self.finite_horizon else ")")
+            )
         out_tile = tile_size // s
 
         n_tiles_h = math.ceil(H / tile_size)

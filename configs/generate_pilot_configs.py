@@ -99,6 +99,19 @@ _VARIANTS = [
         "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "axial"},
         "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0},
     },
+    {
+        "id": "B5b",
+        "desc": "MICF-v2 Extent-Aware (4-dir Directional Context + Validity + Sample-Normalized Loss)",
+        "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "directional", "extent_aware": True},
+        "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0, "normalize_by": "total_count"},
+    },
+    {
+        "id": "B8",
+        "desc": "FH-CMICF K4 (Block-Scoped 4-dir Context + Local Extent-Aware Head + Exact Global Composition)",
+        "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "directional", "extent_aware": True, "finite_horizon": 4},
+        "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0, "lambda_local_recon": 0.0, "normalize_by": "total_count", "norm_eps": 1.0},
+        "save_dir": "./runs/pilot_micf/b8_k4",
+    },
 ]
 
 
@@ -122,7 +135,7 @@ for v in _VARIANTS:
             "model_id":    v["id"],
             "description": v["desc"],
             "seed":        42,
-            "save_dir":    f"./runs/pilot_micf/{bid}",
+            "save_dir":    v.get("save_dir", f"./runs/pilot_micf/{bid}"),
         },
     })
     out_path = os.path.join(_OUT_DIR, f"{bid}.yaml")

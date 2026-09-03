@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-23%2F23%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-25%2F25%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 

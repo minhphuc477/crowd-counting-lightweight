@@ -214,6 +214,8 @@ class MICFLoss(nn.Module):
         if self.lambda_local_recon > 0:
             if target_y is None:
                 target_y = discrete_mixed_difference(target_c)
+            elif target_y.ndim == 2:
+                target_y = target_y.unsqueeze(0).unsqueeze(0)
             elif target_y.ndim == 3:
                 target_y = target_y.unsqueeze(1)
             recon_loss = F.smooth_l1_loss(y_recovered, target_y.float(), beta=self.beta_smooth)

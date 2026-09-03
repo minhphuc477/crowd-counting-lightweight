@@ -19,7 +19,8 @@ dataset:
   part: part_A
   root: ./data/ShanghaiTech
 experiment:
-  description: MICF-v2 Extent-Aware (4-dir Directional Context + Validity + Sample-Normalized Loss)
+  description: MICF-v2 Extent-Aware (4-dir Directional Context + Validity + Sample-Normalized
+    Loss)
   model_id: B5b
   name: pilot_micf_b5b
   save_dir: ./runs/pilot_micf/b5b
