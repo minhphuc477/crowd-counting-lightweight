@@ -30,6 +30,79 @@ from .neck import AdditiveFPNNeck
 from hpc.losses.micf import discrete_mixed_difference
 
 
+def compose_tiled_cumulative_field(c_local: list[list[torch.Tensor]]) -> torch.Tensor:
+    """Exact block-decomposed 2D prefix-sum composition (design doc sec.30, generalized).
+
+    Given a grid of per-tile *local* cumulative count fields c_local[i][j]
+    (each computed independently, as if that tile were its own full image),
+    returns the single global cumulative field consistent with treating the
+    whole tile grid as one image -- equal to computing Y for the full image
+    and taking cumsum2d(Y) directly.
+
+    Each tile's own bottom row / right column / bottom-right corner already
+    equal the row-prefix, column-prefix, and total-mass summaries its
+    down-and-right neighbors need, so composition costs O(n_tiles_h *
+    n_tiles_w) vector adds on top of the tiles already computed -- no
+    additional model forward passes.
+    """
+    n_tiles_h = len(c_local)
+    n_tiles_w = len(c_local[0])
+    out_tile_h, out_tile_w = c_local[0][0].shape
+    device = c_local[0][0].device
+    dtype = c_local[0][0].dtype
+
+    row_edge = [[c_local[i][j][:, -1] for j in range(n_tiles_w)] for i in range(n_tiles_h)]
+    col_edge = [[c_local[i][j][-1, :] for j in range(n_tiles_w)] for i in range(n_tiles_h)]
+    corner = [[c_local[i][j][-1, -1] for j in range(n_tiles_w)] for i in range(n_tiles_h)]
+
+    # row_offset[I,J] = sum_{j<J} row_edge[I,j]  (exclusive prefix along J, per tile-row I)
+    row_offset = [[torch.zeros(out_tile_h, device=device, dtype=dtype) for _ in range(n_tiles_w)] for _ in range(n_tiles_h)]
+    for i in range(n_tiles_h):
+        acc = torch.zeros(out_tile_h, device=device, dtype=dtype)
+        for j in range(n_tiles_w):
+            row_offset[i][j] = acc
+            acc = acc + row_edge[i][j]
+
+    # col_offset[I,J] = sum_{i<I} col_edge[i,J]  (exclusive prefix along I, per tile-col J)
+    col_offset = [[torch.zeros(out_tile_w, device=device, dtype=dtype) for _ in range(n_tiles_w)] for _ in range(n_tiles_h)]
+    for j in range(n_tiles_w):
+        acc = torch.zeros(out_tile_w, device=device, dtype=dtype)
+        for i in range(n_tiles_h):
+            col_offset[i][j] = acc
+            acc = acc + col_edge[i][j]
+
+    # block_prefix[I,J] = sum_{i<I, j<J} corner[i,j]  -- two clean exclusive-prefix passes:
+    # pass 1: exclusive row-prefix of corner along j, for each row i
+    corner_row_prefix = [[torch.zeros((), device=device, dtype=dtype) for _ in range(n_tiles_w)] for _ in range(n_tiles_h)]
+    for i in range(n_tiles_h):
+        acc = torch.zeros((), device=device, dtype=dtype)
+        for j in range(n_tiles_w):
+            corner_row_prefix[i][j] = acc
+            acc = acc + corner[i][j]
+    # pass 2: exclusive col-prefix (along i) of corner_row_prefix, for each J
+    block_prefix = [[torch.zeros((), device=device, dtype=dtype) for _ in range(n_tiles_w)] for _ in range(n_tiles_h)]
+    for j in range(n_tiles_w):
+        acc = torch.zeros((), device=device, dtype=dtype)
+        for i in range(n_tiles_h):
+            block_prefix[i][j] = acc
+            acc = acc + corner_row_prefix[i][j]
+
+    c_global = torch.zeros(n_tiles_h * out_tile_h, n_tiles_w * out_tile_w, device=device, dtype=dtype)
+    for i in range(n_tiles_h):
+        for j in range(n_tiles_w):
+            tile_val = (
+                c_local[i][j]
+                + row_offset[i][j].unsqueeze(-1)
+                + col_offset[i][j].unsqueeze(-2)
+                + block_prefix[i][j]
+            )
+            c_global[
+                i * out_tile_h:(i + 1) * out_tile_h,
+                j * out_tile_w:(j + 1) * out_tile_w,
+            ] = tile_val
+    return c_global
+
+
 class MICFLite(nn.Module):
     """MICF-Lite model supporting local and cumulative count prediction."""
 
@@ -39,7 +112,8 @@ class MICFLite(nn.Module):
         pretrained: bool = False,
         neck_width: int = 32,
         context_dilations: Tuple[int, ...] = (1, 2, 3),
-        use_integral_context: Union[bool, str] = False,
+        use_integral_context: bool = False,
+        context_type: str = "directional",   # 'none' | 'directional' | 'axial'
         head_type: str = "cumulative",
         output_stride: int = 16,
         feature_reductions: Tuple[int, ...] = (4, 8, 16),
@@ -55,6 +129,15 @@ class MICFLite(nn.Module):
         self.output_stride = int(output_stride)
         if self.output_stride not in {4, 8, 16}:
             raise ValueError(f"output_stride must be 4, 8, or 16, got {self.output_stride}")
+
+        # use_integral_context kept for backward compatibility: True maps to
+        # context_type='directional' unless context_type was explicitly overridden.
+        self.context_type = context_type.lower() if use_integral_context else "none"
+        self.use_integral_context = self.context_type != "none"
+        if self.context_type not in {"none", "directional", "axial"}:
+            raise ValueError(
+                f"context_type must be 'none', 'directional', or 'axial', got {self.context_type}"
+            )
 
         self.neck_width = int(neck_width)
         self.eps_d = float(eps_d)
@@ -74,19 +157,10 @@ class MICFLite(nn.Module):
             context_dilations=context_dilations,
         )
 
-        # 3. Context Decoder
-        # Support None / False, 4-dir (True, "4dir"), and axial ("axial")
-        if isinstance(use_integral_context, str):
-            ctx_mode = use_integral_context.lower()
-        else:
-            ctx_mode = "4dir" if use_integral_context else "none"
-
-        self.use_integral_context = ctx_mode != "none"
-        self.context_mode = ctx_mode
-
-        if ctx_mode in {"4dir", "directional"}:
+        # 3. Context Decoder: Directional / Axial Integral Context vs Identity
+        if self.context_type == "directional":
             self.context_module = DirectionalIntegralContext(channels=self.neck_width)
-        elif ctx_mode == "axial":
+        elif self.context_type == "axial":
             self.context_module = AxialIntegralContext(channels=self.neck_width)
         else:
             self.context_module = nn.Identity()
@@ -177,68 +251,72 @@ class MICFLite(nn.Module):
         self,
         x: torch.Tensor,
         tile_size: int = 256,
+        halo: int = 64,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Hierarchical Tile Composition inference for full images (Section 30 of design doc).
+        """Tiled inference for the full-image regime (design doc sec.29-30).
 
-        Solves the full-image inference problem (Section 29) for models with finite receptive field:
-        1. Divides image into non-overlapping tiles of size tile_size.
-        2. On each tile, runs the model.
-        3. For cumulative models:
-           - Reads tile total N_t = C_t[-1, -1]
-           - Recovers local tile mass Y_t = Delta_xy C_t
-           - Assembles global discrete mass map Y_global
-           - Global count is sum_t N_t
-           - Global cumulative field is cumsum2d(Y_global)
-        4. For local models:
-           - Assembles local mass map Y_global
-           - Global count is sum(Y_global)
+        For head_type == 'local': falls back to predict() (local cell counts
+        are position-independent, no composition needed).
+
+        For head_type in {'cumulative', 'integrated_local'}: computes each
+        tile's local cumulative field independently (optionally with `halo`
+        pixels of surrounding context, cropped back out via
+        discrete_mixed_difference before composition), then stitches them with
+        compose_tiled_cumulative_field -- exact block-decomposed 2D prefix
+        composition (design doc sec.30, generalized from a raster chain to a
+        full tile grid).
+
+        Caveat: exact composition of the per-tile *predictions*, not identical
+        to one full-image forward pass -- each pixel only sees `halo` pixels of
+        cross-tile context, not the network's full receptive field. Only B=1
+        is supported.
         """
         if x.ndim != 4:
             raise ValueError(f"Expected 4D tensor, got {tuple(x.shape)}")
+        if x.shape[0] != 1:
+            raise NotImplementedError("predict_tiled currently supports batch size 1 only")
+        if self.head_type == "local":
+            return self.predict(x)
+        if self.head_type not in {"cumulative", "integrated_local"}:
+            raise ValueError(f"Unsupported head_type for predict_tiled: {self.head_type}")
 
-        B, _, H, W = x.shape
-        stride = self.output_stride
-        out_h = math.ceil(H / stride)
-        out_w = math.ceil(W / stride)
+        device = x.device
+        _, _, H, W = x.shape
+        s = self.output_stride
+        out_h_full = math.ceil(H / s)
+        out_w_full = math.ceil(W / s)
 
-        y_assembled = torch.zeros((B, 1, out_h, out_w), device=x.device, dtype=torch.float32)
-        total_counts = torch.zeros(B, device=x.device, dtype=torch.float32)
+        if tile_size % s != 0:
+            raise ValueError(f"tile_size ({tile_size}) must be a multiple of output_stride ({s})")
+        out_tile = tile_size // s
 
-        for top in range(0, H, tile_size):
-            for left in range(0, W, tile_size):
-                bot = min(top + tile_size, H)
-                right = min(left + tile_size, W)
+        n_tiles_h = math.ceil(H / tile_size)
+        n_tiles_w = math.ceil(W / tile_size)
+        padded_h = n_tiles_h * tile_size
+        padded_w = n_tiles_w * tile_size
+        x_pad = F.pad(x, (0, padded_w - W, 0, padded_h - H), mode="constant", value=0.0)
 
-                tile = x[:, :, top:bot, left:right]
-                th, tw = bot - top, right - left
+        c_local: list[list[torch.Tensor]] = [[None] * n_tiles_w for _ in range(n_tiles_h)]
+        for i in range(n_tiles_h):
+            for j in range(n_tiles_w):
+                y0, y1 = i * tile_size, (i + 1) * tile_size
+                x0, x1 = j * tile_size, (j + 1) * tile_size
+                hy0, hy1 = max(0, y0 - halo), min(padded_h, y1 + halo)
+                hx0, hx1 = max(0, x0 - halo), min(padded_w, x1 + halo)
+                crop = x_pad[..., hy0:hy1, hx0:hx1]
 
-                # Pad tile to multiple of 64 if needed
-                pad_h = (64 - (th % 64)) % 64
-                pad_w = (64 - (tw % 64)) % 64
-                if pad_h > 0 or pad_w > 0:
-                    tile = F.pad(tile, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
-
-                tile_field = self.forward_field(tile)
-                tile_out_h = math.ceil(th / stride)
-                tile_out_w = math.ceil(tw / stride)
-                tile_valid = tile_field[..., :tile_out_h, :tile_out_w]
-
-                grid_top = top // stride
-                grid_left = left // stride
-                grid_bot = grid_top + tile_out_h
-                grid_right = grid_left + tile_out_w
-
-                if self.head_type in {"cumulative", "integrated_local"}:
-                    y_tile = discrete_mixed_difference(tile_valid)
-                    n_tile = tile_valid[..., -1, -1].squeeze()
-                    y_assembled[:, :, grid_top:grid_bot, grid_left:grid_right] = y_tile
-                    total_counts += n_tile
+                field = self.forward_field(crop)
+                if halo > 0:
+                    y_full = discrete_mixed_difference(field)
+                    ry0 = (y0 - hy0) // s
+                    rx0 = (x0 - hx0) // s
+                    y_core = y_full[..., ry0: ry0 + out_tile, rx0: rx0 + out_tile]
+                    c_tile = torch.cumsum(torch.cumsum(y_core, dim=-2), dim=-1)
                 else:
-                    y_assembled[:, :, grid_top:grid_bot, grid_left:grid_right] = tile_valid
-                    total_counts += tile_valid.sum(dim=(-1, -2, -3))
+                    c_tile = field[..., :out_tile, :out_tile]
+                c_local[i][j] = c_tile.squeeze(0).squeeze(0)
 
-        if self.head_type in {"cumulative", "integrated_local"}:
-            c_assembled = torch.cumsum(torch.cumsum(y_assembled, dim=-2), dim=-1)
-            return total_counts.squeeze(), c_assembled
-        else:
-            return total_counts.squeeze(), y_assembled
+        c_global = compose_tiled_cumulative_field(c_local)
+        field_valid = c_global[:out_h_full, :out_w_full].unsqueeze(0).unsqueeze(0)
+        count = field_valid[..., -1, -1].squeeze()
+        return count, field_valid

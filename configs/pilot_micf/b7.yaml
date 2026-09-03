@@ -19,22 +19,24 @@ dataset:
   part: part_A
   root: ./data/ShanghaiTech
 experiment:
-  description: Local Count + Directional Context (Ablation Control)
-  model_id: B6
-  name: pilot_micf_b6
-  save_dir: ./runs/pilot_micf/b6
+  description: MICF-v2 Axial (cheap 1D row/col prefix context + Validity, sec.31)
+  model_id: B7
+  name: pilot_micf_b7
+  save_dir: ./runs/pilot_micf/b7
   seed: 42
 loss:
-  mode: local_smooth_l1
+  field_loss: smooth_l1
+  lambda_valid: 1.0
+  mode: micf_v2_full
 model:
   backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
   context_dilations:
   - 1
   - 2
   - 3
-  context_type: directional
+  context_type: axial
   eps_d: 1.0e-08
-  head_type: local
+  head_type: cumulative
   neck_width: 32
   output_stride: 16
   pretrained: true

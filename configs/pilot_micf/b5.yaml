@@ -34,6 +34,7 @@ model:
   - 1
   - 2
   - 3
+  context_type: directional
   eps_d: 1.0e-08
   head_type: cumulative
   neck_width: 32

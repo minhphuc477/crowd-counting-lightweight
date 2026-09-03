@@ -356,6 +356,7 @@ def main() -> None:
         neck_width=int(m_cfg.get("neck_width", 32)),
         context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
         use_integral_context=bool(m_cfg.get("use_integral_context", False)),
+        context_type=str(m_cfg.get("context_type", "directional")),
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=int(m_cfg.get("output_stride", 16)),
         eps_d=float(m_cfg.get("eps_d", 1e-8)),

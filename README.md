@@ -62,14 +62,16 @@ To rigorously decouple **loss geometry** from **output representation**, the ben
 | **B2** | Integral Loss on Local | $\hat{Y}$ | $\operatorname{SmoothL1}(P\hat{Y}, PY)$ | None (Local only) | **Isolates loss geometry**: cumulative loss without cumulative output |
 | **B3** | Direct MICF (Naive) | $\hat{C}$ | $\operatorname{SmoothL1}(\hat{C}, C)$ | None | **Isolates representation**: cumulative output without validity penalty |
 | **B4** | Direct MICF + Validity | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | None | Measures impact of measure consistency constraint |
-| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | 4-Dir Integral Context | **Proposed method**: aligned feature context + valid cumulative field |
+| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | 4-Dir Integral Context | **Proposed method**: aligned 4-direction feature context + valid cumulative field |
 | **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
+| **B7** | MICF-v2 Axial | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Axial Integral Context | **Cheaper context** (sec.31): 1D row/col prefix averages at -2k params / -0.5 MMAC |
 
 ### Decision Logic (Kill Rules)
 - **$C > B > A$**: Direct cumulative representation hypothesis survives.
 - **$B \approx C > A$**: Direct cumulative output is redundant; cumulative loss is the active ingredient.
 - **$B > C$**: Cumulative supervision helps, but direct cumulative prediction is bottlenecked by non-local context.
 - **$A \ge B, C$**: **Kill** the integral-domain crowd counting hypothesis entirely.
+- **$B7 \approx B5$**: The lightweight 1D axial context is sufficient, saving 2D multi-orientation FLOPs.
 
 ---
 

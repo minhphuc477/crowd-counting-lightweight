@@ -125,16 +125,41 @@ class DirectionalIntegralContext(nn.Module):
         return z
 
 
+def _axial_row_prefix(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Normalized row-prefix average (design doc sec.31, R_ij):
+        R_{ij} = (1/(j+1)) * sum_{b<=j} F_{ib}
+    Cumulative sum along the width axis only (independent per row).
+    """
+    w = x.shape[-1]
+    r = x.cumsum(-1)
+    denom = torch.arange(1, w + 1, device=x.device, dtype=x.dtype).view(1, 1, 1, -1)
+    return r / (denom + eps)
+
+
+def _axial_col_prefix(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Normalized column-prefix average (design doc sec.31, V_ij):
+        V_{ij} = (1/(i+1)) * sum_{a<=i} F_{aj}
+    Cumulative sum along the height axis only (independent per column).
+    """
+    h = x.shape[-2]
+    v = x.cumsum(-2)
+    denom = torch.arange(1, h + 1, device=x.device, dtype=x.dtype).view(1, 1, -1, 1)
+    return v / (denom + eps)
+
+
 class AxialIntegralContext(nn.Module):
-    """Axial Integral Context Block (Section 31 of design doc).
+    """Cheaper alternative to DirectionalIntegralContext (design doc sec.31).
 
-    A cheaper alternative to the full 4-directional 2D context:
-    computes horizontal prefix average R and vertical prefix average V:
-        R_{ij} = (1 / (j + 1)) * sum_{b <= j} F_{ib}  (horizontal scan)
-        V_{ij} = (1 / (i + 1)) * sum_{a <= i} F_{aj}  (vertical scan)
+    Uses only 1D row-prefix (R) and column-prefix (V) averages instead of
+    the full 4-orientation 2D prefix context, at roughly 3/5 the concat
+    width and half the cumsum/flip work (1 axis each vs. 2 axes x 4 flips).
 
-    Fused via: 1x1 Conv(3C -> C) + DW-Conv3x3 + 1x1 Conv(C -> C) + residual.
-    Requires only 3C concatenation instead of 5C.
+    Architecture:
+        [F, R, V] (3*C concat)
+            -> 1x1 Conv(3C -> C) + BN + SiLU   (reduce)
+            -> dw 3x3 Conv(C -> C) + BN + SiLU (refine)
+            -> 1x1 Conv(C -> C)                 (project)
+            + residual(x)
     """
 
     def __init__(
@@ -166,14 +191,8 @@ class AxialIntegralContext(nn.Module):
         self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h, w = x.shape[-2:]
-        i_coords = torch.arange(1, h + 1, device=x.device, dtype=x.dtype).view(1, 1, h, 1)
-        j_coords = torch.arange(1, w + 1, device=x.device, dtype=x.dtype).view(1, 1, 1, w)
-
-        # Horizontal prefix average: R
-        r = x.cumsum(-1) / j_coords
-        # Vertical prefix average: V
-        v = x.cumsum(-2) / i_coords
+        r = _axial_row_prefix(x)
+        v = _axial_col_prefix(x)
 
         z = torch.cat([x, r, v], dim=1)  # [B, 3C, H, W]
         z = self.reduce(z)

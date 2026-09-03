@@ -84,14 +84,20 @@ _VARIANTS = [
     {
         "id": "B5",
         "desc": "MICF-v2 Full (4-dir Directional Context + Validity)",
-        "model": {"head_type": "cumulative",  "use_integral_context": True},
+        "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "directional"},
         "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0},
     },
     {
         "id": "B6",
         "desc": "Local Count + Directional Context (Ablation Control)",
-        "model": {"head_type": "local",       "use_integral_context": True},
+        "model": {"head_type": "local",       "use_integral_context": True, "context_type": "directional"},
         "loss":  {"mode": "local_smooth_l1"},
+    },
+    {
+        "id": "B7",
+        "desc": "MICF-v2 Axial (cheap 1D row/col prefix context + Validity, sec.31)",
+        "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "axial"},
+        "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0},
     },
 ]
 

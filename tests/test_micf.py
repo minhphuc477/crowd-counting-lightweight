@@ -219,13 +219,90 @@ class TestMICFv2:
         assert map_tiled.shape == (1, 1, 16, 32)
 
     def test_axial_integral_context(self):
-        from hpc.models.integral_context import AxialIntegralContext
+        from hpc.models.integral_context import (
+            AxialIntegralContext,
+            _axial_col_prefix,
+            _axial_row_prefix,
+        )
 
-        block = AxialIntegralContext(channels=32, use_residual=True)
-        x = torch.ones(2, 32, 16, 16)
-        out = block(x)
-        assert out.shape == (2, 32, 16, 16)
-        assert torch.isfinite(out).all()
+        module = AxialIntegralContext(channels=16, use_residual=True)
+        x = torch.randn(2, 16, 8, 8, requires_grad=True)
+
+        out = module(x)
+        assert out.shape == (2, 16, 8, 8)
+
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert torch.isfinite(x.grad).all()
+
+        with torch.no_grad():
+            ones = torch.ones(1, 1, 4, 4)
+            r = _axial_row_prefix(ones)
+            assert torch.allclose(r, torch.ones_like(r), atol=1e-5)
+            v = _axial_col_prefix(ones)
+            assert torch.allclose(v, torch.ones_like(v), atol=1e-5)
+
+    def test_micf_lite_axial_context_wiring(self):
+        from hpc.models.integral_context import AxialIntegralContext, DirectionalIntegralContext
+
+        m_axial = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="axial",
+            output_stride=16,
+        )
+        assert isinstance(m_axial.context_module, AxialIntegralContext)
+
+        # Backward compatibility check: use_integral_context=True without context_type builds Directional
+        m_directional = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            output_stride=16,
+        )
+        assert isinstance(m_directional.context_module, DirectionalIntegralContext)
+
+        x = torch.randn(1, 3, 128, 128)
+        field = m_axial(x)
+        assert field.shape == (1, 1, 8, 8)
+        assert torch.isfinite(field).all()
+
+    def test_compose_tiled_cumulative_field(self):
+        from hpc.models.micf_lite import compose_tiled_cumulative_field
+
+        torch.manual_seed(42)
+        # Validate 50 random (tile grid, tile size) configurations
+        for _ in range(50):
+            n_tiles_h = torch.randint(1, 5, (1,)).item()
+            n_tiles_w = torch.randint(1, 5, (1,)).item()
+            tile_h = torch.randint(4, 16, (1,)).item()
+            tile_w = torch.randint(4, 16, (1,)).item()
+
+            full_h = n_tiles_h * tile_h
+            full_w = n_tiles_w * tile_w
+
+            # Synthetic non-negative discrete cell count map Y
+            y_full = torch.rand(full_h, full_w)
+            c_expected = torch.cumsum(torch.cumsum(y_full, dim=0), dim=1)
+
+            # Split into tiles and compute independent local cumsum2d per tile
+            c_local: list[list[torch.Tensor]] = []
+            for i in range(n_tiles_h):
+                row_tiles = []
+                for j in range(n_tiles_w):
+                    y_tile = y_full[i * tile_h:(i + 1) * tile_h, j * tile_w:(j + 1) * tile_w]
+                    c_tile = torch.cumsum(torch.cumsum(y_tile, dim=0), dim=1)
+                    row_tiles.append(c_tile)
+                c_local.append(row_tiles)
+
+            c_composed = compose_tiled_cumulative_field(c_local)
+            assert c_composed.shape == c_expected.shape
+            assert torch.allclose(c_composed, c_expected, atol=1e-5), (
+                f"Mismatch in compose_tiled_cumulative_field: max diff = "
+                f"{(c_composed - c_expected).abs().max().item()}"
+            )
 
     def test_points_to_count_map(self):
         from hpc.losses.micf import points_to_count_map

@@ -19,10 +19,10 @@ dataset:
   part: part_A
   root: ./data/ShanghaiTech
 experiment:
-  description: Local Count + Directional Context (Ablation Control)
-  model_id: B6
-  name: pilot_micf_b6
-  save_dir: ./runs/pilot_micf/b6
+  description: Local Count Baseline (SmoothL1 on Y) [capacity sweep, neck_width=24]
+  model_id: B1
+  name: capacity_sweep_b1_w24
+  save_dir: ./runs/capacity_sweep/b1_w24
   seed: 42
 loss:
   mode: local_smooth_l1
@@ -32,13 +32,12 @@ model:
   - 1
   - 2
   - 3
-  context_type: directional
   eps_d: 1.0e-08
   head_type: local
-  neck_width: 32
+  neck_width: 24
   output_stride: 16
   pretrained: true
-  use_integral_context: true
+  use_integral_context: false
 optimizer:
   backbone_lr_scale: 0.1
   grad_clip: 5.0
