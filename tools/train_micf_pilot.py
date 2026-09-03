@@ -373,6 +373,7 @@ def main() -> None:
         output_stride=int(m_cfg.get("output_stride", 16)),
         eps_d=float(m_cfg.get("eps_d", 1e-8)),
         extent_aware=bool(m_cfg.get("extent_aware", False)),
+        finite_horizon=m_cfg.get("finite_horizon", None),
     ).to(device)
 
     criterion = build_criterion(cfg)

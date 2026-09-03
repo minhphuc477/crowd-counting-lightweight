@@ -31,6 +31,7 @@ def build_micf_model_from_config(cfg: dict) -> MICFLite:
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=int(m_cfg.get("output_stride", 16)),
         extent_aware=bool(m_cfg.get("extent_aware", False)),
+        finite_horizon=m_cfg.get("finite_horizon", None),
     )
 
 

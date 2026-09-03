@@ -441,4 +441,183 @@ class TestMICFv2:
         loss_int = IntegralLossOnLocalCount()(y2d, y2d)
         assert abs(loss_int.item()) < 1e-6
 
+    def test_batched_fh_compose_exact(self):
+        from hpc.models.micf_lite import compose_batched_fh_cumulative
+
+        torch.manual_seed(7)
+        B, nh, nw, K = 3, 4, 4, 4
+
+        y_global = torch.rand(B, 1, nh * K, nw * K)
+
+        y_blocks = (
+            y_global.view(B, 1, nh, K, nw, K)
+                    .permute(0, 2, 4, 1, 3, 5)
+                    .contiguous()
+                    .view(B * nh * nw, 1, K, K)
+        )
+
+        c_blocks = torch.cumsum(
+            torch.cumsum(y_blocks, dim=-2),
+            dim=-1,
+        )
+
+        c_actual = compose_batched_fh_cumulative(
+            c_blocks,
+            batch_size=B,
+            n_h=nh,
+            n_w=nw,
+            k=K,
+        )
+
+        c_expected = torch.cumsum(
+            torch.cumsum(y_global, dim=-2),
+            dim=-1,
+        )
+
+        assert torch.allclose(c_actual, c_expected, atol=1e-5)
+
+    def test_batched_fh_matches_reference_compose(self):
+        from hpc.models.micf_lite import (
+            compose_batched_fh_cumulative,
+            compose_tiled_cumulative_field,
+        )
+
+        torch.manual_seed(11)
+        B, nh, nw, K = 2, 3, 2, 4
+        y = torch.rand(B, 1, nh * K, nw * K)
+
+        blocks = (
+            y.view(B, 1, nh, K, nw, K)
+             .permute(0, 2, 4, 1, 3, 5)
+             .contiguous()
+             .view(B * nh * nw, 1, K, K)
+        )
+        c_blocks = blocks.cumsum(-2).cumsum(-1)
+
+        c_fast = compose_batched_fh_cumulative(
+            c_blocks, B, nh, nw, K
+        )
+
+        for b in range(B):
+            ref_grid = []
+            for i in range(nh):
+                row = []
+                for j in range(nw):
+                    idx = b * nh * nw + i * nw + j
+                    row.append(c_blocks[idx, 0])
+                ref_grid.append(row)
+
+            c_ref = compose_tiled_cumulative_field(ref_grid)
+            assert torch.allclose(c_fast[b, 0], c_ref, atol=1e-5)
+
+    def test_fh_global_delta_equals_stitched_local_delta(self):
+        from hpc.models.micf_lite import compose_batched_fh_cumulative
+
+        B, nh, nw, K = 2, 2, 3, 4
+        c_blocks = torch.randn(B * nh * nw, 1, K, K)
+
+        c_global = compose_batched_fh_cumulative(
+            c_blocks, B, nh, nw, K
+        )
+        y_global = discrete_mixed_difference(c_global)
+
+        y_blocks = discrete_mixed_difference(c_blocks)
+        y_expected = (
+            y_blocks.view(B, nh, nw, 1, K, K)
+                    .permute(0, 3, 1, 4, 2, 5)
+                    .contiguous()
+                    .view(B, 1, nh * K, nw * K)
+        )
+
+        assert torch.allclose(y_global, y_expected, atol=1e-5)
+
+    def test_fh_compose_gradient_flow(self):
+        from hpc.models.micf_lite import compose_batched_fh_cumulative
+
+        B, nh, nw, K = 2, 2, 2, 4
+        c_blocks = torch.randn(
+            B * nh * nw, 1, K, K,
+            requires_grad=True,
+        )
+
+        c_global = compose_batched_fh_cumulative(
+            c_blocks, B, nh, nw, K
+        )
+        loss = c_global.square().mean()
+        loss.backward()
+
+        assert c_blocks.grad is not None
+        assert torch.isfinite(c_blocks.grad).all()
+        assert c_blocks.grad.abs().sum() > 0
+
+    def test_fh_micf_forward(self):
+        m = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=4,
+            output_stride=16,
+        )
+
+        x = torch.randn(2, 3, 256, 256)
+        c = m(x)
+
+        assert c.shape == (2, 1, 16, 16)
+        assert torch.isfinite(c).all()
+
+        n = c[..., -1, -1]
+        assert n.shape == (2, 1)
+
+    def test_fh_full_horizon_matches_global_extent_aware(self):
+        torch.manual_seed(123)
+
+        global_model = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=None,
+            output_stride=16,
+        )
+
+        fh_model = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=8,
+            output_stride=16,
+        )
+
+        fh_model.load_state_dict(global_model.state_dict(), strict=True)
+        global_model.eval()
+        fh_model.eval()
+
+        x = torch.randn(1, 3, 128, 128)
+        with torch.no_grad():
+            c_global = global_model(x)
+            c_fh = fh_model(x)
+
+        assert torch.allclose(c_global, c_fh, atol=1e-5, rtol=1e-5)
+
+    def test_fh_rejects_nondivisible_feature_grid(self):
+        m = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=4,
+            output_stride=16,
+        )
+
+        # 160 / 16 = 10, not divisible by K=4 if forward_field is called directly.
+        x = torch.randn(1, 3, 160, 160)
+        with pytest.raises(ValueError):
+            _ = m.forward_field(x)
+
 

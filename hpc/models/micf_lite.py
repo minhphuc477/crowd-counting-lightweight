@@ -46,6 +46,87 @@ def _normalized_coords(h: int, w: int, device, dtype) -> torch.Tensor:
     return torch.stack([ii, jj], dim=0)
 
 
+def _partition_feature_blocks(
+    x: torch.Tensor,
+    k: int,
+) -> tuple[torch.Tensor, int, int]:
+    """Partition [B,C,H,W] into shared-weight KxK blocks.
+
+    Returns:
+        blocks: [B*n_h*n_w, C, K, K]
+        n_h: number of block rows
+        n_w: number of block columns
+
+    The caller must ensure H and W are divisible by K.
+    """
+    if x.ndim != 4:
+        raise ValueError(f"Expected [B,C,H,W], got {tuple(x.shape)}")
+
+    B, C, H, W = x.shape
+    if H % k != 0 or W % k != 0:
+        raise ValueError(
+            f"FH grid ({H},{W}) must be divisible by finite_horizon={k}. "
+            "Use a compatible crop/padding multiple."
+        )
+
+    n_h = H // k
+    n_w = W // k
+
+    blocks = (
+        x.view(B, C, n_h, k, n_w, k)
+         .permute(0, 2, 4, 1, 3, 5)
+         .contiguous()
+         .view(B * n_h * n_w, C, k, k)
+    )
+    return blocks, n_h, n_w
+
+
+def compose_batched_fh_cumulative(
+    c_blocks: torch.Tensor,
+    batch_size: int,
+    n_h: int,
+    n_w: int,
+    k: int,
+) -> torch.Tensor:
+    """Compose block-local cumulative fields into one global MICF field.
+
+    Args:
+        c_blocks: [B*n_h*n_w, 1, K, K]
+        batch_size: B
+        n_h, n_w: block-grid dimensions
+        k: finite horizon K
+
+    Returns:
+        c_global: [B, 1, n_h*K, n_w*K]
+
+    Composition is exact and has no learnable parameters.
+    """
+    if c_blocks.shape != (batch_size * n_h * n_w, 1, k, k):
+        raise ValueError(
+            "Unexpected c_blocks shape: "
+            f"{tuple(c_blocks.shape)} != "
+            f"{(batch_size * n_h * n_w, 1, k, k)}"
+        )
+
+    # Local cumulative -> local signed mass.
+    # Validity is still handled by the existing MICF loss.
+    y_blocks = discrete_mixed_difference(c_blocks)
+
+    # [B, nh, nw, 1, K, K]
+    y_blocks = y_blocks.view(batch_size, n_h, n_w, 1, k, k)
+
+    # Stitch blocks spatially into [B, 1, nh*K, nw*K].
+    y_global = (
+        y_blocks.permute(0, 3, 1, 4, 2, 5)
+                .contiguous()
+                .view(batch_size, 1, n_h * k, n_w * k)
+    )
+
+    # Exact global MICF reconstruction.
+    c_global = torch.cumsum(torch.cumsum(y_global, dim=-2), dim=-1)
+    return c_global
+
+
 def compose_tiled_cumulative_field(c_local: list[list[torch.Tensor]]) -> torch.Tensor:
     """Exact block-decomposed 2D prefix-sum composition (design doc sec.30, generalized).
 
@@ -135,6 +216,7 @@ class MICFLite(nn.Module):
         feature_reductions: Tuple[int, ...] = (4, 8, 16),
         eps_d: float = 1e-8,
         extent_aware: bool = False,
+        finite_horizon: int | None = None,
     ) -> None:
         super().__init__()
         self.head_type = head_type.lower()
@@ -146,6 +228,18 @@ class MICFLite(nn.Module):
         self.extent_aware = bool(extent_aware)
         if self.extent_aware and self.head_type != "cumulative":
             raise ValueError("extent_aware=True is only meaningful for head_type='cumulative'")
+
+        self.finite_horizon = None if finite_horizon is None else int(finite_horizon)
+        if self.finite_horizon is not None:
+            if self.finite_horizon <= 0:
+                raise ValueError("finite_horizon must be a positive integer or None")
+            if self.head_type != "cumulative":
+                raise ValueError("finite_horizon is only supported for cumulative heads")
+            if not self.extent_aware:
+                raise ValueError(
+                    "FH-CMICF requires extent_aware=True so local cumulative fields "
+                    "use local extent-aware parameterization"
+                )
 
         self.output_stride = int(output_stride)
         if self.output_stride not in {4, 8, 16}:
@@ -205,33 +299,13 @@ class MICFLite(nn.Module):
         self.head_act = nn.SiLU()
         self.head_out = nn.Conv2d(self.neck_width, 1, kernel_size=1)
 
-    def forward_field(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass extracting predicted field (Y for local, C for cumulative).
+    def _predict_from_context(self, p_context: torch.Tensor) -> torch.Tensor:
+        """Apply the existing task head to one spatial scope.
 
-        Stride selection: reads native feature P4, P8, or P16 directly from the neck
-        routes, avoiding wasted upsampling + redundant downsampling convolutions.
-
-        Head behaviors:
-        - Local head (B1, B2, B6):
-            Applies softplus to enforce Y_hat >= 0.
-        - Cumulative head (B3, B4, B5):
-            Returns raw linear output. Validity Delta_xy C_hat >= 0 is enforced
-            via the validity loss penalty, NOT by elementwise softplus.
-        - Integrated Local head (Section 32):
-            Predicts local M = softplus(z) >= 0, then computes C = Integral(M).
-            Guarantees Delta_xy C >= 0 by construction.
-        - Extent-aware Cumulative head:
-            Predicts local average prefix intensity rho = softplus(z) >= 0,
-            then computes C_hat = area(i, j) * rho(i, j).
+        For extent-aware cumulative prediction, coordinates and prefix area are
+        computed from p_context.shape[-2:], so when p_context is KxK they are
+        automatically local to the FH block.
         """
-        features = self.backbone(x)
-        # Extract native multi-scale routes: p4, p8, p16 (with early-return at target_stride)
-        _, routes = self.neck(*features, return_routes=True, target_stride=self.output_stride)
-        route_key = f"p{self.output_stride}"
-        p_feat = routes[route_key]
-
-        p_context = self.context_module(p_feat)
-
         if self.extent_aware:
             h_o, w_o = p_context.shape[-2:]
             coords = _normalized_coords(h_o, w_o, p_context.device, p_context.dtype)
@@ -249,16 +323,68 @@ class MICFLite(nn.Module):
             m = F.softplus(z).clamp_min(self.eps_d)
             return torch.cumsum(torch.cumsum(m, dim=-2), dim=-1)
         elif self.extent_aware:
-            # C_hat = area(i,j) * rho_hat(i,j)
-            # rho_hat = predicted average prefix intensity (softplus >= 0).
-            # A spatially-uniform rho now still yields C growing correctly
-            # with prefix area, unlike a raw linear head fed only
-            # mean-normalized context.
             rho = F.softplus(z)
             area = _prefix_area_tl(z.shape[-2], z.shape[-1], z.device, z.dtype)
             return area.unsqueeze(0).unsqueeze(0) * rho
         else:
             return z
+
+    def forward_field(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass extracting predicted field (Y for local, C for cumulative).
+
+        Stride selection: reads native feature P4, P8, or P16 directly from the neck
+        routes, avoiding wasted upsampling + redundant downsampling convolutions.
+
+        Head behaviors:
+        - Local head (B1, B2, B6):
+            Applies softplus to enforce Y_hat >= 0.
+        - Cumulative head (B3, B4, B5):
+            Returns raw linear output. Validity Delta_xy C_hat >= 0 is enforced
+            via the validity loss penalty, NOT by elementwise softplus.
+        - Integrated Local head (Section 32):
+            Predicts local M = softplus(z) >= 0, then computes C = Integral(M).
+            Guarantees Delta_xy C >= 0 by construction.
+        - Extent-aware Cumulative head (B5b):
+            Predicts local average prefix intensity rho = softplus(z) >= 0,
+            then computes C_hat = area(i, j) * rho(i, j).
+        - FH-CMICF (B8):
+            Partitions feature map into KxK blocks, runs block-scoped integral context,
+            block-scoped extent-aware cumulative head, and exact global composition.
+        """
+        features = self.backbone(x)
+        # Extract native multi-scale routes: p4, p8, p16 (with early-return at target_stride)
+        _, routes = self.neck(*features, return_routes=True, target_stride=self.output_stride)
+        route_key = f"p{self.output_stride}"
+        p_feat = routes[route_key]
+
+        # Standard MICF/local path: preserve existing B1-B7 semantics.
+        if self.finite_horizon is None:
+            p_context = self.context_module(p_feat)
+            return self._predict_from_context(p_context)
+
+        # FH-CMICF path.
+        k = self.finite_horizon
+        B, _, H_o, W_o = p_feat.shape
+
+        blocks, n_h, n_w = _partition_feature_blocks(p_feat, k)
+
+        # Critical: context is applied AFTER partitioning.
+        # Each KxK block therefore gets its own local prefix origin.
+        block_context = self.context_module(blocks)
+
+        # Extent-aware coordinates/area are also local because
+        # _predict_from_context() sees tensors of spatial size KxK.
+        c_blocks = self._predict_from_context(block_context)
+
+        # Non-learned exact local-to-global composition.
+        c_global = compose_batched_fh_cumulative(
+            c_blocks,
+            batch_size=B,
+            n_h=n_h,
+            n_w=n_w,
+            k=k,
+        )
+        return c_global
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.forward_field(x)
@@ -278,6 +404,13 @@ class MICFLite(nn.Module):
             raise ValueError(f"Expected 4D tensor, got {tuple(x.shape)}")
 
         _, _, h, w = x.shape
+        if self.finite_horizon is not None:
+            fh_multiple = self.output_stride * self.finite_horizon
+            if pad_multiple is None:
+                pad_multiple = fh_multiple
+            else:
+                pad_multiple = math.lcm(int(pad_multiple), int(fh_multiple))
+
         if pad_multiple is not None:
             pad_h = (pad_multiple - (h % pad_multiple)) % pad_multiple
             pad_w = (pad_multiple - (w % pad_multiple)) % pad_multiple

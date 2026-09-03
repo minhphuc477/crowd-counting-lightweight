@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-16%2F16%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-23%2F23%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
@@ -41,38 +41,44 @@ Total scene count is read directly from the bottom-right corner: $\hat{N}_{corne
 
 ---
 
-## 2. Scientific Controls: The Triangle Kill-Test Suite (B1–B7)
+## 2. Scientific Controls: The Experimental Matrix (B1–B8)
 
-To rigorously decouple **loss geometry** from **output representation**, the benchmark tests 7 strictly controlled variants:
+To rigorously decouple **loss geometry** from **output representation**, **extent mismatch**, and **learned dependency horizon**, the benchmark tests strictly controlled variants:
 
 ```
-              ┌─────────────────────────────────────────────────┐
-              │             Triangle Kill-Test Suite             │
-              └─────────────────────────────────────────────────┘
-                     /                       \
-        Local Representation (Y)       Cumulative Representation (C)
-        ├── B1: SmoothL1(Y_hat, Y)     ├── B3: SmoothL1(C_hat, C) [Naive]
-        ├── B2: SmoothL1(PY_hat, PY)   ├── B4: B3 + Validity Penalty
-        └── B6: B1 + Integral Context  ├── B5: Full MICF-v2 (4-Dir Context)
-                                       └── B7: MICF-v2 Axial (1D Context)
+              ┌─────────────────────────────────────────────────────────┐
+              │                Scientific Control Suite                 │
+              └─────────────────────────────────────────────────────────┘
+                     /                              \
+        Local Representation (Y)        Cumulative Representation (C)
+        ├── B1: SmoothL1(Y_hat, Y)      ├── B3: SmoothL1(C_hat, C) [Naive]
+        ├── B2: SmoothL1(PY_hat, PY)    ├── B4: B3 + Validity Penalty
+        └── B6: B1 + Integral Context   ├── B5: Full MICF-v2 (Global 4-Dir Context)
+                                        ├── B5b: MICF-v2 Extent-Aware (Global C = A * rho)
+                                        ├── B7: MICF-v2 Axial (1D Context)
+                                        └── B8: FH-CMICF (Block-Scoped DIC + Local Head + Exact Composition)
 ```
 
-| ID | Name | Output | Supervision / Loss | Context Module | Purpose |
+| ID | Name | Output | Supervision / Loss | Context Scope | Purpose |
 |:---|:---|:---:|:---|:---:|:---|
 | **B1** | Local Baseline | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | None (Local only) | Standard local count regression benchmark |
 | **B2** | Integral Loss on Local | $\hat{Y}$ | $\operatorname{SmoothL1}(P\hat{Y}, PY)$ | None (Local only) | **Isolates loss geometry**: cumulative loss without cumulative output |
 | **B3** | Direct MICF (Naive) | $\hat{C}$ | $\operatorname{SmoothL1}(\hat{C}, C)$ | None | **Isolates representation**: cumulative output without validity penalty |
 | **B4** | Direct MICF + Validity | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | None | Measures impact of measure consistency constraint |
-| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | 4-Dir Integral Context | **Proposed method**: aligned 4-direction feature context + valid cumulative field |
-| **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
+| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Global 4-Dir Integral Context | Aligned 4-direction feature context + valid cumulative field |
+| **B5b** | **MICF-v2 Extent-Aware** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Global 4-Dir Context + Coords | **Resolves extent mismatch**: $\hat{C} = A \cdot \operatorname{softplus}(z)$ |
+| **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | Global 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
 | **B7** | MICF-v2 Axial | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Axial Integral Context | **Cheaper context** (sec.31): 1D row/col prefix averages at -2k params / -0.5 MMAC |
+| **B8** | **FH-CMICF ($K=4$)** | $\hat{C}^G$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Block-Scoped 4-Dir Context ($K \times K$) | **Factorizes dependency horizon**: local head + exact global composition |
 
 ### Decision Logic (Kill Rules)
+- **Primary contrast $\text{B8 vs B5b}$**: Isolates the finite-horizon factorization effect under matched carrier, context, head capacity, and loss normalization.
 - **$C > B > A$**: Direct cumulative representation hypothesis survives.
 - **$B \approx C > A$**: Direct cumulative output is redundant; cumulative loss is the active ingredient.
 - **$B > C$**: Cumulative supervision helps, but direct cumulative prediction is bottlenecked by non-local context.
 - **$A \ge B, C$**: **Kill** the integral-domain crowd counting hypothesis entirely.
 - **$B7 \approx B5$**: The lightweight 1D axial context is sufficient, saving 2D multi-orientation FLOPs.
+- **$B8 > B5b$**: Finite-horizon factorization makes cumulative regression easier while preserving exact global MICF semantics.
 
 ---
 

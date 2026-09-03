@@ -295,6 +295,7 @@ def main() -> None:
         head_type=m_cfg.get("head_type", "cumulative"),
         output_stride=output_stride,
         extent_aware=bool(m_cfg.get("extent_aware", False)),
+        finite_horizon=m_cfg.get("finite_horizon", None),
     ).to(device)
 
     # Load weights if available
