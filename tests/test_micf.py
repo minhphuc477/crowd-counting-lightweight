@@ -1,0 +1,182 @@
+"""Unit tests for MICF-v2 (Monotonic Integral Count Field).
+
+Verifies:
+1. Exact telescoping identity: sum(Delta_xy C) == C[..., -1, -1] == sum(Y).
+2. Exact algebraic inversion: Delta_xy(cumsum_2d(Y)) == Y.
+3. DirectionalIntegralContext: shapes, gradient flow, and prefix average correctness.
+4. MICFLoss: validity penalty is zero for true fields, positive for invalid fields.
+5. MICFLite forward and predict methods for both local and cumulative heads.
+"""
+
+from __future__ import annotations
+
+import pytest
+import torch
+import torch.nn as nn
+
+from hpc.losses.micf import (
+    cell_counts_to_cumulative_field,
+    discrete_mixed_difference,
+    IntegralLossOnLocalCount,
+    MICFLoss,
+)
+from hpc.models.integral_context import DirectionalIntegralContext
+from hpc.models.micf_lite import MICFLite
+
+
+class TestMICFv2:
+    def test_algebraic_inversion_and_telescoping(self):
+        # Arbitrary positive discrete cell counts [1, 1, 8, 8]
+        y = torch.tensor([
+            [0.0, 1.0, 0.0, 2.0],
+            [1.0, 0.0, 3.0, 0.0],
+            [0.0, 2.0, 1.0, 1.0],
+            [4.0, 0.0, 0.0, 2.0],
+        ]).view(1, 1, 4, 4)
+
+        # Forward 2D cumulative sum
+        c = cell_counts_to_cumulative_field(y, orientation="TL")
+
+        # Check telescoping boundary identity: bottom-right corner == total count
+        assert c[0, 0, -1, -1].item() == y.sum().item()
+
+        # Invert via discrete mixed difference Delta_xy C
+        y_recovered = discrete_mixed_difference(c)
+
+        # Check exact reconstruction
+        assert torch.allclose(y, y_recovered, atol=1e-6)
+
+        # Check sum of recovered cell counts equals bottom-right corner
+        assert abs(y_recovered.sum().item() - c[0, 0, -1, -1].item()) < 1e-6
+
+    def test_orientations(self):
+        y = torch.ones(1, 1, 4, 4)
+        c_tl = cell_counts_to_cumulative_field(y, orientation="TL")
+        c_tr = cell_counts_to_cumulative_field(y, orientation="TR")
+        c_bl = cell_counts_to_cumulative_field(y, orientation="BL")
+        c_br = cell_counts_to_cumulative_field(y, orientation="BR")
+
+        assert c_tl[0, 0, -1, -1] == 16.0
+        assert c_tr[0, 0, -1, 0] == 16.0
+        assert c_bl[0, 0, 0, -1] == 16.0
+        assert c_br[0, 0, 0, 0] == 16.0
+
+    def test_directional_integral_context(self):
+        module = DirectionalIntegralContext(channels=16, use_residual=True)
+        x = torch.randn(2, 16, 8, 8, requires_grad=True)
+
+        out = module(x)
+        assert out.shape == (2, 16, 8, 8), f"Expected (2,16,8,8), got {tuple(out.shape)}"
+
+        # Check gradient flow
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert torch.isfinite(x.grad).all()
+
+        # Verify TL prefix average is correct for constant-1 input
+        with torch.no_grad():
+            from hpc.models.integral_context import (
+                normalized_integral_tl, normalized_integral_tr,
+                normalized_integral_bl, normalized_integral_br,
+            )
+            ones = torch.ones(1, 1, 4, 4)
+            tl = normalized_integral_tl(ones)
+            # Each cell should be 1.0 (sum of (i+1)(j+1) ones / (i+1)(j+1))
+            assert torch.allclose(tl, torch.ones_like(tl), atol=1e-5)
+
+            # TR: flip-normalize-flip; should also be all-ones for constant input
+            tr = normalized_integral_tr(ones)
+            assert torch.allclose(tr, torch.ones_like(tr), atol=1e-5)
+
+            bl = normalized_integral_bl(ones)
+            assert torch.allclose(bl, torch.ones_like(bl), atol=1e-5)
+
+            br = normalized_integral_br(ones)
+            assert torch.allclose(br, torch.ones_like(br), atol=1e-5)
+
+    def test_micf_loss(self):
+        crit = MICFLoss(field_loss="smooth_l1", lambda_valid=1.0)
+
+        # Perfect prediction (identical to target)
+        y = torch.tensor([[1.0, 2.0], [3.0, 4.0]]).view(1, 1, 2, 2)
+        c = cell_counts_to_cumulative_field(y)
+        loss, comp = crit(c, c, return_components=True)
+
+        assert abs(loss.item()) < 1e-6
+        assert comp["validity_loss"] == 0.0
+        assert comp["violation_rate"] == 0.0
+
+        # Invalid prediction: decreasing field (negative mixed difference)
+        c_invalid = torch.tensor([[5.0, 2.0], [3.0, 1.0]]).view(1, 1, 2, 2)
+        loss_inv, comp_inv = crit(c_invalid, c, return_components=True)
+
+        assert comp_inv["validity_loss"] > 0.0
+        assert comp_inv["violation_rate"] > 0.0
+
+    def test_integral_loss_on_local_count(self):
+        crit = IntegralLossOnLocalCount(loss_type="l1")
+        y1 = torch.tensor([[1.0, 0.0], [0.0, 1.0]]).view(1, 1, 2, 2)
+        y2 = torch.tensor([[0.0, 1.0], [1.0, 0.0]]).view(1, 1, 2, 2)
+
+        # Cumsum of y1: [[1, 1], [1, 2]]
+        # Cumsum of y2: [[0, 1], [1, 2]]
+        # Diff: [[1, 0], [0, 0]] -> mean = 1/4 = 0.25
+        loss = crit(y1, y2)
+        assert abs(loss.item() - 0.25) < 1e-6
+
+    def test_micf_lite_models(self):
+        # 1. Cumulative head without context (B3/B4)
+        m_cum = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=False,
+            output_stride=16,
+        )
+        x = torch.randn(1, 3, 128, 128)
+        field_cum = m_cum(x)
+        assert field_cum.shape == (1, 1, 8, 8)
+        count_cum, map_cum = m_cum.predict(x, pad_multiple=64)
+        assert count_cum.ndim == 0
+        # Cumulative head uses raw linear output: untrained model can be negative.
+        # Check that it is a finite scalar.
+        assert torch.isfinite(count_cum)
+
+        # 2. Cumulative head WITH 4-dir directional context (B5)
+        m_b5 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            output_stride=16,
+        )
+        field_b5 = m_b5(x)
+        assert field_b5.shape == (1, 1, 8, 8)
+        assert torch.isfinite(field_b5).all()
+
+        # 3. Local head WITHOUT context (B1 baseline)
+        m_b1 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="local",
+            use_integral_context=False,
+            output_stride=16,
+        )
+        field_b1 = m_b1(x)
+        assert field_b1.shape == (1, 1, 8, 8)
+        # Local head uses softplus: all values must be strictly positive
+        assert (field_b1 > 0).all(), "Local head output must be non-negative (softplus)"
+        count_b1, _ = m_b1.predict(x, pad_multiple=64)
+        assert count_b1.item() > 0
+
+        # 4. Local head WITH directional context (B6)
+        m_b6 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="local",
+            use_integral_context=True,
+            output_stride=16,
+        )
+        field_b6 = m_b6(x)
+        assert field_b6.shape == (1, 1, 8, 8)
+        count_b6, map_b6 = m_b6.predict(x, pad_multiple=64)
+        # Local count = sum of all cells; check consistency
+        assert abs(count_b6.item() - field_b6.sum().item()) < 1e-4
+
