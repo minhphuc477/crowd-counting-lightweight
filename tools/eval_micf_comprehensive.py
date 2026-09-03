@@ -307,7 +307,14 @@ def main() -> None:
     if ckpt_path and os.path.exists(ckpt_path):
         ckpt = torch.load(ckpt_path, map_location=device)
         state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
-        model.load_state_dict(state_dict, strict=False)
+        model_sd = model.state_dict()
+        filtered_sd = {}
+        for k, v in state_dict.items():
+            if k in model_sd and model_sd[k].shape == v.shape:
+                filtered_sd[k] = v
+            elif k in model_sd:
+                print(f"Warning: skipping {k} due to shape mismatch: ckpt {tuple(v.shape)} vs model {tuple(model_sd[k].shape)}")
+        model.load_state_dict(filtered_sd, strict=False)
         print(f"Loaded weights from {ckpt_path}")
     else:
         print(f"Warning: evaluating without loaded weights (raw initialization)")
