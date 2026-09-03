@@ -337,7 +337,8 @@ def main() -> None:
 
     t_cfg = cfg.get("training", {})
     batch_size = int(t_cfg.get("batch_size", 16))
-    num_workers = int(t_cfg.get("num_workers", 2))
+    num_workers = int(t_cfg.get("num_workers", 0))
+    pin_memory = bool(t_cfg.get("pin_memory", False))
     # Orientation balancing: independent vertical flip prob (horizontal done in dataset)
     vflip_prob = float(aug_cfg.get("vflip_prob", 0.5))
 
@@ -348,7 +349,7 @@ def main() -> None:
         num_workers=num_workers,
         collate_fn=ntpc_collate_fn,
         drop_last=bool(t_cfg.get("drop_last", True)),
-        pin_memory=True if device.type == "cuda" else False,
+        pin_memory=pin_memory,
     )
     val_loader = DataLoader(
         test_dataset,

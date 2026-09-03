@@ -52,4 +52,5 @@ training:
   batch_size: 16
   drop_last: true
   evaluate_every: 5
-  num_workers: 2
+  num_workers: 0
+  pin_memory: false

@@ -50,7 +50,8 @@ _COMMON = {
     "training": {
         "amp": True,
         "batch_size": 16,
-        "num_workers": 2,
+        "num_workers": 0,
+        "pin_memory": False,
         "drop_last": True,
         "evaluate_every": 5,
     },
