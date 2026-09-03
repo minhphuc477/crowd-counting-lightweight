@@ -3,6 +3,7 @@ augmentation:
   scale_range:
   - 0.7
   - 1.3
+  vflip_prob: 0.5
 dataset:
   coordinate_base: 0
   crop_size: 256
@@ -17,6 +18,14 @@ dataset:
   name: sha
   part: part_A
   root: ./data/ShanghaiTech
+experiment:
+  description: Local Count + Directional Context (Ablation Control)
+  model_id: B6
+  name: pilot_micf_b6
+  save_dir: ./runs/pilot_micf/b6
+  seed: 42
+loss:
+  mode: local_smooth_l1
 model:
   backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
   context_dilations:
@@ -24,31 +33,23 @@ model:
   - 2
   - 3
   eps_d: 1.0e-08
+  head_type: local
   neck_width: 32
   output_stride: 16
   pretrained: true
-  head_type: local
   use_integral_context: true
 optimizer:
   backbone_lr_scale: 0.1
-  grad_clip: 500.0
-  lr: 0.0002
+  grad_clip: 5.0
+  lr: 0.0001
   name: AdamW
   weight_decay: 0.0001
 schedule:
-  epochs: 100
-  warmup_epochs: 5
+  epochs: 1000
+  warmup_epochs: 25
 training:
   amp: true
   batch_size: 16
   drop_last: true
-  evaluate_every: 2
+  evaluate_every: 5
   num_workers: 2
-experiment:
-  name: pilot_micf_b6
-  model_id: B6
-  description: Local Count + Directional Context (Ablation Control)
-  seed: 42
-  save_dir: ./runs/pilot_micf/b6
-loss:
-  mode: local_l1

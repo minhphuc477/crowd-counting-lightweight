@@ -49,6 +49,12 @@ from .fg_bg_decomposition import (
     decompose_fg_bg_errors,
 )
 from .multiplicity_calibration import MultiplicityAccumulator
+from .micf_diagnostics import (
+    compute_measure_diagnostics,
+    compute_spectral_analysis,
+    evaluate_rectangle_counts,
+    query_rectangle_count,
+)
 
 __all__ = [
     "evaluate_phase_shift_single_image",
@@ -96,4 +102,9 @@ __all__ = [
     "decompose_cell_occupancy_errors",
     "decompose_fg_bg_errors",
     "MultiplicityAccumulator",
+    # micf diagnostics
+    "compute_measure_diagnostics",
+    "query_rectangle_count",
+    "evaluate_rectangle_counts",
+    "compute_spectral_analysis",
 ]

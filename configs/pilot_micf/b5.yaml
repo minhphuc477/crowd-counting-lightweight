@@ -3,6 +3,7 @@ augmentation:
   scale_range:
   - 0.7
   - 1.3
+  vflip_prob: 0.5
 dataset:
   coordinate_base: 0
   crop_size: 256
@@ -17,6 +18,16 @@ dataset:
   name: sha
   part: part_A
   root: ./data/ShanghaiTech
+experiment:
+  description: MICF-v2 Full (4-dir Directional Context + Validity)
+  model_id: B5
+  name: pilot_micf_b5
+  save_dir: ./runs/pilot_micf/b5
+  seed: 42
+loss:
+  field_loss: smooth_l1
+  lambda_valid: 1.0
+  mode: micf_v2_full
 model:
   backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
   context_dilations:
@@ -24,33 +35,23 @@ model:
   - 2
   - 3
   eps_d: 1.0e-08
+  head_type: cumulative
   neck_width: 32
   output_stride: 16
   pretrained: true
-  head_type: cumulative
   use_integral_context: true
 optimizer:
   backbone_lr_scale: 0.1
-  grad_clip: 500.0
-  lr: 0.0002
+  grad_clip: 5.0
+  lr: 0.0001
   name: AdamW
   weight_decay: 0.0001
 schedule:
-  epochs: 100
-  warmup_epochs: 5
+  epochs: 1000
+  warmup_epochs: 25
 training:
   amp: true
   batch_size: 16
   drop_last: true
-  evaluate_every: 2
+  evaluate_every: 5
   num_workers: 2
-experiment:
-  name: pilot_micf_b5
-  model_id: B5
-  description: MICF-v2 Full (Directional Context + Validity)
-  seed: 42
-  save_dir: ./runs/pilot_micf/b5
-loss:
-  mode: micf
-  lambda_valid: 1.0
-  lambda_count: 0.5

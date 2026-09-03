@@ -180,3 +180,98 @@ class TestMICFv2:
         # Local count = sum of all cells; check consistency
         assert abs(count_b6.item() - field_b6.sum().item()) < 1e-4
 
+        # 5. Integrated local head (Section 32 Valid-by-construction baseline)
+        m_int = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="integrated_local",
+            use_integral_context=False,
+            output_stride=16,
+        )
+        field_int = m_int(x)
+        assert field_int.shape == (1, 1, 8, 8)
+        # By construction, Delta_xy(C) must be non-negative everywhere
+        y_int = discrete_mixed_difference(field_int)
+        assert (y_int >= 0).all(), "Integrated local head must be valid by construction (all >= 0)"
+        count_int, _ = m_int.predict(x, pad_multiple=64)
+        assert count_int.item() > 0
+
+    def test_points_to_count_map(self):
+        from hpc.losses.micf import points_to_count_map
+
+        # 4 points on a 64x64 image, stride 16 -> 4x4 grid
+        pts = torch.tensor([
+            [5.0, 5.0],    # cell (0, 0)
+            [10.0, 15.0],  # cell (0, 0)
+            [20.0, 35.0],  # x=20->col 1, y=35->row 2 -> cell (2, 1)
+            [55.0, 55.0],  # x=55->col 3, y=55->row 3 -> cell (3, 3)
+        ])
+        y = points_to_count_map(pts, out_h=4, out_w=4, stride=16)
+        assert y.shape == (4, 4)
+        assert y.sum().item() == 4.0
+        assert y[0, 0].item() == 2.0
+        assert y[2, 1].item() == 1.0
+        assert y[3, 3].item() == 1.0
+
+    def test_rectangle_count_recovery(self):
+        from hpc.diagnostics.micf_diagnostics import (
+            evaluate_rectangle_counts,
+            query_rectangle_count,
+        )
+
+        # Discrete cell counts
+        y = torch.tensor([
+            [1.0, 2.0, 0.0, 1.0],
+            [0.0, 3.0, 1.0, 0.0],
+            [2.0, 0.0, 4.0, 1.0],
+            [0.0, 1.0, 2.0, 3.0],
+        ])
+        c = cell_counts_to_cumulative_field(y.unsqueeze(0).unsqueeze(0), orientation="TL")[0, 0]
+
+        # Query sub-rectangle (x in [1, 3], y in [1, 3]) (1-based cell coords)
+        # Original subgrid rows 1..2, cols 1..2 (0-indexed: row 1..2, col 1..2)
+        # Cells:
+        # row 1: [3, 1]
+        # row 2: [0, 4]
+        # Expected sum: 3 + 1 + 0 + 4 = 8
+        rec_count = query_rectangle_count(c, x1=1, y1=1, x2=3, y2=3)
+        assert abs(rec_count - 8.0) < 1e-5
+
+        # Query full image [0, 0, 4, 4]
+        full_count = query_rectangle_count(c, x1=0, y1=0, x2=4, y2=4)
+        assert abs(full_count - y.sum().item()) < 1e-5
+
+        # Multi-scale evaluation
+        rect_eval = evaluate_rectangle_counts(c, c, scale_bins=(1/16, 1/4, 1.0))
+        assert rect_eval["rectangle_mae_full"] == 0.0
+        assert rect_eval["rectangle_mae_large"] == 0.0
+
+    def test_measure_diagnostics(self):
+        from hpc.diagnostics.micf_diagnostics import compute_measure_diagnostics
+
+        # Valid cumulative field
+        y = torch.ones(1, 1, 4, 4)
+        c_valid = cell_counts_to_cumulative_field(y, orientation="TL")
+        diag = compute_measure_diagnostics(c_valid)
+        assert diag["negative_cell_fraction"] == 0.0
+        assert diag["negative_mass_ratio"] == 0.0
+        assert diag["violation_magnitude"] == 0.0
+        assert diag["corner_delta_count_gap"] == 0.0
+        assert diag["n_corner"] == 16.0
+        assert diag["n_delta"] == 16.0
+
+    def test_spectral_analysis(self):
+        from hpc.diagnostics.micf_diagnostics import compute_spectral_analysis
+
+        # Smooth signal vs noisy signal
+        smooth = torch.ones(16, 16)
+        noisy = torch.randn(16, 16)
+
+        spec_smooth = compute_spectral_analysis(smooth)
+        spec_noisy = compute_spectral_analysis(noisy)
+
+        # Smooth DC signal should have 0 high frequency energy
+        assert spec_smooth["high_freq_energy_ratio"] < 1e-4
+        # Random noise has much higher high frequency energy
+        assert spec_noisy["high_freq_energy_ratio"] > spec_smooth["high_freq_energy_ratio"]
+
+

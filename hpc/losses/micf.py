@@ -71,27 +71,72 @@ def cell_counts_to_cumulative_field(
         raise ValueError(f"Unknown orientation '{orientation}'; expected TL, TR, BL, or BR.")
 
 
+def points_to_count_map(
+    points_xy: Optional[Union[torch.Tensor, np.ndarray, list]],
+    out_h: int,
+    out_w: int,
+    stride: int,
+    device: Optional[torch.device] = None,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Build exact 2D integer cell count map Y from 2D point annotations (Section 13).
+
+    Zero Gaussian smoothing; each point increments the cell containing its floor-divided coordinates:
+        Y[i, j] = # { n : floor(y_n / stride) == i, floor(x_n / stride) == j }
+    Guarantees sum(Y) == N_points exactly.
+
+    Args:
+        points_xy: [N, 2] point coordinates (x, y).
+        out_h: Output grid height.
+        out_w: Output grid width.
+        stride: Downsampling factor from image to count map.
+        device: Torch device.
+        dtype: Output tensor dtype.
+
+    Returns:
+        Exact cell count tensor of shape [out_h, out_w].
+    """
+    y = torch.zeros((out_h, out_w), device=device, dtype=dtype)
+    if points_xy is None or len(points_xy) == 0:
+        return y
+
+    pts = torch.as_tensor(points_xy, device=device, dtype=torch.float32)
+    gx = torch.floor(pts[:, 0] / stride).long()
+    gy = torch.floor(pts[:, 1] / stride).long()
+
+    valid = (gx >= 0) & (gx < out_w) & (gy >= 0) & (gy < out_h)
+    gx = gx[valid]
+    gy = gy[valid]
+
+    if gx.numel() == 0:
+        return y
+
+    flat_idx = gy * out_w + gx
+    y.view(-1).scatter_add_(0, flat_idx, torch.ones_like(flat_idx, dtype=dtype))
+    return y
+
+
 class MICFLoss(nn.Module):
     """Loss for Direct Cumulative Field Prediction (MICF-v2).
 
-    L = L_field(C_hat, C) + lambda_valid * L_valid(Delta_xy C_hat)
+    L = L_field(C_hat, C) + lambda_valid * L_valid(Delta_xy C_hat) + lambda_local_recon * L_recon(Delta_xy C_hat, Y)
 
-    The field loss already includes the corner element C[-1,-1] = N_total, so no
-    separate count boundary term is needed (and adding one would double-weight the
-    corner, biasing toward count accuracy over spatial field consistency).
-
-    lambda_count is retained only as a diagnostic in return_components.
+    - L_field: Loss on all prefix entries C(i, j). Includes the bottom-right corner C[-1,-1] = N_total.
+    - L_valid: Measure validity penalty: mean ReLU(-Delta_xy C_hat). Enforces non-negative counting measure.
+    - L_local_recon: Optional direct local count reconstruction loss on Y_hat = Delta_xy C_hat (Section 19 & 20).
     """
 
     def __init__(
         self,
         field_loss: str = "smooth_l1",
         lambda_valid: float = 1.0,
+        lambda_local_recon: float = 0.0,
         beta_smooth: float = 1.0,
     ) -> None:
         super().__init__()
         self.field_loss = field_loss.lower()
         self.lambda_valid = float(lambda_valid)
+        self.lambda_local_recon = float(lambda_local_recon)
         self.beta_smooth = float(beta_smooth)
 
     def _field_nll(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -108,13 +153,16 @@ class MICFLoss(nn.Module):
         self,
         pred_c: torch.Tensor,
         target_c: torch.Tensor,
+        target_y: Optional[torch.Tensor] = None,
         return_components: bool = False,
     ) -> torch.Tensor | Tuple[torch.Tensor, Dict[str, float]]:
         """Forward loss computation.
 
         Args:
-            pred_c: Predicted cumulative field [B, 1, H, W].
-            target_c: Ground truth cumulative field [B, 1, H, W].
+            pred_c: Predicted cumulative field [B, 1, H, W] or [B, H, W].
+            target_c: Ground truth cumulative field [B, 1, H, W] or [B, H, W].
+            target_y: Optional ground truth local count map [B, 1, H, W] for local reconstruction loss.
+            return_components: Whether to return individual loss components.
         """
         if pred_c.ndim == 3:
             pred_c = pred_c.unsqueeze(1)
@@ -129,8 +177,17 @@ class MICFLoss(nn.Module):
         invalid_violations = F.relu(-y_recovered)
         validity_loss = invalid_violations.mean()
 
-        # Total: only field + validity (design doc section 20)
         total_loss = field_loss + self.lambda_valid * validity_loss
+
+        # 3. Optional local reconstruction loss (Section 19 & 20)
+        recon_loss = torch.tensor(0.0, device=pred_c.device)
+        if self.lambda_local_recon > 0:
+            if target_y is None:
+                target_y = discrete_mixed_difference(target_c)
+            elif target_y.ndim == 3:
+                target_y = target_y.unsqueeze(1)
+            recon_loss = F.smooth_l1_loss(y_recovered, target_y.float(), beta=self.beta_smooth)
+            total_loss = total_loss + self.lambda_local_recon * recon_loss
 
         if return_components:
             # Count loss as diagnostic only (not added to total)
@@ -140,6 +197,7 @@ class MICFLoss(nn.Module):
             components = {
                 "field_loss": float(field_loss.item()),
                 "validity_loss": float(validity_loss.item()),
+                "recon_loss": float(recon_loss.item()),
                 "count_loss": float(count_loss.item()),   # diagnostic only
                 "total_loss": float(total_loss.item()),
                 "violation_rate": float((y_recovered < 0).float().mean().item()),

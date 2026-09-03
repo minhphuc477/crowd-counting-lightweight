@@ -42,8 +42,10 @@ class MICFLite(nn.Module):
     ) -> None:
         super().__init__()
         self.head_type = head_type.lower()
-        if self.head_type not in {"local", "cumulative"}:
-            raise ValueError(f"head_type must be 'local' or 'cumulative', got {head_type}")
+        if self.head_type not in {"local", "cumulative", "integrated_local"}:
+            raise ValueError(
+                f"head_type must be 'local', 'cumulative', or 'integrated_local', got {head_type}"
+            )
 
         self.output_stride = int(output_stride)
         self.use_integral_context = bool(use_integral_context)
@@ -102,6 +104,9 @@ class MICFLite(nn.Module):
             Measure validity Delta_xy C_hat >= 0 is enforced via the validity loss,
             NOT by making each C_hat(i,j) independently positive (which conflates
             elementwise positivity with monotonicity).
+        Integrated Local head (Section 32 Valid-by-construction baseline):
+            Predicts local non-negative mass M = softplus(z) >= 0, then computes
+            exact cumulative field C = Integral(M). Guaranteed Delta_xy C >= 0.
         """
         features = self.backbone(x)
         p4 = self.neck(*features)
@@ -116,6 +121,11 @@ class MICFLite(nn.Module):
         if self.head_type == "local":
             # Local counts must be non-negative
             return F.softplus(z).clamp_min(self.eps_d)
+        elif self.head_type == "integrated_local":
+            # Valid-by-construction control (Section 32):
+            # Non-negative local mass integrated into cumulative field
+            m = F.softplus(z).clamp_min(self.eps_d)
+            return torch.cumsum(torch.cumsum(m, dim=-2), dim=-1)
         else:
             # Cumulative field: raw linear output.
             # measure validity is enforced via MICFLoss.lambda_valid penalty.
@@ -133,7 +143,7 @@ class MICFLite(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Inference method returning (pred_count, pred_map).
 
-        For cumulative head: pred_count = pred_c[..., -1, -1].
+        For cumulative & integrated_local heads: pred_count = pred_c[..., -1, -1].
         For local head: pred_count = pred_y.sum().
         """
         if x.ndim != 4:
@@ -151,7 +161,7 @@ class MICFLite(nn.Module):
         out_w = math.ceil(w / self.output_stride)
         field_valid = field[..., :out_h, :out_w]
 
-        if self.head_type == "cumulative":
+        if self.head_type in {"cumulative", "integrated_local"}:
             # Count is the bottom-right corner of the valid cumulative field
             count = field_valid[..., -1, -1].squeeze()
             return count, field_valid
