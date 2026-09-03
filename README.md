@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-15%2F15%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-13%2F13%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
@@ -14,7 +14,7 @@ Let points $\mathcal{P} = \{(x_n, y_n)\}_{n=1}^N$ be raw 2D annotations on an im
 
 ### 1.1 Exact Local Count Map (Zero Gaussian Smoothing)
 For output stride $s$ (e.g. $s = 16$), the discrete local cell count map $Y \in \mathbb{N}_0^{H_o \times W_o}$ is constructed deterministically:
-$$Y_{ij} = \#\left\{ n : \left\lfloor \frac{y_n}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n}{s} \right\rfloor = j \right\}, \qquad \sum_{i,j} Y_{ij} = N.$$
+$$Y_{ij} = \#\left\{ n : \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor = j \right\}, \qquad \sum_{i,j} Y_{ij} = N.$$
 
 ### 1.2 Cumulative Count Field
 The ground-truth top-left (TL) cumulative count field $C \in \mathbb{R}_{\ge 0}^{H_o \times W_o}$ is:
@@ -41,9 +41,9 @@ Total scene count is read directly from the bottom-right corner: $\hat{N}_{corne
 
 ---
 
-## 2. Scientific Controls: The Triangle Kill-Test Suite (B1–B6)
+## 2. Scientific Controls: The Triangle Kill-Test Suite (B1–B7)
 
-To rigorously decouple **loss geometry** from **output representation**, the benchmark tests 6 strictly controlled variants:
+To rigorously decouple **loss geometry** from **output representation**, the benchmark tests 7 strictly controlled variants:
 
 ```
               ┌─────────────────────────────────────────────────┐
@@ -53,7 +53,8 @@ To rigorously decouple **loss geometry** from **output representation**, the ben
         Local Representation (Y)       Cumulative Representation (C)
         ├── B1: SmoothL1(Y_hat, Y)     ├── B3: SmoothL1(C_hat, C) [Naive]
         ├── B2: SmoothL1(PY_hat, PY)   ├── B4: B3 + Validity Penalty
-        └── B6: B1 + Integral Context  └── B5: Full MICF-v2 (+ Integral Context)
+        └── B6: B1 + Integral Context  ├── B5: Full MICF-v2 (4-Dir Context)
+                                       └── B7: MICF-v2 Axial (1D Context)
 ```
 
 | ID | Name | Output | Supervision / Loss | Context Module | Purpose |
@@ -81,10 +82,7 @@ To rigorously decouple **loss geometry** from **output representation**, the ben
 Input Image [B, 3, H, W]
   │
   ▼
-MobileNetV4-Conv-Small-0.50 (truncated C16, ~97k params, pretrained=True)
-  │
-  ▼
-Additive FPN Neck (32 channels, context dilations {1, 2, 3})
+MobileNetV4-Conv-Small-0.50 (truncated C16, ~88k params, pretrained=True)
   │
   ▼
 Additive FPN Neck (32 channels, context dilations {1, 2, 3})
@@ -98,16 +96,17 @@ Additive FPN Neck (32 channels, context dilations {1, 2, 3})
   │  ├── F_bar^BL = sum_{a>=i, b<=j} F_{ab} / ((H-i)(j+1))
   │  ├── F_bar^BR = sum_{a>=i, b>=j} F_{ab} / ((H-i)(W-j))
   │  └── Fusion: Conv1x1(5C->C) -> DW-Conv3x3 -> Conv1x1 + Residual(F)
+  │      (Axial B7 uses 1D row/col prefix averages with 3C->C fusion: -2k params / -0.5 MMAC)
   │
   ▼
 Task Prediction Head
   ├── Head 'local'            -> softplus(z) >= 0 (B1, B2, B6)
-  ├── Head 'cumulative'       -> raw linear z (B3, B4, B5)
+  ├── Head 'cumulative'       -> raw linear z (B3, B4, B5, B7)
   └── Head 'integrated_local' -> softplus(z) -> CumSum2D (Valid-by-construction control)
 ```
 
-- **Parameters:** ~0.104M (B5) vs ~0.097M (B1) — strictly capacity-matched.
-- **Computational Cost:** ~0.053 GFLOPs (53 MFLOPs) at $256 \times 256$.
+- **Parameters:** ~0.097M (B1: 96,593) vs ~0.101M (B7: 101,105) vs ~0.103M (B5: 103,153) — strictly capacity-matched.
+- **Computational Cost:** ~0.075–0.076 GMACs (74.5–76.2 MMACs) at $256 \times 256$ input resolution.
 - **Parallelism:** Prefix summations run in $O(HW)$ via native GPU parallel prefix scans (`torch.cumsum`). Zero learnable parameters in the pooling operator itself.
 
 ---
@@ -165,18 +164,22 @@ $$\{1/64, \; 1/16, \; 1/4, \; 1.0\}.$$
 lightweightcrcn/
 ├── MICF_full_method_design.md          # Complete mathematical & experimental design document
 ├── configs/
-│   ├── generate_pilot_configs.py       # Config generator for B1-B6
-│   └── pilot_micf/
-│       ├── b1.yaml                     # Local Count Baseline
-│       ├── b2.yaml                     # Local Output + Integral Loss
-│       ├── b3.yaml                     # Direct Cumulative MICF Naive (lambda_valid=0)
-│       ├── b4.yaml                     # Direct Cumulative MICF + Validity (lambda_valid=1.0)
-│       ├── b5.yaml                     # Full MICF-v2 (4-Dir Context + Validity)
-│       └── b6.yaml                     # Local Count + 4-Dir Context Control
+│   ├── generate_pilot_configs.py       # Config generator for B1-B7 pilot suite
+│   ├── generate_capacity_sweep.py      # Config generator for neck-width capacity sweep (sec. 24)
+│   ├── pilot_micf/                     # Pilot suite configs (B1-B7)
+│   │   ├── b1.yaml                     # Local Count Baseline
+│   │   ├── b2.yaml                     # Local Output + Integral Loss
+│   │   ├── b3.yaml                     # Direct Cumulative MICF Naive (lambda_valid=0)
+│   │   ├── b4.yaml                     # Direct Cumulative MICF + Validity (lambda_valid=1.0)
+│   │   ├── b5.yaml                     # Full MICF-v2 (4-Dir Context + Validity)
+│   │   ├── b6.yaml                     # Local Count + 4-Dir Context Control
+│   │   └── b7.yaml                     # MICF-v2 Axial (1D Row/Col Context + Validity)
+│   └── capacity_sweep/                 # Capacity sweep configs (b1_w16..b5_w64)
 ├── hpc/
 │   ├── models/
-│   │   ├── integral_context.py         # 4-Directional Normalized Integral Context Module
+│   │   ├── integral_context.py         # 4-Directional & Axial Normalized Integral Context Modules
 │   │   └── micf_lite.py                # Unified MICFLite model (local, cumulative, integrated_local)
+│   │                                   # + compose_tiled_cumulative_field for exact tile stitching
 │   ├── losses/
 │   │   └── micf.py                     # discrete_mixed_difference, cell_counts_to_cumulative_field,
 │   │                                   # points_to_count_map, MICFLoss, IntegralLossOnLocalCount
@@ -184,9 +187,10 @@ lightweightcrcn/
 │       └── micf_diagnostics.py         # Measure diagnostics, rectangle queries, 2D FFT spectral analysis
 ├── tools/
 │   ├── train_micf_pilot.py             # Authoritative trainer with orientation balancing, warmup, & Regime A/B eval
-│   └── eval_micf_comprehensive.py      # Benchmark evaluator with hierarchical tile composition (Section 50 schema)
+│   ├── eval_micf_comprehensive.py      # Benchmark evaluator with hierarchical tile composition (Section 50 schema)
+│   └── architecture_table.py           # FLOP & parameter profiler per component
 └── tests/
-    └── test_micf.py                    # 11 unit tests covering all MICF math, native strides, tiling, losses, diagnostics
+    └── test_micf.py                    # 13 unit tests covering all MICF math, native strides, tiling, losses, diagnostics
 ```
 
 ---
@@ -197,11 +201,11 @@ lightweightcrcn/
 ```powershell
 .venv\Scripts\pytest tests/ -v
 ```
-*(All 11 tests pass in ~6s).*
+*(All 13 tests pass in ~6.5s).*
 
-### 7.2 Run 1-Epoch Smoke Test (All 6 Models)
+### 7.2 Run 1-Epoch Smoke Test (All 7 Models)
 ```powershell
-for ($i = 1; $i -le 6; $i++) {
+for ($i = 1; $i -le 7; $i++) {
     .venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b$i.yaml --smoke-test
 }
 ```
@@ -219,11 +223,16 @@ for ($i = 1; $i -le 6; $i++) {
     --output-csv ./runs/pilot_micf/benchmark_results.csv
 ```
 
-Outputs the complete 19-column CSV:
+Outputs the complete 18-column CSV:
 ```text
 dataset,seed,variant,params,flops,rf_proxy,mae,rmse,nae,prefix_mae,local_recon_mae,
 rectangle_mae_small,rectangle_mae_medium,rectangle_mae_large,negative_cell_fraction,
-negative_mass_ratio,corner_delta_count_gap,peak_vram_mb
+negative_mass_ratio,violation_magnitude,peak_vram_mb
+```
+
+### 7.5 Run Capacity Sweep Config Generation
+```powershell
+.venv\Scripts\python configs/generate_capacity_sweep.py
 ```
 
 ---

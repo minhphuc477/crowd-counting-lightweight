@@ -67,7 +67,11 @@ def estimate_rf_proxy(model: MICFLite) -> str:
     """Summarize receptive field configuration from neck and context."""
     dilations = getattr(model.neck, "context_dilations", (1, 2, 3))
     has_ctx = getattr(model, "use_integral_context", False)
-    ctx_str = "+4DirIntegralContext" if has_ctx else "LocalOnly"
+    ctx_type = getattr(model, "context_type", "directional" if has_ctx else "none")
+    if has_ctx:
+        ctx_str = f"+{ctx_type.capitalize()}IntegralContext"
+    else:
+        ctx_str = "LocalOnly"
     return f"FPN(dilations={list(dilations)})_{ctx_str}"
 
 
