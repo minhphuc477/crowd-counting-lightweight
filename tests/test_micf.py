@@ -654,4 +654,70 @@ class TestMICFv2:
         loss = loss_fn(c2d, c2d, target_y=y2d)
         assert abs(loss.item()) < 1e-6
 
+    def test_fh_context_full_horizon_equals_global(self):
+        torch.manual_seed(123)
+
+        ctx = DirectionalIntegralContext(channels=32).eval()
+
+        x = torch.randn(2, 32, 8, 8)
+
+        with torch.no_grad():
+            y_global = ctx(x)
+            y_fh = ctx.forward_finite_horizon(x, k=8)
+
+        assert torch.allclose(y_global, y_fh, atol=1e-6, rtol=1e-6)
+
+    def test_fh_head_keeps_global_spatial_scope(self):
+        model = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=4,
+            output_stride=16,
+        )
+
+        seen = {}
+
+        def hook(_module, inputs, output):
+            seen["shape"] = tuple(inputs[0].shape)
+
+        handle = model.head_norm.register_forward_hook(hook)
+
+        x = torch.randn(2, 3, 256, 256)
+        _ = model(x)
+
+        handle.remove()
+
+        # Must be full 16x16 grid, NOT block batch 4x4.
+        assert seen["shape"] == (2, model.neck_width, 16, 16)
+
+    def test_b5b_b8_parameter_count_equal(self):
+        b5b = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=None,
+            output_stride=16,
+        )
+
+        b8 = MICFLite(
+            backbone_name="mobilenetv4_conv_small_050",
+            head_type="cumulative",
+            use_integral_context=True,
+            context_type="directional",
+            extent_aware=True,
+            finite_horizon=4,
+            output_stride=16,
+        )
+
+        p5 = sum(p.numel() for p in b5b.parameters())
+        p8 = sum(p.numel() for p in b8.parameters())
+
+        assert p5 == p8
+
+
 

@@ -56,6 +56,50 @@ def normalized_integral_br(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return torch.flip(ybr, [-2, -1])
 
 
+def _apply_blockwise_integral(
+    x: torch.Tensor,
+    k: int,
+    fn,
+) -> torch.Tensor:
+    """Apply a prefix/integral operator independently inside KxK blocks,
+    then reconstruct the original [B,C,H,W] layout.
+
+    IMPORTANT:
+    Only the integral operator is block-scoped.
+    Learnable fusion / BatchNorm remain global.
+    """
+    if x.ndim != 4:
+        raise ValueError(f"Expected [B,C,H,W], got {tuple(x.shape)}")
+
+    B, C, H, W = x.shape
+
+    if H % k != 0 or W % k != 0:
+        raise ValueError(
+            f"Feature grid ({H},{W}) must be divisible by finite_horizon={k}"
+        )
+
+    nh = H // k
+    nw = W // k
+
+    blocks = (
+        x.view(B, C, nh, k, nw, k)
+        .permute(0, 2, 4, 1, 3, 5)
+        .contiguous()
+        .view(B * nh * nw, C, k, k)
+    )
+
+    blocks = fn(blocks)
+
+    out = (
+        blocks.view(B, nh, nw, C, k, k)
+        .permute(0, 3, 1, 4, 2, 5)
+        .contiguous()
+        .view(B, C, H, W)
+    )
+
+    return out
+
+
 class DirectionalIntegralContext(nn.Module):
     """Full 4-direction integral context block (design doc sections 12, 15, 16).
 
@@ -115,6 +159,40 @@ class DirectionalIntegralContext(nn.Module):
         br = normalized_integral_br(x)
 
         z = torch.cat([x, tl, tr, bl, br], dim=1)  # [B, 5C, H, W]
+        z = self.reduce(z)
+        z = self.dw(z)
+        z = self.project(z)
+        z = self.dropout(z)
+
+        if self.use_residual:
+            return x + z
+        return z
+
+    def forward_finite_horizon(
+        self,
+        x: torch.Tensor,
+        k: int,
+    ) -> torch.Tensor:
+        """FH version of DirectionalIntegralContext.
+
+        Prefix operators reset every KxK block, but all learnable
+        fusion layers operate on the reconstructed full feature map.
+
+        Therefore:
+          - same Conv scope as global B5b
+          - same BatchNorm scope as global B5b
+          - same parameters
+          - only integral horizon differs
+        """
+        tl = _apply_blockwise_integral(x, k, normalized_integral_tl)
+        tr = _apply_blockwise_integral(x, k, normalized_integral_tr)
+        bl = _apply_blockwise_integral(x, k, normalized_integral_bl)
+        br = _apply_blockwise_integral(x, k, normalized_integral_br)
+
+        # IMPORTANT:
+        # Reassembled full HxW tensor enters learned fusion.
+        z = torch.cat([x, tl, tr, bl, br], dim=1)
+
         z = self.reduce(z)
         z = self.dw(z)
         z = self.project(z)

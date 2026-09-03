@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-25%2F25%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-28%2F28%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
@@ -56,7 +56,7 @@ To rigorously decouple **loss geometry** from **output representation**, **exten
         └── B6: B1 + Integral Context   ├── B5: Full MICF-v2 (Global 4-Dir Context)
                                         ├── B5b: MICF-v2 Extent-Aware (Global C = A * rho)
                                         ├── B7: MICF-v2 Axial (1D Context)
-                                        └── B8: FH-CMICF (Block-Scoped DIC + Local Head + Exact Composition)
+                                        └── B8: FH-CMICF (Block-Scoped Pooling + Global Fusion + Local Extent)
 ```
 
 | ID | Name | Output | Supervision / Loss | Context Scope | Purpose |
@@ -69,10 +69,10 @@ To rigorously decouple **loss geometry** from **output representation**, **exten
 | **B5b** | **MICF-v2 Extent-Aware** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Global 4-Dir Context + Coords | **Resolves extent mismatch**: $\hat{C} = A \cdot \operatorname{softplus}(z)$ |
 | **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | Global 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
 | **B7** | MICF-v2 Axial | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Axial Integral Context | **Cheaper context** (sec.31): 1D row/col prefix averages at -2k params / -0.5 MMAC |
-| **B8** | **FH-CMICF ($K=4$)** | $\hat{C}^G$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Block-Scoped 4-Dir Context ($K \times K$) | **Factorizes dependency horizon**: local head + exact global composition |
+| **B8** | **FH-CMICF ($K=4$)** | $\hat{C}^G$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Block-Scoped Pooling ($K \times K$) + Global Fusion | **Factorizes prefix horizon**: isolates finite prefix extent without norm/conv confounders |
 
 ### Decision Logic (Kill Rules)
-- **Primary contrast $\text{B8 vs B5b}$**: Isolates the finite-horizon factorization effect under matched carrier, context, head capacity, and loss normalization.
+- **Primary contrast $\text{B8 vs B5b}$**: Isolates the finite-horizon factorization effect under strictly matched carrier, neck, convolution padding/receptive field scope, BatchNorm/GroupNorm spatial normalization scope, and loss normalization.
 - **$C > B > A$**: Direct cumulative representation hypothesis survives.
 - **$B \approx C > A$**: Direct cumulative output is redundant; cumulative loss is the active ingredient.
 - **$B > C$**: Cumulative supervision helps, but direct cumulative prediction is bottlenecked by non-local context.

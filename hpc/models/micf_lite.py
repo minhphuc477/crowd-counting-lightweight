@@ -46,6 +46,69 @@ def _normalized_coords(h: int, w: int, device, dtype) -> torch.Tensor:
     return torch.stack([ii, jj], dim=0)
 
 
+def _fh_normalized_coords(
+    h: int,
+    w: int,
+    k: int,
+    device,
+    dtype,
+) -> torch.Tensor:
+    """Repeating block-local normalized coordinates.
+
+    Each KxK block receives coordinates:
+        (1/K ... K/K)
+    independently across the full grid.
+    """
+    if h % k != 0 or w % k != 0:
+        raise ValueError(f"Grid ({h},{w}) must be divisible by K={k}")
+
+    row_local = (
+        torch.arange(1, h + 1, device=device)
+        .sub(1)
+        .remainder(k)
+        .add(1)
+        .to(dtype)
+        / float(k)
+    )
+    col_local = (
+        torch.arange(1, w + 1, device=device)
+        .sub(1)
+        .remainder(k)
+        .add(1)
+        .to(dtype)
+        / float(k)
+    )
+    rr = row_local[:, None].expand(h, w)
+    cc = col_local[None, :].expand(h, w)
+    return torch.stack([rr, cc], dim=0)
+
+
+def _fh_prefix_area(
+    h: int,
+    w: int,
+    k: int,
+    device,
+    dtype,
+) -> torch.Tensor:
+    """Local prefix area reset independently every KxK block."""
+    if h % k != 0 or w % k != 0:
+        raise ValueError(f"Grid ({h},{w}) must be divisible by K={k}")
+
+    ri = (
+        torch.arange(h, device=device)
+        .remainder(k)
+        .add(1)
+        .to(dtype)
+    )
+    cj = (
+        torch.arange(w, device=device)
+        .remainder(k)
+        .add(1)
+        .to(dtype)
+    )
+    return ri[:, None] * cj[None, :]
+
+
 def _partition_feature_blocks(
     x: torch.Tensor,
     k: int,
@@ -299,16 +362,29 @@ class MICFLite(nn.Module):
         self.head_act = nn.SiLU()
         self.head_out = nn.Conv2d(self.neck_width, 1, kernel_size=1)
 
-    def _predict_from_context(self, p_context: torch.Tensor) -> torch.Tensor:
-        """Apply the existing task head to one spatial scope.
+    def _predict_from_context(
+        self,
+        p_context: torch.Tensor,
+        finite_horizon: int | None = None,
+    ) -> torch.Tensor:
+        """Apply the task head.
 
-        For extent-aware cumulative prediction, coordinates and prefix area are
-        computed from p_context.shape[-2:], so when p_context is KxK they are
-        automatically local to the FH block.
+        Head always operates on the FULL [B, C, H, W] feature map.
+        Therefore, GroupNorm and DW3x3 convolutions have identical spatial
+        normalization and receptive field scope between B5b and B8.
         """
+        h_o, w_o = p_context.shape[-2:]
+
         if self.extent_aware:
-            h_o, w_o = p_context.shape[-2:]
-            coords = _normalized_coords(h_o, w_o, p_context.device, p_context.dtype)
+            if finite_horizon is None:
+                coords = _normalized_coords(
+                    h_o, w_o, p_context.device, p_context.dtype
+                )
+            else:
+                coords = _fh_normalized_coords(
+                    h_o, w_o, finite_horizon, p_context.device, p_context.dtype
+                )
+
             coords = coords.unsqueeze(0).expand(p_context.shape[0], -1, -1, -1)
             p_context = self.coord_proj(torch.cat([p_context, coords], dim=1))
 
@@ -324,7 +400,10 @@ class MICFLite(nn.Module):
             return torch.cumsum(torch.cumsum(m, dim=-2), dim=-1)
         elif self.extent_aware:
             rho = F.softplus(z)
-            area = _prefix_area_tl(z.shape[-2], z.shape[-1], z.device, z.dtype)
+            if finite_horizon is None:
+                area = _prefix_area_tl(h_o, w_o, z.device, z.dtype)
+            else:
+                area = _fh_prefix_area(h_o, w_o, finite_horizon, z.device, z.dtype)
             return area.unsqueeze(0).unsqueeze(0) * rho
         else:
             return z
@@ -348,8 +427,9 @@ class MICFLite(nn.Module):
             Predicts local average prefix intensity rho = softplus(z) >= 0,
             then computes C_hat = area(i, j) * rho(i, j).
         - FH-CMICF (B8):
-            Partitions feature map into KxK blocks, runs block-scoped integral context,
-            block-scoped extent-aware cumulative head, and exact global composition.
+            Runs block-scoped directional integral pooling, global learned DIC fusion,
+            global task head with block-local repeating coordinates/area, and exact
+            non-learned global composition on predicted local cumulative fields.
         """
         features = self.backbone(x)
         # Extract native multi-scale routes: p4, p8, p16 (with early-return at target_stride)
@@ -357,26 +437,37 @@ class MICFLite(nn.Module):
         route_key = f"p{self.output_stride}"
         p_feat = routes[route_key]
 
-        # Standard MICF/local path: preserve existing B1-B7 semantics.
+        # Standard MICF/local path: preserve existing B1-B7 / B5b semantics.
         if self.finite_horizon is None:
             p_context = self.context_module(p_feat)
-            return self._predict_from_context(p_context)
+            return self._predict_from_context(p_context, finite_horizon=None)
 
         # FH-CMICF path.
         k = self.finite_horizon
         B, _, H_o, W_o = p_feat.shape
 
-        blocks, n_h, n_w = _partition_feature_blocks(p_feat, k)
+        if H_o % k != 0 or W_o % k != 0:
+            raise ValueError(
+                f"FH feature grid ({H_o},{W_o}) must be divisible by finite_horizon={k}"
+            )
 
-        # Critical: context is applied AFTER partitioning.
-        # Each KxK block therefore gets its own local prefix origin.
-        block_context = self.context_module(blocks)
+        # 1. ONLY prefix/integral pooling is finite-horizon.
+        # Learnable DIC fusion still operates globally across the full feature map.
+        if isinstance(self.context_module, DirectionalIntegralContext):
+            p_context = self.context_module.forward_finite_horizon(p_feat, k=k)
+        else:
+            raise ValueError("FH-CMICF currently requires DirectionalIntegralContext")
 
-        # Extent-aware coordinates/area are also local because
-        # _predict_from_context() sees tensors of spatial size KxK.
-        c_blocks = self._predict_from_context(block_context)
+        # 2. Head operates on full feature map.
+        # Local coordinates and local extent reset every K cells,
+        # but Conv/GN scope remains strictly matched with B5b.
+        c_local_layout = self._predict_from_context(p_context, finite_horizon=k)
 
-        # Non-learned exact local-to-global composition.
+        # 3. Convert layout -> block batch ONLY AFTER prediction.
+        # No learnable operation happens after this partition.
+        c_blocks, n_h, n_w = _partition_feature_blocks(c_local_layout, k)
+
+        # 4. Exact non-learned composition.
         c_global = compose_batched_fh_cumulative(
             c_blocks,
             batch_size=B,
