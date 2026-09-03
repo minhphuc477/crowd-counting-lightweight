@@ -47,7 +47,7 @@ def _component(name: str) -> str:
         return "backbone"
     if name.startswith("neck."):
         return "neck"
-    if name.startswith("context."):
+    if name.startswith("context.") or name.startswith("context_module."):
         return "context"
     return "head"
 

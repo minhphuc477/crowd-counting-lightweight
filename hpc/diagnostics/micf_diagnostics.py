@@ -46,7 +46,6 @@ def compute_measure_diagnostics(
         - 'negative_cell_fraction' (f_-): fraction of cells where Delta_xy C < 0
         - 'negative_mass_ratio' (r_-): ratio of negative mass to total absolute mass
         - 'violation_magnitude' (V): mean negative violation magnitude over all cells
-        - 'corner_delta_count_gap' (E_cons): discrepancy between corner and sum-of-differences
         - 'n_corner': count read from bottom-right corner
         - 'n_delta': count read by summing reconstructed discrete cells
     """

@@ -444,17 +444,18 @@ def main() -> None:
             images, points_batch = orientation_balanced_flip(images, points_batch, vflip_prob)
 
             # Rebuild exact count pyramid from (possibly vertically flipped) points
+            out_s = model.output_stride
             pyramid = build_exact_count_pyramid(
                 points_batch,
                 height=H,
                 width=W,
-                block_sizes=(16,),
+                block_sizes=(out_s,),
                 pad_multiple=64,
                 device=device,
             )
-            y_target = pyramid[16]         # [B, H/16, W/16]
+            y_target = pyramid[out_s]         # [B, H/out_s, W/out_s]
             if y_target.ndim == 3:
-                y_target = y_target.unsqueeze(1)   # -> [B, 1, H/16, W/16]
+                y_target = y_target.unsqueeze(1)   # -> [B, 1, H/out_s, W/out_s]
 
             optimizer.zero_grad(set_to_none=True)
 

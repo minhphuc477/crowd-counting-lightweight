@@ -161,6 +161,7 @@ class MICFLite(nn.Module):
             )
 
         self.neck_width = int(neck_width)
+        self.context_dilations = tuple(int(d) for d in context_dilations)
         self.eps_d = float(eps_d)
         self.feature_reductions = tuple(int(r) for r in feature_reductions)
 
@@ -289,11 +290,14 @@ class MICFLite(nn.Module):
         field_valid = field[..., :out_h, :out_w]
 
         if self.head_type in {"cumulative", "integrated_local"}:
-            count = field_valid[..., -1, -1].squeeze()
-            return count, field_valid
+            count = field_valid[..., -1, -1]
         else:
-            count = field_valid.sum(dim=(-1, -2, -3))
-            return count, field_valid
+            count = field_valid.sum(dim=(-3, -2, -1))
+        if count.numel() == 1:
+            count = count.squeeze()
+        else:
+            count = count.view(-1)
+        return count, field_valid
 
     @torch.no_grad()
     def predict_tiled(
@@ -333,6 +337,8 @@ class MICFLite(nn.Module):
 
         if tile_size % s != 0:
             raise ValueError(f"tile_size ({tile_size}) must be a multiple of output_stride ({s})")
+        if halo % s != 0:
+            raise ValueError(f"halo ({halo}) must be a multiple of output_stride ({s})")
         out_tile = tile_size // s
 
         n_tiles_h = math.ceil(H / tile_size)
@@ -366,22 +372,6 @@ class MICFLite(nn.Module):
 
         if self.head_type not in {"cumulative", "integrated_local"}:
             raise ValueError(f"Unsupported head_type for predict_tiled: {self.head_type}")
-
-        device = x.device
-        _, _, H, W = x.shape
-        s = self.output_stride
-        out_h_full = math.ceil(H / s)
-        out_w_full = math.ceil(W / s)
-
-        if tile_size % s != 0:
-            raise ValueError(f"tile_size ({tile_size}) must be a multiple of output_stride ({s})")
-        out_tile = tile_size // s
-
-        n_tiles_h = math.ceil(H / tile_size)
-        n_tiles_w = math.ceil(W / tile_size)
-        padded_h = n_tiles_h * tile_size
-        padded_w = n_tiles_w * tile_size
-        x_pad = F.pad(x, (0, padded_w - W, 0, padded_h - H), mode="constant", value=0.0)
 
         c_local: list[list[torch.Tensor]] = [[None] * n_tiles_w for _ in range(n_tiles_h)]
         for i in range(n_tiles_h):

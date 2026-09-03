@@ -425,4 +425,20 @@ class TestMICFv2:
         assert pred_c.grad is not None
         assert torch.isfinite(pred_c.grad).all()
 
+    def test_2d_tensor_support(self):
+        y2d = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        c2d = cell_counts_to_cumulative_field(y2d)
+        assert c2d.shape == (2, 2)
+        assert c2d[-1, -1].item() == 10.0
+
+        y_rec2d = discrete_mixed_difference(c2d)
+        assert y_rec2d.shape == (2, 2)
+        assert torch.allclose(y2d, y_rec2d)
+
+        loss = MICFLoss()(c2d, c2d)
+        assert abs(loss.item()) < 1e-6
+
+        loss_int = IntegralLossOnLocalCount()(y2d, y2d)
+        assert abs(loss_int.item()) < 1e-6
+
 

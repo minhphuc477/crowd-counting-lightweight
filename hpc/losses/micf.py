@@ -21,9 +21,12 @@ def discrete_mixed_difference(c: torch.Tensor) -> torch.Tensor:
     """Compute discrete mixed difference Delta_{xy} C = C_{i,j} - C_{i-1,j} - C_{i,j-1} + C_{i-1,j-1}.
 
     Exact inverse operator D = T^{-1} recovering discrete cell counts Y from cumulative field C.
-    Preserves exact spatial shape [B, 1, H, W] using zero boundary conditions C_{0,j} = C_{i,0} = 0.
+    Preserves exact spatial shape [B, 1, H, W] (or [H, W] if 2D input) using zero boundary conditions.
     """
-    if c.ndim == 3:
+    orig_2d = (c.ndim == 2)
+    if orig_2d:
+        c = c.unsqueeze(0).unsqueeze(0)
+    elif c.ndim == 3:
         c = c.unsqueeze(1)
     c_pad = F.pad(c.float(), (1, 0, 1, 0), mode="constant", value=0.0)
     y = (
@@ -32,6 +35,8 @@ def discrete_mixed_difference(c: torch.Tensor) -> torch.Tensor:
         - c_pad[:, :, 1:, :-1]
         + c_pad[:, :, :-1, :-1]
     )
+    if orig_2d:
+        return y.squeeze(0).squeeze(0)
     return y
 
 
@@ -42,34 +47,41 @@ def cell_counts_to_cumulative_field(
     """Compute 2D cumulative count field C from discrete cell count map Y.
 
     Args:
-        y: Cell count map of shape [B, 1, H, W] or [B, H, W].
+        y: Cell count map of shape [B, 1, H, W], [B, H, W], or [H, W].
         orientation: Prefix origin corner: 'TL', 'TR', 'BL', 'BR'.
     Returns:
-        Cumulative count field C of same shape.
+        Cumulative count field C of matching shape.
     """
-    if y.ndim == 3:
+    orig_2d = (y.ndim == 2)
+    if orig_2d:
+        y = y.unsqueeze(0).unsqueeze(0)
+    elif y.ndim == 3:
         y = y.unsqueeze(1)
     y = y.float()
 
     if orientation == "TL":
-        return torch.cumsum(torch.cumsum(y, dim=-2), dim=-1)
+        out = torch.cumsum(torch.cumsum(y, dim=-2), dim=-1)
     elif orientation == "TR":
         # Flip width, cumsum, flip back
         y_flip = torch.flip(y, dims=[-1])
         c_flip = torch.cumsum(torch.cumsum(y_flip, dim=-2), dim=-1)
-        return torch.flip(c_flip, dims=[-1])
+        out = torch.flip(c_flip, dims=[-1])
     elif orientation == "BL":
         # Flip height, cumsum, flip back
         y_flip = torch.flip(y, dims=[-2])
         c_flip = torch.cumsum(torch.cumsum(y_flip, dim=-2), dim=-1)
-        return torch.flip(c_flip, dims=[-2])
+        out = torch.flip(c_flip, dims=[-2])
     elif orientation == "BR":
         # Flip both, cumsum, flip back
         y_flip = torch.flip(y, dims=[-2, -1])
         c_flip = torch.cumsum(torch.cumsum(y_flip, dim=-2), dim=-1)
-        return torch.flip(c_flip, dims=[-2, -1])
+        out = torch.flip(c_flip, dims=[-2, -1])
     else:
         raise ValueError(f"Unknown orientation '{orientation}'; expected TL, TR, BL, or BR.")
+
+    if orig_2d:
+        return out.squeeze(0).squeeze(0)
+    return out
 
 
 def points_to_count_map(
@@ -83,7 +95,7 @@ def points_to_count_map(
     """Build exact 2D integer cell count map Y from 2D point annotations (Section 13).
 
     Zero Gaussian smoothing; each point increments the cell containing its floor-divided coordinates:
-        Y[i, j] = # { n : floor(y_n / stride) == i, floor(x_n / stride) == j }
+        Y[i, j] = # { n : floor((y_n + 0.5) / stride) == i, floor((x_n + 0.5) / stride) == j }
     Guarantees sum(Y) == N_points exactly.
 
     Args:
@@ -171,9 +183,13 @@ class MICFLoss(nn.Module):
             target_y: Optional ground truth local count map [B, 1, H, W] for local reconstruction loss.
             return_components: Whether to return individual loss components.
         """
-        if pred_c.ndim == 3:
+        if pred_c.ndim == 2:
+            pred_c = pred_c.unsqueeze(0).unsqueeze(0)
+        elif pred_c.ndim == 3:
             pred_c = pred_c.unsqueeze(1)
-        if target_c.ndim == 3:
+        if target_c.ndim == 2:
+            target_c = target_c.unsqueeze(0).unsqueeze(0)
+        elif target_c.ndim == 3:
             target_c = target_c.unsqueeze(1)
 
         # 1. Field loss across all prefix entries (includes corner = N_total)
@@ -242,9 +258,13 @@ class IntegralLossOnLocalCount(nn.Module):
         target_y: torch.Tensor,
     ) -> torch.Tensor:
         """Forward pass: computes field loss on cumsum(pred_y) vs cumsum(target_y)."""
-        if pred_y.ndim == 3:
+        if pred_y.ndim == 2:
+            pred_y = pred_y.unsqueeze(0).unsqueeze(0)
+        elif pred_y.ndim == 3:
             pred_y = pred_y.unsqueeze(1)
-        if target_y.ndim == 3:
+        if target_y.ndim == 2:
+            target_y = target_y.unsqueeze(0).unsqueeze(0)
+        elif target_y.ndim == 3:
             target_y = target_y.unsqueeze(1)
 
         pred_c = torch.cumsum(torch.cumsum(pred_y.float(), dim=-2), dim=-1)

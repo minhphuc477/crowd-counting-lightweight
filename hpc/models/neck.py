@@ -50,6 +50,7 @@ class AdditiveFPNNeck(nn.Module):
             raise ValueError(f"AdditiveFPNNeck expects 3 or 4 input levels, got {len(in_channels)}")
         c4, c8, c16 = in_channels[:3]
         self.width = width
+        self.context_dilations = tuple(int(d) for d in context_dilations)
         self.use_p8_context = use_p8_context
         self.use_p32 = len(in_channels) == 4
         self.c32_grad_scale = float(c32_grad_scale)
