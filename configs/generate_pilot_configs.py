@@ -103,7 +103,7 @@ _VARIANTS = [
         "id": "B5b",
         "desc": "MICF-v2 Extent-Aware (4-dir Directional Context + Validity + Sample-Normalized Loss)",
         "model": {"head_type": "cumulative",  "use_integral_context": True, "context_type": "directional", "extent_aware": True},
-        "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0, "normalize_by": "total_count"},
+        "loss":  {"mode": "micf_v2_full", "field_loss": "smooth_l1", "lambda_valid": 1.0, "lambda_local_recon": 0.0, "normalize_by": "total_count", "norm_eps": 1.0},
     },
     {
         "id": "B8",
