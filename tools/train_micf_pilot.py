@@ -165,6 +165,8 @@ def evaluate_model(
     model.eval()
     crop_errors: List[float] = []
     full_errors: List[float] = []
+    full_direct_errors: List[float] = []
+    full_tiled_errors: List[float] = []
     full_sq_errors: List[float] = []
     violation_rates: List[float] = []
     violation_magnitudes: List[float] = []
@@ -205,13 +207,17 @@ def evaluate_model(
         crop_errors.append(abs(float(pred_crop_count.item()) - gt_crop_count))
 
         # -------------------------------------------------------------
-        # Regime B: Full-image evaluation (Hierarchical Tile Composition)
+        # Regime B: Full-image evaluation (Direct and Tiled)
         # -------------------------------------------------------------
-        if is_cumulative:
-            pred_full_count, _ = model.predict_tiled(img, tile_size=crop_size)
-        else:
-            pred_full_count, _ = model.predict(img, pad_multiple=64)
+        pred_full_direct, _ = model.predict(img, pad_multiple=64)
+        pred_full_tiled, _ = model.predict_tiled(img, tile_size=crop_size)
 
+        err_direct = float(pred_full_direct.item()) - gt_count
+        err_tiled = float(pred_full_tiled.item()) - gt_count
+        full_direct_errors.append(abs(err_direct))
+        full_tiled_errors.append(abs(err_tiled))
+
+        pred_full_count = pred_full_tiled if is_cumulative else pred_full_direct
         pred_full_val = float(pred_full_count.item())
         err_full = pred_full_val - gt_count
         full_errors.append(abs(err_full))
@@ -234,11 +240,15 @@ def evaluate_model(
 
     mae_crop = float(np.mean(crop_errors)) if crop_errors else 0.0
     mae_full = float(np.mean(full_errors)) if full_errors else 0.0
+    mae_full_direct = float(np.mean(full_direct_errors)) if full_direct_errors else 0.0
+    mae_full_tiled = float(np.mean(full_tiled_errors)) if full_tiled_errors else 0.0
     rmse_full = float(np.sqrt(np.mean(full_sq_errors))) if full_sq_errors else 0.0
 
     metrics = {
         "mae_crop": mae_crop,
         "mae_full": mae_full,
+        "mae_full_direct": mae_full_direct,
+        "mae_full_tiled": mae_full_tiled,
         "mae": mae_crop,      # Primary decision metric is Regime A (isolated geometry)
         "rmse": rmse_full,
     }

@@ -108,6 +108,8 @@ def evaluate_comprehensive(
     errors: List[float] = []
     sq_errors: List[float] = []
     naes: List[float] = []
+    errors_direct: List[float] = []
+    errors_tiled: List[float] = []
     prefix_maes: List[float] = []
     local_recon_maes: List[float] = []
 
@@ -127,13 +129,24 @@ def evaluate_comprehensive(
             break
 
         img = batch["image"].to(device)
+        _, _, H, W = img.shape
         gt_count = float(batch["gt_count"].item())
         gt_pts = [torch.as_tensor(pts, device=device, dtype=torch.float32) for pts in batch["gt_points"]]
 
+        # 1. Full-image Direct vs Tiled inference
+        pred_direct_count, pred_direct_map = model.predict(img, pad_multiple=64)
+        pred_tiled_count, pred_tiled_map = model.predict_tiled(img, tile_size=256)
+
+        err_dir = float(pred_direct_count.item()) - gt_count
+        err_til = float(pred_tiled_count.item()) - gt_count
+        errors_direct.append(abs(err_dir))
+        errors_tiled.append(abs(err_til))
+
+        # Primary benchmark regime (Regime B):
         if model.head_type in {"cumulative", "integrated_local"}:
-            pred_count, pred_map = model.predict_tiled(img, tile_size=256)
+            pred_count, pred_map = pred_tiled_count, pred_tiled_map
         else:
-            pred_count, pred_map = model.predict(img, pad_multiple=64)
+            pred_count, pred_map = pred_direct_count, pred_direct_map
         pred_val = float(pred_count.item())
 
         err = pred_val - gt_count
@@ -174,7 +187,7 @@ def evaluate_comprehensive(
             rect_res = evaluate_rectangle_counts(
                 c_pred[0, 0],
                 c_target[0, 0],
-                scale_bins=(1 / 64, 1 / 16, 1 / 4),
+                scale_bins=(1/64, 1/16, 1/4, 1.0),
                 num_samples_per_bin=20,
             )
             rect_smalls.append(rect_res.get("rectangle_mae_small", 0.0))
@@ -184,6 +197,8 @@ def evaluate_comprehensive(
             # Local head
             y_pred = pred_map
             c_pred = cell_counts_to_cumulative_field(y_pred, orientation="TL")
+
+            # Local models define non-negative density by softplus construction
             f_minuses.append(0.0)
             r_minuses.append(0.0)
             viol_mags.append(0.0)
@@ -194,7 +209,7 @@ def evaluate_comprehensive(
             rect_res = evaluate_rectangle_counts(
                 c_pred[0, 0],
                 c_target[0, 0],
-                scale_bins=(1 / 64, 1 / 16, 1 / 4),
+                scale_bins=(1/64, 1/16, 1/4, 1.0),
                 num_samples_per_bin=20,
             )
             rect_smalls.append(rect_res.get("rectangle_mae_small", 0.0))
@@ -211,6 +226,8 @@ def evaluate_comprehensive(
 
     return {
         "mae": float(np.mean(errors)),
+        "mae_full_direct": float(np.mean(errors_direct)),
+        "mae_full_tiled": float(np.mean(errors_tiled)),
         "rmse": float(np.sqrt(np.mean(sq_errors))),
         "nae": float(np.mean(naes)),
         "prefix_mae": float(np.mean(prefix_maes)),
@@ -318,6 +335,8 @@ def main() -> None:
         "flops": round(flops, 4),
         "rf_proxy": rf_proxy,
         "mae": round(res["mae"], 3),
+        "mae_full_direct": round(res["mae_full_direct"], 3),
+        "mae_full_tiled": round(res["mae_full_tiled"], 3),
         "rmse": round(res["rmse"], 3),
         "nae": round(res["nae"], 4),
         "prefix_mae": round(res["prefix_mae"], 4),

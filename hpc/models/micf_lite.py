@@ -155,6 +155,7 @@ class MICFLite(nn.Module):
             in_channels=self.backbone.out_channels,
             width=self.neck_width,
             context_dilations=context_dilations,
+            target_stride=self.output_stride,
         )
 
         # 3. Context Decoder: Directional / Axial Integral Context vs Identity
@@ -190,8 +191,8 @@ class MICFLite(nn.Module):
             Guarantees Delta_xy C >= 0 by construction.
         """
         features = self.backbone(x)
-        # Extract native multi-scale routes: p4, p8, p16
-        _, routes = self.neck(*features, return_routes=True)
+        # Extract native multi-scale routes: p4, p8, p16 (with early-return at target_stride)
+        _, routes = self.neck(*features, return_routes=True, target_stride=self.output_stride)
         route_key = f"p{self.output_stride}"
         p_feat = routes[route_key]
 
@@ -255,8 +256,8 @@ class MICFLite(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Tiled inference for the full-image regime (design doc sec.29-30).
 
-        For head_type == 'local': falls back to predict() (local cell counts
-        are position-independent, no composition needed).
+        For head_type == 'local': tiles image into non-overlapping tiles,
+        crops halo context, and assembles the global local count map.
 
         For head_type in {'cumulative', 'integrated_local'}: computes each
         tile's local cumulative field independently (optionally with `halo`
@@ -275,8 +276,46 @@ class MICFLite(nn.Module):
             raise ValueError(f"Expected 4D tensor, got {tuple(x.shape)}")
         if x.shape[0] != 1:
             raise NotImplementedError("predict_tiled currently supports batch size 1 only")
+
+        device = x.device
+        _, _, H, W = x.shape
+        s = self.output_stride
+        out_h_full = math.ceil(H / s)
+        out_w_full = math.ceil(W / s)
+
+        if tile_size % s != 0:
+            raise ValueError(f"tile_size ({tile_size}) must be a multiple of output_stride ({s})")
+        out_tile = tile_size // s
+
+        n_tiles_h = math.ceil(H / tile_size)
+        n_tiles_w = math.ceil(W / tile_size)
+        padded_h = n_tiles_h * tile_size
+        padded_w = n_tiles_w * tile_size
+        x_pad = F.pad(x, (0, padded_w - W, 0, padded_h - H), mode="constant", value=0.0)
+
         if self.head_type == "local":
-            return self.predict(x)
+            y_global = torch.zeros((1, 1, n_tiles_h * out_tile, n_tiles_w * out_tile), device=device, dtype=x.dtype)
+            for i in range(n_tiles_h):
+                for j in range(n_tiles_w):
+                    y0, y1 = i * tile_size, (i + 1) * tile_size
+                    x0, x1 = j * tile_size, (j + 1) * tile_size
+                    hy0, hy1 = max(0, y0 - halo), min(padded_h, y1 + halo)
+                    hx0, hx1 = max(0, x0 - halo), min(padded_w, x1 + halo)
+                    crop = x_pad[..., hy0:hy1, hx0:hx1]
+
+                    field = self.forward_field(crop)
+                    if halo > 0:
+                        ry0 = (y0 - hy0) // s
+                        rx0 = (x0 - hx0) // s
+                        y_core = field[..., ry0: ry0 + out_tile, rx0: rx0 + out_tile]
+                    else:
+                        y_core = field[..., :out_tile, :out_tile]
+                    y_global[..., i * out_tile:(i + 1) * out_tile, j * out_tile:(j + 1) * out_tile] = y_core
+
+            field_valid = y_global[..., :out_h_full, :out_w_full]
+            count = field_valid.sum(dim=(-1, -2, -3)).squeeze()
+            return count, field_valid
+
         if self.head_type not in {"cumulative", "integrated_local"}:
             raise ValueError(f"Unsupported head_type for predict_tiled: {self.head_type}")
 

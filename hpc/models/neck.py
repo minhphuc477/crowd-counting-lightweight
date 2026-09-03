@@ -43,6 +43,7 @@ class AdditiveFPNNeck(nn.Module):
         context_dilations: tuple = (1, 2, 3),
         use_p8_context: bool = False,
         c32_grad_scale: float = 1.0,
+        target_stride: int | None = None,
     ):
         super().__init__()
         if len(in_channels) not in {3, 4}:
@@ -52,33 +53,43 @@ class AdditiveFPNNeck(nn.Module):
         self.use_p8_context = use_p8_context
         self.use_p32 = len(in_channels) == 4
         self.c32_grad_scale = float(c32_grad_scale)
+        self.target_stride = target_stride
 
-        # Lateral 1x1 projections
-        self.lat4 = ConvGNAct(c4, width, kernel_size=1)
-        self.lat8 = ConvGNAct(c8, width, kernel_size=1)
+        # P16 path (base level of top-down FPN)
         self.lat16 = ConvGNAct(c16, width, kernel_size=1)
         if self.use_p32:
             self.lat32 = ConvGNAct(in_channels[3], width, kernel_size=1)
+            self.ref32 = DSResidual(width)
 
         # Multi-dilation coarse context at reduction 16
         self.context_blocks = nn.ModuleList([
             DepthwiseDilated(width, dilation=d) for d in context_dilations
         ])
-
-        # Optional multi-dilation context at reduction 8
-        if self.use_p8_context:
-            self.context_p8_blocks = nn.ModuleList([
-                DepthwiseDilated(width, dilation=d) for d in (1, 2, 3)
-            ])
-            self.context_p8_fuse = ConvGNAct(width, width, kernel_size=1)
-            nn.init.zeros_(self.context_p8_fuse.conv.weight)
-
-        # DS Residual refinement blocks
-        if self.use_p32:
-            self.ref32 = DSResidual(width)
         self.ref16 = DSResidual(width)
-        self.ref8 = DSResidual(width)
-        self.ref4 = DSResidual(width)
+
+        # P8 path: only instantiated if target_stride in {4, 8} or None
+        if target_stride is None or target_stride in {4, 8}:
+            self.lat8 = ConvGNAct(c8, width, kernel_size=1)
+            self.ref8 = DSResidual(width)
+            if self.use_p8_context:
+                self.context_p8_blocks = nn.ModuleList([
+                    DepthwiseDilated(width, dilation=d) for d in (1, 2, 3)
+                ])
+                self.context_p8_fuse = ConvGNAct(width, width, kernel_size=1)
+                nn.init.zeros_(self.context_p8_fuse.conv.weight)
+        else:
+            self.lat8 = None
+            self.ref8 = None
+            self.context_p8_blocks = None
+            self.context_p8_fuse = None
+
+        # P4 path: only instantiated if target_stride == 4 or None
+        if target_stride is None or target_stride == 4:
+            self.lat4 = ConvGNAct(c4, width, kernel_size=1)
+            self.ref4 = DSResidual(width)
+        else:
+            self.lat4 = None
+            self.ref4 = None
 
     def forward(
         self,
@@ -87,16 +98,16 @@ class AdditiveFPNNeck(nn.Module):
         c16: torch.Tensor,
         c32: torch.Tensor | None = None,
         return_routes: bool = False,
+        target_stride: int | None = None,
     ):
+        stride = target_stride if target_stride is not None else self.target_stride
+
         if self.use_p32 != (c32 is not None):
             expected = "four (C4/C8/C16/C32)" if self.use_p32 else "three (C4/C8/C16)"
             raise ValueError(f"Neck was constructed for {expected} feature tensors")
-        l4 = self.lat4(c4)
-        l8 = self.lat8(c8)
-        l16 = self.lat16(c16)
 
-        # R6 starts the top-down path at the true P32 representation. Context
-        # remains at P16, after C32 semantics have been fused into that level.
+        # 1. P16 computation
+        l16 = self.lat16(c16)
         p32 = None
         p16_in = l16
         if self.use_p32:
@@ -109,18 +120,49 @@ class AdditiveFPNNeck(nn.Module):
         ctx_sum = sum(ctx(p16_in) for ctx in self.context_blocks) if len(self.context_blocks) > 0 else 0
         p16 = self.ref16(p16_in + ctx_sum)
 
-        # Top-down additive fusion at P8
+        if stride == 16:
+            if return_routes:
+                routes = {"p16": p16}
+                if p32 is not None:
+                    routes["p32"] = p32
+                return p16, routes
+            return p16
+
+        # 2. P8 computation
+        if self.lat8 is None or self.ref8 is None:
+            raise RuntimeError(
+                f"Neck was initialized with target_stride={self.target_stride}, "
+                f"cannot compute stride {stride}"
+            )
+        l8 = self.lat8(c8)
         up16_to_8 = F.interpolate(
             p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
         )
         p8_in = l8 + up16_to_8
-        if self.use_p8_context:
+        if self.use_p8_context and self.context_p8_blocks is not None:
             ctx_sum8 = sum(ctx(p8_in) for ctx in self.context_p8_blocks)
             p8_in = p8_in + self.context_p8_fuse(ctx_sum8)
 
         p8 = self.ref8(p8_in)
 
-        # Top-down additive fusion at P4
+        if stride == 8:
+            if return_routes:
+                routes = {
+                    "p8": p8,
+                    "p16": p16,
+                }
+                if p32 is not None:
+                    routes["p32"] = p32
+                return p8, routes
+            return p8
+
+        # 3. P4 computation
+        if self.lat4 is None or self.ref4 is None:
+            raise RuntimeError(
+                f"Neck was initialized with target_stride={self.target_stride}, "
+                f"cannot compute stride {stride}"
+            )
+        l4 = self.lat4(c4)
         up8_to_4 = F.interpolate(
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )

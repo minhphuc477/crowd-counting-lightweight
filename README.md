@@ -105,8 +105,8 @@ Task Prediction Head
   └── Head 'integrated_local' -> softplus(z) -> CumSum2D (Valid-by-construction control)
 ```
 
-- **Parameters:** ~0.097M (B1: 96,593) vs ~0.101M (B7: 101,105) vs ~0.103M (B5: 103,153) — strictly capacity-matched.
-- **Computational Cost:** ~0.075–0.076 GMACs (74.5–76.2 MMACs) at $256 \times 256$ input resolution.
+- **Parameters:** ~0.092M (B1: 92,049) vs ~0.097M (B7: 96,561) vs ~0.099M (B5: 98,609) — strictly capacity-matched.
+- **Computational Cost:** ~0.065–0.066 GMACs (64.7–66.3 MMACs) at $256 \times 256$ input resolution.
 - **Parallelism:** Prefix summations run in $O(HW)$ via native GPU parallel prefix scans (`torch.cumsum`). Zero learnable parameters in the pooling operator itself.
 
 ---
@@ -140,8 +140,8 @@ guaranteeing equal expected gradient contribution across all spatial locations.
 
 ### 5.1 Decoupled Evaluation Regimes (Sections 29 & 40)
 To avoid confounding representation geometry with receptive-field capacity:
-- **Regime A (Crop-level MAE):** Evaluates models on fixed $256 \times 256$ crops (matching training crop size). Because the full crop lies within the CNN's effective receptive field, this isolates the pure representation hypothesis: does $I \to \hat{C}$ train better than $I \to \hat{Y}$?
-- **Regime B (Full-image MAE):** Evaluates full uncropped images via **Hierarchical Tile Composition** (Section 30): divides images into non-overlapping tiles, predicts local cumulative fields $\hat{C}_t$, and sums tile counts $\sum_t \hat{C}_t[-1, -1]$.
+- **Regime A (Crop-level MAE):** Evaluates models on fixed $256 \times 256$ crops (matching training crop size). This matches the training spatial extent and reduces receptive-field distribution shift, isolating the pure representation hypothesis: does $I \to \hat{C}$ train better than $I \to \hat{Y}$?
+- **Regime B (Full-image MAE):** Evaluates full uncropped images. Supports both **Direct Forward** ($MAE_{\text{full-direct}}$) and **Hierarchical Tile Composition** ($MAE_{\text{full-tiled}}$, Section 30) across all local and cumulative variants for rigorous across-regime comparison.
 
 ### 5.2 Measure Validity Diagnostics
 - Negative-cell fraction: $f_- = \frac{\#\{\hat{Y}_{ij} < 0\}}{HW}$.
@@ -223,11 +223,11 @@ for ($i = 1; $i -le 7; $i++) {
     --output-csv ./runs/pilot_micf/benchmark_results.csv
 ```
 
-Outputs the complete 18-column CSV:
+Outputs the complete 20-column CSV:
 ```text
-dataset,seed,variant,params,flops,rf_proxy,mae,rmse,nae,prefix_mae,local_recon_mae,
-rectangle_mae_small,rectangle_mae_medium,rectangle_mae_large,negative_cell_fraction,
-negative_mass_ratio,violation_magnitude,peak_vram_mb
+dataset,seed,variant,params,flops,rf_proxy,mae,mae_full_direct,mae_full_tiled,
+rmse,nae,prefix_mae,local_recon_mae,rectangle_mae_small,rectangle_mae_medium,
+rectangle_mae_large,negative_cell_fraction,negative_mass_ratio,violation_magnitude,peak_vram_mb
 ```
 
 ### 7.5 Run Capacity Sweep Config Generation
