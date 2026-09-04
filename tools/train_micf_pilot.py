@@ -151,6 +151,7 @@ def build_criterion(cfg: dict) -> nn.Module:
             al_rho=float(l_cfg.get("al_rho", 1.0)),
             al_dual_init=float(l_cfg.get("al_dual_init", 0.0)),
             al_dual_max=float(l_cfg.get("al_dual_max", 100.0)),
+            al_update_mode=str(l_cfg.get("al_update_mode", "dual_ascent")),
             norm_eps=float(l_cfg.get("norm_eps", 1.0)),
         )
     else:
@@ -467,6 +468,7 @@ def main() -> None:
         model.train()
         epoch_losses: List[float] = []
         epoch_ps_components: Dict[str, List[float]] = {}
+        epoch_c_blocks: List[torch.Tensor] = []
         epoch_grad_norms_before: List[float] = []
         epoch_grad_norms_after: List[float] = []
         epoch_clip_triggers: List[float] = []
@@ -518,6 +520,7 @@ def main() -> None:
                     )
                     for k_c, v_c in comp.items():
                         epoch_ps_components.setdefault(k_c, []).append(v_c)
+                    epoch_c_blocks.append(-aux["y_blocks"].detach())
                 elif is_cumulative:
                     pred_field = model.forward_field(images)
                     # Build cumulative target from the (possibly flipped) Y
@@ -572,10 +575,10 @@ def main() -> None:
         epoch_time = time.time() - t0
         mean_loss = float(np.mean(epoch_losses))
 
-        # Augmented Lagrangian dual update per epoch
-        if is_ps_fh and hasattr(criterion, "update_dual"):
-            epoch_g = float(np.mean(epoch_ps_components.get("ps_constraint", [0.0])))
-            new_lambda = criterion.update_dual(epoch_g)
+        # Augmented Lagrangian dual update per epoch (phase-wise multipliers lambda_uv)
+        if is_ps_fh and hasattr(criterion, "update_dual") and epoch_c_blocks:
+            all_c = torch.cat(epoch_c_blocks, dim=0)
+            new_lambda = criterion.update_dual(all_c)
 
         # ------------------------------------------------------------------
         # 5. Evaluation + logging (Regime A: Crop, Regime B: Full)
@@ -593,6 +596,7 @@ def main() -> None:
             mae_full = val_res["mae_full"]
             mae_full_direct = val_res["mae_full_direct"]
             mae_full_tiled = val_res["mae_full_tiled"]
+            direct_tiled_gap = abs(mae_full_direct - mae_full_tiled)
             rmse_full = val_res["rmse"]
             viol = val_res["violation_rate"]
 
@@ -607,6 +611,7 @@ def main() -> None:
                     "mae_full": mae_full,
                     "mae_full_direct": mae_full_direct,
                     "mae_full_tiled": mae_full_tiled,
+                    "direct_tiled_gap": direct_tiled_gap,
                     "config": cfg,
                     "seed": seed,
                 }
@@ -631,6 +636,7 @@ def main() -> None:
                 "mae_full": mae_full,
                 "mae_full_direct": mae_full_direct,
                 "mae_full_tiled": mae_full_tiled,
+                "direct_tiled_gap": direct_tiled_gap,
                 "mae": mae_crop,
                 "rmse": rmse_full,
                 "violation_rate": viol,
@@ -650,6 +656,8 @@ def main() -> None:
                     "ps_count_loss",
                     "ps_constraint",
                     "ps_dual_lambda",
+                    "ps_dual_lambda_max",
+                    "ps_dual_lambda_terminal",
                     "ps_al_rho",
                     "ps_aug_lagrangian",
                     "positive_cell_fraction",
@@ -675,13 +683,14 @@ def main() -> None:
                     f" | NegMass: {val_res.get('neg_mass_ratio', 0)*100:.2f}%"
                 )
             if is_ps_fh:
-                dual_str = f" | DualLambda: {criterion.al_lambda.item():.3f}"
-                diag_str += dual_str
+                dual_max = float(criterion.al_lambda.max().item())
+                dual_term = float(criterion.al_lambda[0, 0, -1, -1].item())
+                diag_str += f" | DualLamMax: {dual_max:.3f} | DualLam(3,3): {dual_term:.3f}"
 
             print(
                 f"[Epoch {epoch:4d}/{total_epochs}] Loss: {mean_loss:.4f} | "
-                f"MAE_crop: {mae_crop:.2f} | MAE_full: {mae_full:.2f} | "
-                f"Viol: {viol*100:.2f}%{diag_str} | Best_crop: {best_mae:.2f} "
+                f"Crop: {mae_crop:.2f} | Direct: {mae_full_direct:.2f} | Tiled: {mae_full_tiled:.2f} | "
+                f"Gap: {direct_tiled_gap:.2f} | Viol: {viol*100:.2f}%{diag_str} | Best_crop: {best_mae:.2f} "
                 f"{'(*)' if is_best else ''} ({epoch_time:.1f}s)",
                 flush=True,
             )

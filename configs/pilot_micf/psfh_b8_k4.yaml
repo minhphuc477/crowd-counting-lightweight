@@ -73,6 +73,7 @@ loss:
   al_rho: 1.0
   al_dual_init: 0.0
   al_dual_max: 100.0
+  al_update_mode: dual_ascent
 
   norm_eps: 1.0
 

@@ -197,6 +197,7 @@ class PSFHCMICFLoss(nn.Module):
         al_rho: float = 1.0,
         al_dual_init: float = 0.0,
         al_dual_max: float = 100.0,
+        al_update_mode: str = "dual_ascent",
         norm_eps: float = 1.0,
     ) -> None:
         super().__init__()
@@ -210,7 +211,12 @@ class PSFHCMICFLoss(nn.Module):
 
         self.al_rho = float(al_rho)
         self.al_dual_max = float(al_dual_max)
-        self.register_buffer("al_lambda", torch.tensor(float(al_dual_init), dtype=torch.float32))
+        self.al_update_mode = str(al_update_mode).lower()
+        # Phase-wise dual multiplier lambda_{uv} of shape [1, 1, K, K]
+        self.register_buffer(
+            "al_lambda",
+            torch.full((1, 1, self.k, self.k), float(al_dual_init), dtype=torch.float32),
+        )
 
         self.norm_eps = float(norm_eps)
 
@@ -220,14 +226,38 @@ class PSFHCMICFLoss(nn.Module):
             sv_floor=self.precondition_sv_floor,
         )
 
-    def update_dual(self, epoch_constraint: float) -> float:
-        """Augmented Lagrangian dual variable update step:
-            lambda_{t+1} = clip(lambda_t + rho * g_t, 0, lambda_max)
+    def update_dual(
+        self,
+        c_blocks: torch.Tensor,
+        mode: Optional[str] = None,
+    ) -> torch.Tensor:
+        """Update phase-wise dual multipliers lambda_{uv} on signed inequality c = -Y_hat <= 0.
+
+        Args:
+            c_blocks: Signed constraint tensor c = -Y_hat, shape [N, 1, K, K] or [N, K, K],
+                      or pre-averaged phase tensor [K, K] / [1, 1, K, K].
+            mode: 'dual_ascent' (default) or 'signed_mean'.
         """
-        current_val = float(self.al_lambda.item())
-        new_val = min(max(current_val + self.al_rho * float(epoch_constraint), 0.0), self.al_dual_max)
-        self.al_lambda.fill_(new_val)
-        return new_val
+        up_mode = (mode or self.al_update_mode).lower()
+        if c_blocks.ndim == 2:
+            c_blocks = c_blocks.unsqueeze(0).unsqueeze(0)
+        elif c_blocks.ndim == 3:
+            c_blocks = c_blocks.unsqueeze(1)
+
+        c_blocks = c_blocks.to(device=self.al_lambda.device, dtype=self.al_lambda.dtype)
+
+        if up_mode == "signed_mean":
+            c_mean = c_blocks.mean(dim=0, keepdim=True) if c_blocks.shape[0] > 1 else c_blocks
+            new_lam = torch.relu(self.al_lambda + self.al_rho * c_mean)
+        else:  # "dual_ascent": exact gradient ascent on Augmented Lagrangian loss
+            if c_blocks.shape[0] > 1:
+                new_lam = torch.relu(self.al_lambda + self.al_rho * c_blocks).mean(dim=0, keepdim=True)
+            else:
+                new_lam = torch.relu(self.al_lambda + self.al_rho * c_blocks)
+
+        new_lam = torch.clamp(new_lam, 0.0, self.al_dual_max)
+        self.al_lambda.copy_(new_lam)
+        return new_lam
 
     def forward(
         self,
@@ -296,14 +326,12 @@ class PSFHCMICFLoss(nn.Module):
             beta=self.sobolev_beta,
         )
 
-        # 7. Augmented-Lagrangian Validity Loss (L_AL)
-        # Reshape recovered mass per sample: [B, nh * nw * K * K]
-        pred_y_per_sample = pred_y_blocks.view(B, -1)
-        neg_mass_per_sample = F.relu(-pred_y_per_sample).sum(dim=-1)
-        g_per_sample = neg_mass_per_sample / scale
-        g = g_per_sample.mean()
-
-        al_loss = self.al_lambda * g + 0.5 * self.al_rho * (g ** 2)
+        # 7. Projected Inequality Augmented-Lagrangian Validity Loss (L_AL)
+        # Signed inequality: c_{buv} = -\hat{Y}_{buv} \le 0
+        c_blocks = -pred_y_blocks  # [B * nh * nw, 1, K, K]
+        q = self.al_lambda + self.al_rho * c_blocks
+        penalty = F.relu(q) ** 2 - self.al_lambda ** 2
+        al_loss = (1.0 / (2.0 * self.al_rho)) * penalty.mean()
 
         # 8. Total objective
         total_loss = (
@@ -314,6 +342,10 @@ class PSFHCMICFLoss(nn.Module):
         )
 
         if return_components:
+            neg_mass_blocks = F.relu(-pred_y_blocks)
+            viol_magnitude = float(neg_mass_blocks.mean().item())
+            viol_rate = float((pred_y_blocks < 0).float().mean().item())
+
             components: Dict[str, Any] = {
                 "loss": float(total_loss.item()),
                 "ps_pc_loss": float(pc_loss.item()),
@@ -321,13 +353,15 @@ class PSFHCMICFLoss(nn.Module):
                 "sobolev_pos_loss": sob_stats["sobolev_pos_loss"],
                 "sobolev_zero_loss": sob_stats["sobolev_zero_loss"],
                 "ps_count_loss": float(count_loss.item()),
-                "ps_constraint": float(g.item()),
-                "ps_dual_lambda": float(self.al_lambda.item()),
+                "ps_constraint": viol_magnitude,
+                "ps_dual_lambda": float(self.al_lambda.mean().item()),
+                "ps_dual_lambda_max": float(self.al_lambda.max().item()),
+                "ps_dual_lambda_terminal": float(self.al_lambda[0, 0, -1, -1].item()),
                 "ps_al_rho": float(self.al_rho),
                 "ps_aug_lagrangian": float(al_loss.item()),
                 "positive_cell_fraction": sob_stats["positive_cell_fraction"],
                 "zero_cell_fraction": sob_stats["zero_cell_fraction"],
-                "violation_rate": float((pred_y_blocks < 0).float().mean().item()),
+                "violation_rate": viol_rate,
             }
             return total_loss, components
 
@@ -376,10 +410,11 @@ class PSFHCMICFLoss(nn.Module):
         g_count = torch.autograd.grad(l_count_weighted, c_detached, retain_graph=True, allow_unused=True)[0]
         norm_count = float(g_count.norm().item()) if g_count is not None else 0.0
 
-        # Term 4: AL
-        neg_mass = F.relu(-y_per_sample).sum(dim=-1)
-        g_val = (neg_mass / scale).mean()
-        l_al = self.al_lambda * g_val + 0.5 * self.al_rho * (g_val ** 2)
+        # Term 4: AL (signed projected inequality)
+        c_signed = -y_detached
+        q_diag = self.al_lambda + self.al_rho * c_signed
+        pen_diag = F.relu(q_diag) ** 2 - self.al_lambda ** 2
+        l_al = (1.0 / (2.0 * self.al_rho)) * pen_diag.mean()
         g_al = torch.autograd.grad(l_al, c_detached, retain_graph=True, allow_unused=True)[0]
         norm_al = float(g_al.norm().item()) if g_al is not None else 0.0
 
