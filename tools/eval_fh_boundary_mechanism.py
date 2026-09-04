@@ -46,6 +46,7 @@ from tools.eval_fh_cmicf_scale_consistency import (
     in_bounds_points,
     count_points_in_rect,
     conservative_region_mass,
+    clipped_cell_edges,
     resize_image_tensor,
     discrete_mixed_difference,
 )
@@ -62,6 +63,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--reference-scale", type=float, default=1.0)
     p.add_argument("--fh-multipliers", nargs="+", type=float, default=[0.5, 1.0, 2.0, 4.0])
     p.add_argument("--fixed-sizes", nargs="+", type=float, default=[32.0, 64.0, 128.0, 256.0])
+    p.add_argument("--regions-per-size", type=int, default=16, help="Regions sampled per size.")
+    p.add_argument("--max-samples", type=int, default=None, help="Debug limit on test samples.")
+    p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    p.add_argument("--seed", type=int, default=20260904, help="Random seed.")
     p.add_argument(
         "--output-dir",
         type=str,
@@ -90,9 +95,13 @@ def build_cumulative_vertex_grid(y_mass: np.ndarray) -> np.ndarray:
 
 
 def resample_reference_grid_mass(
-    C_ref: np.ndarray,
+    ref_y_mass: np.ndarray,
     target_h: int,
     target_w: int,
+    target_sh: int,
+    target_sw: int,
+    ref_sh: int,
+    ref_sw: int,
     sx: float,
     sy: float,
     ref_sx: float,
@@ -100,37 +109,37 @@ def resample_reference_grid_mass(
     stride: int,
 ) -> np.ndarray:
     """
-    Evaluates the continuous reference mass over each cell of the target grid (target_h, target_w)
-    in exact closed-form using bilinear interpolation on C_ref vertices.
+    Evaluates reference mass over each cell of the target grid using exact physical support:
+    target cell [j*s, min((j+1)*s, sw)) x [i*s, min((i+1)*s, sh)) mapped to reference image
+    coordinates and integrated against reference cell actual supports.
     """
-    H_ref = C_ref.shape[0] - 1
-    W_ref = C_ref.shape[1] - 1
+    ref_h, ref_w = ref_y_mass.shape
+    ref_x_edges = clipped_cell_edges(ref_sw, ref_w, stride)
+    ref_y_edges = clipped_cell_edges(ref_sh, ref_h, stride)
 
-    x_verts = np.arange(target_w + 1) * (stride / sx) * ref_sx
-    y_verts = np.arange(target_h + 1) * (stride / sy) * ref_sy
+    # Physical edges of target cells in reference pixel coordinates
+    tgt_x_edges = clipped_cell_edges(target_sw, target_w, stride) * (ref_sx / sx)
+    tgt_y_edges = clipped_cell_edges(target_sh, target_h, stride) * (ref_sy / sy)
 
-    X_grid, Y_grid = np.meshgrid(x_verts, y_verts)
-    xc = np.clip(X_grid, 0.0, float(W_ref * stride))
-    yc = np.clip(Y_grid, 0.0, float(H_ref * stride))
+    ref_dx = ref_x_edges[1:] - ref_x_edges[:-1]
+    ref_dy = ref_y_edges[1:] - ref_y_edges[:-1]
 
-    gx = xc / float(stride)
-    gy = yc / float(stride)
-    ix0 = np.clip(np.floor(gx).astype(np.int64), 0, W_ref - 1)
-    iy0 = np.clip(np.floor(gy).astype(np.int64), 0, H_ref - 1)
-    ix1 = ix0 + 1
-    iy1 = iy0 + 1
-    ax = gx - ix0
-    ay = gy - iy0
+    # Overlap matrices
+    tgt_x0 = tgt_x_edges[:-1, None]
+    tgt_x1 = tgt_x_edges[1:, None]
+    ref_x0 = ref_x_edges[None, :-1]
+    ref_x1 = ref_x_edges[None, 1:]
+    overlap_x = np.maximum(0.0, np.minimum(tgt_x1, ref_x1) - np.maximum(tgt_x0, ref_x0))
+    W_X = overlap_x / ref_dx[None, :]
 
-    c00 = C_ref[iy0, ix0]
-    c01 = C_ref[iy0, ix1]
-    c10 = C_ref[iy1, ix0]
-    c11 = C_ref[iy1, ix1]
+    tgt_y0 = tgt_y_edges[:-1, None]
+    tgt_y1 = tgt_y_edges[1:, None]
+    ref_y0 = ref_y_edges[None, :-1]
+    ref_y1 = ref_y_edges[None, 1:]
+    overlap_y = np.maximum(0.0, np.minimum(tgt_y1, ref_y1) - np.maximum(tgt_y0, ref_y0))
+    W_Y = overlap_y / ref_dy[None, :]
 
-    C_eval = (1.0 - ax) * (1.0 - ay) * c00 + ax * (1.0 - ay) * c01 + (1.0 - ax) * ay * c10 + ax * ay * c11
-    # Mixed difference on vertices gives exact mass per cell
-    cell_masses = C_eval[1:, 1:] - C_eval[:-1, 1:] - C_eval[1:, :-1] + C_eval[:-1, :-1]
-    return cell_masses
+    return W_Y @ ref_y_mass @ W_X.T
 
 
 # -----------------------------------------------------------------------------
@@ -146,12 +155,12 @@ def analyze_cell_geometry_vectorized(
 ) -> dict[str, dict[str, float]]:
     out_h, out_w = pred_y.shape
 
-    # Rasterize GT points to cell grid
+    # Rasterize GT points to cell grid using canonical rounding convention floor((p + 0.5) / stride)
     gt_grid = np.zeros((out_h, out_w), dtype=np.float64)
     for pt in points_scaled:
         px, py = pt[0], pt[1]
-        cx = int(min(out_w - 1, max(0, math.floor(px / stride))))
-        cy = int(min(out_h - 1, max(0, math.floor(py / stride))))
+        cx = int(min(out_w - 1, max(0, math.floor((px + 0.5) / stride))))
+        cy = int(min(out_h - 1, max(0, math.floor((py + 0.5) / stride))))
         gt_grid[cy, cx] += 1.0
 
     # Create coordinate grids
@@ -444,7 +453,6 @@ def main() -> None:
                 }
 
         ref_map = scale_maps[args.reference_scale]
-        C_ref = build_cumulative_vertex_grid(ref_map["y_mass"])
 
         # 1. Module 1: Cell-Level Dissection (Vectorized)
         for scale in scales:
@@ -458,9 +466,13 @@ def main() -> None:
                 ref_cell_masses = ref_map["y_mass"]
             else:
                 ref_cell_masses = resample_reference_grid_mass(
-                    C_ref=C_ref,
+                    ref_y_mass=ref_map["y_mass"],
                     target_h=s_map["y_mass"].shape[0],
                     target_w=s_map["y_mass"].shape[1],
+                    target_sh=s_map["sh"],
+                    target_sw=s_map["sw"],
+                    ref_sh=ref_map["sh"],
+                    ref_sw=ref_map["sw"],
                     sx=s_map["sx"],
                     sy=s_map["sy"],
                     ref_sx=ref_map["sx"],
@@ -600,11 +612,14 @@ def main() -> None:
     # =========================================================================
     # Reporting & Exporting
     # =========================================================================
+    # =========================================================================
+    # Reporting & Exporting
+    # =========================================================================
     print("\n" + "=" * 100)
-    print("MODULE 1: WITHIN-BLOCK CELL GEOMETRY AUDIT (182 Test Images)")
-    print("Formula: Negative Mass Ratio = sum(max(-Y, 0)) / max(sum(max(Y, 0)), 1e-12)")
+    print("MODULE 1: WITHIN-BLOCK CELL GEOMETRY AUDIT")
+    print("Formula: Negative Variation Ratio (NVR) = sum(max(-Y, 0)) / max(sum(max(Y, 0)), 1e-12)")
     print("=" * 100)
-    print(f"{'Scale':<8}{'Category':<22}{'N Cells':<12}{'NegMass%':<12}{'Neg/Pos%':<12}{'Cell MAE':<12}{'RelMismatch':<14}")
+    print(f"{'Scale':<8}{'Category':<22}{'N Cells':<12}{'NVR Share%':<12}{'NVR%':<12}{'Cell MAE':<12}{'RelMismatch':<14}")
     print("-" * 100)
 
     cell_summary_rows = []
@@ -630,6 +645,9 @@ def main() -> None:
                 "scale": scale,
                 "category": cat,
                 "n_cells": n,
+                "neg_variation": neg_mass_tot,
+                "pos_variation": pos_mass_tot,
+                "nvr_pct": neg_mass_ratio * 100.0,
                 "neg_mass_share_pct": neg_mass_share,
                 "neg_mass_ratio_pct": neg_mass_ratio * 100.0,
                 "cell_mae": cell_mae,
@@ -653,7 +671,7 @@ def main() -> None:
     phase_16_rows = []
     for scale in scales:
         print(f"\n--- Scale: {scale:.2f}x ---")
-        print("Negative Mass Ratio (%) Matrix [rows=v, cols=u]:")
+        print("Negative Variation Ratio (NVR) (%) Matrix [rows=v, cols=u]:")
         header = "v \\ u      " + "".join(f"u={u:<8d}" for u in range(fh))
         print(header)
         print("-" * len(header))
@@ -711,6 +729,9 @@ def main() -> None:
                     "manhattan_dist_from_origin": d,
                     "euclidean_dist_from_origin": math.sqrt(u*u + v*v),
                     "n_cells": n_cells,
+                    "neg_variation": acc["neg_mass"],
+                    "pos_variation": acc["pos_mass"],
+                    "nvr_pct": ratio,
                     "neg_mass": acc["neg_mass"],
                     "pos_mass": acc["pos_mass"],
                     "neg_mass_ratio_pct": ratio,
@@ -723,11 +744,11 @@ def main() -> None:
             corr_ratio = float(np.corrcoef(dists, ratios)[0, 1])
             corr_mae = float(np.corrcoef(dists, maes)[0, 1])
             print(f"\nCorrelation with Distance from Anchor (u+v):")
-            print(f"  Pearson r(dist, NegMassRatio) = {corr_ratio:+.4f}")
-            print(f"  Pearson r(dist, Cell MAE)     = {corr_mae:+.4f}")
+            print(f"  Pearson r(dist, NVR)        = {corr_ratio:+.4f}")
+            print(f"  Pearson r(dist, Cell MAE)   = {corr_mae:+.4f}")
             if scale != args.reference_scale and np.std(misms) > 1e-12:
                 corr_mism = float(np.corrcoef(dists, misms)[0, 1])
-                print(f"  Pearson r(dist, RelMismatch)  = {corr_mism:+.4f}")
+                print(f"  Pearson r(dist, RelMismatch)= {corr_mism:+.4f}")
 
     with open(out_dir / "phase_16_summary.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(phase_16_rows[0].keys()))

@@ -238,10 +238,15 @@ def evaluate_model(
             img, tile_size=crop_size, halo=max(64, eval_pad)
         )
 
-        err_direct = float(pred_full_direct.item()) - gt_count
-        err_tiled = float(pred_full_tiled.item()) - gt_count
+        pred_d = float(pred_full_direct.item())
+        pred_t = float(pred_full_tiled.item())
+        err_direct = pred_d - gt_count
+        err_tiled = pred_t - gt_count
         full_direct_errors.append(abs(err_direct))
         full_tiled_errors.append(abs(err_tiled))
+        full_direct_sq_errors.append(err_direct * err_direct)
+        full_tiled_sq_errors.append(err_tiled * err_tiled)
+        direct_tiled_discrepancies.append(abs(pred_d - pred_t))
 
         pred_full_count = pred_full_tiled if is_cumulative else pred_full_direct
         pred_full_val = float(pred_full_count.item())
@@ -259,32 +264,40 @@ def evaluate_model(
             viol_mag = float(F.relu(-y_rec).mean().item())
             violation_magnitudes.append(viol_mag)
 
-            # r_-: canonical negative mass ratio M^- / M^+
+            # NVR: canonical negative variation ratio Q / P
             neg_mass = float((-y_rec).clamp(min=0).sum().item())
             pos_mass = float((y_rec).clamp(min=0).sum().item())
             neg_mass_ratios.append(neg_mass / max(pos_mass, 1e-12))
 
     mae_crop = float(np.mean(crop_errors)) if crop_errors else 0.0
-    mae_full = float(np.mean(full_errors)) if full_errors else 0.0
     mae_full_direct = float(np.mean(full_direct_errors)) if full_direct_errors else 0.0
+    rmse_full_direct = float(np.sqrt(np.mean(full_direct_sq_errors))) if full_direct_sq_errors else 0.0
     mae_full_tiled = float(np.mean(full_tiled_errors)) if full_tiled_errors else 0.0
-    rmse_full = float(np.sqrt(np.mean(full_sq_errors))) if full_sq_errors else 0.0
+    rmse_full_tiled = float(np.sqrt(np.mean(full_tiled_sq_errors))) if full_tiled_sq_errors else 0.0
+    mean_abs_discrepancy = float(np.mean(direct_tiled_discrepancies)) if direct_tiled_discrepancies else 0.0
 
     metrics = {
         "mae_crop": mae_crop,
-        "mae_full": mae_full,
         "mae_full_direct": mae_full_direct,
+        "rmse_full_direct": rmse_full_direct,
         "mae_full_tiled": mae_full_tiled,
-        "mae": mae_crop,      # Primary decision metric is Regime A (isolated geometry)
-        "rmse": rmse_full,
+        "rmse_full_tiled": rmse_full_tiled,
+        "mean_abs_direct_tiled_discrepancy": mean_abs_discrepancy,
+        "direct_tiled_discrepancy": mean_abs_discrepancy,
+        "mae_direct_tiled_difference": abs(mae_full_direct - mae_full_tiled),
+        "mae": mae_crop,
+        "mae_full": mae_full_tiled if is_cumulative else mae_full_direct,
+        "rmse": rmse_full_tiled if is_cumulative else rmse_full_direct,
     }
     if is_cumulative:
         metrics["violation_rate"] = float(np.mean(violation_rates)) if violation_rates else 0.0
         metrics["violation_magnitude"] = float(np.mean(violation_magnitudes)) if violation_magnitudes else 0.0
-        metrics["neg_mass_ratio"] = float(np.mean(neg_mass_ratios)) if neg_mass_ratios else 0.0
+        metrics["nvr"] = float(np.mean(neg_mass_ratios)) if neg_mass_ratios else 0.0
+        metrics["neg_mass_ratio"] = metrics["nvr"]
     else:
         metrics["violation_rate"] = 0.0
         metrics["violation_magnitude"] = 0.0
+        metrics["nvr"] = 0.0
         metrics["neg_mass_ratio"] = 0.0
 
     return metrics
@@ -645,12 +658,14 @@ def main() -> None:
                 crop_size=int(ds_cfg.get("crop_size", 256)),
             )
             mae_crop = val_res["mae_crop"]
-            mae_full = val_res["mae_full"]
             mae_full_direct = val_res["mae_full_direct"]
+            rmse_full_direct = val_res["rmse_full_direct"]
             mae_full_tiled = val_res["mae_full_tiled"]
-            direct_tiled_gap = abs(mae_full_direct - mae_full_tiled)
-            rmse_full = val_res["rmse"]
+            rmse_full_tiled = val_res["rmse_full_tiled"]
+            mean_abs_discrepancy = val_res["mean_abs_direct_tiled_discrepancy"]
+            mae_direct_tiled_diff = val_res["mae_direct_tiled_difference"]
             viol = val_res["violation_rate"]
+            nvr = val_res.get("nvr", val_res.get("neg_mass_ratio", 0.0))
 
             is_best = mae_crop < best_mae
             if is_best:
@@ -660,10 +675,14 @@ def main() -> None:
                     "state_dict": model.state_dict(),
                     "best_mae": best_mae,
                     "mae_crop": mae_crop,
-                    "mae_full": mae_full,
                     "mae_full_direct": mae_full_direct,
+                    "rmse_full_direct": rmse_full_direct,
                     "mae_full_tiled": mae_full_tiled,
-                    "direct_tiled_gap": direct_tiled_gap,
+                    "rmse_full_tiled": rmse_full_tiled,
+                    "mean_abs_direct_tiled_discrepancy": mean_abs_discrepancy,
+                    "mae_direct_tiled_difference": mae_direct_tiled_diff,
+                    "direct_tiled_gap": mean_abs_discrepancy,
+                    "mae_full": val_res.get("mae_full"),
                     "config": cfg,
                     "seed": seed,
                 }
@@ -685,13 +704,19 @@ def main() -> None:
                 "loss": mean_loss,
                 "lr": optimizer.param_groups[-1]["lr"],
                 "mae_crop": mae_crop,
-                "mae_full": mae_full,
                 "mae_full_direct": mae_full_direct,
+                "rmse_full_direct": rmse_full_direct,
                 "mae_full_tiled": mae_full_tiled,
-                "direct_tiled_gap": direct_tiled_gap,
+                "rmse_full_tiled": rmse_full_tiled,
+                "mean_abs_direct_tiled_discrepancy": mean_abs_discrepancy,
+                "mae_direct_tiled_difference": mae_direct_tiled_diff,
+                "direct_tiled_gap": mean_abs_discrepancy,
                 "mae": mae_crop,
-                "rmse": rmse_full,
+                "mae_full": val_res.get("mae_full"),
+                "rmse": rmse_full_tiled if is_cumulative else rmse_full_direct,
                 "violation_rate": viol,
+                "nvr": nvr,
+                "negative_variation_ratio": nvr,
                 "best_mae": best_mae,
                 "time_sec": epoch_time,
                 "grad_norm_before_clip": float(np.mean(epoch_grad_norms_before)) if epoch_grad_norms_before else 0.0,
@@ -721,7 +746,7 @@ def main() -> None:
                         log_entry[k_ps] = float(np.mean(epoch_ps_components[k_ps]))
 
             # Add MICF-specific diagnostics if present
-            for k in ("violation_magnitude", "neg_mass_ratio"):
+            for k in ("violation_magnitude", "neg_mass_ratio", "nvr"):
                 if k in val_res:
                     log_entry[k] = val_res[k]
             if "neg_mass_ratio" in val_res:
@@ -736,7 +761,7 @@ def main() -> None:
             if is_cumulative and not args.smoke_test:
                 diag_str = (
                     f" | ViolMag: {val_res.get('violation_magnitude', 0):.3f}"
-                    f" | NegMass: {val_res.get('neg_mass_ratio', 0)*100:.2f}%"
+                    f" | NVR: {nvr*100:.2f}%"
                 )
             if is_ps_fh:
                 dual_max = float(criterion.al_lambda.max().item())
@@ -746,7 +771,7 @@ def main() -> None:
             print(
                 f"[Epoch {epoch:4d}/{total_epochs}] Loss: {mean_loss:.4f} | "
                 f"Crop: {mae_crop:.2f} | Direct: {mae_full_direct:.2f} | Tiled: {mae_full_tiled:.2f} | "
-                f"Gap: {direct_tiled_gap:.2f} | Viol: {viol*100:.2f}%{diag_str} | Best_crop: {best_mae:.2f} "
+                f"Discrep: {mean_abs_discrepancy:.2f} | Viol: {viol*100:.2f}%{diag_str} | Best_crop: {best_mae:.2f} "
                 f"{'(*)' if is_best else ''} ({epoch_time:.1f}s)",
                 flush=True,
             )

@@ -87,8 +87,15 @@ def _intersection_area(
     )
 
 
+def _clipped_cell_edges_1d(length_px: int, n_cells: int, stride: int) -> np.ndarray:
+    edges = np.arange(n_cells + 1, dtype=np.float64) * float(stride)
+    edges = np.minimum(edges, float(length_px))
+    edges[-1] = float(length_px)
+    return edges
+
+
 def region_count_from_cell_measure(
-    pred_y: torch.Tensor,
+    pred_y: torch.Tensor | np.ndarray,
     *,
     x0: float,
     y0: float,
@@ -106,85 +113,32 @@ def region_count_from_cell_measure(
 
     This is an evaluation convention used only for GAME.
     """
-    if pred_y.ndim == 4:
-        if (
-            pred_y.shape[0] != 1
-            or pred_y.shape[1] != 1
-        ):
-            raise ValueError(
-                f"Expected [1,1,H,W], got "
-                f"{tuple(pred_y.shape)}"
-            )
-        y = (
-            pred_y[0, 0]
-            .detach()
-            .to(dtype=torch.float64)
-            .cpu()
-            .numpy()
-        )
-    elif pred_y.ndim == 2:
-        y = (
-            pred_y.detach()
-            .to(dtype=torch.float64)
-            .cpu()
-            .numpy()
-        )
+    if isinstance(pred_y, torch.Tensor):
+        if pred_y.ndim == 4:
+            if pred_y.shape[0] != 1 or pred_y.shape[1] != 1:
+                raise ValueError(f"Expected [1,1,H,W], got {tuple(pred_y.shape)}")
+            y = pred_y[0, 0].detach().to(dtype=torch.float64).cpu().numpy()
+        elif pred_y.ndim == 2:
+            y = pred_y.detach().to(dtype=torch.float64).cpu().numpy()
+        else:
+            raise ValueError(f"Expected 2D or [1,1,H,W], got {tuple(pred_y.shape)}")
     else:
-        raise ValueError(
-            f"Expected 2D or [1,1,H,W], got "
-            f"{tuple(pred_y.shape)}"
-        )
+        y = np.asarray(pred_y, dtype=np.float64)
 
     out_h, out_w = y.shape
+    x_edges = _clipped_cell_edges_1d(image_w, out_w, stride)
+    y_edges = _clipped_cell_edges_1d(image_h, out_h, stride)
 
-    total = 0.0
+    cell_w = x_edges[1:] - x_edges[:-1]
+    cell_h = y_edges[1:] - y_edges[:-1]
 
-    for r in range(out_h):
-        for c in range(out_w):
-            (
-                cx0,
-                cy0,
-                cx1,
-                cy1,
-            ) = _cell_actual_bounds(
-                r,
-                c,
-                stride=stride,
-                image_h=image_h,
-                image_w=image_w,
-            )
+    overlap_x = np.maximum(0.0, np.minimum(float(x1), x_edges[1:]) - np.maximum(float(x0), x_edges[:-1]))
+    wx = overlap_x / cell_w
 
-            support_area = (
-                (cx1 - cx0)
-                * (cy1 - cy0)
-            )
+    overlap_y = np.maximum(0.0, np.minimum(float(y1), y_edges[1:]) - np.maximum(float(y0), y_edges[:-1]))
+    wy = overlap_y / cell_h
 
-            if support_area <= 0.0:
-                continue
-
-            overlap = _intersection_area(
-                cx0,
-                cy0,
-                cx1,
-                cy1,
-                x0,
-                y0,
-                x1,
-                y1,
-            )
-
-            if overlap <= 0.0:
-                continue
-
-            total += float(
-                y[r, c]
-                * (
-                    overlap
-                    / support_area
-                )
-            )
-
-    return float(total)
+    return float(wy @ y @ wx)
 
 
 def _gt_region_count(
@@ -205,13 +159,11 @@ def _gt_region_count(
         & (points[:, 1] < y1)
     )
 
-    return float(
-        mask.sum()
-    )
+    return float(mask.sum())
 
 
 def game_errors_one_image(
-    pred_y: torch.Tensor,
+    pred_y: torch.Tensor | np.ndarray,
     points: np.ndarray,
     *,
     image_h: int,
@@ -219,84 +171,67 @@ def game_errors_one_image(
     stride: int,
     levels: Iterable[int] = (0, 1, 2, 3),
 ) -> dict[int, float]:
-    pts = _points_array(
-        points
-    )
+    if isinstance(pred_y, torch.Tensor):
+        if pred_y.ndim == 4:
+            y = pred_y[0, 0].detach().to(dtype=torch.float64).cpu().numpy()
+        elif pred_y.ndim == 2:
+            y = pred_y.detach().to(dtype=torch.float64).cpu().numpy()
+        else:
+            raise ValueError(f"Expected 2D or [1,1,H,W], got {tuple(pred_y.shape)}")
+    else:
+        y = np.asarray(pred_y, dtype=np.float64)
+
+    out_h, out_w = y.shape
+    pts = _points_array(points)
+
+    x_edges = _clipped_cell_edges_1d(image_w, out_w, stride)
+    y_edges = _clipped_cell_edges_1d(image_h, out_h, stride)
+    cell_w = x_edges[1:] - x_edges[:-1]
+    cell_h = y_edges[1:] - y_edges[:-1]
 
     out: dict[int, float] = {}
 
     for level_raw in levels:
-        level = int(
-            level_raw
-        )
-
+        level = int(level_raw)
         if level < 0:
-            raise ValueError(
-                "GAME level must be >= 0"
-            )
+            raise ValueError("GAME level must be >= 0")
 
         parts = 2 ** level
+        part_x_edges = np.linspace(0.0, float(image_w), parts + 1)
+        part_y_edges = np.linspace(0.0, float(image_h), parts + 1)
 
-        x_edges = np.linspace(
-            0.0,
-            float(image_w),
-            parts + 1,
-        )
+        # Vectorized 1D overlap weights:
+        # Shape [parts, out_w]
+        p_x0 = part_x_edges[:-1, None]
+        p_x1 = part_x_edges[1:, None]
+        c_x0 = x_edges[None, :-1]
+        c_x1 = x_edges[None, 1:]
+        overlap_x = np.maximum(0.0, np.minimum(p_x1, c_x1) - np.maximum(p_x0, c_x0))
+        W_X = overlap_x / cell_w[None, :]
 
-        y_edges = np.linspace(
-            0.0,
-            float(image_h),
-            parts + 1,
-        )
+        # Shape [parts, out_h]
+        p_y0 = part_y_edges[:-1, None]
+        p_y1 = part_y_edges[1:, None]
+        c_y0 = y_edges[None, :-1]
+        c_y1 = y_edges[None, 1:]
+        overlap_y = np.maximum(0.0, np.minimum(p_y1, c_y1) - np.maximum(p_y0, c_y0))
+        W_Y = overlap_y / cell_h[None, :]
 
-        total_abs_error = 0.0
+        # Predicted count per GAME partition rectangle: shape [parts, parts]
+        pred_counts = W_Y @ y @ W_X.T
 
-        for r in range(parts):
-            for c in range(parts):
-                x0 = float(
-                    x_edges[c]
-                )
-                x1 = float(
-                    x_edges[c + 1]
-                )
-                y0 = float(
-                    y_edges[r]
-                )
-                y1 = float(
-                    y_edges[r + 1]
-                )
+        # GT count per GAME partition rectangle: shape [parts, parts]
+        gt_counts = np.zeros((parts, parts), dtype=np.float64)
+        if pts.size > 0:
+            for pt in pts:
+                px, py = pt[0], pt[1]
+                if 0.0 <= px < float(image_w) and 0.0 <= py < float(image_h):
+                    bx = int(np.clip(np.searchsorted(part_x_edges[1:], px, side="right"), 0, parts - 1))
+                    by = int(np.clip(np.searchsorted(part_y_edges[1:], py, side="right"), 0, parts - 1))
+                    gt_counts[by, bx] += 1.0
 
-                pred_count = (
-                    region_count_from_cell_measure(
-                        pred_y,
-                        x0=x0,
-                        y0=y0,
-                        x1=x1,
-                        y1=y1,
-                        image_h=image_h,
-                        image_w=image_w,
-                        stride=stride,
-                    )
-                )
-
-                gt_count = (
-                    _gt_region_count(
-                        pts,
-                        x0=x0,
-                        y0=y0,
-                        x1=x1,
-                        y1=y1,
-                    )
-                )
-
-                total_abs_error += abs(
-                    pred_count
-                    - gt_count
-                )
-
-        out[level] = float(
-            total_abs_error
-        )
+        total_abs_error = float(np.sum(np.abs(pred_counts - gt_counts)))
+        out[level] = total_abs_error
 
     return out
 

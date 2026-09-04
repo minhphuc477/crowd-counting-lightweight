@@ -8,7 +8,7 @@ Implements:
 
 2. Measure Diagnostics (Section 22):
    - f_- : negative-cell fraction (# {Y_hat < 0} / HW)
-   - r_- : negative-mass ratio (sum([-Y_hat]_+) / (sum|Y_hat| + eps))
+   - NVR (r_-) : negative variation ratio (sum([-Y_hat]_+) / max(sum([Y_hat]_+), eps))
    - V   : violation magnitude (mean([-Y_hat]_+))
 
 3. Multi-Scale Rectangle Evaluation (Section 3 & 23):
@@ -44,7 +44,7 @@ def compute_measure_diagnostics(
     Returns:
         Dictionary of diagnostics:
         - 'negative_cell_fraction' (f_-): fraction of cells where Delta_xy C < 0
-        - 'negative_mass_ratio' (r_-): ratio of negative mass to total absolute mass
+        - 'nvr' / 'negative_mass_ratio' (r_-): ratio of negative variation Q to positive variation P
         - 'violation_magnitude' (V): mean negative violation magnitude over all cells
         - 'n_corner': count read from bottom-right corner
         - 'n_delta': count read by summing reconstructed discrete cells
@@ -60,7 +60,7 @@ def compute_measure_diagnostics(
     # f_-: fraction of cells with negative count
     f_minus = float((y_rec < 0).float().mean().item())
 
-    # r_-: negative mass ratio = sum([-Y]_+) / max(sum([Y]_+), 1e-12)
+    # r_-: negative variation ratio (NVR) = sum([-Y]_+) / max(sum([Y]_+), 1e-12)
     neg_mass_total = float(neg_violations.sum().item())
     pos_mass_total = float(F.relu(y_rec).sum().item())
     r_minus = float(neg_mass_total / max(pos_mass_total, 1e-12))
@@ -74,6 +74,7 @@ def compute_measure_diagnostics(
 
     return {
         "negative_cell_fraction": f_minus,
+        "nvr": r_minus,
         "negative_mass_ratio": r_minus,
         "violation_magnitude": v_mag,
         "n_corner": n_corner,

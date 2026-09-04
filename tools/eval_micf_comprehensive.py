@@ -76,6 +76,31 @@ from hpc.models.micf_lite import (
 )
 
 
+def in_bounds_points(points: np.ndarray, h: int, w: int) -> np.ndarray:
+    """Filters 2D (x, y) points strictly within continuous domain [0, w) x [0, h)."""
+    if len(points) == 0:
+        return np.zeros((0, 2), dtype=np.float64)
+    x = points[:, 0]
+    y = points[:, 1]
+    mask = (x >= 0.0) & (x < float(w)) & (y >= 0.0) & (y < float(h))
+    return points[mask]
+
+
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively replaces NaN and Inf with None for strict JSON standard conformance."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return [sanitize_for_json(v) for v in obj]
+    return obj
+
+
 # ---------------------------------------------------------------------
 # CLI / loading
 # ---------------------------------------------------------------------
@@ -161,9 +186,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument(
-        "--verify-repo-tiled",
+        "--legacy-debug",
         action="store_true",
-        default=True,
+        default=False,
+        help="Compute and write legacy diagnostics, window metrics, and legacy GAME CSVs.",
+    )
+    parser.add_argument(
+        "--verify-repo-tiled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Verify agreement with model.predict_tiled().",
     )
     parser.add_argument(
@@ -1141,6 +1172,7 @@ def main() -> None:
     tiled_predictions: list[float] = []
     controlled_tiled_predictions: list[float] = []
     full_gt_counts: list[float] = []
+    spatial_gt_counts: list[float] = []
 
     direct_validity_rows: list[ValidityRow] = []
     controlled_validity_rows: list[ValidityRow] = []
@@ -1169,6 +1201,8 @@ def main() -> None:
     direct_repr_rows: list[dict[str, float]] = []
     tiled_repr_rows: list[dict[str, float]] = []
 
+    is_cumulative = getattr(model, "head_type", "") == "cumulative"
+
     print("=" * 96)
     print("MICF COMPREHENSIVE CHECKPOINT EVALUATION (Paper-Ready Audit)")
     print(f"Checkpoint : {checkpoint_path}")
@@ -1176,6 +1210,7 @@ def main() -> None:
     print(f"Head       : {model.head_type} | stride={model.output_stride} | FH={model.finite_horizon}")
     print(f"Tile       : {args.tile_size} | halo={args.halo}")
     print(f"GAME       : {args.game_levels}")
+    print(f"LegacyDebug: {args.legacy_debug}")
     print(f"Images     : {n_eval}")
     print("=" * 96)
 
@@ -1189,26 +1224,16 @@ def main() -> None:
         raw_points = as_numpy_points(sample["gt_points"])
         gt_count = float(sample["gt_count"].item())
 
-        # Clamp points to valid continuous image domain [0, W - 1e-4] x [0, H - 1e-4]
-        # so border-annotated heads are integrated into boundary cells and GAME(0) exactly preserves official gt_count
-        points_in_bounds = np.empty_like(raw_points)
-        if len(raw_points) > 0:
-            points_in_bounds[:, 0] = np.clip(raw_points[:, 0], 0.0, float(W) - 1e-4)
-            points_in_bounds[:, 1] = np.clip(raw_points[:, 1], 0.0, float(H) - 1e-4)
-            out_of_bounds_count = float(
-                (
-                    (raw_points[:, 0] < 0.0)
-                    | (raw_points[:, 0] >= float(W))
-                    | (raw_points[:, 1] < 0.0)
-                    | (raw_points[:, 1] >= float(H))
-                ).sum()
-            )
-        else:
-            out_of_bounds_count = 0.0
+        # Protocol: Do NOT artificially relocate OOB points by clipping to boundary.
+        # Benchmark count metrics evaluate against official gt_count. Spatial metrics use valid in-bounds points.
+        points_spatial = in_bounds_points(raw_points, H, W)
+        gt_spatial_count = float(len(points_spatial))
+        oob_count = float(len(raw_points) - len(points_spatial))
 
-        points_inside = points_in_bounds
-        gt_in_bounds = float(len(points_inside))
-        gt_out_of_bounds = out_of_bounds_count
+        points_inside = points_spatial
+        gt_in_bounds = gt_spatial_count
+        gt_out_of_bounds = oob_count
+        spatial_gt_counts.append(gt_spatial_count)
 
         # ---------------------------------------------------------
         # Full-Direct
@@ -1304,7 +1329,7 @@ def main() -> None:
             rel_tol=0.0,
             abs_tol=1e-5,
         ):
-            raise RuntimeError("GT measure does not conserve in-bounds count.")
+            raise RuntimeError("GT measure does not conserve spatial count.")
 
         # ---------------------------------------------------------
         # Optional repository tiled equivalence
@@ -1325,73 +1350,16 @@ def main() -> None:
                 )
 
         # ---------------------------------------------------------
-        # Window bookkeeping + cancellation
-        # ---------------------------------------------------------
-        image_signed_errors: list[float] = []
-
-        for local_idx, row in enumerate(window_rows):
-            enriched = {
-                "image_index": image_index,
-                "window_index": local_idx,
-                "image_path": sample["img_path"],
-                "image_height": H,
-                "image_width": W,
-                "halo_type": "practical",
-                **row,
-            }
-            all_window_rows.append(enriched)
-            image_signed_errors.append(float(row["signed_error"]))
-
-        # Controlled-halo window rows (halo=0 clean pass)
-        for local_idx, row in enumerate(ctrl_window_rows):
-            enriched_ctrl = {
-                "image_index": image_index,
-                "window_index": local_idx,
-                "image_path": sample["img_path"],
-                "image_height": H,
-                "image_width": W,
-                "halo_type": "controlled",
-                **row,
-            }
-            all_window_rows_controlled.append(enriched_ctrl)
-
-        cancel = compute_cancellation_ratio(image_signed_errors)
-        cancellation_ratios.append(cancel)
-
-        local_abs_sum = sum(abs(e) for e in image_signed_errors)
-        net_abs = abs(sum(image_signed_errors))
-
-
-        # ---------------------------------------------------------
-        # Canonical Pixel-Space GAME & Diagnostic Stride-16 GAME
-        # ---------------------------------------------------------
-        direct_game_pixel = game_pixel_space_errors(
-            y_direct, points_inside, img_h=H, img_w=W, stride=stride, levels=args.game_levels
-        )
-        tiled_game_pixel = game_pixel_space_errors(
-            y_tiled, points_inside, img_h=H, img_w=W, stride=stride, levels=args.game_levels
-        )
-
-        direct_game_stride16 = game_stride16_errors(y_direct, gt_y, args.game_levels)
-        tiled_game_stride16 = game_stride16_errors(y_tiled, gt_y, args.game_levels)
-
-        for level in args.game_levels:
-            l_int = int(level)
-            direct_game_pixel_by_level[l_int].append(direct_game_pixel[l_int])
-            tiled_game_pixel_by_level[l_int].append(tiled_game_pixel[l_int])
-            direct_game_stride16_by_level[l_int].append(direct_game_stride16[l_int])
-            tiled_game_stride16_by_level[l_int].append(tiled_game_stride16[l_int])
-
-        # ---------------------------------------------------------
         # Canonical validity & GAME per image
         # ---------------------------------------------------------
-        valid_row_direct = recovered_measure_validity(y_direct, tau=1e-6)
-        valid_row_ctrl = recovered_measure_validity(y_ctrl_tiled, tau=1e-6)
-        valid_row_prac = recovered_measure_validity(y_tiled, tau=1e-6)
+        if is_cumulative:
+            valid_row_direct = recovered_measure_validity(y_direct, tau=1e-6)
+            valid_row_ctrl = recovered_measure_validity(y_ctrl_tiled, tau=1e-6)
+            valid_row_prac = recovered_measure_validity(y_tiled, tau=1e-6)
 
-        direct_validity_rows.append(valid_row_direct)
-        controlled_validity_rows.append(valid_row_ctrl)
-        practical_validity_rows.append(valid_row_prac)
+            direct_validity_rows.append(valid_row_direct)
+            controlled_validity_rows.append(valid_row_ctrl)
+            practical_validity_rows.append(valid_row_prac)
 
         game_row_direct = game_errors_one_image(
             y_direct,
@@ -1409,6 +1377,7 @@ def main() -> None:
             "height": H,
             "width": W,
             "gt_count": gt_count,
+            "gt_spatial_count": gt_spatial_count,
             "direct_pred_count": pred_direct_count,
             "controlled_tiled_pred_count": pred_ctrl_tiled_count,
             "practical_tiled_pred_count": pred_tiled_count,
@@ -1417,97 +1386,148 @@ def main() -> None:
             "practical_tiled_abs_error": abs(pred_tiled_count - gt_count),
             "direct_vs_controlled_abs": abs(pred_direct_count - pred_ctrl_tiled_count),
             "direct_vs_practical_abs": abs(pred_direct_count - pred_tiled_count),
-            "direct_vr_tau": valid_row_direct.vr_tau,
-            "direct_positive_variation": valid_row_direct.positive_variation,
-            "direct_negative_variation": valid_row_direct.negative_variation,
-            "direct_nvr": valid_row_direct.nvr,
-            "direct_violating_cells": valid_row_direct.violating_cells,
-            "direct_total_cells": valid_row_direct.total_cells,
+            "direct_vr_tau": valid_row_direct.vr_tau if is_cumulative else None,
+            "direct_positive_variation": valid_row_direct.positive_variation if is_cumulative else None,
+            "direct_negative_variation": valid_row_direct.negative_variation if is_cumulative else None,
+            "direct_nvr": valid_row_direct.nvr if is_cumulative else None,
+            "direct_violating_cells": valid_row_direct.violating_cells if is_cumulative else None,
+            "direct_total_cells": valid_row_direct.total_cells if is_cumulative else None,
         }
         for lvl, err in game_row_direct.items():
             canon_row[f"direct_game_{lvl}"] = err
         per_image_canonical_rows.append(canon_row)
 
         # ---------------------------------------------------------
-        # Legacy validity & representation diagnostics
+        # Legacy validity, window bookkeeping & representation diagnostics
         # ---------------------------------------------------------
-        direct_valid = measure_validity_metrics(y_direct)
-        tiled_valid = measure_validity_metrics(y_tiled)
+        cancel = float("nan")
+        if args.legacy_debug:
+            image_signed_errors: list[float] = []
+            for local_idx, row in enumerate(window_rows):
+                enriched = {
+                    "image_index": image_index,
+                    "window_index": local_idx,
+                    "image_path": sample["img_path"],
+                    "image_height": H,
+                    "image_width": W,
+                    "halo_type": "practical",
+                    **row,
+                }
+                all_window_rows.append(enriched)
+                image_signed_errors.append(float(row["signed_error"]))
 
-        direct_repr = representation_metrics(
-            c_direct, y_direct, gt_c, gt_y, gt_in_bounds
-        )
-        tiled_repr = representation_metrics(
-            c_tiled, y_tiled, gt_c, gt_y, gt_in_bounds
-        )
+            for local_idx, row in enumerate(ctrl_window_rows):
+                enriched_ctrl = {
+                    "image_index": image_index,
+                    "window_index": local_idx,
+                    "image_path": sample["img_path"],
+                    "image_height": H,
+                    "image_width": W,
+                    "halo_type": "controlled",
+                    **row,
+                }
+                all_window_rows_controlled.append(enriched_ctrl)
 
-        direct_legacy_validity_rows.append(direct_valid)
-        tiled_legacy_validity_rows.append(tiled_valid)
-        direct_repr_rows.append(direct_repr)
-        tiled_repr_rows.append(tiled_repr)
+            cancel = compute_cancellation_ratio(image_signed_errors)
+            cancellation_ratios.append(cancel)
 
-        # ---------------------------------------------------------
-        # Per-image legacy row
-        # ---------------------------------------------------------
-        row_dict: dict[str, Any] = {
-            "image_index": image_index,
-            "image_path": sample["img_path"],
-            "height": H,
-            "width": W,
-            "num_windows": len(window_rows),
-            "gt_count": gt_count,
-            "gt_in_bounds_count": gt_in_bounds,
-            "gt_out_of_bounds": gt_out_of_bounds,
-            "pred_full_direct": pred_direct_count,
-            "err_full_direct_signed": pred_direct_count - gt_count,
-            "err_full_direct_abs": abs(pred_direct_count - gt_count),
-            "pred_full_tiled": pred_tiled_count,
-            "err_full_tiled_signed": pred_tiled_count - gt_count,
-            "err_full_tiled_abs": abs(pred_tiled_count - gt_count),
-            "pred_full_tiled_practical": pred_tiled_count,
-            "err_full_tiled_practical_signed": pred_tiled_count - gt_count,
-            "err_full_tiled_practical_abs": abs(pred_tiled_count - gt_count),
-            "pred_full_tiled_controlled": pred_ctrl_tiled_count,
-            "err_full_tiled_controlled_signed": pred_ctrl_tiled_count - gt_count,
-            "err_full_tiled_controlled_abs": abs(pred_ctrl_tiled_count - gt_count),
-            "halo_effect_signed": pred_tiled_count - pred_ctrl_tiled_count,
-            "halo_effect_abs": abs(pred_tiled_count - pred_ctrl_tiled_count),
-            "cancellation_ratio": cancel,
-            "window_abs_error_sum": local_abs_sum,
-            "window_net_abs_error": net_abs,
-            "repo_tiled_count": repo_tiled_count,
-            "repo_tiled_abs_diff": repo_tiled_diff,
-        }
+            local_abs_sum = sum(abs(e) for e in image_signed_errors)
+            net_abs = abs(sum(image_signed_errors))
 
-        for level in args.game_levels:
-            row_dict[f"direct_game_pixel_L{level}"] = direct_game_pixel[level]
-            row_dict[f"tiled_game_pixel_L{level}"] = tiled_game_pixel[level]
-            row_dict[f"direct_game_stride16_L{level}"] = direct_game_stride16[level]
-            row_dict[f"tiled_game_stride16_L{level}"] = tiled_game_stride16[level]
+            direct_game_pixel = game_pixel_space_errors(
+                y_direct, points_inside, img_h=H, img_w=W, stride=stride, levels=args.game_levels
+            )
+            tiled_game_pixel = game_pixel_space_errors(
+                y_tiled, points_inside, img_h=H, img_w=W, stride=stride, levels=args.game_levels
+            )
 
-        for k, v in direct_valid.items():
-            row_dict[f"direct_{k}"] = v
-        for k, v in tiled_valid.items():
-            row_dict[f"tiled_{k}"] = v
-        for k, v in direct_repr.items():
-            row_dict[f"direct_{k}"] = v
-        for k, v in tiled_repr.items():
-            row_dict[f"tiled_{k}"] = v
+            direct_game_stride16 = game_stride16_errors(y_direct, gt_y, args.game_levels)
+            tiled_game_stride16 = game_stride16_errors(y_tiled, gt_y, args.game_levels)
 
-        per_image_rows.append(row_dict)
+            for level in args.game_levels:
+                l_int = int(level)
+                direct_game_pixel_by_level[l_int].append(direct_game_pixel[l_int])
+                tiled_game_pixel_by_level[l_int].append(tiled_game_pixel[l_int])
+                direct_game_stride16_by_level[l_int].append(direct_game_stride16[l_int])
+                tiled_game_stride16_by_level[l_int].append(tiled_game_stride16[l_int])
+
+            direct_valid = measure_validity_metrics(y_direct)
+            tiled_valid = measure_validity_metrics(y_tiled)
+
+            direct_repr = representation_metrics(
+                c_direct, y_direct, gt_c, gt_y, gt_in_bounds
+            )
+            tiled_repr = representation_metrics(
+                c_tiled, y_tiled, gt_c, gt_y, gt_in_bounds
+            )
+
+            direct_legacy_validity_rows.append(direct_valid)
+            tiled_legacy_validity_rows.append(tiled_valid)
+            direct_repr_rows.append(direct_repr)
+            tiled_repr_rows.append(tiled_repr)
+
+            row_dict: dict[str, Any] = {
+                "image_index": image_index,
+                "image_path": sample["img_path"],
+                "height": H,
+                "width": W,
+                "num_windows": len(window_rows),
+                "gt_count": gt_count,
+                "gt_in_bounds_count": gt_in_bounds,
+                "gt_out_of_bounds": gt_out_of_bounds,
+                "pred_full_direct": pred_direct_count,
+                "err_full_direct_signed": pred_direct_count - gt_count,
+                "err_full_direct_abs": abs(pred_direct_count - gt_count),
+                "pred_full_tiled": pred_tiled_count,
+                "err_full_tiled_signed": pred_tiled_count - gt_count,
+                "err_full_tiled_abs": abs(pred_tiled_count - gt_count),
+                "pred_full_tiled_practical": pred_tiled_count,
+                "err_full_tiled_practical_signed": pred_tiled_count - gt_count,
+                "err_full_tiled_practical_abs": abs(pred_tiled_count - gt_count),
+                "pred_full_tiled_controlled": pred_ctrl_tiled_count,
+                "err_full_tiled_controlled_signed": pred_ctrl_tiled_count - gt_count,
+                "err_full_tiled_controlled_abs": abs(pred_ctrl_tiled_count - gt_count),
+                "halo_effect_signed": pred_tiled_count - pred_ctrl_tiled_count,
+                "halo_effect_abs": abs(pred_tiled_count - pred_ctrl_tiled_count),
+                "cancellation_ratio": cancel,
+                "window_abs_error_sum": local_abs_sum,
+                "window_net_abs_error": net_abs,
+                "repo_tiled_count": repo_tiled_count,
+                "repo_tiled_abs_diff": repo_tiled_diff,
+            }
+
+            for level in args.game_levels:
+                row_dict[f"direct_game_pixel_L{level}"] = direct_game_pixel[level]
+                row_dict[f"tiled_game_pixel_L{level}"] = tiled_game_pixel[level]
+                row_dict[f"direct_game_stride16_L{level}"] = direct_game_stride16[level]
+                row_dict[f"tiled_game_stride16_L{level}"] = tiled_game_stride16[level]
+
+            for k, v in direct_valid.items():
+                row_dict[f"direct_{k}"] = v
+            for k, v in tiled_valid.items():
+                row_dict[f"tiled_{k}"] = v
+            for k, v in direct_repr.items():
+                row_dict[f"direct_{k}"] = v
+            for k, v in tiled_repr.items():
+                row_dict[f"tiled_{k}"] = v
+
+            per_image_rows.append(row_dict)
+
         direct_predictions.append(pred_direct_count)
         tiled_predictions.append(pred_tiled_count)
         controlled_tiled_predictions.append(pred_ctrl_tiled_count)
         full_gt_counts.append(gt_count)
 
-        print(
+        status_str = (
             f"[{image_index + 1:03d}/{n_eval:03d}] "
             f"GT={gt_count:.1f} | "
             f"Direct={pred_direct_count:.2f} (AE={abs(pred_direct_count-gt_count):.2f}) | "
             f"Tiled(h={args.halo})={pred_tiled_count:.2f} (AE={abs(pred_tiled_count-gt_count):.2f}) | "
-            f"Tiled(ctrl={args.controlled_halo})={pred_ctrl_tiled_count:.2f} (AE={abs(pred_ctrl_tiled_count-gt_count):.2f}) | "
-            f"Cancel={100*cancel:.1f}%"
+            f"Tiled(ctrl={args.controlled_halo})={pred_ctrl_tiled_count:.2f} (AE={abs(pred_ctrl_tiled_count-gt_count):.2f})"
         )
+        if args.legacy_debug and not math.isnan(cancel):
+            status_str += f" | Cancel={100*cancel:.1f}%"
+        print(status_str)
 
     # -----------------------------------------------------------------
     # Canonical Aggregation
@@ -1521,28 +1541,30 @@ def main() -> None:
     benchmark_controlled = benchmark_count_summary(controlled_arr, gt_arr)
     benchmark_practical = benchmark_count_summary(practical_arr, gt_arr)
 
-    validity_direct = aggregate_validity(direct_validity_rows)
-    validity_controlled = aggregate_validity(controlled_validity_rows)
-    validity_practical = aggregate_validity(practical_validity_rows)
+    if is_cumulative:
+        validity_direct = aggregate_validity(direct_validity_rows)
+        validity_controlled = aggregate_validity(controlled_validity_rows)
+        validity_practical = aggregate_validity(practical_validity_rows)
+    else:
+        validity_direct = {"status": "nonnegative_by_construction"}
+        validity_controlled = {"status": "nonnegative_by_construction"}
+        validity_practical = {"status": "nonnegative_by_construction"}
 
     controlled_decomposition = direct_tiled_discrepancy(direct_arr, controlled_arr, gt_arr)
     practical_decomposition = direct_tiled_discrepancy(direct_arr, practical_arr, gt_arr)
 
     game_direct = aggregate_game(direct_game_rows)
 
-    # Gate E check: GAME(0) == MAE within 1e-4 * max(1, MAE)
+    # Gate E check: GAME(0) invariant against spatial count
     if 0 in args.game_levels and len(direct_game_rows) > 0:
-        mae = float(benchmark_direct["mae"])
         game0 = float(game_direct.get("game_0", float("nan")))
-        tol = 1e-4 * max(1.0, abs(mae))
-        if abs(game0 - mae) > tol:
+        expected_game0 = float(np.mean(np.abs(direct_arr - np.asarray(spatial_gt_counts, dtype=np.float64))))
+        tol = 1e-4 * max(1.0, abs(expected_game0))
+        if abs(game0 - expected_game0) > tol:
             raise RuntimeError(
-                "GAME(0) invariant failed: "
-                f"GAME0={game0:.8f}, MAE={mae:.8f}, tol={tol:.8f}"
+                "GAME(0) invariant failed against spatial GT count: "
+                f"GAME0={game0:.8f}, expected={expected_game0:.8f}, tol={tol:.8f}"
             )
-
-    window_stats = window_metric_summary(all_window_rows)
-    window_stats_controlled = window_metric_summary(all_window_rows_controlled)
 
     canonical_summary: dict[str, Any] = {
         "benchmark": {
@@ -1572,11 +1594,19 @@ def main() -> None:
             "practical_halo": args.halo,
             "direct_pad_multiple": args.direct_pad_multiple,
             "game_levels": [int(x) for x in args.game_levels],
+            "spatial_points_protocol": "raw_in_bounds",
             "validity_tau": 1e-6,
             "nvr_eps": 1e-12,
             "benchmark_primary_inference": "full_image_direct",
+            "legacy_debug": bool(args.legacy_debug),
         },
-        "legacy_debug": {
+        "legacy_debug": None,
+    }
+
+    if args.legacy_debug:
+        window_stats = window_metric_summary(all_window_rows)
+        window_stats_controlled = window_metric_summary(all_window_rows_controlled)
+        canonical_summary["legacy_debug"] = {
             "checkpoint": str(checkpoint_path.resolve()),
             "checkpoint_epoch": checkpoint.get("epoch"),
             "checkpoint_best_mae_stored": checkpoint.get("best_mae"),
@@ -1601,29 +1631,29 @@ def main() -> None:
                 key: finite_mean(row[key] for row in tiled_repr_rows)
                 for key in (tiled_repr_rows[0].keys() if tiled_repr_rows else [])
             },
-        },
-    }
+        }
 
     # -----------------------------------------------------------------
     # Save Outputs
     # -----------------------------------------------------------------
     summary_path = output_dir / "summary.json"
-    legacy_summary_path = output_dir / "comprehensive_summary.json"
     canonical_image_csv = output_dir / "per_image_canonical.csv"
-    legacy_image_csv = output_dir / "comprehensive_per_image.csv"
-    window_csv = output_dir / "comprehensive_per_window.csv"
-    window_ctrl_csv = output_dir / "comprehensive_per_window_controlled.csv"
 
     with summary_path.open("w", encoding="utf-8") as f:
-        json.dump(canonical_summary, f, indent=2, allow_nan=True)
-
-    with legacy_summary_path.open("w", encoding="utf-8") as f:
-        json.dump(canonical_summary, f, indent=2, allow_nan=True)
+        json.dump(sanitize_for_json(canonical_summary), f, indent=2)
 
     write_csv(canonical_image_csv, per_image_canonical_rows)
-    write_csv(legacy_image_csv, per_image_rows)
-    write_csv(window_csv, all_window_rows)
-    write_csv(window_ctrl_csv, all_window_rows_controlled)
+
+    if args.legacy_debug:
+        legacy_summary_path = output_dir / "comprehensive_summary.json"
+        legacy_image_csv = output_dir / "comprehensive_per_image.csv"
+        window_csv = output_dir / "comprehensive_per_window.csv"
+        window_ctrl_csv = output_dir / "comprehensive_per_window_controlled.csv"
+        with legacy_summary_path.open("w", encoding="utf-8") as f:
+            json.dump(sanitize_for_json(canonical_summary), f, indent=2)
+        write_csv(legacy_image_csv, per_image_rows)
+        write_csv(window_csv, all_window_rows)
+        write_csv(window_ctrl_csv, all_window_rows_controlled)
 
     # -----------------------------------------------------------------
     # Canonical Console Report (Section 25)
@@ -1638,10 +1668,14 @@ def main() -> None:
     print(f"RMSE  : {benchmark_direct['rmse']:.4f}")
     print(f"NAE   : {benchmark_direct['nae']:.4f}")
     print()
-    print("PS-FH Cumulative Validity / Direct")
-    print(f"VR_tau micro : {validity_direct['vr_tau_micro'] * 100:.4f}%")
-    print(f"NVR micro    : {validity_direct['nvr_micro'] * 100:.4f}%")
-    print()
+    if is_cumulative:
+        print("PS-FH Cumulative Validity / Direct")
+        print(f"VR_tau micro : {validity_direct['vr_tau_micro'] * 100:.4f}%")
+        print(f"NVR micro    : {validity_direct['nvr_micro'] * 100:.4f}%")
+        print()
+    else:
+        print("Model Representation : non-cumulative (nonnegative by construction)")
+        print()
     print("Inference Decomposition")
     print(f"Direct vs Controlled | normalized discrepancy : {controlled_decomposition['mean_normalized_prediction_discrepancy']:.6f}")
     print(f"Direct vs Practical  | normalized discrepancy : {practical_decomposition['mean_normalized_prediction_discrepancy']:.6f}")

@@ -477,7 +477,7 @@ def main() -> None:
 | **Val Tiled MAE** (At Best Crop Epoch) | {b5b_best_entry['mae_full']:.2f} | {b8_best_entry['mae_full']:.2f} | {delta_full_val:+.2f} |
 | **Violation Rate** | {b5b_best_entry.get('violation_rate', 0)*100:.2f}% | {b8_best_entry.get('violation_rate', 0)*100:.2f}% | {(b8_best_entry.get('violation_rate', 0) - b5b_best_entry.get('violation_rate', 0))*100:+.2f}% |
 | **Violation Magnitude** | {b5b_best_entry.get('violation_magnitude', 0):.4f} | {b8_best_entry.get('violation_magnitude', 0):.4f} | {b8_best_entry.get('violation_magnitude', 0) - b5b_best_entry.get('violation_magnitude', 0):+.4f} |
-| **Negative Mass Ratio** | {b5b_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {b8_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {(b8_best_entry.get('neg_mass_ratio', 0) - b5b_best_entry.get('neg_mass_ratio', 0))*100:+.2f}% |
+| **Negative Variation Ratio (NVR)** | {b5b_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {b8_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {(b8_best_entry.get('neg_mass_ratio', 0) - b5b_best_entry.get('neg_mass_ratio', 0))*100:+.2f}% |
 {comp_tables_md}
 
 ## Scientific Gate Verdict

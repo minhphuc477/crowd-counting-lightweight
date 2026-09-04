@@ -61,17 +61,17 @@ def export_model_to_onnx(
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    if (checkpoint_path is None or checkpoint_path.lower() in {"none", ""}) and not allow_random_init:
+    has_checkpoint = checkpoint_path is not None and checkpoint_path.lower() not in {"none", ""}
+    if has_checkpoint and allow_random_init:
+        raise ValueError(
+            "Conflicting arguments: cannot specify both --checkpoint and --allow-random-init. "
+            "Provide a checkpoint path to export trained weights, or use --allow-random-init alone."
+        )
+    if not has_checkpoint and not allow_random_init:
         raise ValueError(
             "A valid --checkpoint path is required for export. "
             "Pass --allow-random-init explicitly if you intend to export untrained weights."
         )
-
-    has_checkpoint = (
-        checkpoint_path is not None
-        and checkpoint_path.lower() not in {"none", ""}
-        and not allow_random_init
-    )
 
     model = build_model_from_config(cfg)
     if has_checkpoint:
