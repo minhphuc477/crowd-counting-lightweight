@@ -117,9 +117,9 @@ def points_to_count_map(
     gx = torch.floor((pts[:, 0] + 0.5) / float(stride)).long()
     gy = torch.floor((pts[:, 1] + 0.5) / float(stride)).long()
 
-    valid = (gx >= 0) & (gx < out_w) & (gy >= 0) & (gy < out_h)
-    gx = gx[valid]
-    gy = gy[valid]
+    valid = (pts[:, 0] >= 0) & (pts[:, 0] < float(out_w * stride)) & (pts[:, 1] >= 0) & (pts[:, 1] < float(out_h * stride))
+    gx = gx[valid].clamp(0, out_w - 1)
+    gy = gy[valid].clamp(0, out_h - 1)
 
     if gx.numel() == 0:
         return y
