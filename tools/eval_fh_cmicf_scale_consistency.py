@@ -104,7 +104,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--output-dir",
         type=str,
-        default="runs/pilot_micf/b8_k4/eval_scale_consistency",
+        default=None,
+        help="Directory to save audit outputs. Default: <checkpoint_dir>/eval_scale_consistency",
     )
     p.add_argument(
         "--conservation-tol",
@@ -113,9 +114,11 @@ def parse_args() -> argparse.Namespace:
         help="Relative/absolute tolerance for full-image measure conservation checks.",
     )
     p.add_argument(
+        "--allow-non-s16-k4",
         "--allow-non-b8",
+        dest="allow_non_s16_k4",
         action="store_true",
-        help="Disable the strict stride16/K4 B8 identity check.",
+        help="Disable the strict stride16/K4 model identity check.",
     )
 
     return p.parse_args()
@@ -595,11 +598,15 @@ def main() -> None:
         raise ValueError(f"Duplicate scales are not allowed: {scales}")
 
     device = torch.device(args.device)
-    out_dir = Path(args.output_dir)
+    if args.output_dir is not None:
+        out_dir = Path(args.output_dir)
+    else:
+        out_dir = Path(args.checkpoint).resolve().parent / "eval_scale_consistency"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint = safe_torch_load(args.checkpoint, map_location="cpu")
     cfg = load_config(checkpoint, args.config)
+    m_id = cfg.get("experiment", {}).get("model_id", "MICF")
 
     if "state_dict" not in checkpoint:
         raise KeyError(f"Checkpoint {args.checkpoint} has no 'state_dict'")
@@ -610,14 +617,14 @@ def main() -> None:
         device=device,
     )
 
-    if not args.allow_non_b8:
+    if not args.allow_non_s16_k4:
         if model.head_type != "cumulative":
-            raise RuntimeError(f"Expected cumulative B8 head, got {model.head_type}")
+            raise RuntimeError(f"Expected cumulative head, got {model.head_type}")
         if int(model.output_stride) != 16:
-            raise RuntimeError(f"Expected B8 output_stride=16, got {model.output_stride}")
+            raise RuntimeError(f"Expected output_stride=16, got {model.output_stride}")
         if model.finite_horizon is None or int(model.finite_horizon) != 4:
             raise RuntimeError(
-                f"Expected B8 finite_horizon=4, got {model.finite_horizon}"
+                f"Expected finite_horizon=4, got {model.finite_horizon}"
             )
 
     dataset = build_dataset(
@@ -637,8 +644,9 @@ def main() -> None:
         )
 
     print("=" * 80)
-    print("FH-CMICF B8 SCALE / REGION CONSISTENCY AUDIT")
+    print(f"{m_id} (stride={model.output_stride}, K={model.finite_horizon}) SCALE / REGION CONSISTENCY AUDIT")
     print(f"Checkpoint       : {args.checkpoint}")
+    print(f"Output Dir       : {out_dir}")
     print(f"Images           : {n_total}")
     print(f"Scales           : {scales}")
     print(f"Reference scale  : {args.reference_scale}")
@@ -953,11 +961,14 @@ def main() -> None:
         "checkpoint": str(args.checkpoint),
         "checkpoint_epoch": checkpoint.get("epoch"),
         "model": {
+            "model_id": m_id,
             "head_type": model.head_type,
             "output_stride": int(model.output_stride),
             "finite_horizon": (
                 None if model.finite_horizon is None else int(model.finite_horizon)
             ),
+            "fh_strict_local": getattr(model, "fh_strict_local", False),
+            "fh_local_norm": getattr(model, "fh_local_norm", None),
             "fh_physical_span_at_1x_px": (
                 None
                 if model.finite_horizon is None

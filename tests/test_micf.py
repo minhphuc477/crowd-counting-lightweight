@@ -720,4 +720,48 @@ class TestMICFv2:
         assert p5 == p8
 
 
+def test_cumulative_mobius_inversion():
+    y = torch.tensor(
+        [[[[0.0, 2.0, 1.0],
+           [3.0, 0.0, 4.0],
+           [1.0, 2.0, 0.0]]]],
+        dtype=torch.float64,
+    )
 
+    c = cell_counts_to_cumulative_field(
+        y
+    )
+
+    y_recovered = discrete_mixed_difference(
+        c
+    )
+
+    assert torch.allclose(
+        y,
+        y_recovered,
+        atol=1e-12,
+        rtol=0.0,
+    )
+
+
+def test_count_conservation():
+    y = torch.rand(
+        1,
+        1,
+        8,
+        9,
+        dtype=torch.float64,
+    )
+
+    c = cell_counts_to_cumulative_field(
+        y
+    )
+
+    assert torch.allclose(
+        c[..., -1, -1],
+        y.sum(
+            dim=(-1, -2)
+        ),
+        atol=1e-12,
+        rtol=0.0,
+    )

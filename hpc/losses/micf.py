@@ -28,7 +28,7 @@ def discrete_mixed_difference(c: torch.Tensor) -> torch.Tensor:
         c = c.unsqueeze(0).unsqueeze(0)
     elif c.ndim == 3:
         c = c.unsqueeze(1)
-    c_pad = F.pad(c.float(), (1, 0, 1, 0), mode="constant", value=0.0)
+    c_pad = F.pad(c, (1, 0, 1, 0), mode="constant", value=0.0)
     y = (
         c_pad[:, :, 1:, 1:]
         - c_pad[:, :, :-1, 1:]
@@ -57,7 +57,8 @@ def cell_counts_to_cumulative_field(
         y = y.unsqueeze(0).unsqueeze(0)
     elif y.ndim == 3:
         y = y.unsqueeze(1)
-    y = y.float()
+    if not torch.is_floating_point(y):
+        y = y.float()
 
     if orientation == "TL":
         out = torch.cumsum(torch.cumsum(y, dim=-2), dim=-1)

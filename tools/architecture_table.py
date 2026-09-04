@@ -32,6 +32,8 @@ def build_micf_model_from_config(cfg: dict) -> MICFLite:
         output_stride=int(m_cfg.get("output_stride", 16)),
         extent_aware=bool(m_cfg.get("extent_aware", False)),
         finite_horizon=m_cfg.get("finite_horizon", None),
+        fh_strict_local=bool(m_cfg.get("fh_strict_local", False)),
+        fh_local_norm=str(m_cfg.get("fh_local_norm", "group")),
     )
 
 
@@ -81,9 +83,12 @@ def collect_architecture(cfg: dict, height: int, width: int) -> dict:
         def hook(_module, inputs, output):
             macs = 0
             if isinstance(module, nn.Conv2d):
-                out_h, out_w = output.shape[-2:]
+                actual_batch = int(output.shape[0])
+                out_h = int(output.shape[-2])
+                out_w = int(output.shape[-1])
                 macs = int(
-                    out_h
+                    actual_batch
+                    * out_h
                     * out_w
                     * module.out_channels
                     * (module.in_channels // module.groups)

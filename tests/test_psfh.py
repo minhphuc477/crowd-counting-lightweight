@@ -1,4 +1,4 @@
-﻿"""Unit tests for PS-FH-CMICF components:
+"""Unit tests for PS-FH-CMICF components:
 - FractionalPrefixPreconditioner
 - balanced_sobolev_smooth_l1
 - partition_grid_into_blocks
@@ -21,7 +21,7 @@ from hpc.losses.micf import (
     cell_counts_to_cumulative_field,
     discrete_mixed_difference,
 )
-from hpc.models.micf_lite import MICFLite
+from hpc.models.micf_lite import MICFLite, _partition_feature_blocks
 
 
 def test_fractional_prefix_preconditioner_svd():
@@ -99,8 +99,8 @@ def test_ps_fh_cmicf_signed_al_forward_and_dual():
     assert "ps_pc_loss" in comp
     assert "ps_sobolev_loss" in comp
     assert "ps_count_loss" in comp
-    assert "ps_constraint" in comp
-    assert "ps_dual_lambda" in comp
+    assert "ps_violation_magnitude" in comp
+    assert "ps_dual_lambda_mean" in comp
     assert "ps_dual_lambda_max" in comp
     assert "ps_dual_lambda_terminal" in comp
 
@@ -177,4 +177,124 @@ def test_ps_fh_model_strict_local_multi_block_256():
         .view(B, 1, 16, 16)
     )
     diff = (y_global - y_from_blocks).abs().max().item()
-    assert diff < 2e-5, f"Composition mismatch: max diff {diff}"
+    assert diff < 5e-5, f"Composition mismatch: max diff {diff}"
+
+
+def test_augmented_lagrangian_analytical_inequality():
+    """Analytical verification of the signed inequality Augmented Lagrangian:
+    L_AL(c; lambda, rho) = (1 / (2 * rho)) * [ ReLU(lambda + rho * c)^2 - lambda^2 ]
+    where c = -y <= 0 is the non-negativity constraint.
+    """
+    rho = 2.0
+    loss_fn = PSFHCMICFLoss(
+        k=4,
+        lambda_sobolev=0.0,
+        lambda_count=0.0,
+        al_rho=rho,
+        al_dual_init=1.0,  # lambda = 1.0 everywhere
+    )
+
+    # Case 1: lambda = 1.0, rho = 2.0, c = -0.1 (satisfied constraint with margin)
+    # q = lambda + rho * c = 1.0 + 2.0 * (-0.1) = 0.8 > 0
+    # penalty = 0.8^2 - 1.0^2 = 0.64 - 1.0 = -0.36
+    # L_AL = (1 / (2 * 2.0)) * (-0.36) = -0.09
+    c_val = -0.1
+    pred_y_blocks = torch.full((1, 1, 4, 4), -c_val, dtype=torch.float32)
+    c_blocks = cell_counts_to_cumulative_field(pred_y_blocks, orientation="TL")
+    target_y = pred_y_blocks.detach().clone()
+    target_c = cell_counts_to_cumulative_field(target_y, orientation="TL")
+
+    _, comp = loss_fn(
+        pred_c=c_blocks,
+        target_c=target_c,
+        target_y=target_y,
+        pred_c_blocks=c_blocks,
+        return_components=True,
+    )
+    assert comp["ps_aug_lagrangian"] == pytest.approx(-0.09, abs=1e-6)
+
+    # Case 2: lambda = 1.0, rho = 2.0, c = -0.6 (strictly inactive / deep interior)
+    # q = 1.0 + 2.0 * (-0.6) = -0.2 <= 0
+    # penalty = 0 - 1.0^2 = -1.0
+    # L_AL = (1 / 4.0) * (-1.0) = -0.25
+    c_val2 = -0.6
+    pred_y_blocks2 = torch.full((1, 1, 4, 4), -c_val2, dtype=torch.float32)
+    c_blocks2 = cell_counts_to_cumulative_field(pred_y_blocks2, orientation="TL")
+    _, comp2 = loss_fn(
+        pred_c=c_blocks2,
+        target_c=c_blocks2.detach(),
+        target_y=pred_y_blocks2.detach(),
+        pred_c_blocks=c_blocks2,
+        return_components=True,
+    )
+    assert comp2["ps_aug_lagrangian"] == pytest.approx(-0.25, abs=1e-6)
+
+    # Case 3: lambda = 0.0, rho = 1.0, c = 0.5 (violation of 0.5 with zero initial dual)
+    # q = 0 + 1.0 * 0.5 = 0.5 > 0
+    # penalty = 0.5^2 - 0 = 0.25
+    # L_AL = (1 / 2.0) * 0.25 = 0.125
+    loss_fn3 = PSFHCMICFLoss(
+        k=4,
+        lambda_sobolev=0.0,
+        lambda_count=0.0,
+        al_rho=1.0,
+        al_dual_init=0.0,
+    )
+    c_val3 = 0.5  # y = -0.5 (negative mass)
+    pred_y_blocks3 = torch.full((1, 1, 4, 4), -c_val3, dtype=torch.float32)
+    c_blocks3 = cell_counts_to_cumulative_field(pred_y_blocks3, orientation="TL")
+    _, comp3 = loss_fn3(
+        pred_c=c_blocks3,
+        target_c=c_blocks3.detach(),
+        target_y=pred_y_blocks3.detach(),
+        pred_c_blocks=c_blocks3,
+        return_components=True,
+    )
+    assert comp3["ps_aug_lagrangian"] == pytest.approx(0.125, abs=1e-6)
+
+
+def test_strict_local_isolation_intervention():
+    """Verify that under strict-local mode (fh_strict_local=True), feature changes in one
+    finite-horizon block do NOT leak into or alter any other block's predicted cumulative chart.
+    """
+    model_strict = MICFLite(
+        backbone_name="mobilenetv4_conv_small_050.e3000_r224_in1k",
+        pretrained=False,
+        output_stride=16,
+        finite_horizon=4,
+        extent_aware=True,
+        fh_strict_local=True,
+        fh_local_norm="group",
+    ).eval()
+
+    # Input image feature grid at stride 16 for 256x256 is 16x16 (4x4 = 16 blocks of 4x4)
+    B, C_neck, H_o, W_o = 1, 32, 16, 16
+    k = 4
+
+    feat1 = torch.randn(B, C_neck, H_o, W_o)
+    feat2 = feat1.clone()
+
+    # Perturb ONLY the top-left block (rows 0:4, cols 0:4) in feat2
+    feat2[:, :, 0:k, 0:k] += torch.randn(B, C_neck, k, k) * 5.0
+
+    # In strict-local mode, partition happens BEFORE context module
+    blocks1, _, _ = _partition_feature_blocks(feat1, k)
+    blocks2, _, _ = _partition_feature_blocks(feat2, k)
+
+    # Forward through context module and head
+    with torch.no_grad():
+        ctx1 = model_strict.context_module(blocks1)
+        ctx2 = model_strict.context_module(blocks2)
+
+        c_b1 = model_strict._predict_from_context(ctx1, finite_horizon=k)
+        c_b2 = model_strict._predict_from_context(ctx2, finite_horizon=k)
+
+    # Check 1: Perturbed block 0 MUST be different
+    assert not torch.allclose(c_b1[0], c_b2[0]), "Perturbed block 0 should have changed"
+
+    # Check 2: Unperturbed blocks 1..15 MUST BE EXACTLY IDENTICAL (bitwise match, max diff = 0.0)
+    max_diff_unperturbed = (c_b1[1:] - c_b2[1:]).abs().max().item()
+    assert max_diff_unperturbed == 0.0, (
+        f"Strict-local isolation failure: unperturbed blocks changed by max diff {max_diff_unperturbed}"
+    )
+

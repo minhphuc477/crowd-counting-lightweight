@@ -22,6 +22,7 @@ import csv
 import json
 import math
 import os
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,10 @@ from typing import Any
 import numpy as np
 import torch
 import yaml
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from hpc.models.micf_lite import MICFLite
 from hpc.data.sha import ShanghaiTechDataset
@@ -57,11 +62,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--reference-scale", type=float, default=1.0)
     p.add_argument("--fh-multipliers", nargs="+", type=float, default=[0.5, 1.0, 2.0, 4.0])
     p.add_argument("--fixed-sizes", nargs="+", type=float, default=[32.0, 64.0, 128.0, 256.0])
-    p.add_argument("--regions-per-size", type=int, default=32)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--device", type=str, default="cpu")
-    p.add_argument("--max-samples", type=int, default=None)
-    p.add_argument("--output-dir", type=str, default="runs/pilot_micf/b8_k4/eval_boundary_mechanism")
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory to save audit outputs. Default: <checkpoint_dir>/eval_boundary_mechanism",
+    )
+    p.add_argument(
+        "--allow-non-s16-k4",
+        "--allow-non-b8",
+        dest="allow_non_s16_k4",
+        action="store_true",
+        help="Disable the strict stride16/K4 model identity check.",
+    )
     return p.parse_args()
 
 
@@ -350,12 +363,27 @@ def sample_conditioned_fh_rects(
 def main() -> None:
     args = parse_args()
     device = torch.device(args.device)
-    out_dir = Path(args.output_dir)
+    if args.output_dir is not None:
+        out_dir = Path(args.output_dir)
+    else:
+        out_dir = Path(args.checkpoint).resolve().parent / "eval_boundary_mechanism"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint = safe_torch_load(args.checkpoint, map_location="cpu")
     cfg = load_config(checkpoint, args.config)
+    m_id = cfg.get("experiment", {}).get("model_id", "MICF")
     model = build_model_from_config(cfg, checkpoint["state_dict"], device=device)
+
+    stride = int(model.output_stride)
+    fh = int(model.finite_horizon) if model.finite_horizon is not None else None
+
+    if not args.allow_non_s16_k4:
+        if model.head_type != "cumulative":
+            raise RuntimeError(f"Expected cumulative head, got {model.head_type}")
+        if stride != 16:
+            raise RuntimeError(f"Expected output_stride=16, got {stride}")
+        if fh is None or fh != 4:
+            raise RuntimeError(f"Expected finite_horizon=4, got {fh}")
 
     dataset = build_dataset(cfg, root_override=args.dataset_root, part_override=args.part, split=args.split)
     n_total = len(dataset) if args.max_samples is None else min(len(dataset), int(args.max_samples))
@@ -363,13 +391,12 @@ def main() -> None:
     scales = [float(s) for s in args.scales]
     fh_mults = [float(m) for m in args.fh_multipliers]
     fixed_sizes = [float(sz) for sz in args.fixed_sizes]
-    stride = int(model.output_stride)
-    fh = int(model.finite_horizon)
     fh_span_scaled_px = stride * fh  # 16 * 4 = 64
 
     print("=" * 80)
     print("FINITE HORIZON BOUNDARY MECHANISM AUDIT")
-    print(f"Model: B8 (output_stride={stride}, finite_horizon={fh}, block_span={fh_span_scaled_px}px)")
+    print(f"Model: {m_id} (output_stride={stride}, finite_horizon={fh}, block_span={fh_span_scaled_px}px)")
+    print(f"Output Dir: {out_dir}")
     print(f"Images to evaluate: {n_total}")
     print(f"Scales: {scales}")
     print(f"FH Multipliers: {fh_mults} x ({fh_span_scaled_px}px / scale)")
@@ -798,8 +825,22 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(cond_summary)
 
+    manifest = {
+        "model_id": m_id,
+        "checkpoint": str(args.checkpoint),
+        "output_dir": str(out_dir),
+        "stride": stride,
+        "finite_horizon": fh,
+        "fh_strict_local": getattr(model, "fh_strict_local", False),
+        "fh_local_norm": getattr(model, "fh_local_norm", None),
+        "scales": scales,
+        "n_images": n_total,
+    }
+    with open(out_dir / "boundary_mechanism_manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
     print("\n" + "=" * 100)
-    print("Summary CSVs successfully written to:", out_dir)
+    print("Summary CSVs and manifest successfully written to:", out_dir)
     print("=" * 100)
 
 

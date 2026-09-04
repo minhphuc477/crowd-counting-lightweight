@@ -53,7 +53,23 @@ from hpc.losses.micf import (
     discrete_mixed_difference,
     points_to_count_map,
 )
-from hpc.metrics.counting import count_metric_summary
+from hpc.metrics.counting import (
+    benchmark_count_summary,
+    count_metric_summary,
+    diagnostic_count_summary,
+)
+from hpc.metrics.decomposition import (
+    direct_tiled_discrepancy,
+)
+from hpc.metrics.game import (
+    aggregate_game,
+    game_errors_one_image,
+)
+from hpc.metrics.micf_validity import (
+    ValidityRow,
+    aggregate_validity,
+    recovered_measure_validity,
+)
 from hpc.models.micf_lite import (
     MICFLite,
     compose_tiled_cumulative_field,
@@ -610,17 +626,6 @@ def window_metric_summary(
             "empty_window_mae": empty_mae,
             "empty_window_mean_prediction": empty_mean_pred,
             "empty_window_fraction": float(empty.mean()),
-            # Backward-compatible aliases for PMAE/PRMSE
-            "pmae": stats["mae"],
-            "prmse": stats["rmse"],
-            "pmae_micro": stats["mae"],
-            "prmse_micro": stats["rmse"],
-            "pmae_macro": wmae_macro,
-            "prmse_macro": wrmse_macro,
-            "full_window_pmae": full_wmae,
-            "full_window_prmse": full_wrmse,
-            "edge_window_pmae": edge_wmae,
-            "edge_window_prmse": edge_wrmse,
         }
     )
 
@@ -642,10 +647,11 @@ def measure_validity_metrics(
     y = y_pred.float()
 
     negative_raw = (-y).clamp_min(0.0)
+    positive_raw = y.clamp_min(0.0)
     negative_tau = (-y - tau).clamp_min(0.0)
 
     neg_total = float(negative_raw.sum().item())
-    abs_total = float(y.abs().sum().item())
+    pos_total = float(positive_raw.sum().item())
 
     neg_cells_raw = int((y < 0.0).sum().item())
     neg_cells_tau = int((y < -tau).sum().item())
@@ -660,13 +666,13 @@ def measure_validity_metrics(
         "violation_rate_tau": vr_tau,
         "violation_magnitude": float(negative_raw.mean().item()),
         "violation_magnitude_tau": float(negative_tau.mean().item()),
-        "negative_mass_ratio": float(neg_total / (abs_total + eps)),
+        "negative_mass_ratio": float(neg_total / max(pos_total, 1e-12)),
         "negative_mass_total": neg_total,
+        "positive_mass_total": pos_total,
         "neg_cell_count": neg_cells_raw,
         "neg_cell_count_raw": neg_cells_raw,
         "neg_cell_count_tau": neg_cells_tau,
         "total_cells": total_cells,
-        "abs_mass_total": abs_total,
     }
 
 
@@ -686,12 +692,12 @@ def aggregate_validity_metrics(
     total_neg_cells_tau = sum(int(r.get("neg_cell_count_tau", 0)) for r in rows)
     total_cells = sum(int(r["total_cells"]) for r in rows)
     total_neg_mass = sum(float(r["negative_mass_total"]) for r in rows)
-    total_abs_mass = sum(float(r["abs_mass_total"]) for r in rows)
+    total_pos_mass = sum(float(r.get("positive_mass_total", 0.0)) for r in rows)
 
     micro_vr_raw = float(total_neg_cells_raw / max(total_cells, 1))
     micro_vr_tau = float(total_neg_cells_tau / max(total_cells, 1))
     micro_vm = float(total_neg_mass / max(total_cells, 1))
-    micro_nmr = float(total_neg_mass / (total_abs_mass + eps))
+    micro_nmr = float(total_neg_mass / max(total_pos_mass, 1e-12))
 
     return {
         "macro_violation_rate": macro_vr_raw,
@@ -705,6 +711,7 @@ def aggregate_validity_metrics(
         "micro_violation_magnitude": micro_vm,
         "micro_negative_mass_ratio": micro_nmr,
         "negative_mass_total": float(total_neg_mass),
+        "positive_mass_total": float(total_pos_mass),
         # Backward-compatibility aliases
         "violation_rate": macro_vr_raw,
         "violation_magnitude": macro_vm,
@@ -1135,6 +1142,15 @@ def main() -> None:
     controlled_tiled_predictions: list[float] = []
     full_gt_counts: list[float] = []
 
+    direct_validity_rows: list[ValidityRow] = []
+    controlled_validity_rows: list[ValidityRow] = []
+    practical_validity_rows: list[ValidityRow] = []
+
+    direct_game_rows: list[dict[int, float]] = []
+    per_image_canonical_rows: list[dict[str, Any]] = []
+
+    max_conservation_error: float = 0.0
+
     all_window_rows: list[dict[str, Any]] = []
     all_window_rows_controlled: list[dict[str, Any]] = []
     per_image_rows: list[dict[str, Any]] = []
@@ -1147,8 +1163,8 @@ def main() -> None:
     direct_game_stride16_by_level: dict[int, list[float]] = {int(l): [] for l in args.game_levels}
     tiled_game_stride16_by_level: dict[int, list[float]] = {int(l): [] for l in args.game_levels}
 
-    direct_validity_rows: list[dict[str, Any]] = []
-    tiled_validity_rows: list[dict[str, Any]] = []
+    direct_legacy_validity_rows: list[dict[str, Any]] = []
+    tiled_legacy_validity_rows: list[dict[str, Any]] = []
 
     direct_repr_rows: list[dict[str, float]] = []
     tiled_repr_rows: list[dict[str, float]] = []
@@ -1171,11 +1187,28 @@ def main() -> None:
         stride = int(model.output_stride)
 
         raw_points = as_numpy_points(sample["gt_points"])
-        points_inside = in_bounds_points(raw_points, height=H, width=W)
-
         gt_count = float(sample["gt_count"].item())
+
+        # Clamp points to valid continuous image domain [0, W - 1e-4] x [0, H - 1e-4]
+        # so border-annotated heads are integrated into boundary cells and GAME(0) exactly preserves official gt_count
+        points_in_bounds = np.empty_like(raw_points)
+        if len(raw_points) > 0:
+            points_in_bounds[:, 0] = np.clip(raw_points[:, 0], 0.0, float(W) - 1e-4)
+            points_in_bounds[:, 1] = np.clip(raw_points[:, 1], 0.0, float(H) - 1e-4)
+            out_of_bounds_count = float(
+                (
+                    (raw_points[:, 0] < 0.0)
+                    | (raw_points[:, 0] >= float(W))
+                    | (raw_points[:, 1] < 0.0)
+                    | (raw_points[:, 1] >= float(H))
+                ).sum()
+            )
+        else:
+            out_of_bounds_count = 0.0
+
+        points_inside = points_in_bounds
         gt_in_bounds = float(len(points_inside))
-        gt_out_of_bounds = gt_count - gt_in_bounds
+        gt_out_of_bounds = out_of_bounds_count
 
         # ---------------------------------------------------------
         # Full-Direct
@@ -1188,6 +1221,19 @@ def main() -> None:
         if model.head_type in {"cumulative", "integrated_local"}:
             c_direct = direct_field.float()
             y_direct = discrete_mixed_difference(c_direct)
+
+            count_from_c = float(c_direct[..., -1, -1].reshape(-1)[0].item())
+            count_from_y = float(y_direct.sum().item())
+            abs_cons_error = abs(count_from_c - count_from_y)
+            if abs_cons_error > max_conservation_error:
+                max_conservation_error = abs_cons_error
+            cons_tol = 1e-4 * max(1.0, abs(count_from_c))
+            if abs_cons_error > cons_tol:
+                raise RuntimeError(
+                    "Cumulative/measure conservation failed: "
+                    f"C[-1,-1]={count_from_c:.8f}, sum(Y)={count_from_y:.8f}, "
+                    f"error={abs_cons_error:.8f}, tol={cons_tol:.8f}"
+                )
         else:
             y_direct = direct_field.float()
             c_direct = cell_counts_to_cumulative_field(y_direct, orientation="TL")
@@ -1214,12 +1260,14 @@ def main() -> None:
         if args.controlled_halo == args.halo:
             pred_ctrl_tiled_count = pred_tiled_count
             ctrl_window_rows = window_rows
+            c_ctrl_tiled = c_tiled
+            y_ctrl_tiled = y_tiled
         else:
             (
                 pred_ctrl_tiled_count,
                 ctrl_window_rows,
-                _ctrl_c,
-                _ctrl_y,
+                c_ctrl_tiled,
+                y_ctrl_tiled,
             ) = predict_windows_and_tiled(
                 model=model,
                 image=image,
@@ -1335,7 +1383,53 @@ def main() -> None:
             tiled_game_stride16_by_level[l_int].append(tiled_game_stride16[l_int])
 
         # ---------------------------------------------------------
-        # MICF validity / representation
+        # Canonical validity & GAME per image
+        # ---------------------------------------------------------
+        valid_row_direct = recovered_measure_validity(y_direct, tau=1e-6)
+        valid_row_ctrl = recovered_measure_validity(y_ctrl_tiled, tau=1e-6)
+        valid_row_prac = recovered_measure_validity(y_tiled, tau=1e-6)
+
+        direct_validity_rows.append(valid_row_direct)
+        controlled_validity_rows.append(valid_row_ctrl)
+        practical_validity_rows.append(valid_row_prac)
+
+        game_row_direct = game_errors_one_image(
+            y_direct,
+            points_inside,
+            image_h=H,
+            image_w=W,
+            stride=stride,
+            levels=args.game_levels,
+        )
+        direct_game_rows.append(game_row_direct)
+
+        canon_row: dict[str, Any] = {
+            "image_index": image_index,
+            "image_name": Path(sample["img_path"]).name,
+            "height": H,
+            "width": W,
+            "gt_count": gt_count,
+            "direct_pred_count": pred_direct_count,
+            "controlled_tiled_pred_count": pred_ctrl_tiled_count,
+            "practical_tiled_pred_count": pred_tiled_count,
+            "direct_abs_error": abs(pred_direct_count - gt_count),
+            "controlled_tiled_abs_error": abs(pred_ctrl_tiled_count - gt_count),
+            "practical_tiled_abs_error": abs(pred_tiled_count - gt_count),
+            "direct_vs_controlled_abs": abs(pred_direct_count - pred_ctrl_tiled_count),
+            "direct_vs_practical_abs": abs(pred_direct_count - pred_tiled_count),
+            "direct_vr_tau": valid_row_direct.vr_tau,
+            "direct_positive_variation": valid_row_direct.positive_variation,
+            "direct_negative_variation": valid_row_direct.negative_variation,
+            "direct_nvr": valid_row_direct.nvr,
+            "direct_violating_cells": valid_row_direct.violating_cells,
+            "direct_total_cells": valid_row_direct.total_cells,
+        }
+        for lvl, err in game_row_direct.items():
+            canon_row[f"direct_game_{lvl}"] = err
+        per_image_canonical_rows.append(canon_row)
+
+        # ---------------------------------------------------------
+        # Legacy validity & representation diagnostics
         # ---------------------------------------------------------
         direct_valid = measure_validity_metrics(y_direct)
         tiled_valid = measure_validity_metrics(y_tiled)
@@ -1347,13 +1441,13 @@ def main() -> None:
             c_tiled, y_tiled, gt_c, gt_y, gt_in_bounds
         )
 
-        direct_validity_rows.append(direct_valid)
-        tiled_validity_rows.append(tiled_valid)
+        direct_legacy_validity_rows.append(direct_valid)
+        tiled_legacy_validity_rows.append(tiled_valid)
         direct_repr_rows.append(direct_repr)
         tiled_repr_rows.append(tiled_repr)
 
         # ---------------------------------------------------------
-        # Per-image row
+        # Per-image legacy row
         # ---------------------------------------------------------
         row_dict: dict[str, Any] = {
             "image_index": image_index,
@@ -1416,252 +1510,154 @@ def main() -> None:
         )
 
     # -----------------------------------------------------------------
-    # Aggregate
+    # Canonical Aggregation
     # -----------------------------------------------------------------
-    direct_stats = count_metric_summary(direct_predictions, full_gt_counts, eps=1.0)
-    tiled_stats = count_metric_summary(tiled_predictions, full_gt_counts, eps=1.0)
-    tiled_ctrl_stats = count_metric_summary(controlled_tiled_predictions, full_gt_counts, eps=1.0)
-    # Practical (halo=args.halo) window metrics — may be contaminated by halo context
+    gt_arr = np.asarray(full_gt_counts, dtype=np.float64)
+    direct_arr = np.asarray(direct_predictions, dtype=np.float64)
+    controlled_arr = np.asarray(controlled_tiled_predictions, dtype=np.float64)
+    practical_arr = np.asarray(tiled_predictions, dtype=np.float64)
+
+    benchmark_direct = benchmark_count_summary(direct_arr, gt_arr)
+    benchmark_controlled = benchmark_count_summary(controlled_arr, gt_arr)
+    benchmark_practical = benchmark_count_summary(practical_arr, gt_arr)
+
+    validity_direct = aggregate_validity(direct_validity_rows)
+    validity_controlled = aggregate_validity(controlled_validity_rows)
+    validity_practical = aggregate_validity(practical_validity_rows)
+
+    controlled_decomposition = direct_tiled_discrepancy(direct_arr, controlled_arr, gt_arr)
+    practical_decomposition = direct_tiled_discrepancy(direct_arr, practical_arr, gt_arr)
+
+    game_direct = aggregate_game(direct_game_rows)
+
+    # Gate E check: GAME(0) == MAE within 1e-4 * max(1, MAE)
+    if 0 in args.game_levels and len(direct_game_rows) > 0:
+        mae = float(benchmark_direct["mae"])
+        game0 = float(game_direct.get("game_0", float("nan")))
+        tol = 1e-4 * max(1.0, abs(mae))
+        if abs(game0 - mae) > tol:
+            raise RuntimeError(
+                "GAME(0) invariant failed: "
+                f"GAME0={game0:.8f}, MAE={mae:.8f}, tol={tol:.8f}"
+            )
+
     window_stats = window_metric_summary(all_window_rows)
-    # Controlled (halo=args.controlled_halo) window metrics — clean training-scale windows
     window_stats_controlled = window_metric_summary(all_window_rows_controlled)
 
-    direct_validity_summary = aggregate_validity_metrics(direct_validity_rows)
-    tiled_validity_summary = aggregate_validity_metrics(tiled_validity_rows)
-
-    summary: dict[str, Any] = {
-        "checkpoint": str(checkpoint_path.resolve()),
-        "checkpoint_epoch": checkpoint.get("epoch"),
-        "checkpoint_best_mae_stored": checkpoint.get("best_mae"),
-        "model_head_type": model.head_type,
-        "model_output_stride": model.output_stride,
-        "model_finite_horizon": model.finite_horizon,
-        "dataset_split": args.split,
-        "num_images": n_eval,
-        "num_windows": len(all_window_rows),
-        "num_windows_controlled": len(all_window_rows_controlled),
-        "tile_size": args.tile_size,
-        "halo": args.halo,
-        "controlled_halo": args.controlled_halo,
-        "game_levels": [int(x) for x in args.game_levels],
-        # window_controlled: clean halo=0 (no extent distortion from border cropping)
-        "window_controlled": window_stats_controlled,
-        # window_practical: halo=args.halo (same context as model sees at inference boundary)
-        "window": window_stats,
-        "full_tiled": tiled_stats,
-        "full_tiled_practical": tiled_stats,
-        "full_tiled_controlled": tiled_ctrl_stats,
-        "full_direct": direct_stats,
-
-        "direct_minus_tiled": {
-            "mae_gap": direct_stats["mae"] - tiled_stats["mae"],
-            "rmse_gap": direct_stats["rmse"] - tiled_stats["rmse"],
-            "nae_gap": direct_stats["nae"] - tiled_stats["nae"],
-            "sre_gap": direct_stats["sre"] - tiled_stats["sre"],
+    canonical_summary: dict[str, Any] = {
+        "benchmark": {
+            "direct": benchmark_direct,
+            "tiled_controlled": benchmark_controlled,
+            "tiled_practical": benchmark_practical,
         },
-        "direct_minus_tiled_practical": {
-            "mae_gap": direct_stats["mae"] - tiled_stats["mae"],
-            "rmse_gap": direct_stats["rmse"] - tiled_stats["rmse"],
-            "nae_gap": direct_stats["nae"] - tiled_stats["nae"],
-            "sre_gap": direct_stats["sre"] - tiled_stats["sre"],
+        "method_validity": {
+            "direct": validity_direct,
+            "tiled_controlled": validity_controlled,
+            "tiled_practical": validity_practical,
         },
-        "direct_minus_tiled_controlled": {
-            "mae_gap": direct_stats["mae"] - tiled_ctrl_stats["mae"],
-            "rmse_gap": direct_stats["rmse"] - tiled_ctrl_stats["rmse"],
-            "nae_gap": direct_stats["nae"] - tiled_ctrl_stats["nae"],
-            "sre_gap": direct_stats["sre"] - tiled_ctrl_stats["sre"],
+        "decomposition": {
+            "controlled": controlled_decomposition,
+            "practical": practical_decomposition,
         },
-        "halo_effect_practical_minus_controlled": {
-            "mae_gap": tiled_stats["mae"] - tiled_ctrl_stats["mae"],
-            "rmse_gap": tiled_stats["rmse"] - tiled_ctrl_stats["rmse"],
-            "nae_gap": tiled_stats["nae"] - tiled_ctrl_stats["nae"],
-            "sre_gap": tiled_stats["sre"] - tiled_ctrl_stats["sre"],
+        "spatial_optional": {
+            "direct": game_direct,
         },
-        "cancellation": {
-            "mean": finite_mean(cancellation_ratios),
-            "median": finite_percentile(cancellation_ratios, 50),
-            "p90": finite_percentile(cancellation_ratios, 90),
+        "sanity": {
+            "max_conservation_error": float(max_conservation_error),
         },
-        "game_pixel_direct": {
-            f"L{level}": finite_mean(values)
-            for level, values in direct_game_pixel_by_level.items()
+        "protocol": {
+            "split": args.split,
+            "tile_size": args.tile_size,
+            "controlled_halo": args.controlled_halo,
+            "practical_halo": args.halo,
+            "direct_pad_multiple": args.direct_pad_multiple,
+            "game_levels": [int(x) for x in args.game_levels],
+            "validity_tau": 1e-6,
+            "nvr_eps": 1e-12,
+            "benchmark_primary_inference": "full_image_direct",
         },
-        "game_pixel_tiled": {
-            f"L{level}": finite_mean(values)
-            for level, values in tiled_game_pixel_by_level.items()
-        },
-        "game_stride16_direct": {
-            f"L{level}": finite_mean(values)
-            for level, values in direct_game_stride16_by_level.items()
-        },
-        "game_stride16_tiled": {
-            f"L{level}": finite_mean(values)
-            for level, values in tiled_game_stride16_by_level.items()
-        },
-        "micf_validity_direct": direct_validity_summary,
-        "micf_validity_tiled": tiled_validity_summary,
-        "representation_direct": {
-            key: finite_mean(row[key] for row in direct_repr_rows)
-            for key in (direct_repr_rows[0].keys() if direct_repr_rows else [])
-        },
-        "representation_tiled": {
-            key: finite_mean(row[key] for row in tiled_repr_rows)
-            for key in (tiled_repr_rows[0].keys() if tiled_repr_rows else [])
+        "legacy_debug": {
+            "checkpoint": str(checkpoint_path.resolve()),
+            "checkpoint_epoch": checkpoint.get("epoch"),
+            "checkpoint_best_mae_stored": checkpoint.get("best_mae"),
+            "model_head_type": model.head_type,
+            "model_output_stride": model.output_stride,
+            "model_finite_horizon": model.finite_horizon,
+            "direct_diagnostics": diagnostic_count_summary(direct_arr, gt_arr),
+            "controlled_diagnostics": diagnostic_count_summary(controlled_arr, gt_arr),
+            "practical_diagnostics": diagnostic_count_summary(practical_arr, gt_arr),
+            "window_controlled": window_stats_controlled,
+            "window_practical": window_stats,
+            "cancellation": {
+                "mean": finite_mean(cancellation_ratios),
+                "median": finite_percentile(cancellation_ratios, 50),
+                "p90": finite_percentile(cancellation_ratios, 90),
+            },
+            "representation_direct": {
+                key: finite_mean(row[key] for row in direct_repr_rows)
+                for key in (direct_repr_rows[0].keys() if direct_repr_rows else [])
+            },
+            "representation_tiled": {
+                key: finite_mean(row[key] for row in tiled_repr_rows)
+                for key in (tiled_repr_rows[0].keys() if tiled_repr_rows else [])
+            },
         },
     }
 
-    # Backward-compatible alias for game_tiled and game_direct pointing to pixel GAME
-    summary["game_direct"] = summary["game_pixel_direct"]
-    summary["game_tiled"] = summary["game_pixel_tiled"]
-
     # -----------------------------------------------------------------
-    # Save
+    # Save Outputs
     # -----------------------------------------------------------------
-    summary_path = output_dir / "comprehensive_summary.json"
-    image_csv = output_dir / "comprehensive_per_image.csv"
+    summary_path = output_dir / "summary.json"
+    legacy_summary_path = output_dir / "comprehensive_summary.json"
+    canonical_image_csv = output_dir / "per_image_canonical.csv"
+    legacy_image_csv = output_dir / "comprehensive_per_image.csv"
     window_csv = output_dir / "comprehensive_per_window.csv"
     window_ctrl_csv = output_dir / "comprehensive_per_window_controlled.csv"
 
     with summary_path.open("w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2, allow_nan=True)
+        json.dump(canonical_summary, f, indent=2, allow_nan=True)
 
-    write_csv(image_csv, per_image_rows)
+    with legacy_summary_path.open("w", encoding="utf-8") as f:
+        json.dump(canonical_summary, f, indent=2, allow_nan=True)
+
+    write_csv(canonical_image_csv, per_image_canonical_rows)
+    write_csv(legacy_image_csv, per_image_rows)
     write_csv(window_csv, all_window_rows)
     write_csv(window_ctrl_csv, all_window_rows_controlled)
 
     # -----------------------------------------------------------------
-    # Console report
+    # Canonical Console Report (Section 25)
     # -----------------------------------------------------------------
     print()
-    print("=" * 120)
-    print("STANDARD COUNT METRICS")
-    print("=" * 120)
-    win_ctrl_label = f"Win(ctrl={args.controlled_halo})"
-    win_prac_label = f"Win(halo={args.halo})"
-    ctrl_tiled_label = f"Tiled(ctrl={args.controlled_halo})"
-    prac_label = f"Tiled(halo={args.halo})"
-    print(f"{'Metric':<18}{win_ctrl_label:>18}{win_prac_label:>18}{ctrl_tiled_label:>20}{prac_label:>18}{'Direct':>14}")
-    print("-" * 106)
-    print(f"{'MAE/PMAE':<18}"
-          f"{window_stats_controlled.get('window_mae_micro', float('nan')):>18.4f}"
-          f"{window_stats.get('window_mae_micro', float('nan')):>18.4f}"
-          f"{tiled_ctrl_stats['mae']:>20.4f}"
-          f"{tiled_stats['mae']:>18.4f}"
-          f"{direct_stats['mae']:>14.4f}")
-    print(f"{'RMSE/PRMSE':<18}"
-          f"{window_stats_controlled.get('window_rmse_micro', float('nan')):>18.4f}"
-          f"{window_stats.get('window_rmse_micro', float('nan')):>18.4f}"
-          f"{tiled_ctrl_stats['rmse']:>20.4f}"
-          f"{tiled_stats['rmse']:>18.4f}"
-          f"{direct_stats['rmse']:>14.4f}")
-    print(f"{'NAE':<18}"
-          f"{window_stats_controlled.get('nae_nonzero', float('nan')):>18.4f}"
-          f"{window_stats.get('nae_nonzero', float('nan')):>18.4f}"
-          f"{tiled_ctrl_stats['nae']:>20.4f}"
-          f"{tiled_stats['nae']:>18.4f}"
-          f"{direct_stats['nae']:>14.4f}")
-    print(f"{'SRE':<18}{'n/a':>18}{'n/a':>18}"
-          f"{tiled_ctrl_stats['sre']:>20.4f}"
-          f"{tiled_stats['sre']:>18.4f}"
-          f"{direct_stats['sre']:>14.4f}")
-    print(f"{'Signed Bias':<18}"
-          f"{window_stats_controlled.get('signed_bias', float('nan')):>18.4f}"
-          f"{window_stats.get('signed_bias', float('nan')):>18.4f}"
-          f"{tiled_ctrl_stats['signed_bias']:>20.4f}"
-          f"{tiled_stats['signed_bias']:>18.4f}"
-          f"{direct_stats['signed_bias']:>14.4f}")
-
+    print("=" * 80)
+    print("CANONICAL CROWD-COUNTING EVALUATION")
+    print("=" * 80)
     print()
-    print("=" * 120)
-    print("TAIL / FAILURE METRICS")
-    print("=" * 120)
-    print(f"{'Metric':<18}{win_ctrl_label:>18}{win_prac_label:>18}{ctrl_tiled_label:>20}{prac_label:>18}{'Direct':>14}")
-    print("-" * 106)
-    for key, label in (("median_ae", "Median AE"), ("p90_ae", "P90 AE"), ("p95_ae", "P95 AE"), ("max_ae", "Max AE")):
-        print(f"{label:<18}"
-              f"{window_stats_controlled.get(key, float('nan')):>18.4f}"
-              f"{window_stats.get(key, float('nan')):>18.4f}"
-              f"{tiled_ctrl_stats[key]:>20.4f}"
-              f"{tiled_stats[key]:>18.4f}"
-              f"{direct_stats[key]:>14.4f}")
-
+    print("Benchmark / Full-Image Direct")
+    print(f"MAE   : {benchmark_direct['mae']:.4f}")
+    print(f"RMSE  : {benchmark_direct['rmse']:.4f}")
+    print(f"NAE   : {benchmark_direct['nae']:.4f}")
     print()
-    print("=" * 96)
-    print(f"LOCAL / PATCH DIAGNOSTICS  [ctrl=halo{args.controlled_halo} | prac=halo{args.halo}]")
-    print("=" * 96)
-    wsc = window_stats_controlled
-    wsp = window_stats
-    print(f"Window PMAE micro  ctrl={wsc.get('pmae_micro', float('nan')):.4f}  prac={wsp.get('pmae_micro', float('nan')):.4f}")
-    print(f"Window PMAE macro  ctrl={wsc.get('pmae_macro', float('nan')):.4f}  prac={wsp.get('pmae_macro', float('nan')):.4f}")
-    print(f"Window PRMSE micro ctrl={wsc.get('prmse_micro', float('nan')):.4f}  prac={wsp.get('prmse_micro', float('nan')):.4f}")
-    print(f"Window PRMSE macro ctrl={wsc.get('prmse_macro', float('nan')):.4f}  prac={wsp.get('prmse_macro', float('nan')):.4f}")
-    print(f"Full 256×256 PMAE  ctrl={wsc.get('full_window_pmae', float('nan')):.4f} (N={wsc.get('full_window_count')})  prac={wsp.get('full_window_pmae', float('nan')):.4f} (N={wsp.get('full_window_count')})")
-    print(f"Edge window PMAE   ctrl={wsc.get('edge_window_pmae', float('nan')):.4f} (N={wsc.get('edge_window_count')})  prac={wsp.get('edge_window_pmae', float('nan')):.4f} (N={wsp.get('edge_window_count')})")
-    print(f"Window NAE (GT>0)  ctrl={wsc.get('nae_nonzero', float('nan')):.4f}  prac={wsp.get('nae_nonzero', float('nan')):.4f}")
-    print(f"Non-empty Win MAE  ctrl={wsc.get('nonempty_window_mae', float('nan')):.4f}  prac={wsp.get('nonempty_window_mae', float('nan')):.4f}")
-    print(f"Empty Win MAE      ctrl={wsc.get('empty_window_mae', float('nan')):.4f}  prac={wsp.get('empty_window_mae', float('nan')):.4f}")
-    print(f"Empty Win Frac     ctrl={100*wsc.get('empty_window_fraction', float('nan')):.2f}%  prac={100*wsp.get('empty_window_fraction', float('nan')):.2f}%")
-    print(f"Mean Cancel Ratio  : {100*summary['cancellation']['mean']:.2f}%")
-
-
+    print("PS-FH Cumulative Validity / Direct")
+    print(f"VR_tau micro : {validity_direct['vr_tau_micro'] * 100:.4f}%")
+    print(f"NVR micro    : {validity_direct['nvr_micro'] * 100:.4f}%")
     print()
-    print("=" * 96)
-    print("CANONICAL PIXEL-SPACE GAME (Continuous Pixel Bounding-Box Benchmark)")
-    print("=" * 96)
-    for level in args.game_levels:
-        l_int = int(level)
-        print(f"GAME_pixel({l_int})  Tiled={summary['game_pixel_tiled'][f'L{l_int}']:.4f} | Direct={summary['game_pixel_direct'][f'L{l_int}']:.4f}")
-
+    print("Inference Decomposition")
+    print(f"Direct vs Controlled | normalized discrepancy : {controlled_decomposition['mean_normalized_prediction_discrepancy']:.6f}")
+    print(f"Direct vs Practical  | normalized discrepancy : {practical_decomposition['mean_normalized_prediction_discrepancy']:.6f}")
     print()
-    print("=" * 96)
-    print("DIAGNOSTIC STRIDE-16 GAME (Measure Raster Cell Diagnostic)")
-    print("=" * 96)
-    for level in args.game_levels:
-        l_int = int(level)
-        print(f"GAME@stride16({l_int}) Tiled={summary['game_stride16_tiled'][f'L{l_int}']:.4f} | Direct={summary['game_stride16_direct'][f'L{l_int}']:.4f}")
-
+    print("Optional Spatial")
+    for lvl in sorted(args.game_levels):
+        val = game_direct.get(f"game_{lvl}", float("nan"))
+        print(f"GAME({lvl}): {val:.4f}")
     print()
-    print("=" * 96)
-    print("MICF VALIDITY (Macro vs Micro Aggregation)")
-    print("=" * 96)
-    vd = summary["micf_validity_direct"]
-    vt = summary["micf_validity_tiled"]
-    print(f"Macro Violation Rate         Tiled={vt['macro_violation_rate']*100:.2f}% | Direct={vd['macro_violation_rate']*100:.2f}%")
-    print(f"Micro Violation Rate         Tiled={vt['micro_violation_rate']*100:.2f}% | Direct={vd['micro_violation_rate']*100:.2f}%")
-    print(f"Macro Violation Magnitude    Tiled={vt['macro_violation_magnitude']:.6f} | Direct={vd['macro_violation_magnitude']:.6f}")
-    print(f"Micro Violation Magnitude    Tiled={vt['micro_violation_magnitude']:.6f} | Direct={vd['micro_violation_magnitude']:.6f}")
-    print(f"Macro Negative Mass Ratio    Tiled={vt['macro_negative_mass_ratio']*100:.2f}% | Direct={vd['macro_negative_mass_ratio']*100:.2f}%")
-    print(f"Micro Negative Mass Ratio    Tiled={vt['micro_negative_mass_ratio']*100:.2f}% | Direct={vd['micro_negative_mass_ratio']*100:.2f}%")
-    print(f"Negative Mass Total          Tiled={vt['negative_mass_total']:.4f} | Direct={vd['negative_mass_total']:.4f}")
-
-    print()
-    print("=" * 96)
-    print("REPRESENTATION DIAGNOSTICS")
-    print("=" * 96)
-    rd = summary["representation_direct"]
-    rt = summary["representation_tiled"]
-    print(f"cumulative_field_nmae        Tiled={rt.get('cumulative_field_nmae', float('nan')):.6f} | Direct={rd.get('cumulative_field_nmae', float('nan')):.6f}")
-    print(f"measure_nl1                  Tiled={rt.get('measure_nl1', float('nan')):.6f} | Direct={rd.get('measure_nl1', float('nan')):.6f}")
-    print(f"conservation_error           Tiled={rt.get('conservation_error', float('nan')):.6f} | Direct={rd.get('conservation_error', float('nan')):.6f}")
-
-    print()
-    print("=" * 96)
-    print("DIRECT - TILED GAPS & HALO SENSITIVITY")
-    print("=" * 96)
-    print("--- Direct - Practical Tiled ---")
-    for key, value in summary["direct_minus_tiled_practical"].items():
-        print(f"  {key:<28}: {value:.6f}")
-    print(f"--- Direct - Controlled Tiled (halo={args.controlled_halo}) ---")
-    for key, value in summary["direct_minus_tiled_controlled"].items():
-        print(f"  {key:<28}: {value:.6f}")
-    print("--- Halo Effect (Practical - Controlled) ---")
-    for key, value in summary["halo_effect_practical_minus_controlled"].items():
-        print(f"  {key:<28}: {value:.6f}")
-
+    print("Sanity")
+    print(f"max |C[-1,-1] - sum(Delta_xy C)| : {max_conservation_error:.8e}")
+    print("=" * 80)
     print()
     print(f"Summary    : {summary_path}")
-    print(f"Per-image  : {image_csv}")
-    print(f"Per-window : {window_csv}")
+    print(f"Per-image  : {canonical_image_csv}")
+    print()
 
 
 if __name__ == "__main__":

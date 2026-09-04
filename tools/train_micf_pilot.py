@@ -301,6 +301,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--smoke-test", action="store_true", help="Run 1-epoch smoke test on a small subset")
     parser.add_argument("--seed", type=int, default=None, help="Override random seed")
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint (.pt) to resume from")
     return parser.parse_args()
 
 
@@ -449,14 +450,47 @@ def main() -> None:
         init_scale=float(t_cfg.get("scaler_init_scale", 128.0)),
     )
 
+    start_epoch = 1
     best_mae = float("inf")
     history: List[Dict[str, Any]] = []
+    last_grad_shares: Dict[str, float] = {}
 
     is_cumulative = model.head_type in {"cumulative", "integrated_local"}
     is_ps_fh = isinstance(criterion, PSFHCMICFLoss)
+
+    if args.resume:
+        resume_path = Path(args.resume)
+        if not resume_path.is_file():
+            raise FileNotFoundError(f"Resume checkpoint not found: {resume_path}")
+        print(f"Loading checkpoint for resume from {resume_path}...", flush=True)
+        ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["state_dict"])
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        if "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
+        if is_ps_fh and "criterion_state" in ckpt:
+            criterion.load_state_dict(ckpt["criterion_state"])
+        start_epoch = int(ckpt.get("epoch", 0)) + 1
+        best_mae = float(ckpt.get("best_mae", float("inf")))
+
+        # Load existing history if available
+        hist_path = save_dir / "history.json"
+        if hist_path.is_file():
+            try:
+                with open(hist_path, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load existing history: {e}")
+        print(
+            f"Successfully resumed from epoch {ckpt.get('epoch')} -> starting epoch {start_epoch}, "
+            f"best_mae={best_mae:.2f}",
+            flush=True,
+        )
+
     print(
         f"Model: {m_cfg.get('head_type')} head | context={m_cfg.get('use_integral_context')} | "
-        f"Training {total_epochs} epochs (warmup={warmup_epochs}) | grad_clip={grad_clip}"
+        f"Training {start_epoch}..{total_epochs} epochs (warmup={warmup_epochs}) | grad_clip={grad_clip}"
     )
     print(f"Orientation balancing: hflip_prob={aug_cfg.get('flip_prob', 0.5)} (dataset) "
           f"vflip_prob={vflip_prob} (training loop)", flush=True)
@@ -464,7 +498,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 4. Training Loop
     # ------------------------------------------------------------------
-    for epoch in range(1, total_epochs + 1):
+    for epoch in range(start_epoch, total_epochs + 1):
         model.train()
         epoch_losses: List[float] = []
         epoch_ps_components: Dict[str, List[float]] = {}
@@ -560,12 +594,30 @@ def main() -> None:
                     target_y=y_target,
                     pred_c_blocks=aux["c_blocks"],
                 )
+                g_pc = float(grad_diag["grad_pc"])
+                g_sob = float(grad_diag["grad_sobolev"])
+                g_count = float(grad_diag["grad_count"])
+                g_al = float(grad_diag["grad_al"])
+                g_sum = g_pc + g_sob + g_count + g_al
+                denom = max(g_sum, 1e-12)
+                share_pc = (g_pc / denom) * 100.0
+                share_sob = (g_sob / denom) * 100.0
+                share_count = (g_count / denom) * 100.0
+                share_al = (g_al / denom) * 100.0
+                last_grad_shares = {
+                    "grad_share_pc": share_pc,
+                    "grad_share_sobolev": share_sob,
+                    "grad_share_count": share_count,
+                    "grad_share_al": share_al,
+                }
                 print(
                     f"  [Epoch {epoch:4d} Gradient Diagnostics] "
-                    f"grad_pc: {grad_diag['grad_pc']:.4e} | "
-                    f"grad_sobolev: {grad_diag['grad_sobolev']:.4e} | "
-                    f"grad_count: {grad_diag['grad_count']:.4e} | "
-                    f"grad_al: {grad_diag['grad_al']:.4e}",
+                    f"grad_pc: {g_pc:.4e} ({share_pc:.1f}%) | "
+                    f"grad_sobolev: {g_sob:.4e} ({share_sob:.1f}%) | "
+                    f"grad_count: {g_count:.4e} ({share_count:.1f}%) | "
+                    f"grad_al: {g_al:.4e} ({share_al:.1f}%) | "
+                    f"Shares: PC {share_pc:.1f}% | Sob {share_sob:.1f}% | "
+                    f"Count {share_count:.1f}% | AL {share_al:.1f}%",
                     flush=True,
                 )
 
@@ -654,8 +706,10 @@ def main() -> None:
                     "sobolev_pos_loss",
                     "sobolev_zero_loss",
                     "ps_count_loss",
+                    "ps_violation_magnitude",
                     "ps_constraint",
                     "ps_dual_lambda",
+                    "ps_dual_lambda_mean",
                     "ps_dual_lambda_max",
                     "ps_dual_lambda_terminal",
                     "ps_al_rho",
@@ -672,6 +726,8 @@ def main() -> None:
                     log_entry[k] = val_res[k]
             if "neg_mass_ratio" in val_res:
                 log_entry["negative_mass_ratio"] = val_res["neg_mass_ratio"]
+            if last_grad_shares:
+                log_entry.update(last_grad_shares)
 
             history.append(log_entry)
 

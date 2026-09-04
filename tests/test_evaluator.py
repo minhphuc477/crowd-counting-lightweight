@@ -80,12 +80,12 @@ class TestWindowMetrics:
         summary = window_metric_summary(rows)
 
         # Micro: 4 windows, errors = [0, 10, 10, 10] -> MAE = 30 / 4 = 7.5
-        assert pytest.approx(summary["pmae_micro"], abs=1e-6) == 7.5
-        assert pytest.approx(summary["pmae"], abs=1e-6) == 7.5
+        assert pytest.approx(summary["window_mae_micro"], abs=1e-6) == 7.5
+        assert pytest.approx(summary["window_mae"], abs=1e-6) == 7.5
 
         # Macro: Image 0 MAE = 0.0, Image 1 MAE = 10.0 -> Macro MAE = (0 + 10) / 2 = 5.0
-        assert pytest.approx(summary["pmae_macro"], abs=1e-6) == 5.0
-        assert summary["pmae_micro"] != summary["pmae_macro"]
+        assert pytest.approx(summary["window_mae_macro"], abs=1e-6) == 5.0
+        assert summary["window_mae_micro"] != summary["window_mae_macro"]
 
     def test_window_full_vs_edge_partition(self):
         """Full 256x256 windows vs partial boundary edge windows."""
@@ -99,9 +99,9 @@ class TestWindowMetrics:
         ]
         summary = window_metric_summary(rows)
 
-        assert pytest.approx(summary["full_window_pmae"], abs=1e-6) == 2.0
+        assert pytest.approx(summary["full_window_mae"], abs=1e-6) == 2.0
         assert summary["full_window_count"] == 2
-        assert pytest.approx(summary["edge_window_pmae"], abs=1e-6) == 7.0
+        assert pytest.approx(summary["edge_window_mae"], abs=1e-6) == 7.0
         assert summary["edge_window_count"] == 2
 
     def test_empty_vs_nonempty_windows(self):
@@ -131,32 +131,33 @@ class TestMeasureValidity:
         assert pytest.approx(metrics["violation_magnitude"], abs=1e-6) == 0.5
         # negative_mass_total = 2.0
         assert pytest.approx(metrics["negative_mass_total"], abs=1e-6) == 2.0
-        # abs_mass_total = 1 + 2 + 3 + 2 = 8.0
-        # negative_mass_ratio = 2.0 / 8.0 = 0.25
-        assert pytest.approx(metrics["negative_mass_ratio"], abs=1e-4) == 0.25
+        # positive_mass_total = 1 + 2 + 3 = 6.0
+        assert pytest.approx(metrics["positive_mass_total"], abs=1e-6) == 6.0
+        # canonical negative_mass_ratio = 2.0 / 6.0 = 0.333333...
+        assert pytest.approx(metrics["negative_mass_ratio"], abs=1e-4) == 2.0 / 6.0
 
     def test_aggregate_validity_macro_vs_micro(self):
         """Unequal cell counts across images demonstrate macro vs micro weighting."""
-        # Image 0: small (100 cells), 10 negative cells, neg_mass=5.0, abs_mass=20.0
-        # Image 1: large (900 cells), 10 negative cells, neg_mass=5.0, abs_mass=180.0
+        # Image 0: small (100 cells), 10 negative cells, neg_mass=5.0, pos_mass=15.0
+        # Image 1: large (900 cells), 10 negative cells, neg_mass=5.0, pos_mass=175.0
         rows = [
             {
                 "violation_rate": 10 / 100,  # 0.10
                 "violation_magnitude": 5.0 / 100,  # 0.05
-                "negative_mass_ratio": 5.0 / 20.0,  # 0.25
+                "negative_mass_ratio": 5.0 / 15.0,  # 0.3333...
                 "neg_cell_count": 10,
                 "total_cells": 100,
                 "negative_mass_total": 5.0,
-                "abs_mass_total": 20.0,
+                "positive_mass_total": 15.0,
             },
             {
                 "violation_rate": 10 / 900,  # 0.011111...
                 "violation_magnitude": 5.0 / 900,  # 0.005555...
-                "negative_mass_ratio": 5.0 / 180.0,  # 0.027777...
+                "negative_mass_ratio": 5.0 / 175.0,  # 0.028571...
                 "neg_cell_count": 10,
                 "total_cells": 900,
                 "negative_mass_total": 5.0,
-                "abs_mass_total": 180.0,
+                "positive_mass_total": 175.0,
             },
         ]
         agg = aggregate_validity_metrics(rows)
@@ -168,12 +169,13 @@ class TestMeasureValidity:
         # Micro VR: (10 + 10) / (100 + 900) = 20 / 1000 = 0.02
         assert pytest.approx(agg["micro_violation_rate"], abs=1e-6) == 0.02
 
-        # Macro NMR: (0.25 + 5/180) / 2
-        expected_macro_nmr = 0.5 * (0.25 + 5.0 / 180.0)
+        # Macro NMR: (5/15 + 5/175) / 2
+        expected_macro_nmr = 0.5 * (5.0 / 15.0 + 5.0 / 175.0)
         assert pytest.approx(agg["macro_negative_mass_ratio"], abs=1e-6) == expected_macro_nmr
 
-        # Micro NMR: (5 + 5) / (20 + 180) = 10 / 200 = 0.05
-        assert pytest.approx(agg["micro_negative_mass_ratio"], abs=1e-4) == 0.05
+        # Micro NMR: (5 + 5) / (15 + 175) = 10 / 190
+        expected_micro_nmr = 10.0 / 190.0
+        assert pytest.approx(agg["micro_negative_mass_ratio"], abs=1e-4) == expected_micro_nmr
 
         assert agg["macro_violation_rate"] != agg["micro_violation_rate"]
 

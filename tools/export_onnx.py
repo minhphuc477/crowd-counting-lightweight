@@ -69,8 +69,8 @@ def export_model_to_onnx(
 
     has_checkpoint = (
         checkpoint_path is not None
-        and checkpoint_path.lower() != "none"
-        and checkpoint_path != ""
+        and checkpoint_path.lower() not in {"none", ""}
+        and not allow_random_init
     )
 
     model = build_model_from_config(cfg)
@@ -125,6 +125,8 @@ def export_model_to_onnx(
     test_shapes = [
         (1, 3, input_resolution, input_resolution),
         (2, 3, input_resolution, input_resolution),
+        (1, 3, 320, 320),
+        (1, 3, 384, 512),
     ]
 
     for shape in test_shapes:
@@ -139,9 +141,9 @@ def export_model_to_onnx(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export MICF-Lite to ONNX")
-    parser.add_argument("--config", default="configs/pilot_micf/b8.yaml")
-    parser.add_argument("--checkpoint", default="runs/pilot_micf/b8_k4/best.pt")
-    parser.add_argument("--output", default="runs/micf_b8.onnx")
+    parser.add_argument("--config", default="configs/pilot_micf/psfh_b8_k4.yaml")
+    parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--output", default="runs/micf_lite.onnx")
     parser.add_argument("--resolution", type=int, default=256)
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--allow-random-init", action="store_true")

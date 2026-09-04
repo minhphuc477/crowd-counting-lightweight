@@ -345,15 +345,20 @@ class MICFLite(nn.Module):
         )
 
         # 3. Context Decoder: StrictLocalDirectional / Directional / Axial vs Identity
-        if self.finite_horizon is not None and self.fh_strict_local:
-            if self.fh_local_norm == "group":
-                self.context_module = StrictLocalDirectionalIntegralContext(channels=self.neck_width)
-            elif self.context_type == "directional":
-                self.context_module = DirectionalIntegralContext(channels=self.neck_width)
+        if not self.use_integral_context:
+            self.context_module = nn.Identity()
+        elif self.finite_horizon is not None and self.fh_strict_local:
+            if self.context_type == "directional":
+                if self.fh_local_norm == "group":
+                    self.context_module = StrictLocalDirectionalIntegralContext(channels=self.neck_width)
+                elif self.fh_local_norm == "batch":
+                    self.context_module = DirectionalIntegralContext(channels=self.neck_width)
+                else:
+                    raise ValueError(f"Unsupported fh_local_norm={self.fh_local_norm}")
             elif self.context_type == "axial":
-                self.context_module = AxialIntegralContext(channels=self.neck_width)
+                raise NotImplementedError("Strict-local axial context is not implemented yet.")
             else:
-                self.context_module = nn.Identity()
+                raise ValueError(f"Unsupported strict-local context_type={self.context_type}")
         elif self.context_type == "directional":
             self.context_module = DirectionalIntegralContext(channels=self.neck_width)
         elif self.context_type == "axial":

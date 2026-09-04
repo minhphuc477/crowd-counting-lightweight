@@ -69,9 +69,11 @@ def profile_model_efficiency(
     handles = []
 
     def convolution_hook(module: nn.Conv2d, _inputs, output):
-        out_height, out_width = output.shape[-2:]
+        actual_batch = int(output.shape[0])
+        out_height = int(output.shape[-2])
+        out_width = int(output.shape[-1])
         convolution_macs.append(int(
-            batch_size * out_height * out_width * module.out_channels
+            actual_batch * out_height * out_width * module.out_channels
             * (module.in_channels // module.groups)
             * module.kernel_size[0] * module.kernel_size[1]
         ))

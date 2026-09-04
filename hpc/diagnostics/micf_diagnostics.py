@@ -60,10 +60,10 @@ def compute_measure_diagnostics(
     # f_-: fraction of cells with negative count
     f_minus = float((y_rec < 0).float().mean().item())
 
-    # r_-: negative mass ratio = sum([-Y]_+) / (sum|Y| + eps)
+    # r_-: negative mass ratio = sum([-Y]_+) / max(sum([Y]_+), 1e-12)
     neg_mass_total = float(neg_violations.sum().item())
-    abs_mass_total = float(y_rec.abs().sum().item()) + eps
-    r_minus = float(neg_mass_total / abs_mass_total)
+    pos_mass_total = float(F.relu(y_rec).sum().item())
+    r_minus = float(neg_mass_total / max(pos_mass_total, 1e-12))
 
     # V: mean violation magnitude across all cells: mean(ReLU(-Y))
     v_mag = float(neg_violations.mean().item())
