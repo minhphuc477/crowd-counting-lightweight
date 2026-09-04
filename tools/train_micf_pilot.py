@@ -205,14 +205,21 @@ def evaluate_model(
         else:
             gt_crop_count = 0.0
 
-        pred_crop_count, pred_crop_map = model.predict(crop_img, pad_multiple=64)
+        stride = getattr(model, "output_stride", 16)
+        fh = getattr(model, "finite_horizon", None)
+        req_horizon = (stride * fh) if fh is not None else stride
+        eval_pad = math.lcm(64, req_horizon)
+
+        pred_crop_count, pred_crop_map = model.predict(crop_img, pad_multiple=eval_pad)
         crop_errors.append(abs(float(pred_crop_count.item()) - gt_crop_count))
 
         # -------------------------------------------------------------
         # Regime B: Full-image evaluation (Direct and Tiled)
         # -------------------------------------------------------------
-        pred_full_direct, _ = model.predict(img, pad_multiple=64)
-        pred_full_tiled, _ = model.predict_tiled(img, tile_size=crop_size)
+        pred_full_direct, _ = model.predict(img, pad_multiple=eval_pad)
+        pred_full_tiled, _ = model.predict_tiled(
+            img, tile_size=crop_size, halo=max(64, eval_pad)
+        )
 
         err_direct = float(pred_full_direct.item()) - gt_count
         err_tiled = float(pred_full_tiled.item()) - gt_count
@@ -447,12 +454,15 @@ def main() -> None:
 
             # Rebuild exact count pyramid from (possibly vertically flipped) points
             out_s = model.output_stride
+            fh = getattr(model, "finite_horizon", None)
+            req_horizon = (out_s * fh) if fh is not None else out_s
+            target_pad = math.lcm(64, req_horizon)
             pyramid = build_exact_count_pyramid(
                 points_batch,
                 height=H,
                 width=W,
                 block_sizes=(out_s,),
-                pad_multiple=64,
+                pad_multiple=target_pad,
                 device=device,
             )
             y_target = pyramid[out_s]         # [B, H/out_s, W/out_s]

@@ -1124,6 +1124,7 @@ def main() -> None:
     full_gt_counts: list[float] = []
 
     all_window_rows: list[dict[str, Any]] = []
+    all_window_rows_controlled: list[dict[str, Any]] = []
     per_image_rows: list[dict[str, Any]] = []
 
     cancellation_ratios: list[float] = []
@@ -1200,12 +1201,13 @@ def main() -> None:
         # ---------------------------------------------------------
         if args.controlled_halo == args.halo:
             pred_ctrl_tiled_count = pred_tiled_count
+            ctrl_window_rows = window_rows
         else:
             (
                 pred_ctrl_tiled_count,
-                _,
-                _,
-                _,
+                ctrl_window_rows,
+                _ctrl_c,
+                _ctrl_y,
             ) = predict_windows_and_tiled(
                 model=model,
                 image=image,
@@ -1274,16 +1276,31 @@ def main() -> None:
                 "image_path": sample["img_path"],
                 "image_height": H,
                 "image_width": W,
+                "halo_type": "practical",
                 **row,
             }
             all_window_rows.append(enriched)
             image_signed_errors.append(float(row["signed_error"]))
+
+        # Controlled-halo window rows (halo=0 clean pass)
+        for local_idx, row in enumerate(ctrl_window_rows):
+            enriched_ctrl = {
+                "image_index": image_index,
+                "window_index": local_idx,
+                "image_path": sample["img_path"],
+                "image_height": H,
+                "image_width": W,
+                "halo_type": "controlled",
+                **row,
+            }
+            all_window_rows_controlled.append(enriched_ctrl)
 
         cancel = compute_cancellation_ratio(image_signed_errors)
         cancellation_ratios.append(cancel)
 
         local_abs_sum = sum(abs(e) for e in image_signed_errors)
         net_abs = abs(sum(image_signed_errors))
+
 
         # ---------------------------------------------------------
         # Canonical Pixel-Space GAME & Diagnostic Stride-16 GAME
@@ -1392,7 +1409,10 @@ def main() -> None:
     direct_stats = count_metric_summary(direct_predictions, full_gt_counts, eps=1.0)
     tiled_stats = count_metric_summary(tiled_predictions, full_gt_counts, eps=1.0)
     tiled_ctrl_stats = count_metric_summary(controlled_tiled_predictions, full_gt_counts, eps=1.0)
+    # Practical (halo=args.halo) window metrics — may be contaminated by halo context
     window_stats = window_metric_summary(all_window_rows)
+    # Controlled (halo=args.controlled_halo) window metrics — clean training-scale windows
+    window_stats_controlled = window_metric_summary(all_window_rows_controlled)
 
     direct_validity_summary = aggregate_validity_metrics(direct_validity_rows)
     tiled_validity_summary = aggregate_validity_metrics(tiled_validity_rows)
@@ -1407,15 +1427,20 @@ def main() -> None:
         "dataset_split": args.split,
         "num_images": n_eval,
         "num_windows": len(all_window_rows),
+        "num_windows_controlled": len(all_window_rows_controlled),
         "tile_size": args.tile_size,
         "halo": args.halo,
         "controlled_halo": args.controlled_halo,
         "game_levels": [int(x) for x in args.game_levels],
+        # window_controlled: clean halo=0 (no extent distortion from border cropping)
+        "window_controlled": window_stats_controlled,
+        # window_practical: halo=args.halo (same context as model sees at inference boundary)
         "window": window_stats,
         "full_tiled": tiled_stats,
         "full_tiled_practical": tiled_stats,
         "full_tiled_controlled": tiled_ctrl_stats,
         "full_direct": direct_stats,
+
         "direct_minus_tiled": {
             "mae_gap": direct_stats["mae"] - tiled_stats["mae"],
             "rmse_gap": direct_stats["rmse"] - tiled_stats["rmse"],
@@ -1483,53 +1508,89 @@ def main() -> None:
     summary_path = output_dir / "comprehensive_summary.json"
     image_csv = output_dir / "comprehensive_per_image.csv"
     window_csv = output_dir / "comprehensive_per_window.csv"
+    window_ctrl_csv = output_dir / "comprehensive_per_window_controlled.csv"
 
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, allow_nan=True)
 
     write_csv(image_csv, per_image_rows)
     write_csv(window_csv, all_window_rows)
+    write_csv(window_ctrl_csv, all_window_rows_controlled)
 
     # -----------------------------------------------------------------
     # Console report
     # -----------------------------------------------------------------
     print()
-    print("=" * 104)
+    print("=" * 120)
     print("STANDARD COUNT METRICS")
-    print("=" * 104)
-    ctrl_label = f"Tiled(ctrl={args.controlled_halo})"
+    print("=" * 120)
+    win_ctrl_label = f"Win(ctrl={args.controlled_halo})"
+    win_prac_label = f"Win(halo={args.halo})"
+    ctrl_tiled_label = f"Tiled(ctrl={args.controlled_halo})"
     prac_label = f"Tiled(halo={args.halo})"
-    print(f"{'Metric':<16}{'Window':>14}{ctrl_label:>18}{prac_label:>18}{'Direct':>14}")
-    print("-" * 80)
-    print(f"{'MAE/PMAE':<16}{window_stats.get('window_mae_micro', float('nan')):>14.4f}{tiled_ctrl_stats['mae']:>18.4f}{tiled_stats['mae']:>18.4f}{direct_stats['mae']:>14.4f}")
-    print(f"{'RMSE/PRMSE':<16}{window_stats.get('window_rmse_micro', float('nan')):>14.4f}{tiled_ctrl_stats['rmse']:>18.4f}{tiled_stats['rmse']:>18.4f}{direct_stats['rmse']:>14.4f}")
-    print(f"{'NAE':<16}{window_stats.get('nae_nonzero', float('nan')):>14.4f}{tiled_ctrl_stats['nae']:>18.4f}{tiled_stats['nae']:>18.4f}{direct_stats['nae']:>14.4f}")
-    print(f"{'SRE':<16}{'n/a':>14}{tiled_ctrl_stats['sre']:>18.4f}{tiled_stats['sre']:>18.4f}{direct_stats['sre']:>14.4f}")
-    print(f"{'Signed Bias':<16}{window_stats.get('signed_bias', float('nan')):>14.4f}{tiled_ctrl_stats['signed_bias']:>18.4f}{tiled_stats['signed_bias']:>18.4f}{direct_stats['signed_bias']:>14.4f}")
+    print(f"{'Metric':<18}{win_ctrl_label:>18}{win_prac_label:>18}{ctrl_tiled_label:>20}{prac_label:>18}{'Direct':>14}")
+    print("-" * 106)
+    print(f"{'MAE/PMAE':<18}"
+          f"{window_stats_controlled.get('window_mae_micro', float('nan')):>18.4f}"
+          f"{window_stats.get('window_mae_micro', float('nan')):>18.4f}"
+          f"{tiled_ctrl_stats['mae']:>20.4f}"
+          f"{tiled_stats['mae']:>18.4f}"
+          f"{direct_stats['mae']:>14.4f}")
+    print(f"{'RMSE/PRMSE':<18}"
+          f"{window_stats_controlled.get('window_rmse_micro', float('nan')):>18.4f}"
+          f"{window_stats.get('window_rmse_micro', float('nan')):>18.4f}"
+          f"{tiled_ctrl_stats['rmse']:>20.4f}"
+          f"{tiled_stats['rmse']:>18.4f}"
+          f"{direct_stats['rmse']:>14.4f}")
+    print(f"{'NAE':<18}"
+          f"{window_stats_controlled.get('nae_nonzero', float('nan')):>18.4f}"
+          f"{window_stats.get('nae_nonzero', float('nan')):>18.4f}"
+          f"{tiled_ctrl_stats['nae']:>20.4f}"
+          f"{tiled_stats['nae']:>18.4f}"
+          f"{direct_stats['nae']:>14.4f}")
+    print(f"{'SRE':<18}{'n/a':>18}{'n/a':>18}"
+          f"{tiled_ctrl_stats['sre']:>20.4f}"
+          f"{tiled_stats['sre']:>18.4f}"
+          f"{direct_stats['sre']:>14.4f}")
+    print(f"{'Signed Bias':<18}"
+          f"{window_stats_controlled.get('signed_bias', float('nan')):>18.4f}"
+          f"{window_stats.get('signed_bias', float('nan')):>18.4f}"
+          f"{tiled_ctrl_stats['signed_bias']:>20.4f}"
+          f"{tiled_stats['signed_bias']:>18.4f}"
+          f"{direct_stats['signed_bias']:>14.4f}")
 
     print()
-    print("=" * 104)
+    print("=" * 120)
     print("TAIL / FAILURE METRICS")
-    print("=" * 104)
+    print("=" * 120)
+    print(f"{'Metric':<18}{win_ctrl_label:>18}{win_prac_label:>18}{ctrl_tiled_label:>20}{prac_label:>18}{'Direct':>14}")
+    print("-" * 106)
     for key, label in (("median_ae", "Median AE"), ("p90_ae", "P90 AE"), ("p95_ae", "P95 AE"), ("max_ae", "Max AE")):
-        print(f"{label:<16}{window_stats.get(key, float('nan')):>14.4f}{tiled_ctrl_stats[key]:>18.4f}{tiled_stats[key]:>18.4f}{direct_stats[key]:>14.4f}")
+        print(f"{label:<18}"
+              f"{window_stats_controlled.get(key, float('nan')):>18.4f}"
+              f"{window_stats.get(key, float('nan')):>18.4f}"
+              f"{tiled_ctrl_stats[key]:>20.4f}"
+              f"{tiled_stats[key]:>18.4f}"
+              f"{direct_stats[key]:>14.4f}")
 
     print()
     print("=" * 96)
-    print("LOCAL / PATCH DIAGNOSTICS (Micro, Macro, and Window Partitioning)")
+    print(f"LOCAL / PATCH DIAGNOSTICS  [ctrl=halo{args.controlled_halo} | prac=halo{args.halo}]")
     print("=" * 96)
-    print(f"Window PMAE (micro)          : {window_stats.get('pmae_micro', float('nan')):.4f}")
-    print(f"Window PMAE (macro)          : {window_stats.get('pmae_macro', float('nan')):.4f}")
-    print(f"Window PRMSE (micro)         : {window_stats.get('prmse_micro', float('nan')):.4f}")
-    print(f"Window PRMSE (macro)         : {window_stats.get('prmse_macro', float('nan')):.4f}")
-    print(f"Full 256x256 Windows PMAE    : {window_stats.get('full_window_pmae', float('nan')):.4f} (N={window_stats.get('full_window_count')})")
-    print(f"Partial Edge Windows PMAE    : {window_stats.get('edge_window_pmae', float('nan')):.4f} (N={window_stats.get('edge_window_count')})")
-    print(f"Window NAE (GT>0 only)       : {window_stats.get('nae_nonzero', float('nan')):.4f}")
-    print(f"Non-empty Window MAE         : {window_stats.get('nonempty_window_mae', float('nan')):.4f}")
-    print(f"Empty Window MAE             : {window_stats.get('empty_window_mae', float('nan')):.4f}")
-    print(f"Empty Window Mean Pred       : {window_stats.get('empty_window_mean_prediction', float('nan')):.4f}")
-    print(f"Empty Window Fraction        : {100*window_stats.get('empty_window_fraction', float('nan')):.2f}%")
-    print(f"Mean Cancellation Ratio      : {100*summary['cancellation']['mean']:.2f}%")
+    wsc = window_stats_controlled
+    wsp = window_stats
+    print(f"Window PMAE micro  ctrl={wsc.get('pmae_micro', float('nan')):.4f}  prac={wsp.get('pmae_micro', float('nan')):.4f}")
+    print(f"Window PMAE macro  ctrl={wsc.get('pmae_macro', float('nan')):.4f}  prac={wsp.get('pmae_macro', float('nan')):.4f}")
+    print(f"Window PRMSE micro ctrl={wsc.get('prmse_micro', float('nan')):.4f}  prac={wsp.get('prmse_micro', float('nan')):.4f}")
+    print(f"Window PRMSE macro ctrl={wsc.get('prmse_macro', float('nan')):.4f}  prac={wsp.get('prmse_macro', float('nan')):.4f}")
+    print(f"Full 256×256 PMAE  ctrl={wsc.get('full_window_pmae', float('nan')):.4f} (N={wsc.get('full_window_count')})  prac={wsp.get('full_window_pmae', float('nan')):.4f} (N={wsp.get('full_window_count')})")
+    print(f"Edge window PMAE   ctrl={wsc.get('edge_window_pmae', float('nan')):.4f} (N={wsc.get('edge_window_count')})  prac={wsp.get('edge_window_pmae', float('nan')):.4f} (N={wsp.get('edge_window_count')})")
+    print(f"Window NAE (GT>0)  ctrl={wsc.get('nae_nonzero', float('nan')):.4f}  prac={wsp.get('nae_nonzero', float('nan')):.4f}")
+    print(f"Non-empty Win MAE  ctrl={wsc.get('nonempty_window_mae', float('nan')):.4f}  prac={wsp.get('nonempty_window_mae', float('nan')):.4f}")
+    print(f"Empty Win MAE      ctrl={wsc.get('empty_window_mae', float('nan')):.4f}  prac={wsp.get('empty_window_mae', float('nan')):.4f}")
+    print(f"Empty Win Frac     ctrl={100*wsc.get('empty_window_fraction', float('nan')):.2f}%  prac={100*wsp.get('empty_window_fraction', float('nan')):.2f}%")
+    print(f"Mean Cancel Ratio  : {100*summary['cancellation']['mean']:.2f}%")
+
 
     print()
     print("=" * 96)
