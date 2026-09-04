@@ -200,7 +200,9 @@ class BaseCrowdDataset(Dataset):
             }
 
         # Validation / test path (full image, uncropped)
-        img_tensor = TF.to_tensor(image)
+        img_np = np.array(image, dtype=np.uint8, copy=True)
+        image.close()
+        img_tensor = torch.from_numpy(img_np.transpose((2, 0, 1))).float().div(255.0)
         img_norm = TF.normalize(img_tensor, mean=self.image_mean, std=self.image_std)
         gt_count = torch.tensor(
             float(len(points)) if has_gt else float("nan"), dtype=torch.float32
