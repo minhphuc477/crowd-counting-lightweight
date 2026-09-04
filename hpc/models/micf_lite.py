@@ -136,10 +136,10 @@ def _partition_feature_blocks(
     n_w = W // k
 
     blocks = (
-        x.view(B, C, n_h, k, n_w, k)
+        x.view(-1, C, n_h, k, n_w, k)
          .permute(0, 2, 4, 1, 3, 5)
          .contiguous()
-         .view(B * n_h * n_w, C, k, k)
+         .view(-1, C, k, k)
     )
     return blocks, n_h, n_w
 
@@ -164,25 +164,23 @@ def compose_batched_fh_cumulative(
 
     Composition is exact and has no learnable parameters.
     """
-    if c_blocks.shape != (batch_size * n_h * n_w, 1, k, k):
+    if c_blocks.shape[1:] != (1, k, k):
         raise ValueError(
-            "Unexpected c_blocks shape: "
-            f"{tuple(c_blocks.shape)} != "
-            f"{(batch_size * n_h * n_w, 1, k, k)}"
+            f"Unexpected c_blocks shape: {tuple(c_blocks.shape)}, expected [..., 1, {k}, {k}]"
         )
 
     # Local cumulative -> local signed mass.
     # Validity is still handled by the existing MICF loss.
     y_blocks = discrete_mixed_difference(c_blocks)
 
-    # [B, nh, nw, 1, K, K]
-    y_blocks = y_blocks.view(batch_size, n_h, n_w, 1, k, k)
+    # [-1, nh, nw, 1, K, K]
+    y_blocks = y_blocks.view(-1, n_h, n_w, 1, k, k)
 
-    # Stitch blocks spatially into [B, 1, nh*K, nw*K].
+    # Stitch blocks spatially into [-1, 1, nh*K, nw*K].
     y_global = (
         y_blocks.permute(0, 3, 1, 4, 2, 5)
                 .contiguous()
-                .view(batch_size, 1, n_h * k, n_w * k)
+                .view(-1, 1, n_h * k, n_w * k)
     )
 
     # Exact global MICF reconstruction.

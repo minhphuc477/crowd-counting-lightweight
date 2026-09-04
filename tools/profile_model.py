@@ -1,14 +1,17 @@
-"""Profile current HPCLite parameters, Conv2d MACs, latency and peak memory."""
+"""Profile MICF model parameters, Conv2d MACs, latency, and peak memory."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import platform
+import subprocess
 import sys
 import time
 
 import numpy as np
+import timm
 import torch
 import torch.nn as nn
 import yaml
@@ -17,15 +20,34 @@ _REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPOSITORY_ROOT not in sys.path:
     sys.path.insert(0, _REPOSITORY_ROOT)
 
-from hpc.models.factory import build_model_from_config
+from hpc.models.micf_lite import MICFLite
+
+
+def build_model_from_config(cfg: dict) -> MICFLite:
+    m_cfg = cfg.get("model", {})
+    return MICFLite(
+        backbone_name=m_cfg.get(
+            "backbone", "mobilenetv4_conv_small_050.e3000_r224_in1k"
+        ),
+        pretrained=False,
+        neck_width=int(m_cfg.get("neck_width", 32)),
+        context_dilations=tuple(m_cfg.get("context_dilations", [1, 2, 3])),
+        use_integral_context=bool(m_cfg.get("use_integral_context", True)),
+        context_type=str(m_cfg.get("context_type", "directional")),
+        head_type=m_cfg.get("head_type", "cumulative"),
+        output_stride=int(m_cfg.get("output_stride", 16)),
+        eps_d=float(m_cfg.get("eps_d", 1e-8)),
+        extent_aware=bool(m_cfg.get("extent_aware", True)),
+        finite_horizon=m_cfg.get("finite_horizon", None),
+    )
 
 
 def count_parameters(model: nn.Module) -> int:
-    return sum(parameter.numel() for parameter in model.parameters())
+    return sum(p.numel() for p in model.parameters())
 
 
 def count_trainable_parameters(model: nn.Module) -> int:
-    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 def profile_model_efficiency(
@@ -78,9 +100,6 @@ def profile_model_efficiency(
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
             latency.append((time.perf_counter() - start) * 1000.0)
-    import platform
-    import subprocess
-    import timm
 
     git_sha = None
     try:
@@ -133,7 +152,7 @@ def profile_model_efficiency(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/ntpc_r4_neural_dtm_tree.yaml")
+    parser.add_argument("--config", default="configs/pilot_micf/b8.yaml")
     parser.add_argument("--resolution", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--warmup-iters", type=int, default=20)
@@ -142,8 +161,7 @@ def main() -> None:
     args = parser.parse_args()
     with open(args.config, "r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
-    # Initialization values do not affect architecture/efficiency profiling.
-    model = build_model_from_config(cfg, load_pretrained=False)
+    model = build_model_from_config(cfg)
     profile = profile_model_efficiency(
         model,
         input_resolution=args.resolution,

@@ -93,7 +93,7 @@ def plot_loss_curves(
     ax = axes[1, 0]
     ax.plot(b5b_eval_e, [e["mae_full"] for e in b5b_hist if "mae_full" in e], label="B5b (Full MAE)", color="#1f77b4", marker="o", lw=1.8, ms=4)
     ax.plot(b8_eval_e, [e["mae_full"] for e in b8_hist if "mae_full" in e], label="B8 (Full MAE)", color="#ff7f0e", marker="s", lw=1.8, ms=4)
-    ax.set_title("Validation MAE (Regime B: Full Image Direct)", fontsize=12, fontweight="bold")
+    ax.set_title("Validation MAE (Regime B: Full Image Tiled)", fontsize=12, fontweight="bold")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("MAE")
     ax.grid(True, alpha=0.3)
@@ -187,15 +187,28 @@ def compute_and_plot_spatial_error_map(
                 break
 
             img = batch["image"].to(device)
-            gt_pts = [torch.as_tensor(pts, device=device, dtype=torch.float32) for pts in batch["gt_points"]]
-
-            # Ground truth C
             _, _, H, W = img.shape
             out_h = math.ceil(H / s)
             out_w = math.ceil(W / s)
+
+            # Extract points and filter in-bounds points
+            raw_pts = batch["gt_points"][0]
+            if isinstance(raw_pts, torch.Tensor):
+                raw_pts = raw_pts.cpu().numpy()
+            pts_np = np.asarray(raw_pts, dtype=np.float32).reshape(-1, 2)
+            if len(pts_np) > 0:
+                mask = (pts_np[:, 0] >= 0) & (pts_np[:, 0] < W) & (pts_np[:, 1] >= 0) & (pts_np[:, 1] < H)
+                pts_inside = pts_np[mask]
+            else:
+                pts_inside = pts_np
+
             from hpc.losses.micf import points_to_count_map
-            gt_y = points_to_count_map(gt_pts[0], out_h, out_w, stride=s, device=device).unsqueeze(0).unsqueeze(0)
+            gt_y = points_to_count_map(pts_inside, out_h, out_w, stride=s, device=device).unsqueeze(0).unsqueeze(0)
             gt_c = cell_counts_to_cumulative_field(gt_y)  # [1, 1, Ho, Wo]
+
+            # Scale-invariant normalization factor: ground-truth in-bounds crowd count
+            gt_count = float(len(pts_inside))
+            norm_factor = max(gt_count, 1.0)
 
             # Predictions
             _, pred_c_b5b = model_b5b.predict(img, pad_multiple=64)
@@ -206,9 +219,9 @@ def compute_and_plot_spatial_error_map(
             pred_c_b5b = pred_c_b5b[..., :Ho, :Wo]
             pred_c_b8 = pred_c_b8[..., :Ho, :Wo]
 
-            # Compute absolute cumulative error maps |C_hat - C_gt|
-            err_b5b = torch.abs(pred_c_b5b - gt_c)
-            err_b8 = torch.abs(pred_c_b8 - gt_c)
+            # Compute normalized absolute cumulative error maps |C_hat - C_gt| / max(N*, 1)
+            err_b5b = torch.abs(pred_c_b5b - gt_c) / norm_factor
+            err_b8 = torch.abs(pred_c_b8 - gt_c) / norm_factor
 
             # Interpolate to canonical grid
             err_b5b_res = F.interpolate(err_b5b, size=(canonical_size, canonical_size), mode="bilinear", align_corners=False)
@@ -227,13 +240,13 @@ def compute_and_plot_spatial_error_map(
     vmax = max(float(np.max(mean_err_b5b)), float(np.max(mean_err_b8)))
 
     im0 = axes[0].imshow(mean_err_b5b, cmap="viridis", vmin=0, vmax=vmax)
-    axes[0].set_title("B5b: Mean Cumulative Error |C_hat - C_gt|\n(Global Dependency Horizon)", fontsize=11, fontweight="bold")
+    axes[0].set_title("B5b: Normalized Cumulative Error |C_hat - C_gt| / N*\n(Global Dependency Horizon)", fontsize=11, fontweight="bold")
     axes[0].set_xlabel("Normalized Width (0 -> W)")
     axes[0].set_ylabel("Normalized Height (0 -> H)")
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     im1 = axes[1].imshow(mean_err_b8, cmap="viridis", vmin=0, vmax=vmax)
-    axes[1].set_title("B8: Mean Cumulative Error |C_hat - C_gt|\n(Finite-Horizon K=4 Factorization)", fontsize=11, fontweight="bold")
+    axes[1].set_title("B8: Normalized Cumulative Error |C_hat - C_gt| / N*\n(Finite-Horizon K=4 Factorization)", fontsize=11, fontweight="bold")
     axes[1].set_xlabel("Normalized Width (0 -> W)")
     axes[1].set_ylabel("Normalized Height (0 -> H)")
     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
@@ -333,14 +346,122 @@ def main() -> None:
     b8_best_entry = min((e for e in b8_hist if "mae_crop" in e), key=lambda x: x["mae_crop"])
 
     delta_crop = b8_best_entry["mae_crop"] - b5b_best_entry["mae_crop"]
-    delta_full = b8_best_entry["mae_full"] - b5b_best_entry["mae_full"]
+    delta_full_val = b8_best_entry["mae_full"] - b5b_best_entry["mae_full"]
 
-    if delta_crop < -5.0:
-        verdict = "B8 >> B5b (FH factorization significantly superior -> proceed to seed expansion & K-sweep)"
-    elif abs(delta_crop) <= 5.0:
-        verdict = "B8 ~ B5b (Comparable performance -> investigate spatial diagnostics before further sweeps)"
+    # Try loading comprehensive evaluation summaries
+    b5b_comp_path = b5b_save_dir / "eval_comprehensive" / "comprehensive_summary.json"
+    b8_comp_path = b8_save_dir / "eval_comprehensive" / "comprehensive_summary.json"
+
+    has_comp = b5b_comp_path.exists() and b8_comp_path.exists()
+    if has_comp:
+        with open(b5b_comp_path, "r", encoding="utf-8") as f:
+            b5b_comp = json.load(f)
+        with open(b8_comp_path, "r", encoding="utf-8") as f:
+            b8_comp = json.load(f)
     else:
-        verdict = "B8 << B5b (Global context superior or FH bottleneck -> inspect local boundary reconstruction)"
+        b5b_comp, b8_comp = {}, {}
+
+    # Comprehensive metric tables if available
+    comp_tables_md = ""
+    if has_comp:
+        b5b_ctrl = b5b_comp.get("full_tiled_controlled", {})
+        b8_ctrl = b8_comp.get("full_tiled_controlled", {})
+        b5b_prac = b5b_comp.get("full_tiled_practical", b5b_comp.get("full_tiled", {}))
+        b8_prac = b8_comp.get("full_tiled_practical", b8_comp.get("full_tiled", {}))
+        b5b_dir = b5b_comp.get("full_direct", {})
+        b8_dir = b8_comp.get("full_direct", {})
+        b5b_win = b5b_comp.get("window", {})
+        b8_win = b8_comp.get("window", {})
+        b5b_val_d = b5b_comp.get("micf_validity_direct", {})
+        b8_val_d = b8_comp.get("micf_validity_direct", {})
+        b5b_val_t = b5b_comp.get("micf_validity_tiled", {})
+        b8_val_t = b8_comp.get("micf_validity_tiled", {})
+        b5b_rep_d = b5b_comp.get("representation_direct", {})
+        b8_rep_d = b8_comp.get("representation_direct", {})
+        b5b_rep_t = b5b_comp.get("representation_tiled", {})
+        b8_rep_t = b8_comp.get("representation_tiled", {})
+        b5b_g_pix = b5b_comp.get("game_pixel_tiled", {})
+        b8_g_pix = b8_comp.get("game_pixel_tiled", {})
+        b5b_g_pix_d = b5b_comp.get("game_pixel_direct", {})
+        b8_g_pix_d = b8_comp.get("game_pixel_direct", {})
+
+        delta_ctrl_mae = b8_ctrl.get("mae", 0.0) - b5b_ctrl.get("mae", 0.0)
+        delta_prac_mae = b8_prac.get("mae", 0.0) - b5b_prac.get("mae", 0.0)
+        delta_dir_mae = b8_dir.get("mae", 0.0) - b5b_dir.get("mae", 0.0)
+
+        comp_tables_md = f"""
+## Comprehensive Test Set Evaluation (Unbiased Protocols)
+
+### 1. Counting Performance Across Regimes
+
+| Evaluation Regime | Metric | B5b (Global Extent-Aware) | B8 (FH-CMICF K=4) | Absolute Delta (B8 - B5b) |
+| :--- | :--- | :---: | :---: | :---: |
+| **Regime A: Fixed 256x256 Validation Crop** | MAE_crop | {b5b_best_entry['mae_crop']:.2f} | {b8_best_entry['mae_crop']:.2f} | {delta_crop:+.2f} |
+| | Val Tiled MAE | {b5b_best_entry['mae_full']:.2f} | {b8_best_entry['mae_full']:.2f} | {delta_full_val:+.2f} |
+| **Regime B: Controlled Tiled (tile=256, halo=0, matched extent $A_{{\\max}}=256$)** | MAE | {b5b_ctrl.get('mae', 0):.2f} | {b8_ctrl.get('mae', 0):.2f} | {delta_ctrl_mae:+.2f} |
+| | RMSE | {b5b_ctrl.get('rmse', 0):.2f} | {b8_ctrl.get('rmse', 0):.2f} | {b8_ctrl.get('rmse', 0) - b5b_ctrl.get('rmse', 0):+.2f} |
+| | NAE | {b5b_ctrl.get('nae', 0):.4f} | {b8_ctrl.get('nae', 0):.4f} | {b8_ctrl.get('nae', 0) - b5b_ctrl.get('nae', 0):+.4f} |
+| | SRE | {b5b_ctrl.get('sre', 0):.4f} | {b8_ctrl.get('sre', 0):.4f} | {b8_ctrl.get('sre', 0) - b5b_ctrl.get('sre', 0):+.4f} |
+| **Regime C: Practical Tiled (tile=256, halo=64)** | MAE | {b5b_prac.get('mae', 0):.2f} | {b8_prac.get('mae', 0):.2f} | {delta_prac_mae:+.2f} |
+| | RMSE | {b5b_prac.get('rmse', 0):.2f} | {b8_prac.get('rmse', 0):.2f} | {b8_prac.get('rmse', 0) - b5b_prac.get('rmse', 0):+.2f} |
+| | NAE | {b5b_prac.get('nae', 0):.4f} | {b8_prac.get('nae', 0):.4f} | {b8_prac.get('nae', 0) - b5b_prac.get('nae', 0):+.4f} |
+| | SRE | {b5b_prac.get('sre', 0):.4f} | {b8_prac.get('sre', 0):.4f} | {b8_prac.get('sre', 0) - b5b_prac.get('sre', 0):+.4f} |
+| **Regime D: Full Direct (Unconstrained inference)** | MAE | {b5b_dir.get('mae', 0):.2f} | {b8_dir.get('mae', 0):.2f} | {delta_dir_mae:+.2f} |
+| | RMSE | {b5b_dir.get('rmse', 0):.2f} | {b8_dir.get('rmse', 0):.2f} | {b8_dir.get('rmse', 0) - b5b_dir.get('rmse', 0):+.2f} |
+| | NAE | {b5b_dir.get('nae', 0):.4f} | {b8_dir.get('nae', 0):.4f} | {b8_dir.get('nae', 0) - b5b_dir.get('nae', 0):+.4f} |
+| | SRE | {b5b_dir.get('sre', 0):.4f} | {b8_dir.get('sre', 0):.4f} | {b8_dir.get('sre', 0) - b5b_dir.get('sre', 0):+.4f} |
+
+### 2. Generalization Gaps & Sensitivity Analysis
+
+| Diagnostic Gap | Metric | B5b (Global Extent-Aware) | B8 (FH-CMICF K=4) | Difference |
+| :--- | :--- | :---: | :---: | :---: |
+| **Direct - Tiled Practical Gap** | $\\Delta$ MAE | {b5b_comp.get('direct_minus_tiled_practical', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('direct_minus_tiled_practical', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('direct_minus_tiled_practical', {}).get('mae_gap', 0) - b5b_comp.get('direct_minus_tiled_practical', {}).get('mae_gap', 0):+.2f} |
+| **Direct - Tiled Controlled Gap** | $\\Delta$ MAE | {b5b_comp.get('direct_minus_tiled_controlled', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('direct_minus_tiled_controlled', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('direct_minus_tiled_controlled', {}).get('mae_gap', 0) - b5b_comp.get('direct_minus_tiled_controlled', {}).get('mae_gap', 0):+.2f} |
+| **Halo Effect (Practical - Controlled)** | $\\Delta$ MAE | {b5b_comp.get('halo_effect_practical_minus_controlled', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('halo_effect_practical_minus_controlled', {}).get('mae_gap', 0):+.2f} | {b8_comp.get('halo_effect_practical_minus_controlled', {}).get('mae_gap', 0) - b5b_comp.get('halo_effect_practical_minus_controlled', {}).get('mae_gap', 0):+.2f} |
+
+### 3. Patch / Window & Localization (GAME) Metrics
+
+| Metric | B5b | B8 | Delta (B8 - B5b) |
+| :--- | :---: | :---: | :---: |
+| **Window MAE (Micro)** | {b5b_win.get('window_mae_micro', 0):.2f} | {b8_win.get('window_mae_micro', 0):.2f} | {b8_win.get('window_mae_micro', 0) - b5b_win.get('window_mae_micro', 0):+.2f} |
+| **Window MAE (Macro)** | {b5b_win.get('window_mae_macro', 0):.2f} | {b8_win.get('window_mae_macro', 0):.2f} | {b8_win.get('window_mae_macro', 0) - b5b_win.get('window_mae_macro', 0):+.2f} |
+| **Empty Window MAE** | {b5b_win.get('empty_window_mae', 0):.2f} | {b8_win.get('empty_window_mae', 0):.2f} | {b8_win.get('empty_window_mae', 0) - b5b_win.get('empty_window_mae', 0):+.2f} |
+| **Non-Empty Window MAE** | {b5b_win.get('nonempty_window_mae', 0):.2f} | {b8_win.get('nonempty_window_mae', 0):.2f} | {b8_win.get('nonempty_window_mae', 0) - b5b_win.get('nonempty_window_mae', 0):+.2f} |
+| **Cancellation Ratio (Mean)** | {b5b_comp.get('cancellation', {}).get('mean', 0)*100:.2f}% | {b8_comp.get('cancellation', {}).get('mean', 0)*100:.2f}% | {(b8_comp.get('cancellation', {}).get('mean', 0) - b5b_comp.get('cancellation', {}).get('mean', 0))*100:+.2f}% |
+| **GAME(0) Tiled / Direct** | {b5b_g_pix.get('L0', 0):.2f} / {b5b_g_pix_d.get('L0', 0):.2f} | {b8_g_pix.get('L0', 0):.2f} / {b8_g_pix_d.get('L0', 0):.2f} | {b8_g_pix.get('L0', 0) - b5b_g_pix.get('L0', 0):+.2f} / {b8_g_pix_d.get('L0', 0) - b5b_g_pix_d.get('L0', 0):+.2f} |
+| **GAME(1) Tiled / Direct** | {b5b_g_pix.get('L1', 0):.2f} / {b5b_g_pix_d.get('L1', 0):.2f} | {b8_g_pix.get('L1', 0):.2f} / {b8_g_pix_d.get('L1', 0):.2f} | {b8_g_pix.get('L1', 0) - b5b_g_pix.get('L1', 0):+.2f} / {b8_g_pix_d.get('L1', 0) - b5b_g_pix_d.get('L1', 0):+.2f} |
+| **GAME(2) Tiled / Direct** | {b5b_g_pix.get('L2', 0):.2f} / {b5b_g_pix_d.get('L2', 0):.2f} | {b8_g_pix.get('L2', 0):.2f} / {b8_g_pix_d.get('L2', 0):.2f} | {b8_g_pix.get('L2', 0) - b5b_g_pix.get('L2', 0):+.2f} / {b8_g_pix_d.get('L2', 0) - b5b_g_pix_d.get('L2', 0):+.2f} |
+| **GAME(3) Tiled / Direct** | {b5b_g_pix.get('L3', 0):.2f} / {b5b_g_pix_d.get('L3', 0):.2f} | {b8_g_pix.get('L3', 0):.2f} / {b8_g_pix_d.get('L3', 0):.2f} | {b8_g_pix.get('L3', 0) - b5b_g_pix.get('L3', 0):+.2f} / {b8_g_pix_d.get('L3', 0) - b5b_g_pix_d.get('L3', 0):+.2f} |
+
+### 4. Measure Validity & Representation Diagnostics
+
+| Metric | B5b (Tiled / Direct) | B8 (Tiled / Direct) |
+| :--- | :---: | :---: |
+| **Violation Rate (raw)** | {b5b_val_t.get('macro_violation_rate_raw', b5b_val_t.get('macro_violation_rate', 0))*100:.2f}% / {b5b_val_d.get('macro_violation_rate_raw', b5b_val_d.get('macro_violation_rate', 0))*100:.2f}% | {b8_val_t.get('macro_violation_rate_raw', b8_val_t.get('macro_violation_rate', 0))*100:.2f}% / {b8_val_d.get('macro_violation_rate_raw', b8_val_d.get('macro_violation_rate', 0))*100:.2f}% |
+| **Violation Rate ($\\tau=10^{{-6}}$)** | {b5b_val_t.get('macro_violation_rate_tau', 0)*100:.2f}% / {b5b_val_d.get('macro_violation_rate_tau', 0)*100:.2f}% | {b8_val_t.get('macro_violation_rate_tau', 0)*100:.2f}% / {b8_val_d.get('macro_violation_rate_tau', 0)*100:.2f}% |
+| **Negative Mass Ratio** | {b5b_val_t.get('macro_negative_mass_ratio', 0)*100:.2f}% / {b5b_val_d.get('macro_negative_mass_ratio', 0)*100:.2f}% | {b8_val_t.get('macro_negative_mass_ratio', 0)*100:.2f}% / {b8_val_d.get('macro_negative_mass_ratio', 0)*100:.2f}% |
+| **Cumulative Field NMAE** | {b5b_rep_t.get('cumulative_field_nmae', 0):.4f} / {b5b_rep_d.get('cumulative_field_nmae', 0):.4f} | {b8_rep_t.get('cumulative_field_nmae', 0):.4f} / {b8_rep_d.get('cumulative_field_nmae', 0):.4f} |
+| **Measure Normalized L1** | {b5b_rep_t.get('measure_nl1', 0):.4f} / {b5b_rep_d.get('measure_nl1', 0):.4f} | {b8_rep_t.get('measure_nl1', 0):.4f} / {b8_rep_d.get('measure_nl1', 0):.4f} |
+"""
+
+    if has_comp:
+        ctrl_mae_diff = b8_ctrl.get("mae", 0.0) - b5b_ctrl.get("mae", 0.0)
+        dir_mae_diff = b8_dir.get("mae", 0.0) - b5b_dir.get("mae", 0.0)
+        if ctrl_mae_diff < -5.0 or dir_mae_diff < -10.0:
+            verdict = "B8 >> B5b (FH factorization significantly superior -> proceed to seed expansion & K-sweep)"
+        elif abs(ctrl_mae_diff) <= 5.0 and dir_mae_diff <= 0.0:
+            verdict = "B8 ~ B5b (Comparable in matched tiled control; B8 superior in full-direct unconstrained inference)"
+        elif ctrl_mae_diff > 5.0 and dir_mae_diff > 5.0:
+            verdict = "B8 << B5b (Global context superior -> inspect local boundary reconstruction)"
+        else:
+            verdict = "B8 ~ B5b (Regime trade-off: evaluate deployment constraints)"
+    else:
+        if delta_crop < -5.0:
+            verdict = "B8 >> B5b (FH factorization significantly superior on crop validation)"
+        elif abs(delta_crop) <= 5.0:
+            verdict = "B8 ~ B5b (Comparable crop validation performance)"
+        else:
+            verdict = "B8 << B5b (Global extent-aware baseline superior on crop validation)"
 
     report = f"""# Gate Decision Report: B5b vs B8 (FH-CMICF K=4)
 
@@ -348,16 +469,16 @@ def main() -> None:
 **Carrier**: MobileNetV4-Conv-Small-0.50 (99,697 parameters)
 **Strict Control**: Confounder-free architecture (identical parameter count, conv RF scope, and GroupNorm spatial scope).
 
-## Metric Comparison
+## Validation Trajectory Summary (Training History)
 
 | Metric | B5b (Global Extent-Aware) | B8 (FH-CMICF K=4) | Absolute Delta (B8 - B5b) |
 | :--- | :---: | :---: | :---: |
 | **MAE_crop** (Best Validation) | {b5b_best_entry['mae_crop']:.2f} | {b8_best_entry['mae_crop']:.2f} | {delta_crop:+.2f} |
-| **MAE_full_direct** | {b5b_best_entry['mae_full']:.2f} | {b8_best_entry['mae_full']:.2f} | {delta_full:+.2f} |
-| **RMSE** | {b5b_best_entry.get('rmse', 0):.2f} | {b8_best_entry.get('rmse', 0):.2f} | {b8_best_entry.get('rmse', 0) - b5b_best_entry.get('rmse', 0):+.2f} |
+| **Val Tiled MAE** (At Best Crop Epoch) | {b5b_best_entry['mae_full']:.2f} | {b8_best_entry['mae_full']:.2f} | {delta_full_val:+.2f} |
 | **Violation Rate** | {b5b_best_entry.get('violation_rate', 0)*100:.2f}% | {b8_best_entry.get('violation_rate', 0)*100:.2f}% | {(b8_best_entry.get('violation_rate', 0) - b5b_best_entry.get('violation_rate', 0))*100:+.2f}% |
 | **Violation Magnitude** | {b5b_best_entry.get('violation_magnitude', 0):.4f} | {b8_best_entry.get('violation_magnitude', 0):.4f} | {b8_best_entry.get('violation_magnitude', 0) - b5b_best_entry.get('violation_magnitude', 0):+.4f} |
 | **Negative Mass Ratio** | {b5b_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {b8_best_entry.get('neg_mass_ratio', 0)*100:.2f}% | {(b8_best_entry.get('neg_mass_ratio', 0) - b5b_best_entry.get('neg_mass_ratio', 0))*100:+.2f}% |
+{comp_tables_md}
 
 ## Scientific Gate Verdict
 

@@ -53,6 +53,7 @@ from hpc.losses.micf import (
     discrete_mixed_difference,
     points_to_count_map,
 )
+from hpc.metrics.counting import count_metric_summary
 from hpc.models.micf_lite import (
     MICFLite,
     compose_tiled_cumulative_field,
@@ -106,6 +107,12 @@ def parse_args() -> argparse.Namespace:
         "--halo",
         type=int,
         default=64,
+    )
+    parser.add_argument(
+        "--controlled-halo",
+        type=int,
+        default=0,
+        help="Halo size for controlled tiled evaluation without extent distortion (default: 0).",
     )
     parser.add_argument(
         "--direct-pad-multiple",
@@ -459,93 +466,8 @@ def finite_percentile(
 
 
 # ---------------------------------------------------------------------
-# Standard count metrics
+# Local window metrics
 # ---------------------------------------------------------------------
-
-def count_metric_summary(
-    predictions: Iterable[float],
-    targets: Iterable[float],
-    eps: float = 1e-12,
-) -> dict[str, float]:
-    pred = np.asarray(
-        list(predictions),
-        dtype=np.float64,
-    )
-    gt = np.asarray(
-        list(targets),
-        dtype=np.float64,
-    )
-
-    if pred.shape != gt.shape:
-        raise ValueError(
-            f"Prediction/GT shape mismatch: "
-            f"{pred.shape} vs {gt.shape}"
-        )
-
-    if pred.size == 0:
-        return {
-            "mae": float("nan"),
-            "rmse": float("nan"),
-            "nae": float("nan"),
-            "sre": float("nan"),
-            "signed_bias": float("nan"),
-            "median_ae": float("nan"),
-            "p90_ae": float("nan"),
-            "p95_ae": float("nan"),
-            "max_ae": float("nan"),
-        }
-
-    err = pred - gt
-    ae = np.abs(err)
-
-    denom = np.maximum(
-        gt,
-        eps,
-    )
-
-    return {
-        "mae": float(np.mean(ae)),
-        "rmse": float(
-            np.sqrt(
-                np.mean(err * err)
-            )
-        ),
-        "nae": float(
-            np.mean(
-                ae / denom
-            )
-        ),
-        "sre": float(
-            np.sqrt(
-                np.mean(
-                    (err * err)
-                    / denom
-                )
-            )
-        ),
-        "signed_bias": float(
-            np.mean(err)
-        ),
-        "median_ae": float(
-            np.median(ae)
-        ),
-        "p90_ae": float(
-            np.percentile(
-                ae,
-                90,
-            )
-        ),
-        "p95_ae": float(
-            np.percentile(
-                ae,
-                95,
-            )
-        ),
-        "max_ae": float(
-            np.max(ae)
-        ),
-    }
-
 
 def window_metric_summary(
     rows: list[dict[str, Any]],
@@ -580,41 +502,40 @@ def window_metric_summary(
     for r in rows:
         by_image.setdefault(int(r["image_index"]), []).append(r)
 
-    per_image_pmae = []
-    per_image_prmse = []
+    per_image_wmae = []
+    per_image_wrmse = []
     for img_idx, img_rows in by_image.items():
         img_pred = np.asarray([float(r["pred_count"]) for r in img_rows], dtype=np.float64)
         img_gt = np.asarray([float(r["gt_count"]) for r in img_rows], dtype=np.float64)
         err = img_pred - img_gt
-        per_image_pmae.append(float(np.mean(np.abs(err))))
-        per_image_prmse.append(float(np.sqrt(np.mean(err * err))))
+        per_image_wmae.append(float(np.mean(np.abs(err))))
+        per_image_wrmse.append(float(np.sqrt(np.mean(err * err))))
 
-    pmae_macro = float(np.mean(per_image_pmae)) if per_image_pmae else float("nan")
-    prmse_macro = float(np.mean(per_image_prmse)) if per_image_prmse else float("nan")
+    wmae_macro = float(np.mean(per_image_wmae)) if per_image_wmae else float("nan")
+    wrmse_macro = float(np.mean(per_image_wrmse)) if per_image_wrmse else float("nan")
 
     # Partition: Full 256x256 core windows vs Partial edge windows
     full_rows = [r for r in rows if bool(r.get("is_full_window", True))]
     edge_rows = [r for r in rows if not bool(r.get("is_full_window", True))]
 
-    full_pmae = float("nan")
-    full_prmse = float("nan")
+    full_wmae = float("nan")
+    full_wrmse = float("nan")
     if full_rows:
         f_pred = np.asarray([float(r["pred_count"]) for r in full_rows], dtype=np.float64)
         f_gt = np.asarray([float(r["gt_count"]) for r in full_rows], dtype=np.float64)
         f_err = f_pred - f_gt
-        full_pmae = float(np.mean(np.abs(f_err)))
-        full_prmse = float(np.sqrt(np.mean(f_err * f_err)))
+        full_wmae = float(np.mean(np.abs(f_err)))
+        full_wrmse = float(np.sqrt(np.mean(f_err * f_err)))
 
-    edge_pmae = float("nan")
-    edge_prmse = float("nan")
+    edge_wmae = float("nan")
+    edge_wrmse = float("nan")
     if edge_rows:
         e_pred = np.asarray([float(r["pred_count"]) for r in edge_rows], dtype=np.float64)
         e_gt = np.asarray([float(r["gt_count"]) for r in edge_rows], dtype=np.float64)
         e_err = e_pred - e_gt
-        edge_pmae = float(np.mean(np.abs(e_err)))
-        edge_prmse = float(np.sqrt(np.mean(e_err * e_err)))
+        edge_wmae = float(np.mean(np.abs(e_err)))
+        edge_wrmse = float(np.sqrt(np.mean(e_err * e_err)))
 
-    # Ordinary NAE is not meaningful for GT=0 windows.
     positive = gt > 0
     empty = gt == 0
 
@@ -659,23 +580,35 @@ def window_metric_summary(
 
     stats.update(
         {
-            "pmae": stats["mae"],          # micro PMAE (standard)
-            "prmse": stats["rmse"],        # micro PRMSE
-            "pmae_micro": stats["mae"],
-            "prmse_micro": stats["rmse"],
-            "pmae_macro": pmae_macro,
-            "prmse_macro": prmse_macro,
-            "full_window_pmae": full_pmae,
-            "full_window_prmse": full_prmse,
+            # Primary naming: Window-MAE / Window-RMSE
+            "window_mae": stats["mae"],
+            "window_rmse": stats["rmse"],
+            "window_mae_micro": stats["mae"],
+            "window_rmse_micro": stats["rmse"],
+            "window_mae_macro": wmae_macro,
+            "window_rmse_macro": wrmse_macro,
+            "full_window_mae": full_wmae,
+            "full_window_rmse": full_wrmse,
             "full_window_count": len(full_rows),
-            "edge_window_pmae": edge_pmae,
-            "edge_window_prmse": edge_prmse,
+            "edge_window_mae": edge_wmae,
+            "edge_window_rmse": edge_wrmse,
             "edge_window_count": len(edge_rows),
             "nae_nonzero": nae_nonzero,
             "nonempty_window_mae": nonempty_mae,
             "empty_window_mae": empty_mae,
             "empty_window_mean_prediction": empty_mean_pred,
             "empty_window_fraction": float(empty.mean()),
+            # Backward-compatible aliases for PMAE/PRMSE
+            "pmae": stats["mae"],
+            "prmse": stats["rmse"],
+            "pmae_micro": stats["mae"],
+            "prmse_micro": stats["rmse"],
+            "pmae_macro": wmae_macro,
+            "prmse_macro": wrmse_macro,
+            "full_window_pmae": full_wmae,
+            "full_window_prmse": full_wrmse,
+            "edge_window_pmae": edge_wmae,
+            "edge_window_prmse": edge_wrmse,
         }
     )
 
@@ -691,37 +624,35 @@ def window_metric_summary(
 
 def measure_validity_metrics(
     y_pred: torch.Tensor,
+    tau: float = 1e-6,
     eps: float = 1e-6,
 ) -> dict[str, float]:
     y = y_pred.float()
 
-    negative = (
-        -y
-    ).clamp_min(0.0)
+    negative_raw = (-y).clamp_min(0.0)
+    negative_tau = (-y - tau).clamp_min(0.0)
 
-    neg_total = float(
-        negative.sum().item()
-    )
-    abs_total = float(
-        y.abs().sum().item()
-    )
+    neg_total = float(negative_raw.sum().item())
+    abs_total = float(y.abs().sum().item())
 
-    neg_cells = int((y < 0).sum().item())
+    neg_cells_raw = int((y < 0.0).sum().item())
+    neg_cells_tau = int((y < -tau).sum().item())
     total_cells = int(y.numel())
 
+    vr_raw = float(neg_cells_raw / max(total_cells, 1))
+    vr_tau = float(neg_cells_tau / max(total_cells, 1))
+
     return {
-        "violation_rate": float(
-            neg_cells / max(total_cells, 1)
-        ),
-        "violation_magnitude": float(
-            negative.mean().item()
-        ),
-        "negative_mass_ratio": float(
-            neg_total
-            / (abs_total + eps)
-        ),
+        "violation_rate": vr_raw,
+        "violation_rate_raw": vr_raw,
+        "violation_rate_tau": vr_tau,
+        "violation_magnitude": float(negative_raw.mean().item()),
+        "violation_magnitude_tau": float(negative_tau.mean().item()),
+        "negative_mass_ratio": float(neg_total / (abs_total + eps)),
         "negative_mass_total": neg_total,
-        "neg_cell_count": neg_cells,
+        "neg_cell_count": neg_cells_raw,
+        "neg_cell_count_raw": neg_cells_raw,
+        "neg_cell_count_tau": neg_cells_tau,
         "total_cells": total_cells,
         "abs_mass_total": abs_total,
     }
@@ -734,31 +665,36 @@ def aggregate_validity_metrics(
     if not rows:
         return {}
 
-    # Macro averages (mean over per-image metrics)
-    macro_vr = finite_mean(r["violation_rate"] for r in rows)
+    macro_vr_raw = finite_mean(r.get("violation_rate_raw", r.get("violation_rate", 0.0)) for r in rows)
+    macro_vr_tau = finite_mean(r.get("violation_rate_tau", r.get("violation_rate", 0.0)) for r in rows)
     macro_vm = finite_mean(r["violation_magnitude"] for r in rows)
     macro_nmr = finite_mean(r["negative_mass_ratio"] for r in rows)
 
-    # Micro averages (pooled across all cells in the dataset)
-    total_neg_cells = sum(int(r["neg_cell_count"]) for r in rows)
+    total_neg_cells_raw = sum(int(r.get("neg_cell_count_raw", r.get("neg_cell_count", 0))) for r in rows)
+    total_neg_cells_tau = sum(int(r.get("neg_cell_count_tau", 0)) for r in rows)
     total_cells = sum(int(r["total_cells"]) for r in rows)
     total_neg_mass = sum(float(r["negative_mass_total"]) for r in rows)
     total_abs_mass = sum(float(r["abs_mass_total"]) for r in rows)
 
-    micro_vr = float(total_neg_cells / max(total_cells, 1))
+    micro_vr_raw = float(total_neg_cells_raw / max(total_cells, 1))
+    micro_vr_tau = float(total_neg_cells_tau / max(total_cells, 1))
     micro_vm = float(total_neg_mass / max(total_cells, 1))
     micro_nmr = float(total_neg_mass / (total_abs_mass + eps))
 
     return {
-        "macro_violation_rate": macro_vr,
+        "macro_violation_rate": macro_vr_raw,
+        "macro_violation_rate_raw": macro_vr_raw,
+        "macro_violation_rate_tau": macro_vr_tau,
         "macro_violation_magnitude": macro_vm,
         "macro_negative_mass_ratio": macro_nmr,
-        "micro_violation_rate": micro_vr,
+        "micro_violation_rate": micro_vr_raw,
+        "micro_violation_rate_raw": micro_vr_raw,
+        "micro_violation_rate_tau": micro_vr_tau,
         "micro_violation_magnitude": micro_vm,
         "micro_negative_mass_ratio": micro_nmr,
         "negative_mass_total": float(total_neg_mass),
         # Backward-compatibility aliases
-        "violation_rate": macro_vr,
+        "violation_rate": macro_vr_raw,
         "violation_magnitude": macro_vm,
         "negative_mass_ratio": macro_nmr,
     }
@@ -1184,6 +1120,7 @@ def main() -> None:
 
     direct_predictions: list[float] = []
     tiled_predictions: list[float] = []
+    controlled_tiled_predictions: list[float] = []
     full_gt_counts: list[float] = []
 
     all_window_rows: list[dict[str, Any]] = []
@@ -1243,7 +1180,7 @@ def main() -> None:
             c_direct = cell_counts_to_cumulative_field(y_direct, orientation="TL")
 
         # ---------------------------------------------------------
-        # Window + Full-Tiled
+        # Window + Full-Tiled (Practical)
         # ---------------------------------------------------------
         (
             pred_tiled_count,
@@ -1257,6 +1194,25 @@ def main() -> None:
             tile_size=args.tile_size,
             halo=args.halo,
         )
+
+        # ---------------------------------------------------------
+        # Full-Tiled (Controlled halo)
+        # ---------------------------------------------------------
+        if args.controlled_halo == args.halo:
+            pred_ctrl_tiled_count = pred_tiled_count
+        else:
+            (
+                pred_ctrl_tiled_count,
+                _,
+                _,
+                _,
+            ) = predict_windows_and_tiled(
+                model=model,
+                image=image,
+                points_in_bounds=points_inside,
+                tile_size=args.tile_size,
+                halo=args.controlled_halo,
+            )
 
         # ---------------------------------------------------------
         # Shared exact GT count measure on output grid
@@ -1385,6 +1341,14 @@ def main() -> None:
             "pred_full_tiled": pred_tiled_count,
             "err_full_tiled_signed": pred_tiled_count - gt_count,
             "err_full_tiled_abs": abs(pred_tiled_count - gt_count),
+            "pred_full_tiled_practical": pred_tiled_count,
+            "err_full_tiled_practical_signed": pred_tiled_count - gt_count,
+            "err_full_tiled_practical_abs": abs(pred_tiled_count - gt_count),
+            "pred_full_tiled_controlled": pred_ctrl_tiled_count,
+            "err_full_tiled_controlled_signed": pred_ctrl_tiled_count - gt_count,
+            "err_full_tiled_controlled_abs": abs(pred_ctrl_tiled_count - gt_count),
+            "halo_effect_signed": pred_tiled_count - pred_ctrl_tiled_count,
+            "halo_effect_abs": abs(pred_tiled_count - pred_ctrl_tiled_count),
             "cancellation_ratio": cancel,
             "window_abs_error_sum": local_abs_sum,
             "window_net_abs_error": net_abs,
@@ -1410,13 +1374,15 @@ def main() -> None:
         per_image_rows.append(row_dict)
         direct_predictions.append(pred_direct_count)
         tiled_predictions.append(pred_tiled_count)
+        controlled_tiled_predictions.append(pred_ctrl_tiled_count)
         full_gt_counts.append(gt_count)
 
         print(
             f"[{image_index + 1:03d}/{n_eval:03d}] "
             f"GT={gt_count:.1f} | "
             f"Direct={pred_direct_count:.2f} (AE={abs(pred_direct_count-gt_count):.2f}) | "
-            f"Tiled={pred_tiled_count:.2f} (AE={abs(pred_tiled_count-gt_count):.2f}) | "
+            f"Tiled(h={args.halo})={pred_tiled_count:.2f} (AE={abs(pred_tiled_count-gt_count):.2f}) | "
+            f"Tiled(ctrl={args.controlled_halo})={pred_ctrl_tiled_count:.2f} (AE={abs(pred_ctrl_tiled_count-gt_count):.2f}) | "
             f"Cancel={100*cancel:.1f}%"
         )
 
@@ -1425,6 +1391,7 @@ def main() -> None:
     # -----------------------------------------------------------------
     direct_stats = count_metric_summary(direct_predictions, full_gt_counts, eps=1.0)
     tiled_stats = count_metric_summary(tiled_predictions, full_gt_counts, eps=1.0)
+    tiled_ctrl_stats = count_metric_summary(controlled_tiled_predictions, full_gt_counts, eps=1.0)
     window_stats = window_metric_summary(all_window_rows)
 
     direct_validity_summary = aggregate_validity_metrics(direct_validity_rows)
@@ -1442,15 +1409,36 @@ def main() -> None:
         "num_windows": len(all_window_rows),
         "tile_size": args.tile_size,
         "halo": args.halo,
+        "controlled_halo": args.controlled_halo,
         "game_levels": [int(x) for x in args.game_levels],
         "window": window_stats,
         "full_tiled": tiled_stats,
+        "full_tiled_practical": tiled_stats,
+        "full_tiled_controlled": tiled_ctrl_stats,
         "full_direct": direct_stats,
         "direct_minus_tiled": {
             "mae_gap": direct_stats["mae"] - tiled_stats["mae"],
             "rmse_gap": direct_stats["rmse"] - tiled_stats["rmse"],
             "nae_gap": direct_stats["nae"] - tiled_stats["nae"],
             "sre_gap": direct_stats["sre"] - tiled_stats["sre"],
+        },
+        "direct_minus_tiled_practical": {
+            "mae_gap": direct_stats["mae"] - tiled_stats["mae"],
+            "rmse_gap": direct_stats["rmse"] - tiled_stats["rmse"],
+            "nae_gap": direct_stats["nae"] - tiled_stats["nae"],
+            "sre_gap": direct_stats["sre"] - tiled_stats["sre"],
+        },
+        "direct_minus_tiled_controlled": {
+            "mae_gap": direct_stats["mae"] - tiled_ctrl_stats["mae"],
+            "rmse_gap": direct_stats["rmse"] - tiled_ctrl_stats["rmse"],
+            "nae_gap": direct_stats["nae"] - tiled_ctrl_stats["nae"],
+            "sre_gap": direct_stats["sre"] - tiled_ctrl_stats["sre"],
+        },
+        "halo_effect_practical_minus_controlled": {
+            "mae_gap": tiled_stats["mae"] - tiled_ctrl_stats["mae"],
+            "rmse_gap": tiled_stats["rmse"] - tiled_ctrl_stats["rmse"],
+            "nae_gap": tiled_stats["nae"] - tiled_ctrl_stats["nae"],
+            "sre_gap": tiled_stats["sre"] - tiled_ctrl_stats["sre"],
         },
         "cancellation": {
             "mean": finite_mean(cancellation_ratios),
@@ -1506,23 +1494,25 @@ def main() -> None:
     # Console report
     # -----------------------------------------------------------------
     print()
-    print("=" * 96)
+    print("=" * 104)
     print("STANDARD COUNT METRICS")
-    print("=" * 96)
-    print(f"{'Metric':<18}{'Window':>14}{'Tiled':>14}{'Direct':>14}")
-    print("-" * 60)
-    print(f"{'MAE/PMAE':<18}{window_stats.get('pmae_micro', float('nan')):>14.4f}{tiled_stats['mae']:>14.4f}{direct_stats['mae']:>14.4f}")
-    print(f"{'RMSE/PRMSE':<18}{window_stats.get('prmse_micro', float('nan')):>14.4f}{tiled_stats['rmse']:>14.4f}{direct_stats['rmse']:>14.4f}")
-    print(f"{'NAE':<18}{window_stats.get('nae_nonzero', float('nan')):>14.4f}{tiled_stats['nae']:>14.4f}{direct_stats['nae']:>14.4f}")
-    print(f"{'SRE':<18}{'n/a':>14}{tiled_stats['sre']:>14.4f}{direct_stats['sre']:>14.4f}")
-    print(f"{'Signed Bias':<18}{window_stats.get('signed_bias', float('nan')):>14.4f}{tiled_stats['signed_bias']:>14.4f}{direct_stats['signed_bias']:>14.4f}")
+    print("=" * 104)
+    ctrl_label = f"Tiled(ctrl={args.controlled_halo})"
+    prac_label = f"Tiled(halo={args.halo})"
+    print(f"{'Metric':<16}{'Window':>14}{ctrl_label:>18}{prac_label:>18}{'Direct':>14}")
+    print("-" * 80)
+    print(f"{'MAE/PMAE':<16}{window_stats.get('window_mae_micro', float('nan')):>14.4f}{tiled_ctrl_stats['mae']:>18.4f}{tiled_stats['mae']:>18.4f}{direct_stats['mae']:>14.4f}")
+    print(f"{'RMSE/PRMSE':<16}{window_stats.get('window_rmse_micro', float('nan')):>14.4f}{tiled_ctrl_stats['rmse']:>18.4f}{tiled_stats['rmse']:>18.4f}{direct_stats['rmse']:>14.4f}")
+    print(f"{'NAE':<16}{window_stats.get('nae_nonzero', float('nan')):>14.4f}{tiled_ctrl_stats['nae']:>18.4f}{tiled_stats['nae']:>18.4f}{direct_stats['nae']:>14.4f}")
+    print(f"{'SRE':<16}{'n/a':>14}{tiled_ctrl_stats['sre']:>18.4f}{tiled_stats['sre']:>18.4f}{direct_stats['sre']:>14.4f}")
+    print(f"{'Signed Bias':<16}{window_stats.get('signed_bias', float('nan')):>14.4f}{tiled_ctrl_stats['signed_bias']:>18.4f}{tiled_stats['signed_bias']:>18.4f}{direct_stats['signed_bias']:>14.4f}")
 
     print()
-    print("=" * 96)
+    print("=" * 104)
     print("TAIL / FAILURE METRICS")
-    print("=" * 96)
+    print("=" * 104)
     for key, label in (("median_ae", "Median AE"), ("p90_ae", "P90 AE"), ("p95_ae", "P95 AE"), ("max_ae", "Max AE")):
-        print(f"{label:<18}{window_stats.get(key, float('nan')):>14.4f}{tiled_stats[key]:>14.4f}{direct_stats[key]:>14.4f}")
+        print(f"{label:<16}{window_stats.get(key, float('nan')):>14.4f}{tiled_ctrl_stats[key]:>18.4f}{tiled_stats[key]:>18.4f}{direct_stats[key]:>14.4f}")
 
     print()
     print("=" * 96)
@@ -1583,10 +1573,17 @@ def main() -> None:
 
     print()
     print("=" * 96)
-    print("DIRECT - TILED GAPS")
+    print("DIRECT - TILED GAPS & HALO SENSITIVITY")
     print("=" * 96)
-    for key, value in summary["direct_minus_tiled"].items():
-        print(f"{key:<28}: {value:.6f}")
+    print("--- Direct - Practical Tiled ---")
+    for key, value in summary["direct_minus_tiled_practical"].items():
+        print(f"  {key:<28}: {value:.6f}")
+    print(f"--- Direct - Controlled Tiled (halo={args.controlled_halo}) ---")
+    for key, value in summary["direct_minus_tiled_controlled"].items():
+        print(f"  {key:<28}: {value:.6f}")
+    print("--- Halo Effect (Practical - Controlled) ---")
+    for key, value in summary["halo_effect_practical_minus_controlled"].items():
+        print(f"  {key:<28}: {value:.6f}")
 
     print()
     print(f"Summary    : {summary_path}")

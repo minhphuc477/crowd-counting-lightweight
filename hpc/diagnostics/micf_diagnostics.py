@@ -224,7 +224,27 @@ def compute_spectral_analysis(
     # 2D real FFT
     fft2 = torch.fft.rfft2(map_2d.float())
     power = (fft2.real ** 2 + fft2.imag ** 2)
-    total_power = float(power.sum().item()) + 1e-12
+
+    # Hermitian multiplicity weighting: rfft2 drops negative frequencies along width.
+    # Non-DC and non-Nyquist frequencies must be weighted by 2 to equal full 2D FFT energy (Parseval).
+    weights = torch.ones_like(power)
+    if W % 2 == 0:
+        if weights.shape[1] > 2:
+            weights[:, 1:-1] = 2.0
+    else:
+        if weights.shape[1] > 1:
+            weights[:, 1:] = 2.0
+
+    weighted_power = power * weights
+    total_power = float(weighted_power.sum().item())
+
+    if total_power <= 1e-12:
+        return {
+            "high_freq_energy_ratio": 0.0,
+            "coeff_frac_90": 0.0,
+            "coeff_frac_95": 0.0,
+            "coeff_frac_99": 0.0,
+        }
 
     # Frequency coordinates normalized to [0, 1]
     fy = torch.fft.fftfreq(H, device=map_2d.device).unsqueeze(1).repeat(1, fft2.shape[1])
@@ -232,11 +252,11 @@ def compute_spectral_analysis(
     radius = torch.sqrt((fy * 2.0) ** 2 + (fx * 2.0) ** 2)  # [0, ~sqrt(2)]
 
     high_mask = radius > tau_norm
-    high_power = float(power[high_mask].sum().item())
+    high_power = float((weighted_power * high_mask.float()).sum().item())
     e_high = high_power / total_power
 
-    # Cumulative energy retention
-    flat_power = power.flatten().cpu().numpy()
+    # Cumulative energy retention (based on effective full-spectrum weighted power)
+    flat_power = weighted_power.flatten().cpu().numpy()
     sorted_power = np.sort(flat_power)[::-1]  # descending
     cum_energy = np.cumsum(sorted_power) / (np.sum(sorted_power) + 1e-12)
     total_coeffs = len(sorted_power)

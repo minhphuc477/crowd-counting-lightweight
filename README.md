@@ -1,6 +1,6 @@
 # MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-28%2F28%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-40%2F40%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
 [![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
 
@@ -131,9 +131,9 @@ Top-left cumulative supervision naturally weights cells near $(0, 0)$ more heavi
 1. Horizontal flip is applied at random in the dataset loader ($p = 0.5$).
 2. **Independent vertical flip** is applied in the training loop ($p = 0.5$) with point $y \leftarrow (H - 1) - y$.
 3. Exact local $Y$ and cumulative $C$ targets are generated dynamically from the flipped points.
-By symmetry:
-$$(H-x)(W-y) + (H-x)y + x(W-y) + xy = HW = \text{constant},$$
-guaranteeing equal expected gradient contribution across all spatial locations.
+By symmetry across all 4 corner orientations:
+$$[(i+1) + (H-i)] \cdot [(j+1) + (W-j)] = (H+1)(W+1) = \text{constant},$$
+guaranteeing equal expected gradient contribution across all spatial locations $(i, j) \in [0, H-1] \times [0, W-1]$.
 
 ### 4.3 Training Schedule
 - **Optimizer:** AdamW, initial base LR $10^{-4}$, backbone LR scale $0.1$, weight decay $10^{-4}$.
@@ -207,43 +207,40 @@ lightweightcrcn/
 ```powershell
 .venv\Scripts\pytest tests/ -v
 ```
-*(All 13 tests pass in ~6.5s).*
+*(All 40 tests pass in ~7s).*
 
-### 7.2 Run 1-Epoch Smoke Test (All 7 Models)
+### 7.2 Run 1-Epoch Smoke Test (All Models)
 ```powershell
-for ($i = 1; $i -le 7; $i++) {
+for ($i = 1; $i -le 8; $i++) {
     .venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b$i.yaml --smoke-test
 }
 ```
 
-### 7.3 Train a Full Pilot Model (e.g. B5 Full MICF-v2)
+### 7.3 Train a Pilot Model (e.g. B8 FH-CMICF K=4)
 ```powershell
-.venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b5.yaml --epochs 100
+.venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b8.yaml --epochs 1000
 ```
 
-### 7.4 Comprehensive Benchmark Evaluation
+### 7.4 Comprehensive Checkpoint Evaluation (Dual Tiled & Direct)
 ```powershell
-.venv\Scripts\python tools/eval_micf_comprehensive.py `
-    --config configs/pilot_micf/b5.yaml `
-    --checkpoint runs/pilot_micf/b5/best.pt `
-    --output-csv ./runs/pilot_micf/benchmark_results.csv
+.venv\Scripts\python tools/eval_micf_comprehensive.py --config configs/pilot_micf/b8.yaml
 ```
 
-Outputs the complete 20-column CSV:
-```text
-dataset,seed,variant,params,flops,rf_proxy,mae,mae_full_direct,mae_full_tiled,
-rmse,nae,prefix_mae,local_recon_mae,rectangle_mae_small,rectangle_mae_medium,
-rectangle_mae_large,negative_cell_fraction,negative_mass_ratio,violation_magnitude,peak_vram_mb
-```
+Outputs:
+- `comprehensive_summary.json`: Multi-family metrics (Window MAE/RMSE, Controlled Tiled halo=0, Practical Tiled halo=64, Direct, GAME 0–3, Validity $\tau=10^{-6}$, Representation diagnostics, Direct-Tiled gaps, and Halo effect).
+- `comprehensive_per_image.csv`: Per-image counts, GAME errors, validity metrics, and cancellation ratios.
+- `comprehensive_per_window.csv`: Per-window ground-truth and prediction counts.
 
-### 7.5 Run Capacity Sweep Config Generation
+### 7.5 Automated Gate Decision Runner (B5b vs B8)
 ```powershell
-.venv\Scripts\python configs/generate_capacity_sweep.py
+.venv\Scripts\python tools/run_gate_b5b_vs_b8.py --skip-train
 ```
+Generates `runs/pilot_micf/gate_decision_b5b_vs_b8.md`, `runs/pilot_micf/comparison_b5b_vs_b8_curves.png`, and `runs/pilot_micf/spatial_error_map_C_b5b_vs_b8.png`.
 
-### 7.6 Run Receptive-Field Sweep Config Generation (Section 25)
+### 7.6 Model Profiling & ONNX Export
 ```powershell
-.venv\Scripts\python configs/generate_rf_sweep.py
+.venv\Scripts\python tools/profile_model.py --config configs/pilot_micf/b8.yaml
+.venv\Scripts\python tools/export_onnx.py --config configs/pilot_micf/b8.yaml --output b8.onnx --verify
 ```
 
 ---
