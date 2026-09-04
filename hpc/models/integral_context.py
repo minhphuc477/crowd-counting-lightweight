@@ -19,6 +19,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .blocks import make_group_norm
+
 
 def _prefix_area_tl(h: int, w: int, device, dtype) -> torch.Tensor:
     """Area (i+1)(j+1) for TL prefix, shape [H, W]."""
@@ -275,6 +277,77 @@ class AxialIntegralContext(nn.Module):
         z = torch.cat([x, r, v], dim=1)  # [B, 3C, H, W]
         z = self.reduce(z)
         z = self.dw(z)
+        z = self.project(z)
+        z = self.dropout(z)
+
+        if self.use_residual:
+            return x + z
+        return z
+
+
+class StrictLocalDirectionalIntegralContext(nn.Module):
+    """Directional integral context intended for already-partitioned KxK chart batches.
+
+    No global spatial statistics: uses make_group_norm instead of BatchNorm2d.
+    Operates strictly within each KxK block batch [B * nh * nw, C, K, K].
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        use_residual: bool = True,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.channels = channels
+        self.use_residual = use_residual
+
+        in_channels = channels * 5
+
+        self.reduce_conv = nn.Conv2d(
+            in_channels,
+            channels,
+            kernel_size=1,
+            bias=False,
+        )
+        self.reduce_norm = make_group_norm(channels)
+        self.reduce_act = nn.SiLU(inplace=True)
+
+        self.dw_conv = nn.Conv2d(
+            channels,
+            channels,
+            kernel_size=3,
+            padding=1,
+            groups=channels,
+            bias=False,
+        )
+        self.dw_norm = make_group_norm(channels)
+        self.dw_act = nn.SiLU(inplace=True)
+
+        self.project = nn.Conv2d(
+            channels,
+            channels,
+            kernel_size=1,
+            bias=False,
+        )
+        self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        tl = normalized_integral_tl(x)
+        tr = normalized_integral_tr(x)
+        bl = normalized_integral_bl(x)
+        br = normalized_integral_br(x)
+
+        z = torch.cat([x, tl, tr, bl, br], dim=1)
+
+        z = self.reduce_conv(z)
+        z = self.reduce_norm(z)
+        z = self.reduce_act(z)
+
+        z = self.dw_conv(z)
+        z = self.dw_norm(z)
+        z = self.dw_act(z)
+
         z = self.project(z)
         z = self.dropout(z)
 

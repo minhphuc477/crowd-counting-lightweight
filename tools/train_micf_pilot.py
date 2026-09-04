@@ -49,6 +49,7 @@ from hpc.losses.micf import (
     IntegralLossOnLocalCount,
     MICFLoss,
 )
+from hpc.losses.ps_fh_cmicf import PSFHCMICFLoss
 from hpc.models.micf_lite import MICFLite
 
 
@@ -135,6 +136,21 @@ def build_criterion(cfg: dict) -> nn.Module:
             lambda_local_recon=float(l_cfg.get("lambda_local_recon", 0.0)),
             beta_smooth=float(l_cfg.get("beta_smooth", 1.0)),
             normalize_by=l_cfg.get("normalize_by", "none"),
+            norm_eps=float(l_cfg.get("norm_eps", 1.0)),
+        )
+    elif mode == "ps_fh_cmicf":
+        m_cfg = cfg.get("model", {})
+        k = int(m_cfg.get("finite_horizon", 4))
+        return PSFHCMICFLoss(
+            k=k,
+            precondition_alpha=float(l_cfg.get("precondition_alpha", 0.5)),
+            precondition_sv_floor=float(l_cfg.get("precondition_sv_floor", 1e-8)),
+            lambda_sobolev=float(l_cfg.get("lambda_sobolev", 1.0)),
+            sobolev_beta=float(l_cfg.get("sobolev_beta", 1.0)),
+            lambda_count=float(l_cfg.get("lambda_count", 1.0)),
+            al_rho=float(l_cfg.get("al_rho", 1.0)),
+            al_dual_init=float(l_cfg.get("al_dual_init", 0.0)),
+            al_dual_max=float(l_cfg.get("al_dual_max", 100.0)),
             norm_eps=float(l_cfg.get("norm_eps", 1.0)),
         )
     else:
@@ -242,10 +258,10 @@ def evaluate_model(
             viol_mag = float(F.relu(-y_rec).mean().item())
             violation_magnitudes.append(viol_mag)
 
-            # r_-: negative mass ratio
+            # r_-: canonical negative mass ratio M^- / M^+
             neg_mass = float((-y_rec).clamp(min=0).sum().item())
-            total_abs = float(y_rec.abs().sum().item()) + 1e-6
-            neg_mass_ratios.append(neg_mass / total_abs)
+            pos_mass = float((y_rec).clamp(min=0).sum().item())
+            neg_mass_ratios.append(neg_mass / max(pos_mass, 1e-12))
 
     mae_crop = float(np.mean(crop_errors)) if crop_errors else 0.0
     mae_full = float(np.mean(full_errors)) if full_errors else 0.0
@@ -382,9 +398,18 @@ def main() -> None:
         eps_d=float(m_cfg.get("eps_d", 1e-8)),
         extent_aware=bool(m_cfg.get("extent_aware", False)),
         finite_horizon=m_cfg.get("finite_horizon", None),
+        fh_strict_local=bool(m_cfg.get("fh_strict_local", False)),
+        fh_local_norm=str(m_cfg.get("fh_local_norm", "group")),
     ).to(device)
 
-    criterion = build_criterion(cfg)
+    criterion = build_criterion(cfg).to(device)
+    if hasattr(criterion, "preconditioner"):
+        p = criterion.preconditioner
+        print(
+            f"PS-FH preconditioner | K={p.k} | alpha={p.alpha:.2f} | "
+            f"kappa(T)={p.prefix_condition_number:.3f} | kappa_eff={p.quadratic_condition_number:.3f}",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------
     # 3. Optimizer & LR schedule (warmup + cosine, design doc sec.39)
@@ -417,12 +442,17 @@ def main() -> None:
         warmup_epochs = 0
 
     use_amp = bool(t_cfg.get("amp", True)) and device.type == "cuda"
-    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=use_amp,
+        init_scale=float(t_cfg.get("scaler_init_scale", 128.0)),
+    )
 
     best_mae = float("inf")
     history: List[Dict[str, Any]] = []
 
     is_cumulative = model.head_type in {"cumulative", "integrated_local"}
+    is_ps_fh = isinstance(criterion, PSFHCMICFLoss)
     print(
         f"Model: {m_cfg.get('head_type')} head | context={m_cfg.get('use_integral_context')} | "
         f"Training {total_epochs} epochs (warmup={warmup_epochs}) | grad_clip={grad_clip}"
@@ -436,6 +466,10 @@ def main() -> None:
     for epoch in range(1, total_epochs + 1):
         model.train()
         epoch_losses: List[float] = []
+        epoch_ps_components: Dict[str, List[float]] = {}
+        epoch_grad_norms_before: List[float] = []
+        epoch_grad_norms_after: List[float] = []
+        epoch_clip_triggers: List[float] = []
         t0 = time.time()
 
         # Apply warmup + cosine LR scaling from stored initial_lr
@@ -472,30 +506,76 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=use_amp):
-                pred_field = model.forward_field(images)
-
-                if is_cumulative:
+                if is_ps_fh:
+                    pred_field, aux = model.forward_field_with_aux(images)
+                    c_target = cell_counts_to_cumulative_field(y_target, orientation="TL")
+                    loss, comp = criterion(
+                        pred_c=pred_field,
+                        target_c=c_target,
+                        target_y=y_target,
+                        pred_c_blocks=aux["c_blocks"],
+                        return_components=True,
+                    )
+                    for k_c, v_c in comp.items():
+                        epoch_ps_components.setdefault(k_c, []).append(v_c)
+                elif is_cumulative:
+                    pred_field = model.forward_field(images)
                     # Build cumulative target from the (possibly flipped) Y
                     c_target = cell_counts_to_cumulative_field(y_target, orientation="TL")
                     loss = criterion(pred_field, c_target, target_y=y_target)
                 elif isinstance(criterion, IntegralLossOnLocalCount):
+                    pred_field = model.forward_field(images)
                     loss = criterion(pred_field, y_target)
                 else:
+                    pred_field = model.forward_field(images)
                     loss = criterion(pred_field, y_target)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+
+            grad_norm_before = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+            gn_before_val = float(grad_norm_before.item())
+            if math.isfinite(gn_before_val):
+                gn_after_val = min(gn_before_val, grad_clip)
+                clip_trig = 1.0 if gn_before_val > grad_clip else 0.0
+                epoch_grad_norms_before.append(gn_before_val)
+                epoch_grad_norms_after.append(gn_after_val)
+                epoch_clip_triggers.append(clip_trig)
+            else:
+                epoch_clip_triggers.append(1.0)
+
             scaler.step(optimizer)
             scaler.update()
 
             epoch_losses.append(float(loss.item()))
+
+            # Gradient diagnostics every 25 epochs on batch 0
+            if is_ps_fh and (epoch % 25 == 0 or epoch == 1) and batch_idx == 0:
+                grad_diag = criterion.compute_gradient_diagnostics(
+                    pred_c=pred_field,
+                    target_c=c_target,
+                    target_y=y_target,
+                    pred_c_blocks=aux["c_blocks"],
+                )
+                print(
+                    f"  [Epoch {epoch:4d} Gradient Diagnostics] "
+                    f"grad_pc: {grad_diag['grad_pc']:.4e} | "
+                    f"grad_sobolev: {grad_diag['grad_sobolev']:.4e} | "
+                    f"grad_count: {grad_diag['grad_count']:.4e} | "
+                    f"grad_al: {grad_diag['grad_al']:.4e}",
+                    flush=True,
+                )
 
             if args.smoke_test and batch_idx >= 2:
                 break
 
         epoch_time = time.time() - t0
         mean_loss = float(np.mean(epoch_losses))
+
+        # Augmented Lagrangian dual update per epoch
+        if is_ps_fh and hasattr(criterion, "update_dual"):
+            epoch_g = float(np.mean(epoch_ps_components.get("ps_constraint", [0.0])))
+            new_lambda = criterion.update_dual(epoch_g)
 
         # ------------------------------------------------------------------
         # 5. Evaluation + logging (Regime A: Crop, Regime B: Full)
@@ -511,24 +591,37 @@ def main() -> None:
             )
             mae_crop = val_res["mae_crop"]
             mae_full = val_res["mae_full"]
+            mae_full_direct = val_res["mae_full_direct"]
+            mae_full_tiled = val_res["mae_full_tiled"]
             rmse_full = val_res["rmse"]
             viol = val_res["violation_rate"]
 
             is_best = mae_crop < best_mae
             if is_best:
                 best_mae = mae_crop
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "state_dict": model.state_dict(),
-                        "best_mae": best_mae,
-                        "mae_crop": mae_crop,
-                        "mae_full": mae_full,
-                        "config": cfg,
-                        "seed": seed,
-                    },
-                    save_dir / "best.pt",
-                )
+                ckpt_data = {
+                    "epoch": epoch,
+                    "state_dict": model.state_dict(),
+                    "best_mae": best_mae,
+                    "mae_crop": mae_crop,
+                    "mae_full": mae_full,
+                    "mae_full_direct": mae_full_direct,
+                    "mae_full_tiled": mae_full_tiled,
+                    "config": cfg,
+                    "seed": seed,
+                }
+                if is_ps_fh:
+                    ckpt_data["criterion_state"] = criterion.state_dict()
+                    p = criterion.preconditioner
+                    ckpt_data["preconditioner"] = {
+                        "k": p.k,
+                        "alpha": p.alpha,
+                        "min_singular_value": p.min_singular_value,
+                        "max_singular_value": p.max_singular_value,
+                        "prefix_condition_number": p.prefix_condition_number,
+                        "quadratic_condition_number": p.quadratic_condition_number,
+                    }
+                torch.save(ckpt_data, save_dir / "best.pt")
 
             log_entry = {
                 "epoch": epoch,
@@ -536,16 +629,42 @@ def main() -> None:
                 "lr": optimizer.param_groups[-1]["lr"],
                 "mae_crop": mae_crop,
                 "mae_full": mae_full,
+                "mae_full_direct": mae_full_direct,
+                "mae_full_tiled": mae_full_tiled,
                 "mae": mae_crop,
                 "rmse": rmse_full,
                 "violation_rate": viol,
                 "best_mae": best_mae,
                 "time_sec": epoch_time,
+                "grad_norm_before_clip": float(np.mean(epoch_grad_norms_before)) if epoch_grad_norms_before else 0.0,
+                "grad_norm_after_clip": float(np.mean(epoch_grad_norms_after)) if epoch_grad_norms_after else 0.0,
+                "clip_trigger_rate": float(np.mean(epoch_clip_triggers)) if epoch_clip_triggers else 0.0,
+                "clip_triggered": bool(np.any(epoch_clip_triggers)) if epoch_clip_triggers else False,
             }
+            if is_ps_fh:
+                for k_ps in [
+                    "ps_pc_loss",
+                    "ps_sobolev_loss",
+                    "sobolev_pos_loss",
+                    "sobolev_zero_loss",
+                    "ps_count_loss",
+                    "ps_constraint",
+                    "ps_dual_lambda",
+                    "ps_al_rho",
+                    "ps_aug_lagrangian",
+                    "positive_cell_fraction",
+                    "zero_cell_fraction",
+                ]:
+                    if k_ps in epoch_ps_components:
+                        log_entry[k_ps] = float(np.mean(epoch_ps_components[k_ps]))
+
             # Add MICF-specific diagnostics if present
             for k in ("violation_magnitude", "neg_mass_ratio"):
                 if k in val_res:
                     log_entry[k] = val_res[k]
+            if "neg_mass_ratio" in val_res:
+                log_entry["negative_mass_ratio"] = val_res["neg_mass_ratio"]
+
             history.append(log_entry)
 
             # Format extra MICF diagnostics for display
@@ -553,8 +672,11 @@ def main() -> None:
             if is_cumulative and not args.smoke_test:
                 diag_str = (
                     f" | ViolMag: {val_res.get('violation_magnitude', 0):.3f}"
-                    f" | NegMass: {val_res.get('neg_mass_ratio', 0)*100:.1f}%"
+                    f" | NegMass: {val_res.get('neg_mass_ratio', 0)*100:.2f}%"
                 )
+            if is_ps_fh:
+                dual_str = f" | DualLambda: {criterion.al_lambda.item():.3f}"
+                diag_str += dual_str
 
             print(
                 f"[Epoch {epoch:4d}/{total_epochs}] Loss: {mean_loss:.4f} | "
@@ -569,6 +691,20 @@ def main() -> None:
                 f"lr={optimizer.param_groups[-1]['lr']:.2e} ({epoch_time:.1f}s)",
                 flush=True,
             )
+
+        if epoch % 10 == 0 or epoch == total_epochs:
+            last_ckpt = {
+                "epoch": epoch,
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scaler": scaler.state_dict(),
+                "best_mae": best_mae,
+                "config": cfg,
+                "seed": seed,
+            }
+            if is_ps_fh:
+                last_ckpt["criterion_state"] = criterion.state_dict()
+            torch.save(last_ckpt, save_dir / "last.pt")
 
         if args.smoke_test:
             break

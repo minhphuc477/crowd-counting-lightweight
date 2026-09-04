@@ -169,6 +169,8 @@ def build_model_from_config(
         eps_d=float(m_cfg.get("eps_d", 1e-8)),
         extent_aware=bool(m_cfg.get("extent_aware", False)),
         finite_horizon=m_cfg.get("finite_horizon", None),
+        fh_strict_local=bool(m_cfg.get("fh_strict_local", False)),
+        fh_local_norm=str(m_cfg.get("fh_local_norm", "group")),
     )
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)

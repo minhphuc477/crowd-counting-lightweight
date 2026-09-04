@@ -251,6 +251,18 @@ def build_model_from_config(
             "finite_horizon",
             None,
         ),
+        fh_strict_local=bool(
+            m_cfg.get(
+                "fh_strict_local",
+                False,
+            )
+        ),
+        fh_local_norm=str(
+            m_cfg.get(
+                "fh_local_norm",
+                "group",
+            )
+        ),
     )
 
     missing, unexpected = model.load_state_dict(

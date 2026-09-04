@@ -25,7 +25,11 @@ import torch.nn.functional as F
 
 from .backbone import MobileNetV4Backbone
 from .blocks import make_group_norm
-from .integral_context import AxialIntegralContext, DirectionalIntegralContext
+from .integral_context import (
+    AxialIntegralContext,
+    DirectionalIntegralContext,
+    StrictLocalDirectionalIntegralContext,
+)
 from .neck import AdditiveFPNNeck
 from hpc.losses.micf import discrete_mixed_difference
 
@@ -278,6 +282,8 @@ class MICFLite(nn.Module):
         eps_d: float = 1e-8,
         extent_aware: bool = False,
         finite_horizon: int | None = None,
+        fh_strict_local: bool = False,
+        fh_local_norm: str = "group",
     ) -> None:
         super().__init__()
         self.head_type = head_type.lower()
@@ -291,6 +297,9 @@ class MICFLite(nn.Module):
             raise ValueError("extent_aware=True is only meaningful for head_type='cumulative'")
 
         self.finite_horizon = None if finite_horizon is None else int(finite_horizon)
+        self.fh_strict_local = bool(fh_strict_local)
+        self.fh_local_norm = str(fh_local_norm).lower()
+
         if self.finite_horizon is not None:
             if self.finite_horizon <= 0:
                 raise ValueError("finite_horizon must be a positive integer or None")
@@ -335,8 +344,17 @@ class MICFLite(nn.Module):
             target_stride=self.output_stride,
         )
 
-        # 3. Context Decoder: Directional / Axial Integral Context vs Identity
-        if self.context_type == "directional":
+        # 3. Context Decoder: StrictLocalDirectional / Directional / Axial vs Identity
+        if self.finite_horizon is not None and self.fh_strict_local:
+            if self.fh_local_norm == "group":
+                self.context_module = StrictLocalDirectionalIntegralContext(channels=self.neck_width)
+            elif self.context_type == "directional":
+                self.context_module = DirectionalIntegralContext(channels=self.neck_width)
+            elif self.context_type == "axial":
+                self.context_module = AxialIntegralContext(channels=self.neck_width)
+            else:
+                self.context_module = nn.Identity()
+        elif self.context_type == "directional":
             self.context_module = DirectionalIntegralContext(channels=self.neck_width)
         elif self.context_type == "axial":
             self.context_module = AxialIntegralContext(channels=self.neck_width)
@@ -449,6 +467,25 @@ class MICFLite(nn.Module):
                 f"FH feature grid ({H_o},{W_o}) must be divisible by finite_horizon={k}"
             )
 
+        if self.fh_strict_local:
+            # Component A: Strict-Local FH Cumulative Head
+            # 1. Partition P16 features into KxK blocks BEFORE context and head
+            blocks, n_h, n_w = _partition_feature_blocks(p_feat, k)
+            # 2. Block-independent directional integral context (GroupNorm)
+            p_context_blocks = self.context_module(blocks)
+            # 3. Predict local cumulative chart inside each block
+            c_blocks = self._predict_from_context(p_context_blocks, finite_horizon=k)
+            # 4. Exact non-learned composition
+            c_global = compose_batched_fh_cumulative(
+                c_blocks,
+                batch_size=B,
+                n_h=n_h,
+                n_w=n_w,
+                k=k,
+            )
+            return c_global
+
+        # Original FH-CMICF (B8) path:
         # 1. ONLY prefix/integral pooling is finite-horizon.
         # Learnable DIC fusion still operates globally across the full feature map.
         if isinstance(self.context_module, DirectionalIntegralContext):
@@ -474,6 +511,57 @@ class MICFLite(nn.Module):
             k=k,
         )
         return c_global
+
+    def forward_field_with_aux(
+        self,
+        x: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Forward pass returning global field along with auxiliary block-level tensors."""
+        features = self.backbone(x)
+        _, routes = self.neck(*features, return_routes=True, target_stride=self.output_stride)
+        route_key = f"p{self.output_stride}"
+        p_feat = routes[route_key]
+
+        if self.finite_horizon is None:
+            p_context = self.context_module(p_feat)
+            c_global = self._predict_from_context(p_context, finite_horizon=None)
+            y_global = discrete_mixed_difference(c_global)
+            return c_global, {"y_global": y_global}
+
+        k = self.finite_horizon
+        B, _, H_o, W_o = p_feat.shape
+        if H_o % k != 0 or W_o % k != 0:
+            raise ValueError(
+                f"FH feature grid ({H_o},{W_o}) must be divisible by finite_horizon={k}"
+            )
+
+        if self.fh_strict_local:
+            blocks, n_h, n_w = _partition_feature_blocks(p_feat, k)
+            p_context_blocks = self.context_module(blocks)
+            c_blocks = self._predict_from_context(p_context_blocks, finite_horizon=k)
+        else:
+            if isinstance(self.context_module, DirectionalIntegralContext):
+                p_context = self.context_module.forward_finite_horizon(p_feat, k=k)
+            else:
+                raise ValueError("FH-CMICF currently requires DirectionalIntegralContext")
+            c_local_layout = self._predict_from_context(p_context, finite_horizon=k)
+            c_blocks, n_h, n_w = _partition_feature_blocks(c_local_layout, k)
+
+        y_blocks = discrete_mixed_difference(c_blocks)
+        c_global = compose_batched_fh_cumulative(
+            c_blocks,
+            batch_size=B,
+            n_h=n_h,
+            n_w=n_w,
+            k=k,
+        )
+        aux = {
+            "c_blocks": c_blocks,
+            "y_blocks": y_blocks,
+            "n_h": n_h,
+            "n_w": n_w,
+        }
+        return c_global, aux
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.forward_field(x)
