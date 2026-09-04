@@ -21,6 +21,7 @@ Key training decisions (from design doc):
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -271,6 +272,14 @@ def evaluate_model(
             neg_mass = float((-y_rec).clamp(min=0).sum().item())
             pos_mass = float((y_rec).clamp(min=0).sum().item())
             neg_mass_ratios.append(neg_mass / max(pos_mass, 1e-12))
+
+        del img, crop_img, pred_crop_count, pred_crop_map, pred_full_direct, pred_full_tiled
+        if idx % 30 == 0:
+            gc.collect()
+
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
     mae_crop = float(np.mean(crop_errors)) if crop_errors else 0.0
     mae_full_direct = float(np.mean(full_direct_errors)) if full_direct_errors else 0.0
