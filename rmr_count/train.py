@@ -6,7 +6,20 @@ import gc
 import math
 import os
 import random
+import sys
 from pathlib import Path
+
+# Windows cp1252 stdout encoding safety
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import numpy as np
 import torch
@@ -372,9 +385,9 @@ def main() -> None:
                 torch.save(state, out_dir / "best_val_mae.pt")
                 is_new_best = True
 
-        # Formatted readable epoch log
+        # Formatted readable epoch log (pure ASCII for cross-platform compatibility)
         if model.variant in {"local_refine", "learned_project", "rmr"}:
-            solver_str = f"Solver: {solver_strength:4.2f} (step: {row['solver_rel_step_mean']:.4f}, ΔN: {row['solver_delta_n_mean']:4.1f})"
+            solver_str = f"Solver: {solver_strength:4.2f} (step: {row['solver_rel_step_mean']:.4f}, dN: {row['solver_delta_n_mean']:4.1f})"
         else:
             solver_str = "Solver: N/A"
 
@@ -390,9 +403,14 @@ def main() -> None:
         )
 
         if do_eval:
-            best_tag = " ★ NEW BEST" if is_new_best else f" (Best: {best_mae:.2f})"
+            if is_new_best:
+                best_tag = " * NEW BEST"
+            elif not math.isinf(best_mae):
+                best_tag = f" (Best: {best_mae:.2f})"
+            else:
+                best_tag = " (warmup)"
             print(
-                f"       └──> [VAL @ Epoch {epoch+1:03d}] "
+                f"       --> [VAL @ Epoch {epoch+1:03d}] "
                 f"MAE: {metrics['MAE']:.2f} | "
                 f"RMSE: {metrics['RMSE']:.2f} | "
                 f"NAE: {metrics['NAE']:.3f} | "

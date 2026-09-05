@@ -1,5 +1,6 @@
-﻿$ErrorActionPreference = "Stop"
-$lrs = @("1e-4", "3e-4", "1e-3")
+$ErrorActionPreference = "Stop"
+# lr = 1e-4 has already finished and reached best MAE = 234.04
+$lrs = @("3e-4", "1e-3")
 
 foreach ($lr in $lrs) {
     Write-Host "========================================================="
