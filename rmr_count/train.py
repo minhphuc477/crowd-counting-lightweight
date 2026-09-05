@@ -190,6 +190,7 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None, help="Stop training if validation MAE does not improve for this many evaluations")
+    ap.add_argument("--disable-early-stopping", action="store_true", default=False, help="Disable early stopping completely to train for full epochs")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -203,6 +204,9 @@ def main() -> None:
         cfg.setdefault("train", {})["eval_every"] = args.eval_every
     if args.patience is not None:
         cfg.setdefault("train", {})["patience"] = args.patience
+    if args.disable_early_stopping:
+        cfg.setdefault("train", {})["early_stopping"] = False
+        cfg.setdefault("train", {})["patience"] = 0
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
     seed = int(cfg.get("seed", 42))
@@ -298,7 +302,10 @@ def main() -> None:
     eval_every = int(cfg["train"].get("eval_every", 10))
     solver_warmup_epochs = int(cfg["train"].get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg["train"].get("solver_ramp_epochs", 20))
-    patience = int(cfg["train"].get("patience", 10))
+    early_stopping = bool(cfg["train"].get("early_stopping", True))
+    patience = int(cfg["train"].get("patience", 10 if early_stopping else 0))
+    if patience <= 0:
+        early_stopping = False
     no_improve_evals = 0
     diverge_evals = 0
 
@@ -582,8 +589,8 @@ def main() -> None:
                 flush=True,
             )
 
-            # Early stopping & Divergence tracking guard
-            if (patience > 0 and no_improve_evals >= patience) or (diverge_evals >= 3):
+            # Early stopping & Divergence tracking guard (skipped if early_stopping is False)
+            if early_stopping and ((patience > 0 and no_improve_evals >= patience) or (diverge_evals >= 3)):
                 reason = (
                     f"divergence detected ({diverge_evals} consecutive evaluations > 2x best MAE or > 800)"
                     if diverge_evals >= 3

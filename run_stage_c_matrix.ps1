@@ -26,7 +26,7 @@ foreach ($m in $models) {
         --output-dir $m.OutDir `
         --epochs 1000 `
         --eval-every 10 `
-        --patience 10
+        --disable-early-stopping
 
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Training completed/stopped for: $($m.Name)"
 

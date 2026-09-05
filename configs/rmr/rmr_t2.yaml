@@ -49,5 +49,6 @@ train:
   amp: true
   solver_warmup_epochs: 5
   solver_ramp_epochs: 20
-  patience: 10
+  patience: 0
   backbone_lr_scale: 0.1
+  early_stopping: false
