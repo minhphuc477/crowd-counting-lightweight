@@ -1,40 +1,44 @@
-# RMR-Count: Regional Measure Regularization for Ultra-Lightweight Crowd Counting
+# RMR-Count: Regional Measure Reconciliation for Ultra-Lightweight Crowd Counting
 
 > **Target Venue:** IEEE / CVPR 2026 (Computer Vision and Pattern Recognition)  
-> **Topic:** Ultra-Lightweight Visual Crowd Analysis, Implicit Optimization Layers, Discrete Geometric Measure Theory.
+> **Topic:** Ultra-Lightweight Visual Crowd Analysis, Operator-Guided Optimization Layers, Discrete Geometric Measure Theory.  
+> **Scope:** Pure visual crowd counting and spatial density estimation (< 100k parameters). This is an explicit counting architecture; point localization, detection bounding boxes, and Hungarian matching are out of scope.
 
 ---
 
-## 1. Abstract & Executive Summary
+## 1. Abstract & Motivation
 
-Ultra-lightweight crowd counting (< 100k parameters) faces a fundamental architectural dilemma: mobile-edge carriers (e.g., MobileNetV4-Conv-Small-0.50) possess small effective receptive fields that fail to capture long-range contextual dependencies, leading to massive overcounting in clutters and undercounting in sparse backgrounds. While global transformer necks or dense multi-scale dialations mitigate context deficits in heavy networks, they exceed the parameter and compute budget of mobile hardware.
+In ultra-lightweight crowd counting (< 100k parameters), models must maintain local spatial resolution while preserving global count coherence under strict memory and computational constraints. Heavy crowd counters rely on deep transformer backbones, dense self-attention, or large multi-scale dilated convolutions to integrate long-range context. However, these mechanisms exceed the parameter and compute budget of mobile-edge carriers.
 
-**RMR-Count** resolves this dilemma through a decoupled dual-head framework governed by an exact discrete geometric operator algebra:
-1. A **Fine Density Head** predicts local initial cell densities $y_0 \in \mathbb{R}_+^G$ at output stride $s=4$.
-2. A **Regional Extensivity Head** directly estimates aggregated count mass $b \in \mathbb{R}_+^M$ over multi-scale bounding regions $\mathcal{R}$.
-3. An **Implicit Unrolled Solver** iteratively reconciles local fine densities against regional constraints via the exact adjoint operator $A^\top$, minimizing the regional energy $\mathcal{E}_a(Y) = \frac{1}{2}(AY - b)^\top D_a^{-1} (AY - b)$ without backpropagating through large spatial graphs or dense attention maps.
+We investigate a fundamental research question:
+$$\boxed{\textbf{Can known discrete regional-count operators replace part of learned contextual reasoning in ultra-lightweight models?}}$$
 
-Crucially, we prove that under the area-normalized and coverage-preconditioned operator $H = D_c^{-1} A^\top D_a^{-1} A$, the system satisfies the **Adjoint Scale Invariance Theorem**: $H \mathbf{1}_G = \mathbf{1}_G$. This guarantees that uniform density distributions remain unaltered across arbitrary regional partitions, preventing scale-dependent gradient explosion or boundary artifacts.
+**RMR-Count** (Regional Measure Reconciliation) answers this question through a decoupled, operator-guided architecture:
+1. A **Fine Density Head** estimates initial spatial cell densities $y_0 \in \mathbb{R}_+^G$ at output stride $s=4$.
+2. A **Regional Extensivity Head** independently predicts aggregated count mass $b \in \mathbb{R}_+^M$ across multi-scale bounding regions $\mathcal{R}$.
+3. An **Operator-Guided Unrolled Reconciliation Layer** iteratively reconciles local densities against regional count constraints using the **exact geometric adjoint operator** $A^\top$.
+
+Crucially, we prove that under the area-normalized and coverage-preconditioned transfer operator $H = D_c^{-1} A^\top D_a^{-1} A$, the system satisfies the **Adjoint Scale Invariance Theorem**: $H \mathbf{1}_G = \mathbf{1}_G$. This guarantees that uniform density fields remain unaltered across arbitrary multi-scale partitions, preventing scale-dependent gradient explosion or boundary artifacts.
 
 ---
 
 ## 2. Mathematical Formulation
 
-### 2.1 Spatial Discretization & Cell Representation
+### 2.1 Spatial Discretization & Ground-Truth Cell Representation
 Let an input image $I \in \mathbb{R}^{3 \times H \times W}$ contain $N$ annotated head points $\mathcal{P} = \{(x_n, y_n)\}_{n=1}^N$.
 Under output stride $s=4$, the spatial counting lattice has dimensions $H_o = \lceil H/s \rceil, W_o = \lceil W/s \rceil$ with total grid cells $G = H_o \cdot W_o$.
 
-The discrete ground-truth count per cell is:
-$$Y_{ij}^* = \sum_{n=1}^N \mathbf{1}\left(\left\lfloor \frac{y_n}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n}{s} \right\rfloor = j\right), \qquad \sum_{i,j} Y_{ij}^* = N.$$
+Points strictly outside the image support $(x < 0, x \ge W, y < 0, y \ge H)$ are filtered out. The canonical ground-truth count per discrete cell is:
+$$Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\left\lfloor \frac{y_n + 0.5}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor = j\right),$$
+with cell indices clamped to the valid lattice bounds $[0, H_o - 1] \times [0, W_o - 1]$, ensuring exact count conservation $\sum_{i,j} Y_{ij}^* = |\mathcal{P}_{\text{valid}}|$.
 
 ### 2.2 Regional Projection Operator $A$ and Adjoint $A^\top$
-We define a multi-scale regional dictionary $\mathcal{R} = \{R_m\}_{m=1}^M$ spanning window sizes $K \in \{32, 64, 128\}$ pixels (grid dimensions $k = K/s \in \{8, 16, 32\}$) with stride overlap $\sigma = 0.5$.
+We define a multi-scale regional dictionary $\mathcal{R} = \{R_m\}_{m=1}^M$ spanning window sizes $K \in \{32, 64, 128\}$ pixels (grid dimensions $k = K/s \in \{8, 16, 32\}$ cells) with stride overlap $\sigma = 0.5$.
 
-The forward regional projection matrix $A \in \{0, 1\}^{M \times G}$ aggregates cell counts into regional masses:
-$$(A Y)_m = \sum_{g \in R_m} Y_g = q_m.$$
-
-The adjoint operator $A^\top \in \{0, 1\}^{G \times M}$ scatters regional residual feedback back onto the fine spatial grid:
-$$(A^\top r)_g = \sum_{m: g \in R_m} r_m.$$
+- **Forward Regional Projection Matrix** $A \in \{0, 1\}^{M \times G}$:
+  $$(A Y)_m = \sum_{g \in R_m} Y_g = q_m.$$
+- **Adjoint Back-Projection Matrix** $A^\top \in \{0, 1\}^{G \times M}$:
+  $$(A^\top r)_g = \sum_{m: g \in R_m} r_m.$$
 
 ### 2.3 The Adjoint Scale Invariance Theorem ($H \mathbf{1} = \mathbf{1}$)
 Let $D_a \in \mathbb{R}^{M \times M}$ be the diagonal matrix of regional areas: $(D_a)_{mm} = |R_m|$.  
@@ -55,61 +59,74 @@ For uniform density field $Y = c \mathbf{1}_G$ ($c \in \mathbb{R}$):
 4. $D_c^{-1} (c D_c \mathbf{1}_G) = c \mathbf{1}_G = Y$.  
 Hence $H \mathbf{1}_G = \mathbf{1}_G$. $\blacksquare$
 
-**Corollary 1.1 (Uniform Error Preservation):**  
-If the regional head predicts a uniform rate discrepancy $\Delta \rho_m = \delta$, the projected spatial update is identically uniform across the entire scene: $\Delta Y = \delta \mathbf{1}_G$.
+**Corollary 1.1 (Scale-Balanced Error Feedback):**  
+If the regional head predicts a uniform rate discrepancy $\Delta \rho_m = \delta$, the projected spatial update is identically uniform across all covered cells: $\Delta Y = \delta \mathbf{1}_G$, regardless of the number or size of overlapping regions.
 
 ---
 
-## 3. RMR Unrolled Solver Dynamics
+## 3. Operator-Guided Unrolled Reconciliation
 
-### 3.1 Regional Count Energy
-The objective of the solver is to align local predictions $Y$ with regional evidence $b$:
+### 3.1 Regional Energy Geometry
+The geometric objective guiding reconciliation is the weighted discrepancy between regional fine sums $q = AY$ and regional head predictions $b$:
 $$\mathcal{E}_a(Y) = \frac{1}{2} (AY - b)^\top D_a^{-1} (AY - b) = \frac{1}{2} \sum_{m=1}^M \frac{(q_m - b_m)^2}{|R_m|}.$$
 
-The analytical gradient of $\mathcal{E}_a$ with respect to spatial cell counts $Y$ is:
+The analytical gradient of $\mathcal{E}_a$ with respect to spatial counts $Y$ is:
 $$\nabla_Y \mathcal{E}_a(Y) = A^\top D_a^{-1} (AY - b) = A^\top r^{\text{rate}},$$
 where $r_m^{\text{rate}} = \frac{q_m - b_m}{|R_m|}$ is the rate-normalized residual.
 
-### 3.2 Preconditioned Latent Updates
-Direct updates on non-negative counts $Y$ risk violating physical positivity ($Y \ge 0$). We parameterize $Y = \operatorname{softplus}(z)$ and perform unrolled gradient steps in latent log-density space $z \in \mathbb{R}^G$:
+### 3.2 Unrolled Latent Updates (RMR-Latent vs RMR-Jacobian)
+Counts must remain strictly non-negative ($Y \ge 0$). We parameterize cell densities in latent space $z \in \mathbb{R}^G$ via $Y = \operatorname{softplus}(z)$.
 
-$$z^{(t+1)} = z^{(t)} - \eta_t \cdot M^{(t)} \cdot \operatorname{clip}\left(D_c^{-1} A^\top D_a^{-1} (A Y^{(t)} - b), \; [-\tau, \tau]\right),$$
+In **RMR-Latent** (the registered benchmark model), the spatial field:
+$$r^{\text{field}} = \operatorname{clip}\left(D_c^{-1} A^\top D_a^{-1} (AY - b), \; [-\tau, \tau]\right)$$
+is derived from regional-energy geometry and applied as an explicit reconciliation direction directly in latent log-density space $z$:
+
+$$\boxed{z^{(t+1)} = z^{(t)} - \eta_t \cdot M^{(t)} \cdot r^{\text{field}}, \qquad Y^{(t+1)} = \operatorname{softplus}(z^{(t+1)}),}$$
+
 where:
-- $\eta_t = \eta_{\text{init}} + (\eta_{\text{max}} - \eta_{\text{init}}) \cdot \frac{t}{T}$ is the step-size schedule ($\eta_{\text{init}}=0.05, \eta_{\text{max}}=0.20$).
-- $M^{(t)}$ is a dynamic feature preconditioner gating updates based on local semantic confidence.
-- $\tau = 5.0$ clips extreme rate residuals, preventing divergence on dense outliers.
-- $Y^{(t+1)} = \operatorname{softplus}(z^{(t+1)})$.
+- $\eta_t = \eta_{\text{max}} \cdot \sigma(\alpha_t)$ is a parameterized step size with learnable logits $\alpha_t$, initialized to $\eta_t(0) = \eta_{\text{init}} = 0.05$ (with $\eta_{\text{max}} = 0.20$).
+- $M^{(t)}$ is a lightweight feature preconditioner gating updates based on local semantic context.
+- $\tau = 5.0$ clips extreme rate residuals to ensure numerical stability.
 
-In the registered model (**RMR-Latent**), $M^{(t)}$ operates directly on $z$ without sigmoid Jacobian damping, avoiding gradient vanishing when cells have small count values.
+*Remark on Optimization Geometry:* RMR-Latent deliberately omits the sigmoid Jacobian factor $\sigma(z) \approx 0.01$ associated with chain-rule gradient descent $\nabla_z \mathcal{E}_a = \sigma(z) \nabla_Y \mathcal{E}_a$. Including $\sigma(z)$ suppresses updates ~100x on sparse cells. RMR-Jacobian is retained strictly as an ablation (`use_jacobian_gate: true`).
 
 ---
 
 ## 4. Architectural Implementation
 
+The architecture matches the concrete implementation in `rmr_count/model.py`:
+
 ```
 Input Image [1, 3, H, W]
        │
        ▼
-MobileNetV4-Conv-Small-0.50 (truncated C16, ~65k params)
+TinyLocalEncoder (~52k params)
+  ├── Stem: ConvGNAct(3 -> 16, k=3, stride=2)
+  ├── s4:   TinyIR(16 -> 24, stride=2) + TinyIR(24 -> 24)
+  ├── s8:   TinyIR(24 -> 40, stride=2) + 2x TinyIR(40 -> 40)
+  └── s16:  TinyIR(40 -> 64, stride=2) + TinyIR(64 -> 64)
        │
        ▼
-Additive FPN Neck (32 channels, context dilations {1, 2, 3})
+AdditiveFusion Neck (~3.5k params, width=32)
+  ├── 1x1 Projections of C4, C8, C16 to 32 ch
+  ├── Bilinear upsampling to C4 resolution + elementwise addition
+  └── Fused via depthwise-separable 3x3 ConvGNAct + 1x1 ConvGNAct
        │
        ├───────────────────────────────────────────────┐
        ▼                                               ▼
-Fine Density Head                               Regional Extensivity Head
-Conv3x3 -> GN -> SiLU -> Conv1x1                ROI-Pooling on {32, 64, 128} px
-init: b_0 ≈ softplus(-4.595) ≈ 0.01             + 4D Geometry [log h, log w, log A, log(w/h)]
+Fine Density Head (~3.2k params)               Regional Extensivity Head (~4.2k params)
+Depthwise-sep Conv3x3 + Conv1x1                ROI-Pooling on {32, 64, 128} px
+init bias: b_0 ≈ -4.595 (softplus ≈ 0.01)      + 4D Geometry [log h, log w, log A, log(w/h)]
        │                                        init: b_R = |R| * rho_R (calibrated to 0.01)
        ▼                                               │
 Initial Latent Field z_0                               │
        │                                               │
        └───────────────────────┬───────────────────────┘
                                ▼
-               RMR Implicit Unrolled Solver (T=2)
+            Unrolled Regional Reconciliation (T=2, ~1.5k params)
                  │
-                 ├── Prefix2D fast regional integration: q = A Y^(t)
-                 ├── Compute rate residual: r = (q - b) / D_a
+                 ├── Prefix2D fast integration: q = A Y^(t)
+                 ├── Rate residual: r = (q - b) / D_a
                  ├── Adjoint back-projection: r_field = D_c^(-1) A^T r
                  ├── Latent update: z^(t+1) = z^(t) - eta_t * M^(t) * r_field
                  └── Re-activation: Y^(t+1) = softplus(z^(t+1))
@@ -122,19 +139,19 @@ Initial Latent Field z_0                               │
 
 ## 5. Registered Experimental Matrix (B0–B5)
 
-To decisively demonstrate the necessity of each component, we benchmark 6 scientific variants across identical training schedules (60 epochs, warmup 5, AdamW 3e-4, 3 random seeds):
+Exact parameter counts computed via `count_parameters(model)` from `rmr_count/model.py`:
 
-| ID | Variant Name | Parameter Count | Regional Head | Iterative Solver | Conservation Theorem |
-|:---|:---|:---:|:---:|:---:|:---:|
-| **B0** | Direct Baseline | 64,581 | ✗ | ✗ | ✗ |
-| **B1** | Region Loss (Single Head) | 64,581 | ✗ (Aux loss on $AY$) | ✗ | ✗ |
-| **B2** | Region Aux (Dual Head) | 82,143 | ✓ (Loss supervision) | ✗ | ✗ |
-| **B3a** | Local Refine (Iterative GRU) | 88,412 | ✗ | ✓ (Unconstrained) | ✗ |
-| **B3b** | Learned Projector | 94,820 | ✓ | ✓ (Blackbox MLP) | ✗ |
-| **B4** | RMR-T1 (1 Iteration) | 82,143 | ✓ | ✓ ($T=1$) | ✓ ($H\mathbf{1}=\mathbf{1}$) |
-| **B5** | **RMR-T2 (Registered Model)** | **82,143** | ✓ | ✓ ($T=2$) | ✓ ($H\mathbf{1}=\mathbf{1}$) |
+| ID | Variant Name | Parameter Count | Regional Head | Unrolled Steps | Operator Adjoint $A^\top$ | Scientific Hypothesis Tested |
+|:---|:---|:---:|:---:|:---:|:---:|:---|
+| **B0** | Direct Baseline | 58,867 | ✗ | ✗ | ✗ | Direct regression control without regional reasoning |
+| **B1** | Region Loss | 58,867 | ✗ (Loss on $AY$) | ✗ | ✗ | Auxiliary regional rate loss without dual head |
+| **B2** | Region Aux | 63,044 | ✓ | ✗ | ✗ | Multi-task dual head without runtime reconciliation |
+| **B3a** | Local Refine | 61,876 | ✗ | ✓ ($T=2$) | ✗ (Unconstrained) | Receptive field expansion via local recurrent refinement |
+| **B3b** | Learned Projector | 66,086 | ✓ | ✓ ($T=2$) | ✗ (Blackbox MLP) | Learned neural projection vs exact mathematical adjoint $A^\top$ |
+| **B4** | RMR-T1 | 64,580 | ✓ | ✓ ($T=1$) | ✓ ($H\mathbf{1}=\mathbf{1}$) | Single-step unrolled reconciliation |
+| **B5** | **RMR-T2 (Registered)** | **64,581** | ✓ | ✓ ($T=2$) | ✓ ($H\mathbf{1}=\mathbf{1}$) | Two-step registered RMR-Count model |
 
 ### Core Hypotheses Tested:
-1. **$B5 > B2$**: Verifies that runtime iterative projection is superior to passive multi-task feature sharing.
-2. **$B5 > B3b$**: Verifies that the exact mathematical adjoint $A^\top$ outperforms learned, unconstrained neural projection networks.
-3. **$B5 > B3a$**: Verifies that regional measure conservation provides stronger spatial regularization than arbitrary recurrent refinement.
+1. **$B5 > B2$**: Verifies that runtime operator reconciliation provides active spatial correction beyond passive multi-task feature sharing.
+2. **$B5 > B3b$**: Verifies that the exact mathematical adjoint $A^\top$ outperforms unconstrained learned neural projection.
+3. **$B5 > B3a$**: Verifies that regional count conservation provides stronger inductive bias than arbitrary recurrent refinement.

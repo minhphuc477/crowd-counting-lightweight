@@ -1,6 +1,8 @@
 # RMR-Count: Evaluation Specification & Diagnostic Rigor
 
-> **Standards:** Adheres to CVPR / ECCV / PAMI canonical evaluation protocols for visual crowd counting.
+> **Method:** Regional Measure Reconciliation (RMR-Count)  
+> **Evaluation Standards:** Adheres to CVPR / ECCV / PAMI canonical evaluation protocols for visual crowd counting.  
+> **Evaluation Scope:** RMR-Count is evaluated strictly as a visual crowd counting and spatial density estimation model. Grid Average Mean Error (GAME) measures multi-scale spatial count discrepancy across rigid spatial partitions; it is not a point localization or detection metric. The system does not output point coordinates or compute localization Precision / Recall / F1 scores.
 
 ---
 
@@ -26,10 +28,10 @@ RMR implements **physical-support GAME**:
 
 ## 2. Mechanism Tracing & Diagnostic Artifacts
 
-Every standalone evaluation run (`python -m rmr_count.eval`) automatically writes structured long-table diagnostic artifacts to `--out_dir`:
+Every standalone evaluation run (`python -m rmr_count.eval --checkpoint <path> --manifest <path> --out-dir <dir>`) automatically writes structured long-table diagnostic artifacts:
 
-### 2.1 `solver_trace.csv` (Per-Iteration Solver Dynamics)
-Records the trajectory of the unrolled solver at each step $t \in \{0, \dots, T-1\}$:
+### 2.1 `solver_trace.csv` (Per-Iteration Reconciliation Dynamics)
+Records the trajectory of the unrolled reconciliation layer at each step $t \in \{0, \dots, T-1\}$:
 - `image_id`: Unique sample identifier.
 - `iteration`: Step index $t$.
 - `eta`: Effective step size $\eta_t$.
@@ -76,7 +78,7 @@ The tool computes:
 
 CLI Usage:
 ```powershell
-python -m rmr_count.aggregate --compare runs/b5/predictions.csv runs/b0/predictions.csv --name-a B5_RMR --name-b B0_Direct
+python -m rmr_count.aggregate --compare runs/sha_a/rmr_t2_seed42/predictions.csv runs/sha_a/direct_seed42/predictions.csv --name-a B5_RMR --name-b B0_Direct
 ```
 
 ---
