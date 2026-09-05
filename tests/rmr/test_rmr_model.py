@@ -450,3 +450,46 @@ def test_eval_restores_jacobian_gate_and_solver_strength():
     loaded = make_model_from_ckpt(fake_ckpt, torch.device("cpu"))
     assert loaded.cfg.use_jacobian_gate is True, "use_jacobian_gate must be restored"
     assert abs(loaded.solver_strength - 0.65) < 1e-6, "solver_strength must be restored"
+
+
+def test_r_spatial_computation():
+    """Verify mathematical properties of R_spatial diagnostic."""
+    # Case 1: Zero step (e.g. during warmup)
+    dy_zero = torch.zeros(2, 1, 16, 16)
+    signed_dn = dy_zero.sum(dim=(-3, -2, -1))
+    abs_dn = signed_dn.abs()
+    l1_dy = dy_zero.abs().sum(dim=(-3, -2, -1))
+    r_sp_zero = torch.where(
+        l1_dy > 1e-6,
+        (1.0 - (abs_dn / (l1_dy + 1e-6))).clamp(0.0, 1.0),
+        torch.zeros_like(l1_dy),
+    )
+    assert (r_sp_zero == 0.0).all()
+
+    # Case 2: Unipolar shift (pure global count adjustment, dy >= 0 everywhere)
+    dy_unipolar = torch.ones(2, 1, 16, 16) * 0.5
+    signed_dn = dy_unipolar.sum(dim=(-3, -2, -1))
+    abs_dn = signed_dn.abs()
+    l1_dy = dy_unipolar.abs().sum(dim=(-3, -2, -1))
+    r_sp_unipolar = torch.where(
+        l1_dy > 1e-6,
+        (1.0 - (abs_dn / (l1_dy + 1e-6))).clamp(0.0, 1.0),
+        torch.zeros_like(l1_dy),
+    )
+    assert torch.allclose(r_sp_unipolar, torch.zeros_like(r_sp_unipolar), atol=1e-5)
+    assert (signed_dn > 0).all()
+
+    # Case 3: Pure zero-sum spatial redistribution (sum dy == 0, but mass moved)
+    dy_redist = torch.zeros(2, 1, 16, 16)
+    dy_redist[:, :, :, :8] = 1.0
+    dy_redist[:, :, :, 8:] = -1.0
+    signed_dn = dy_redist.sum(dim=(-3, -2, -1))
+    abs_dn = signed_dn.abs()
+    l1_dy = dy_redist.abs().sum(dim=(-3, -2, -1))
+    r_sp_redist = torch.where(
+        l1_dy > 1e-6,
+        (1.0 - (abs_dn / (l1_dy + 1e-6))).clamp(0.0, 1.0),
+        torch.zeros_like(l1_dy),
+    )
+    assert torch.allclose(r_sp_redist, torch.ones_like(r_sp_redist), atol=1e-5)
+    assert torch.allclose(signed_dn, torch.zeros_like(signed_dn), atol=1e-5)

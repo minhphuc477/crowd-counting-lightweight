@@ -20,11 +20,17 @@ def otm_density_to_points(
     outer_iters: int = 8,
     sinkhorn_iters: int = 25,
     tau: float = 1e-4,
+    seed: int | None = 42,
     device: str | torch.device | None = None,
 ) -> np.ndarray:
     """Parameter-free Optimal Transport Minimization (OT-M) converting density/count field to point set.
 
-    Reference: Lin et al., 'Optimal Transport Minimization: Crowd Localization on Density Maps', CVPR 2023.
+    Scientific Notice:
+        This implementation is a pilot diagnostic Sinkhorn-based point extractor for L2/L3 mechanism
+        validation. It implements alternating entropic optimal transport (Sinkhorn + barycentric projection).
+        While inspired by Lin et al. ('Optimal Transport Minimization', CVPR 2023), it is an internal
+        diagnostic tool and should not be cited as a faithful replication of the official CVPR 2023
+        author codebase without formal calibration.
 
     Args:
         density: 2D array-like of shape (H_g, W_g) representing predicted count measure.
@@ -33,6 +39,7 @@ def otm_density_to_points(
         outer_iters: Number of alternating OT-M updates (default 8).
         sinkhorn_iters: Number of Sinkhorn scaling iterations per outer step (default 25).
         tau: Minimum threshold fraction of max density to consider as active source mass.
+        seed: Random seed for deterministic reproducibility in point sampling and jitter (default 42).
         device: PyTorch device ('cuda' or 'cpu'). Defaults to cuda if available.
 
     Returns:
@@ -79,17 +86,33 @@ def otm_density_to_points(
     # Normalize source weights to sum to 1
     a = a / a.sum()
 
+    # Generator for deterministic execution
+    if seed is not None:
+        gen = torch.Generator(device=device if device.type == "cpu" else "cpu")
+        gen.manual_seed(seed)
+    else:
+        gen = None
+
     # Initialize target points B = {y_j}_{j=1}^m
     with torch.no_grad():
         if m <= k_src:
             _, topk_idx = torch.topk(a, k=m)
             y_pts = x_src[topk_idx].clone()
         else:
-            sampled_idx = torch.multinomial(a, num_samples=m, replacement=True)
+            # Deterministic multinomial sampling via CPU generator if needed
+            a_cpu = a.cpu()
+            if gen is not None:
+                sampled_idx = torch.multinomial(a_cpu, num_samples=m, replacement=True, generator=gen).to(device)
+            else:
+                sampled_idx = torch.multinomial(a, num_samples=m, replacement=True)
             y_pts = x_src[sampled_idx].clone()
 
         # Add small Gaussian jitter (0.25 px std) to break point degeneracy in multi-occupancy cells
-        jitter = torch.randn_like(y_pts) * (stride * 0.1)
+        if gen is not None:
+            jitter_cpu = torch.randn(y_pts.shape, generator=gen, dtype=torch.float32) * (stride * 0.1)
+            jitter = jitter_cpu.to(device)
+        else:
+            jitter = torch.randn_like(y_pts) * (stride * 0.1)
         y_pts = y_pts + jitter
 
         b = torch.full((m,), 1.0 / m, dtype=torch.float32, device=device)
@@ -157,7 +180,12 @@ def evaluate_oracle_otm(
                 if candidate.exists():
                     img_path = candidate
 
-            points = np.asarray(item.get("points", []), dtype=np.float32)
+            raw_points = item.get("points", [])
+            points = np.asarray(raw_points, dtype=np.float32)
+            if points.size == 0 or len(raw_points) == 0:
+                points = np.empty((0, 2), dtype=np.float32)
+            elif points.ndim == 1:
+                points = points.reshape(-1, 2)
 
             # Image dimensions
             if img_path.exists():
@@ -174,7 +202,7 @@ def evaluate_oracle_otm(
             gh = int(math.ceil(h / stride))
 
             if len(points) == 0:
-                meter.update(np.empty((0, 2)), np.empty((0, 2)))
+                meter.update(np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32))
                 continue
 
             x = points[:, 0]
@@ -183,7 +211,7 @@ def evaluate_oracle_otm(
             valid_gts = points[valid]
 
             if len(valid_gts) == 0:
-                meter.update(np.empty((0, 2)), np.empty((0, 2)))
+                meter.update(np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32))
                 continue
 
             # Rasterize GT to grid
@@ -199,6 +227,7 @@ def evaluate_oracle_otm(
                 stride=stride,
                 eps=eps,
                 outer_iters=outer_iters,
+                seed=42,
             )
 
             meter.update(otm_pts, valid_gts)
@@ -229,9 +258,10 @@ def evaluate_model_otm(
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    device_t = torch.device("cpu")
+    device_t = torch.device(device if (torch.cuda.is_available() or device != "cuda") else "cpu")
     ckpt = torch.load(ckpt_path, map_location=device_t)
     model = make_model_from_ckpt(ckpt, device=device_t)
+    model.to(device_t)
     model.eval()
 
     tf = transforms.Compose([
@@ -257,21 +287,29 @@ def evaluate_model_otm(
                 if candidate.exists():
                     img_path = candidate
 
-            points = np.asarray(item.get("points", []), dtype=np.float32)
+            raw_points = item.get("points", [])
+            points = np.asarray(raw_points, dtype=np.float32)
+            if points.size == 0 or len(raw_points) == 0:
+                points = np.empty((0, 2), dtype=np.float32)
+            elif points.ndim == 1:
+                points = points.reshape(-1, 2)
 
             with Image.open(img_path) as pil_img:
                 img_rgb = pil_img.convert("RGB")
                 w, h = img_rgb.size
                 tensor = tf(img_rgb).to(device_t)
 
-            valid = (points[:, 0] >= 0) & (points[:, 0] < w) & (points[:, 1] >= 0) & (points[:, 1] < h)
-            valid_gts = points[valid]
+            if len(points) == 0:
+                valid_gts = np.empty((0, 2), dtype=np.float32)
+            else:
+                valid = (points[:, 0] >= 0) & (points[:, 0] < w) & (points[:, 1] >= 0) & (points[:, 1] < h)
+                valid_gts = points[valid]
 
             with torch.inference_mode():
                 y_canvas = predict_tiled(model, tensor, tile_size=512, halo=0)
                 y_pred = y_canvas[0].cpu().numpy()
 
-            otm_pts = otm_density_to_points(y_pred, stride=stride, device="cpu")
+            otm_pts = otm_density_to_points(y_pred, stride=stride, device=device_t, seed=42)
             meter.update(otm_pts, valid_gts)
             if num_images % 20 == 0:
                 gc.collect()
@@ -311,6 +349,7 @@ def main() -> None:
     parser.add_argument("--sigmas", nargs="+", type=float, default=[2.0, 4.0, 6.0, 8.0, 10.0], help="Sigmas.")
     parser.add_argument("--eps", type=float, default=2.0, help="Entropic regularization (default 2.0).")
     parser.add_argument("--outer-iters", type=int, default=8, help="Number of OT-M outer iterations (default 8).")
+    parser.add_argument("--device", default="cuda", help="Computation device ('cuda' or 'cpu').")
     args = parser.parse_args()
 
     if args.mode == "oracle":
@@ -332,6 +371,7 @@ def main() -> None:
             args.manifest,
             stride=args.stride,
             sigmas=args.sigmas,
+            device=args.device,
         )
         print("\n" + format_otm_table(summary, title=f"L3 Model OT-M ({args.checkpoint})"))
 

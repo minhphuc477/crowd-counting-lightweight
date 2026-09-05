@@ -137,3 +137,30 @@ def test_occupancy_analysis(tmp_path: Path):
     # 3 heads are in the cell with occupancy 3, 1 head in cell with occupancy 1
     assert res["heads_in_multi_cells"] == 3
     assert pytest.approx(res["multi_head_ratio"]) == 3.0 / 4.0
+
+
+def test_empty_gt_manifest(tmp_path: Path):
+    from rmr_count.localization.oracle_cell import evaluate_oracle_cell_centers
+    from rmr_count.localization.otm import evaluate_oracle_otm
+
+    manifest_file = tmp_path / "empty_manifest.jsonl"
+    data = [
+        {"image": "nonexistent_empty.jpg", "points": [], "id": "0"},
+    ]
+    manifest_file.write_text("\n".join(json.dumps(d) for d in data), encoding="utf-8")
+
+    occ = compute_manifest_occupancy(manifest_file, stride=4)
+    assert occ["total_heads"] == 0
+
+    oracle = evaluate_oracle_cell_centers(manifest_file, stride=4)
+    assert oracle["total_ground_truth"] == 0
+
+    otm = evaluate_oracle_otm(manifest_file, stride=4)
+    assert otm["total_ground_truth"] == 0
+
+
+def test_otm_deterministic_seed():
+    density = np.random.RandomState(123).uniform(0, 1, size=(16, 16)).astype(np.float32)
+    pts1 = otm_density_to_points(density, stride=4, seed=42, device="cpu")
+    pts2 = otm_density_to_points(density, stride=4, seed=42, device="cpu")
+    assert np.allclose(pts1, pts2)

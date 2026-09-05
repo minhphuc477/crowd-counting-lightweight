@@ -214,6 +214,7 @@ def main() -> None:
         "residual_abs_mean", "residual_abs_max", "z_lt_minus10_frac",
         "initial_pred_count_mean", "initial_pred_count_std",
         "solver_rel_step_mean", "solver_delta_n_mean",
+        "solver_signed_delta_n_mean", "solver_r_spatial_mean",
         "val_MAE", "val_RMSE", "val_NAE", "val_Bias",
     ]
     if not log_path.exists():
@@ -252,10 +253,12 @@ def main() -> None:
         init_count_sum = 0.0
         init_count_sq_sum = 0.0
         init_count_n = 0
-        # Diagnostic: solver effective step — |Y1-Y0|_1 / (|Y0|_1 + eps)
+        # Diagnostic: solver effective step & spatial redistribution
         # Detects if sigma(z)*r term is effectively zero due to z ≈ -4.6 init.
         solver_rel_step_sum = 0.0   # sum of relative L1 mass change
         solver_delta_n_sum = 0.0    # sum of |sum(Y_final) - sum(Y0)| per sample
+        solver_signed_delta_n_sum = 0.0  # sum of (sum(Y_final) - sum(Y0)) per sample
+        solver_r_spatial_sum = 0.0       # sum of R_spatial = 1 - |sum dy| / (sum |dy| + eps)
 
 
         for batch in train_loader:
@@ -272,8 +275,7 @@ def main() -> None:
             init_count_sq_sum += float((y0_counts ** 2).sum().item())
             init_count_n += y0_counts.numel()
 
-            # Diagnostic: solver effective step
-            # If sigma(z) ≈ 0.01 and eta ≈ 0.05, M ≈ 1, |r| ≈ 0.5 → |Δz| ≈ 0.00025 → negligible
+            # Diagnostic: solver effective step & spatial redistribution
             iterates = outputs.get("iterates", [])
             if len(iterates) >= 2:
                 y0_det = iterates[0].detach()
@@ -281,15 +283,26 @@ def main() -> None:
                 rel_step = float(
                     ((yf_det - y0_det).abs().sum() / (y0_det.abs().sum() + 1e-8)).item()
                 )
-                # P1 fix: per-sample |ΔN| averaged over batch.
-                # Old: (yf.sum() - y0.sum()).abs() — batch-sum first, then abs.
-                # Positive and negative shifts could cancel, hiding systematic solver drift.
-                # New: sum over spatial dims per sample → abs per sample → mean over batch.
-                delta_n = float(
-                    (yf_det - y0_det).sum(dim=(-3, -2, -1)).abs().mean().item()
+                dy = yf_det - y0_det
+                # Per-sample signed count change: sum_p dy_p
+                signed_dn = dy.sum(dim=(-3, -2, -1))  # [B]
+                abs_dn = signed_dn.abs()               # [B]
+                # Per-sample absolute mass moved: sum_p |dy_p|
+                l1_dy = dy.abs().sum(dim=(-3, -2, -1)) # [B]
+                # Spatial redistribution ratio:
+                # R_spatial = 1 - |sum dy| / (sum |dy| + eps)
+                # 0 = pure global count shifting (unipolar)
+                # 1 = pure zero-sum spatial mass redistribution
+                # If solver didn't move mass (l1_dy <= 1e-6), R_spatial = 0.0
+                r_sp = torch.where(
+                    l1_dy > 1e-6,
+                    (1.0 - (abs_dn / (l1_dy + 1e-6))).clamp(0.0, 1.0),
+                    torch.zeros_like(l1_dy),
                 )
                 solver_rel_step_sum += rel_step
-                solver_delta_n_sum += delta_n
+                solver_delta_n_sum += float(abs_dn.mean().item())
+                solver_signed_delta_n_sum += float(signed_dn.mean().item())
+                solver_r_spatial_sum += float(r_sp.mean().item())
 
             residuals = outputs.get("residual_fields", [])
             if residuals:
@@ -347,6 +360,8 @@ def main() -> None:
             "initial_pred_count_std": init_std,
             "solver_rel_step_mean": solver_rel_step_sum / max(1, n_steps),
             "solver_delta_n_mean": solver_delta_n_sum / max(1, n_steps),
+            "solver_signed_delta_n_mean": solver_signed_delta_n_sum / max(1, n_steps),
+            "solver_r_spatial_mean": solver_r_spatial_sum / max(1, n_steps),
             "val_MAE": "",
             "val_RMSE": "",
             "val_NAE": "",
@@ -387,7 +402,14 @@ def main() -> None:
 
         # Formatted readable epoch log (pure ASCII for cross-platform compatibility)
         if model.variant in {"local_refine", "learned_project", "rmr"}:
-            solver_str = f"Solver: {solver_strength:4.2f} (step: {row['solver_rel_step_mean']:.4f}, dN: {row['solver_delta_n_mean']:4.1f})"
+            sgn = "+" if row["solver_signed_delta_n_mean"] >= 0 else ""
+            solver_str = (
+                f"Solver: {solver_strength:4.2f} "
+                f"(step: {row['solver_rel_step_mean']:.4f}, "
+                f"dN: {sgn}{row['solver_signed_delta_n_mean']:.1f}, "
+                f"|dN|: {row['solver_delta_n_mean']:.1f}, "
+                f"R_sp: {row['solver_r_spatial_mean']:.3f})"
+            )
         else:
             solver_str = "Solver: N/A"
 
@@ -422,7 +444,7 @@ def main() -> None:
             torch.save(state, out_dir / "last.pt")
 
         with log_path.open("a", newline="") as f:
-            csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
+            csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore").writerow(row)
 
         # Explicit garbage collection to prevent host heap fragmentation across long runs
         gc.collect()

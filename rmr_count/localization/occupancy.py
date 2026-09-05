@@ -48,7 +48,12 @@ def compute_manifest_occupancy(
                 if candidate.exists():
                     img_path = candidate
 
-            points = np.asarray(item.get("points", []), dtype=np.float64)
+            raw_points = item.get("points", [])
+            points = np.asarray(raw_points, dtype=np.float64)
+            if points.size == 0 or len(raw_points) == 0:
+                points = np.empty((0, 2), dtype=np.float64)
+            elif points.ndim == 1:
+                points = points.reshape(-1, 2)
 
             # Retrieve image dimensions
             if img_path.exists():

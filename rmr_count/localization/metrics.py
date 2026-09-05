@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""Point localization evaluation metrics via spatial bipartite matching.
+
+Protocol Notes:
+    1. ShanghaiTech Part A & B: Evaluated under fixed pixel distance thresholds sigma in {4.0, 8.0} px
+       (or {2.0, 4.0, 8.0} px) using bipartite matching (Hopcroft-Karp).
+    2. UCF-QNRF: Evaluated across 100 thresholds sigma in {1, 2, ..., 100} px, reporting the mean F1:
+       F1_avg = (1/100) * sum_{sigma=1}^100 F1(sigma).
+    3. NWPU-Crowd: Official evaluation uses adaptive size-aware thresholds sigma_i = min(w_i, h_i)/2
+       based on head bounding boxes or k-NN distance.
+"""
+
 from typing import Any
 import numpy as np
 from scipy.spatial import KDTree
