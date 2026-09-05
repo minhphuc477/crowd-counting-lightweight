@@ -1,0 +1,94 @@
+{
+  "benchmark": {
+    "direct": {
+      "mae": 97.985899579394,
+      "rmse": 152.68146512955423,
+      "nae": 0.2542065064858957,
+      "num_images": 182
+    },
+    "tiled_controlled": {
+      "mae": 100.42715483445387,
+      "rmse": 162.54646429622707,
+      "nae": 0.25759716106107255,
+      "num_images": 182
+    },
+    "tiled_practical": {
+      "mae": 98.91987655975007,
+      "rmse": 155.1762872077841,
+      "nae": 0.2584554480021531,
+      "num_images": 182
+    }
+  },
+  "method_validity": {
+    "direct": {
+      "vr_tau_micro": 0.1977898962114791,
+      "vr_tau_macro": 0.17295634147444255,
+      "nvr_micro": 0.027927428785177788,
+      "nvr_macro": 0.04355629601399157,
+      "positive_variation_total": 84459.32124668732,
+      "negative_variation_total": 2358.7316793613136,
+      "violating_cells_total": 74208,
+      "cells_total": 375186
+    },
+    "tiled_controlled": {
+      "vr_tau_micro": 0.21384060172820948,
+      "vr_tau_macro": 0.18825985163020129,
+      "nvr_micro": 0.03269661629402912,
+      "nvr_macro": 0.050673872360437286,
+      "positive_variation_total": 85270.22440229356,
+      "negative_variation_total": 2788.047808587551,
+      "violating_cells_total": 80230,
+      "cells_total": 375186
+    },
+    "tiled_practical": {
+      "vr_tau_micro": 0.20134546598220615,
+      "vr_tau_macro": 0.17646985730708512,
+      "nvr_micro": 0.02855882343142034,
+      "nvr_macro": 0.04431003405489493,
+      "positive_variation_total": 85284.32604042068,
+      "negative_variation_total": 2435.620008856058,
+      "violating_cells_total": 75542,
+      "cells_total": 375186
+    }
+  },
+  "decomposition": {
+    "controlled": {
+      "mean_abs_prediction_discrepancy": 21.853411077143072,
+      "mean_normalized_prediction_discrepancy": 0.06298271516396083
+    },
+    "practical": {
+      "mean_abs_prediction_discrepancy": 14.29684087732336,
+      "mean_normalized_prediction_discrepancy": 0.04096070275625491
+    }
+  },
+  "spatial_optional": {
+    "direct": {
+      "game_0": 98.21666893678216,
+      "game_1": 113.6785042983797,
+      "game_2": 133.86225211598207,
+      "game_3": 168.17144039582624
+    }
+  },
+  "sanity": {
+    "max_conservation_error": 6.103515625e-05
+  },
+  "protocol": {
+    "split": "test_data",
+    "tile_size": 256,
+    "controlled_halo": 0,
+    "practical_halo": 64,
+    "direct_pad_multiple": 64,
+    "game_levels": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "spatial_points_protocol": "raw_in_bounds",
+    "validity_tau": 1e-06,
+    "nvr_eps": 1e-12,
+    "benchmark_primary_inference": "full_image_direct",
+    "legacy_debug": false
+  },
+  "legacy_debug": null
+}
