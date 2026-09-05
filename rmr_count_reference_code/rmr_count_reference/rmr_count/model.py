@@ -153,17 +153,23 @@ class RegionalEvidenceHead(nn.Module):
     This enforces extensivity by construction: same visual crowd density in a
     larger region correctly predicts a proportionally larger count.
 
-    P0 fix (absolute geometry):
-        geom = [cy/H, cx/W, log(h), log(w), log(|R|), log(w/h)]
-    where h, w, |R| are absolute grid extents, not relative fractions.
-    This makes a 32px region have the same geometric identity regardless of
-    overall image resolution — fixing the extent extrapolation bug.
+    P0 #1 fix (bias calibration):
+        Final Linear bias initialized to _FINE_HEAD_BIAS_INIT ≈ -4.595 so that
+        softplus(bias) ≈ 0.01 count/cell at initialization — same density prior
+        as FineMeasureHead. Without this, softplus(0) = 0.693 per cell, which
+        causes b_128 ≈ 710 while Y_0 ≈ 164 → solver tries to inject mass.
 
-    P0 fix (include_full_image=False):
-        full-image region is excluded from the pilot; only {32, 64, 128} px scales.
+    P1 #1 fix (position-free geometry, geom_dim=4):
+        geom = [log(h), log(w), log(|R|), log(w/h)]
+        Positional terms cy/H, cx/W are dropped because they change value for the
+        SAME physical region depending on whether it sits inside a random 512-crop
+        (training), a full-resolution image (direct eval), or a tile (tiled eval).
+        This mismatch creates three different "geometric identities" for the same
+        window and contaminates the regional evidence head with spurious position cues.
+        Positional ablation can be added later with globally-consistent coordinates.
     """
 
-    def __init__(self, feature_dim: int = 32, hidden: int = 48, geom_dim: int = 6):
+    def __init__(self, feature_dim: int = 32, hidden: int = 48, geom_dim: int = 4):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(feature_dim + geom_dim, hidden),
@@ -172,6 +178,11 @@ class RegionalEvidenceHead(nn.Module):
             nn.SiLU(inplace=True),
             nn.Linear(hidden, 1),
         )
+        # P0 #1 fix: calibrate final Linear so initial rate ≈ 0.01 count/cell.
+        # softplus^{-1}(0.01) = log(exp(0.01) - 1) ≈ -4.595 = _FINE_HEAD_BIAS_INIT.
+        final_linear: nn.Linear = self.mlp[-1]  # type: ignore[assignment]
+        nn.init.normal_(final_linear.weight, std=0.01)
+        nn.init.constant_(final_linear.bias, _FINE_HEAD_BIAS_INIT)
 
     def forward(self, f: torch.Tensor, regions: RegionSet) -> torch.Tensor:
         b, _, h, w = f.shape
@@ -480,7 +491,17 @@ class RMRCount(nn.Module):
                 r = self._normalized_adjoint_field(y, b_region, regions)
                 residual_fields.append(r)
                 m = self.preconditioner(f, y, r)
-                z = z - eta * m * torch.sigmoid(z) * r
+                # Direct z-space update (proximal gradient on z):
+                #     z^{t+1} = z^t - eta * M * r
+                # The previous code had: z = z - eta * M * sigma(z) * r
+                # PROBLEM with sigma(z) multiplier: after bias fix z ≈ -4.595,
+                # sigma(z) ≈ 0.01, so |Δz| ≈ 0.05 * 0.01 * r ≈ 7e-8,
+                # which is below float32 ULP at z ≈ -4.6. Solver was numerically dead.
+                # sigma(z) was intended as a "Jacobian factor" (dy/dz = sigma(z) for
+                # logistic y), but softplus uses dy/dz = sigma(z) differently, and
+                # since z is the actual optimization variable, the clean update is
+                # the direct z-space step without the extra sigmoid gate.
+                z = z - eta * m * r
 
             elif self.variant == "learned_project":
                 assert b_region is not None and self.learned_projector is not None

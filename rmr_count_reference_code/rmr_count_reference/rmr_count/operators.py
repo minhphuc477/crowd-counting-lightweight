@@ -170,31 +170,35 @@ def region_geometry(
     width: int,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Geometry features [M,6]: cy/H, cx/W, log_h, log_w, log_area, log_aspect.
+    """Position-free geometry features [M, 4]: log_h, log_w, log_area, log_aspect.
 
-    P0 fix — absolute region extent encoding:
-        cy/H, cx/W : normalized center (scale-invariant position)
-        log(h), log(w) : absolute grid extents in log scale
-        log(|R|)       : absolute area = log(h*w)
-        log(w/h)       : aspect ratio
+    P1 #1 fix — drop positional terms cy/H, cx/W:
+        These terms encode where a region sits within the *current* coordinate frame,
+        which changes between:
+          - training (random 512-crop): cy/H = position-within-crop
+          - direct eval (full image):    cy/H = position-within-full-image
+          - tiled eval (tile):           cy/H = position-within-tile
+        The SAME physical 32px window gets three different geometric identities, so
+        the regional head can learn to detect crop-position instead of visual density.
 
-    Previously used h/H, w/W (relative fractions) which caused a 32px region on a
-    512px image and a 32px region on a 1024px image to have DIFFERENT geometry
-    descriptors, even though they represent the same physical scale window.
-    With absolute encoding, the 32px region always contributes the same geometric
-    identity regardless of full image resolution.
+    Retained features (all position-free, scale-invariant):
+        log(h)      absolute grid height (same for same physical scale, any crop)
+        log(w)      absolute grid width
+        log(h*w)    absolute area = log_h + log_w (redundant but explicit)
+        log(w/h)    aspect ratio
+
+    Positional features should only be added in a separate ablation where crop/tile
+    coordinates are normalized to the GLOBAL image frame (not the local frame).
     """
     boxes = boxes.float()
     y1, x1, y2, x2 = boxes.unbind(-1)
     h = (y2 - y1).clamp_min(1.0)
     w = (x2 - x1).clamp_min(1.0)
-    cy = 0.5 * (y1 + y2) / max(float(height), 1.0)   # normalized center y
-    cx = 0.5 * (x1 + x2) / max(float(width), 1.0)    # normalized center x
-    log_h = torch.log(h + eps)                         # absolute height (log)
-    log_w = torch.log(w + eps)                         # absolute width  (log)
-    log_area = torch.log(h * w + eps)                  # absolute area   (log)
-    log_aspect = torch.log(w / (h + eps) + eps)        # aspect ratio
-    return torch.stack([cy, cx, log_h, log_w, log_area, log_aspect], dim=-1)
+    log_h = torch.log(h + eps)
+    log_w = torch.log(w + eps)
+    log_area = torch.log(h * w + eps)
+    log_aspect = torch.log(w / (h + eps) + eps)
+    return torch.stack([log_h, log_w, log_area, log_aspect], dim=-1)
 
 
 

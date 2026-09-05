@@ -38,23 +38,44 @@ def global_count_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
 
 
-def scale_balanced_region_loss(
+def scale_balanced_region_rate_loss(
     pred_region: torch.Tensor,
     target_region: torch.Tensor,
     regions: RegionSet,
     beta: float = 1.0,
 ) -> torch.Tensor:
-    """Average region-count SmoothL1 equally across region scales."""
+    """Scale-balanced loss on per-cell RATE, not raw count.
+
+    P0 #2 fix — normalize by area before computing loss:
+        pred_rate   = b_R   / |R|    [predicted count/cell for each region]
+        target_rate = N_R   / |R|    [GT count/cell for each region]
+        L = (1/S) sum_s mean_{R in scale s} SmoothL1(pred_rate_R, target_rate_R)
+
+    Rationale: the regional head predicts b_R = |R| * softplus(z_R), so:
+        dL/dz_R  ∝  |R| * sigma(z_R)     [via chain rule through b_R]
+    This means gradient magnitude scales with |R| even when loss is averaged per-scale.
+    A 128px region (1024 cells) would produce gradients 16× larger than a 32px region
+    (64 cells), breaking scale balance despite the scale-averaging wrapper.
+
+    Training on rate eliminates this: dL_rate/dz_R ∝ sigma(z_R) regardless of |R|.
+    This is consistent with the head actually estimating a PER-CELL rate.
+
+    Applied to both `region_head` (regional evidence head b_R vs N_R) and
+    `region_map` (B1 control: sum-of-map vs N_R). Fair comparison requires same objective.
+    """
     if pred_region.shape != target_region.shape:
         raise ValueError(f"shape mismatch: {pred_region.shape} vs {target_region.shape}")
+    area = regions.area.to(dtype=pred_region.dtype).view(1, 1, -1).clamp_min(1.0)
+    pred_rate = pred_region / area
+    target_rate = target_region / area
     losses = []
     for sid in torch.unique(regions.scale_id):
         mask = regions.scale_id == sid
         if mask.any():
             losses.append(
                 F.smooth_l1_loss(
-                    pred_region[..., mask],
-                    target_region[..., mask],
+                    pred_rate[..., mask],
+                    target_rate[..., mask],
                     reduction="mean",
                     beta=beta,
                 )
@@ -82,8 +103,8 @@ def compute_losses(
 
     Variant semantics:
       direct:          fine + global only
-      region_loss:     direct + training-only regional loss on final map
-      region_aux:      direct + auxiliary regional evidence head
+      region_loss:     direct + training-only regional rate loss on final map (B1)
+      region_aux:      direct + auxiliary regional evidence rate head (B2)
       local_refine:    direct + purely local learned inference refinement
       learned_project: region_aux + learned regional-membership projector
       rmr:             region_aux + exact-adjoint reconciliation
@@ -98,14 +119,17 @@ def compute_losses(
     target_region = regional_sum(target_y, regions.boxes)
 
     if variant == "region_loss":
+        # B1 control: impose regional rate loss on the output density map.
+        # Uses rate loss (P0 #2 fix) for fair comparison with B2.
         pred_region = regional_sum(y, regions.boxes)
-        losses["region_map"] = scale_balanced_region_loss(
+        losses["region_map"] = scale_balanced_region_rate_loss(
             pred_region, target_region, regions, beta=cfg.region_beta
         )
 
     if variant in {"region_aux", "learned_project", "rmr"}:
+        # Regional evidence head loss: rate-normalized for scale-balanced gradient.
         b_region = outputs["b_region"]
-        losses["region_head"] = scale_balanced_region_loss(
+        losses["region_head"] = scale_balanced_region_rate_loss(
             b_region, target_region, regions, beta=cfg.region_beta
         )
 

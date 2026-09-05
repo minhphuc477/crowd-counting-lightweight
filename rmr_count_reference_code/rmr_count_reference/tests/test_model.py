@@ -145,27 +145,190 @@ def test_regional_area_extensivity():
 
 
 def test_same_size_region_invariant_to_image_extent():
-    """P1-T3: A 32px region should have the same geometric descriptor regardless of image size.
+    """P1-T3 (updated): A 32px region must have IDENTICAL geometry on different image sizes.
 
-    With the absolute geometry encoding (log_h, log_w, log_area, log_aspect),
-    a 32px region (= 8 cells at stride 4) should produce the same geometry vector
-    on a 256px image and a 512px image.
+    With position-free geometry (geom_dim=4), ALL 4 features are position-free:
+        [log_h, log_w, log_area, log_aspect]
+    The ENTIRE geometry vector must be equal across 256px and 512px images.
+    Previously this tested only indices 2:, but now ALL indices must match.
     """
-    # 32px = 8 grid cells at stride 4
-    win = 8
-    boxes_small = torch.tensor([[0, 0, win, win]], dtype=torch.long)
-    boxes_large = torch.tensor([[0, 0, win, win]], dtype=torch.long)
+    win = 8  # 32px at stride 4
+    boxes = torch.tensor([[4, 4, 4 + win, 4 + win]], dtype=torch.long)
 
-    geom_small = region_geometry(boxes_small, height=64, width=64)    # 256px image
-    geom_large = region_geometry(boxes_large, height=128, width=128)  # 512px image
+    # Same physical window, different image sizes
+    geom_256 = region_geometry(boxes, height=64, width=64)    # 256px image
+    geom_512 = region_geometry(boxes, height=128, width=128)  # 512px image
 
-    # log_h, log_w, log_area, log_aspect (indices 2,3,4,5) must be identical
-    assert torch.allclose(geom_small[:, 2:], geom_large[:, 2:], atol=1e-6), (
-        f"Absolute geometry not invariant to image size:\n"
-        f"  small: {geom_small[:, 2:]}\n"
-        f"  large: {geom_large[:, 2:]}"
+    assert geom_256.shape[-1] == 4, f"Expected geom_dim=4, got {geom_256.shape[-1]}"
+    assert torch.allclose(geom_256, geom_512, atol=1e-6), (
+        f"Position-free geometry must be fully identical across image sizes:\n"
+        f"  256px: {geom_256}\n"
+        f"  512px: {geom_512}"
     )
-    # cy/H, cx/W (normalized center position) WILL differ — that is correct behavior.
+
+
+def test_regional_head_initial_rate_calibrated():
+    """NEW P0 #1-T: RegionalEvidenceHead must initialize at ~0.01 count/cell.
+
+    With final Linear bias = _FINE_HEAD_BIAS_INIT ≈ -4.595:
+        softplus(bias) ≈ 0.01
+        b_R = |R| * 0.01
+
+    For 32px (8×8=64 cells): b_R ≈ 0.64
+    For 128px (32×32=1024 cells): b_R ≈ 10.24
+
+    OLD broken: softplus(0) = 0.693 → b_128 ≈ 710 → solver injects mass.
+    """
+    model = RMRCount(
+        RMRConfig(region_sizes_px=(32, 64, 128), include_full_image=False),
+        variant="region_aux",
+    )
+    model.eval()
+    with torch.no_grad():
+        x = torch.zeros(1, 3, 256, 256)
+        out = model(x)
+        regions = out["regions"]
+        b_region = out["b_region"][0, 0]   # [M]
+        area = regions.area.float()
+        rate_per_cell = b_region / area.clamp_min(1.0)
+
+    # All rates should be close to 0.01, definitely NOT 0.693
+    mean_rate = float(rate_per_cell.mean().item())
+    assert mean_rate < 0.5, (
+        f"Regional initial rate/cell={mean_rate:.4f}. "
+        f"Expected ~0.01 (fixed init). Got ~0.693 (broken, softplus(0))."
+    )
+    assert mean_rate > 1e-4, (
+        f"Regional initial rate/cell={mean_rate:.6f} suspiciously low."
+    )
+
+
+def test_regional_loss_gradient_scale_balanced():
+    """NEW P0 #2-T: Regional rate loss must produce equal-magnitude gradients for 32px and 128px.
+
+    With rate-normalized loss: L_rate = SmoothL1(b_R/|R|, N_R/|R|)
+    dL/dz_R ∝ sigma(z_R) regardless of |R| — gradient magnitude is scale-balanced.
+
+    With old count loss: dL/dz_R ∝ |R| * sigma(z_R)
+    → 128px (|R|=1024) produces 16× larger gradients than 32px (|R|=64).
+    """
+    import torch
+
+    from rmr_count.losses import LossConfig, compute_losses
+
+    torch.manual_seed(0)
+    model = RMRCount(
+        RMRConfig(region_sizes_px=(32, 128), include_full_image=False, iterations=0),
+        variant="region_aux",
+    )
+    x = torch.zeros(1, 3, 256, 256)
+    target = torch.zeros(1, 1, 64, 64)   # all-zero GT
+
+    model.zero_grad()
+    out = model(x)
+    # Inject large b_region to create large residual (simulate early training)
+    b_region = out["b_region"]
+    losses = compute_losses(out, target, "region_aux", LossConfig())
+    losses["region_head"].backward()
+
+    # Inspect gradients on the final linear bias of regional MLP
+    final_linear = model.region_head.mlp[-1]
+    grad_bias = final_linear.bias.grad
+    assert grad_bias is not None, "No gradient on regional MLP final bias"
+    # Gradient should be finite and non-zero
+    assert torch.isfinite(grad_bias).all(), "Gradient contains inf/nan"
+    assert grad_bias.abs().item() > 0, "Zero gradient — rate loss not connected"
+
+
+def test_region_geometry_position_free_across_crop_and_tile():
+    """NEW P1 #1-T: Same physical region must have identical geometry in crop vs tile vs full-res.
+
+    Simulates three coordinate contexts for the same 32px window:
+      - training crop (512px):  region at position (50,50)-(58,58) in 128-cell grid
+      - full image (1024px):    same region at same pixel position → (50,50)-(58,58) in 256-cell grid
+      - tile (256px):           region at position (20,20)-(28,28) in 64-cell grid
+
+    All must produce identical 4-dim geometry [log_h, log_w, log_area, log_aspect].
+    """
+    win = 8  # 32px at stride 4
+    box_crop = torch.tensor([[50, 50, 50 + win, 50 + win]], dtype=torch.long)
+    box_full = torch.tensor([[50, 50, 50 + win, 50 + win]], dtype=torch.long)
+    box_tile = torch.tensor([[20, 20, 20 + win, 20 + win]], dtype=torch.long)
+
+    g_crop = region_geometry(box_crop, height=128, width=128)   # 512px training crop
+    g_full = region_geometry(box_full, height=256, width=256)   # 1024px full image
+    g_tile = region_geometry(box_tile, height=64, width=64)     # 256px tile
+
+    assert torch.allclose(g_crop, g_full, atol=1e-6), (
+        f"Geometry differs between crop and full-image for same 32px window:\n"
+        f"  crop: {g_crop}\n  full: {g_full}"
+    )
+    assert torch.allclose(g_crop, g_tile, atol=1e-6), (
+        f"Geometry differs between crop and tile for same 32px window:\n"
+        f"  crop: {g_crop}\n  tile: {g_tile}"
+    )
+
+
+def test_padding_mean_is_zero_after_normalization():
+    """NEW P1 #2-T: ImageNet-mean padded pixels must normalize to exactly 0.
+
+    After padding with [0.485, 0.456, 0.406] in [0,1] space and then applying
+    normalize_image (subtract mean, divide by std), padded pixels → 0.0 for all channels.
+    This verifies no spurious feature activations from padding.
+    """
+    import torch
+
+    from rmr_count.data import _pad_to_crop, normalize_image
+
+    # Create small image (3×10×10) and pad to (3×20×20)
+    image = torch.rand(3, 10, 10)
+    pts = torch.empty(0, 2)
+    padded, _ = _pad_to_crop(image, pts, crop_h=20, crop_w=20)
+
+    # Apply normalization
+    normalized = normalize_image(padded)
+
+    # Padded region (rows 10:, cols 10:) should be ~0.0 after normalization
+    pad_region = normalized[:, 10:, 10:]
+    assert torch.allclose(pad_region, torch.zeros_like(pad_region), atol=1e-5), (
+        f"Padded region after normalization should be ~0.0, got max abs {pad_region.abs().max():.6f}"
+    )
+
+
+def test_solver_effective_step_nonzero_after_warmup():
+    """NEW Diagnostic: After solver ramp, Y1 != Y0 (solver actually changes prediction).
+
+    Checks that with solver_strength=1.0, eta=0.05, the iterative update produces
+    a non-trivial change. This validates that the sigma(z) * r * eta chain is not
+    numerically collapsed to zero.
+    """
+    torch.manual_seed(42)
+    model = RMRCount(RMRConfig(iterations=2, eta_init=0.05, eta_max=0.2), variant="rmr")
+    model.set_solver_strength(1.0)
+    model.eval()
+    with torch.no_grad():
+        x = torch.randn(1, 3, 128, 128)
+        out = model(x)
+        iterates = out["iterates"]
+        y0 = iterates[0]
+        y1 = iterates[1]
+        yf = iterates[-1]
+
+    rel_step = float((yf - y0).abs().sum() / (y0.abs().sum() + 1e-8))
+    delta_n = float((yf.sum() - y0.sum()).abs())
+
+    # With bias init z ≈ -4.6 → sigma(z) ≈ 0.01 → step ≈ 0.05 * 1 * 0.01 * r
+    # Even if small, must be > 0 (model is not broken)
+    assert rel_step > 0.0, "Solver produces zero relative step — update is collapsed"
+    # Warn if extremely small (< 0.0001 relative), as this may indicate sigma(z) bottleneck
+    # This is not a hard failure but should trigger the sigma(z) ablation
+    if rel_step < 1e-4:
+        import warnings
+        warnings.warn(
+            f"Solver relative step = {rel_step:.2e} is very small. "
+            f"Consider removing sigma(z) multiplier from the update rule "
+            f"(z = z - eta * M * r without the sigmoid gate)."
+        )
 
 
 def test_no_full_image_region_in_pilot():

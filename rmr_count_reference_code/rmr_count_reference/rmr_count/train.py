@@ -173,7 +173,7 @@ def main() -> None:
         start_epoch = ckpt["epoch"] + 1
         best_mae = ckpt.get("best_mae", best_mae)
 
-    # P1: expanded logging with loss components, grad norm, initial count distribution
+    # P1: expanded logging with loss components, grad norm, initial count, solver diagnostics
     log_path = out_dir / "train_log.csv"
     fieldnames = [
         "epoch", "lr", "solver_strength", "eta0",
@@ -181,6 +181,7 @@ def main() -> None:
         "grad_norm_mean", "grad_norm_max", "clip_rate",
         "residual_abs_mean", "residual_abs_max", "z_lt_minus10_frac",
         "initial_pred_count_mean", "initial_pred_count_std",
+        "solver_rel_step_mean", "solver_delta_n_mean",
         "val_MAE", "val_RMSE", "val_NAE", "val_Bias",
     ]
     if not log_path.exists():
@@ -219,6 +220,11 @@ def main() -> None:
         init_count_sum = 0.0
         init_count_sq_sum = 0.0
         init_count_n = 0
+        # Diagnostic: solver effective step — |Y1-Y0|_1 / (|Y0|_1 + eps)
+        # Detects if sigma(z)*r term is effectively zero due to z ≈ -4.6 init.
+        solver_rel_step_sum = 0.0   # sum of relative L1 mass change
+        solver_delta_n_sum = 0.0    # sum of |sum(Y_final) - sum(Y0)| per sample
+
 
         for batch in train_loader:
             image = batch["image"].to(device, non_blocking=True)
@@ -233,6 +239,19 @@ def main() -> None:
             init_count_sum += float(y0_counts.sum().item())
             init_count_sq_sum += float((y0_counts ** 2).sum().item())
             init_count_n += y0_counts.numel()
+
+            # Diagnostic: solver effective step
+            # If sigma(z) ≈ 0.01 and eta ≈ 0.05, M ≈ 1, |r| ≈ 0.5 → |Δz| ≈ 0.00025 → negligible
+            iterates = outputs.get("iterates", [])
+            if len(iterates) >= 2:
+                y0_det = iterates[0].detach()
+                yf_det = iterates[-1].detach()
+                rel_step = float(
+                    ((yf_det - y0_det).abs().sum() / (y0_det.abs().sum() + 1e-8)).item()
+                )
+                delta_n = float((yf_det.sum() - y0_det.sum()).abs().item())
+                solver_rel_step_sum += rel_step
+                solver_delta_n_sum += delta_n
 
             residuals = outputs.get("residual_fields", [])
             if residuals:
@@ -286,6 +305,8 @@ def main() -> None:
             "z_lt_minus10_frac": z_sat_sum / max(1, n_steps),
             "initial_pred_count_mean": init_mean,
             "initial_pred_count_std": init_std,
+            "solver_rel_step_mean": solver_rel_step_sum / max(1, n_steps),
+            "solver_delta_n_mean": solver_delta_n_sum / max(1, n_steps),
             "val_MAE": "",
             "val_RMSE": "",
             "val_NAE": "",
@@ -327,6 +348,7 @@ def main() -> None:
                 f"clip={row['clip_rate']:.3f} gnorm_mean={row['grad_norm_mean']:.3f} "
                 f"gnorm_max={row['grad_norm_max']:.3f} "
                 f"solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f} "
+                f"srel={row['solver_rel_step_mean']:.4f} dn={row['solver_delta_n_mean']:.2f} "
                 f"init_count={init_mean:.1f}",
                 flush=True,
             )
@@ -336,6 +358,7 @@ def main() -> None:
                 f"clip={row['clip_rate']:.3f} gnorm_mean={row['grad_norm_mean']:.3f} "
                 f"gnorm_max={row['grad_norm_max']:.3f} "
                 f"solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f} "
+                f"srel={row['solver_rel_step_mean']:.4f} dn={row['solver_delta_n_mean']:.2f} "
                 f"init_count={init_mean:.1f}",
                 flush=True,
             )
