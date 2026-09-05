@@ -170,18 +170,32 @@ def region_geometry(
     width: int,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Geometry features [M,6]: cy,cx,h,w,log_area,log_aspect."""
+    """Geometry features [M,6]: cy/H, cx/W, log_h, log_w, log_area, log_aspect.
+
+    P0 fix — absolute region extent encoding:
+        cy/H, cx/W : normalized center (scale-invariant position)
+        log(h), log(w) : absolute grid extents in log scale
+        log(|R|)       : absolute area = log(h*w)
+        log(w/h)       : aspect ratio
+
+    Previously used h/H, w/W (relative fractions) which caused a 32px region on a
+    512px image and a 32px region on a 1024px image to have DIFFERENT geometry
+    descriptors, even though they represent the same physical scale window.
+    With absolute encoding, the 32px region always contributes the same geometric
+    identity regardless of full image resolution.
+    """
     boxes = boxes.float()
     y1, x1, y2, x2 = boxes.unbind(-1)
     h = (y2 - y1).clamp_min(1.0)
     w = (x2 - x1).clamp_min(1.0)
-    cy = 0.5 * (y1 + y2) / max(float(height), 1.0)
-    cx = 0.5 * (x1 + x2) / max(float(width), 1.0)
-    hn = h / max(float(height), 1.0)
-    wn = w / max(float(width), 1.0)
-    area = (h * w) / max(float(height * width), 1.0)
-    aspect = w / (h + eps)
-    return torch.stack([cy, cx, hn, wn, torch.log(area + eps), torch.log(aspect + eps)], dim=-1)
+    cy = 0.5 * (y1 + y2) / max(float(height), 1.0)   # normalized center y
+    cx = 0.5 * (x1 + x2) / max(float(width), 1.0)    # normalized center x
+    log_h = torch.log(h + eps)                         # absolute height (log)
+    log_w = torch.log(w + eps)                         # absolute width  (log)
+    log_area = torch.log(h * w + eps)                  # absolute area   (log)
+    log_aspect = torch.log(w / (h + eps) + eps)        # aspect ratio
+    return torch.stack([cy, cx, log_h, log_w, log_area, log_aspect], dim=-1)
+
 
 
 def region_average_features(features: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:

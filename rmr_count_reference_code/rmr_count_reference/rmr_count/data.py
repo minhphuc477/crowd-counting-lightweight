@@ -53,9 +53,23 @@ def _pad_to_crop(image: torch.Tensor, points: torch.Tensor, crop_h: int, crop_w:
     pad_h = max(0, crop_h - h)
     pad_w = max(0, crop_w - w)
     if pad_h or pad_w:
-        # ImageNet-normalized zero is close to mean after normalization; raw tensor here uses 0..1.
-        image = torch.nn.functional.pad(image, (0, pad_w, 0, pad_h), value=0.0)
+        # P2 fix: use reflect padding (in image space, before ImageNet normalization) so
+        # padded pixels are actual nearby scene content rather than raw 0.0 which becomes a
+        # large negative value after subtracting ImageNet mean (~-2.1 for the R channel).
+        # reflect mode requires tensor >= 1 in each dim, so clamp pads to image size.
+        pad_h = min(pad_h, h - 1) if h > 1 else 0
+        pad_w = min(pad_w, w - 1) if w > 1 else 0
+        if pad_h or pad_w:
+            image = torch.nn.functional.pad(image, (0, pad_w, 0, pad_h), mode="reflect")
+        # Re-check in case we couldn't pad enough with reflect; fill remainder with mean.
+        _, h2, w2 = image.shape
+        remain_h = max(0, crop_h - h2)
+        remain_w = max(0, crop_w - w2)
+        if remain_h or remain_w:
+            # Fall back to border replication for the small remainder.
+            image = torch.nn.functional.pad(image, (0, remain_w, 0, remain_h), mode="replicate")
     return image, points
+
 
 
 def train_transform(

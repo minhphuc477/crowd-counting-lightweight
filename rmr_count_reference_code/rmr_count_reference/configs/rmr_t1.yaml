@@ -16,7 +16,7 @@ model:
   - 64
   - 128
   region_overlap: 0.5
-  include_full_image: true
+  include_full_image: false
   iterations: 1
   eta_max: 0.2
   eta_init: 0.05
@@ -34,7 +34,7 @@ train:
   lr: 0.0003
   weight_decay: 0.0001
   epochs: 1000
-  warmup_epochs: 25
+  warmup_epochs: 5
   eval_every: 10
   grad_clip: 5.0
   amp: true

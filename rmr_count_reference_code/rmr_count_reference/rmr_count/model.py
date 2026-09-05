@@ -26,6 +26,11 @@ Variant = Literal[
     "rmr",
 ]
 
+# Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(y) = log(exp(y)-1).
+# For target initial rate mu0 = 0.01 count/cell:
+# softplus^{-1}(0.01) = log(exp(0.01)-1) ≈ -4.595
+_FINE_HEAD_BIAS_INIT: float = math.log(math.exp(0.01) - 1.0)   # ≈ -4.595
+
 
 def _gn(channels: int) -> nn.GroupNorm:
     for groups in (8, 4, 2, 1):
@@ -113,6 +118,15 @@ class AdditiveFusion(nn.Module):
 
 
 class FineMeasureHead(nn.Module):
+    """Fine-grained density head with calibrated initial rate.
+
+    P0 fix: The final Conv2d bias is initialized so that:
+        softplus(bias) ≈ mu0 = 0.01 count/cell
+    i.e. bias ≈ log(exp(0.01) - 1) ≈ -4.595.
+    Weights of the last conv are also scaled down to avoid large initial variance.
+    This prevents the "initialization MAE ≈ 0.693 × N_cells" problem.
+    """
+
     def __init__(self, width: int = 32):
         super().__init__()
         self.body = nn.Sequential(
@@ -120,13 +134,34 @@ class FineMeasureHead(nn.Module):
             ConvGNAct(width, width, 1),
             nn.Conv2d(width, 1, 1),
         )
+        # Initialize final conv: small weights + calibrated bias.
+        final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
+        nn.init.normal_(final_conv.weight, std=0.01)
+        nn.init.constant_(final_conv.bias, _FINE_HEAD_BIAS_INIT)  # type: ignore[arg-type]
 
     def forward(self, f: torch.Tensor) -> torch.Tensor:
         return self.body(f)
 
 
 class RegionalEvidenceHead(nn.Module):
-    """Shared regional count regressor over exact integral-feature pooled descriptors."""
+    """Shared regional count regressor: predicts rate rho_R then scales by area.
+
+    P0 fix (rate × area formulation):
+        rho_R = softplus(MLP(avg_feat_R, geom_R))   [counts/cell]
+        b_R   = |R| * rho_R                          [total counts in region]
+
+    This enforces extensivity by construction: same visual crowd density in a
+    larger region correctly predicts a proportionally larger count.
+
+    P0 fix (absolute geometry):
+        geom = [cy/H, cx/W, log(h), log(w), log(|R|), log(w/h)]
+    where h, w, |R| are absolute grid extents, not relative fractions.
+    This makes a 32px region have the same geometric identity regardless of
+    overall image resolution — fixing the extent extrapolation bug.
+
+    P0 fix (include_full_image=False):
+        full-image region is excluded from the pilot; only {32, 64, 128} px scales.
+    """
 
     def __init__(self, feature_dim: int = 32, hidden: int = 48, geom_dim: int = 6):
         super().__init__()
@@ -143,12 +178,23 @@ class RegionalEvidenceHead(nn.Module):
         pooled = region_average_features(f, regions.boxes)  # [B,M,C]
         geom = region_geometry(regions.boxes, h, w).to(dtype=f.dtype)
         geom = geom.unsqueeze(0).expand(b, -1, -1)
-        raw = self.mlp(torch.cat([pooled, geom], dim=-1)).squeeze(-1)
-        return F.softplus(raw).unsqueeze(1)  # [B,1,M]
+        raw = self.mlp(torch.cat([pooled, geom], dim=-1)).squeeze(-1)  # [B,M]
+        # rate per cell (positive), then scale by region area for total count
+        area = regions.area.to(dtype=f.dtype).view(1, -1)  # [1,M]
+        rate = F.softplus(raw)                              # [B,M] rate per cell
+        b_region = rate * area                              # [B,M] total count
+        return b_region.unsqueeze(1)                        # [B,1,M]
 
 
 class LocalPreconditioner(nn.Module):
-    """Small bounded local preconditioner applied after the exact adjoint field."""
+    """Small bounded local preconditioner applied after the normalized adjoint field.
+
+    This implements M^(t) in [0.25, 1.75] as described in the paper.
+    The update formula is the diagonally preconditioned adjoint (not raw gradient):
+        r = D_c^{-1} A^T D_a^{-1} (AY - b)
+    where D_a = region-area normalization, D_c = overlap-coverage normalization.
+    The preconditioner M further shapes this coverage-normalized adjoint field.
+    """
 
     def __init__(
         self,
@@ -197,10 +243,10 @@ class LearnedMembershipProjector(nn.Module):
         pi_{R,p} = softmax_{p in R}(s_theta(F)_p)
         r_p = mean_{R contains p} delta_R * pi_{R,p}
 
-    Exact RMR corresponds to a fixed uniform allocation delta_R / |R| before overlap
-    averaging, followed by a small local preconditioner. This B3b control therefore has
-    access to the same regional information and scope but is allowed to learn the
-    region-to-grid allocation geometry.
+    Exact RMR uses the normalized adjoint (D_c^{-1} A^T D_a^{-1}), i.e. uniform
+    allocation delta_R / |R| before overlap averaging, followed by a small local
+    preconditioner. B3b therefore has access to the same regional information and scope
+    but is allowed to learn the region-to-grid allocation geometry.
 
     The explicit region loop is intentionally used for correctness in the causal control.
     Its measured latency must be reported; it is not proposed as the deployment model.
@@ -250,10 +296,15 @@ class LearnedMembershipProjector(nn.Module):
 class RMRConfig:
     output_stride: int = 4
     feature_width: int = 32
-    # Pilot starts at 32 px; 16 px is added only if oracle/predicted-scale diagnostics justify it.
+    # Pilot: {32, 64, 128} px only. include_full_image=False avoids:
+    #  (a) extent extrapolation bug: full-image descriptor is resolution-invariant by design
+    #      but count is proportional to area — they conflict.
+    #  (b) direct/tiled inconsistency: full-image region changes between whole-image and tiled inference.
+    #  (c) scale imbalance in loss: one full-image term dominates scale-balanced loss.
+    # Global supervision is handled separately by global_count_loss.
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
     region_overlap: float = 0.5
-    include_full_image: bool = True
+    include_full_image: bool = False   # P0 fix: False for registered pilot
     iterations: int = 2
 
     # Stability: bounded step size with small initialization.
@@ -265,7 +316,20 @@ class RMRConfig:
 
 
 class RMRCount(nn.Module):
-    """Regional Measure Reconciliation crowd counter and registered controls."""
+    """Regional Measure Reconciliation crowd counter and registered controls.
+
+    The core RMR update uses a diagonally preconditioned adjoint:
+        r = D_c^{-1} A^T D_a^{-1} (AY - b)
+    where:
+        A:   rectangular region summation operator (exact)
+        A^T: exact adjoint (implemented via 2D difference arrays, O(M+HW))
+        D_a: diagonal matrix of region areas (density normalization)
+        D_c: diagonal matrix of overlap coverage counts per cell (averaging)
+    Followed by a learned local preconditioner M^(t) in [m_min, m_max].
+
+    P0 checkpoint guard: best_val_mae.pt is only updated after solver_strength
+    reaches 1.0, preventing reproducing-when-loaded inconsistency.
+    """
 
     def __init__(self, cfg: RMRConfig = RMRConfig(), variant: Variant = "rmr"):
         super().__init__()
@@ -290,6 +354,8 @@ class RMRCount(nn.Module):
         self.eta_logits = nn.Parameter(torch.full((n_steps,), init))
 
         # Training script ramps this from 0 -> 1 after the direct prediction has stabilized.
+        # NOTE: this is a Python float, NOT in state_dict. Checkpoint loading always restores
+        # to 1.0. Training prevents selecting best_val_mae.pt before strength == 1.0.
         self.solver_strength: float = 1.0
 
     def set_solver_strength(self, strength: float) -> None:
@@ -318,26 +384,36 @@ class RMRCount(nn.Module):
     ) -> torch.Tensor:
         return regional_sum(y, regions.boxes) - b_region
 
-    def _rmr_field(
+    def _normalized_adjoint_field(
         self,
         y: torch.Tensor,
         b_region: torch.Tensor,
         regions: RegionSet,
     ) -> torch.Tensor:
-        """Coverage-normalized exact adjoint of regional count residual density."""
+        """Diagonally preconditioned adjoint: D_c^{-1} A^T D_a^{-1} (AY - b).
+
+        D_a: area normalization  — converts raw count residual to per-cell residual density.
+        D_c: coverage normalization — averages overlapping region contributions per cell.
+
+        This is NOT the raw gradient A^T (AY - b). The diagonal preconditioning makes
+        the update scale-invariant with respect to region size and overlap density.
+        """
         _, _, h, w = y.shape
-        delta = self._raw_region_delta(y, b_region, regions)  # [B,1,M]
+        delta = self._raw_region_delta(y, b_region, regions)   # [B,1,M]
         area = regions.area.to(y.dtype).view(1, 1, -1)
-        residual_density = delta / area.clamp_min(1.0)
+        residual_density = delta / area.clamp_min(1.0)          # D_a^{-1} (AY-b)
 
         back = regional_adjoint(residual_density, regions.boxes, h, w)
         coverage = regional_adjoint(
             torch.ones_like(residual_density), regions.boxes, h, w
         )
-        r = back / coverage.clamp_min(1.0)
+        r = back / coverage.clamp_min(1.0)                      # D_c^{-1} A^T
         if self.cfg.residual_clip > 0:
             r = r.clamp(-self.cfg.residual_clip, self.cfg.residual_clip)
         return r
+
+    # Keep legacy name for backward compatibility in tests.
+    _rmr_field = _normalized_adjoint_field
 
     def forward(
         self,
@@ -371,7 +447,6 @@ class RMRCount(nn.Module):
                 b_region = b_region_override
             elif shuffle_region:
                 # Shuffle only within each scale family to avoid a trivial scale mismatch artifact.
-                pieces = []
                 b_region = b_region.clone()
                 for sid in torch.unique(regions.scale_id):
                     mask = regions.scale_id == sid
@@ -402,7 +477,7 @@ class RMRCount(nn.Module):
             eta = self._eta(t) * self.solver_strength
             if self.variant == "rmr":
                 assert b_region is not None and self.preconditioner is not None
-                r = self._rmr_field(y, b_region, regions)
+                r = self._normalized_adjoint_field(y, b_region, regions)
                 residual_fields.append(r)
                 m = self.preconditioner(f, y, r)
                 z = z - eta * m * torch.sigmoid(z) * r
