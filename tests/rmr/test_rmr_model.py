@@ -386,16 +386,16 @@ def test_checkpoint_solver_strength_saved():
 
 
 def test_fine_head_bias_correct():
-    """P1-T6: FineMeasureHead final conv bias must be initialized to ~-4.595.
+    """P1-T6: FineMeasureHead final conv bias must be initialized to _FINE_HEAD_BIAS_INIT (~-4.142).
 
-    This ensures initial predicted density ≈ 0.01 counts/cell via softplus(-4.595) ≈ 0.01.
+    This ensures initial predicted density ≈ 0.0158 counts/cell via softplus(-4.142) ≈ 0.0158.
     """
     model = RMRCount(RMRConfig(), variant="direct")
     # Access the last Conv2d in fine_head.body
     final_conv = model.fine_head.body[-1]
     bias_val = float(final_conv.bias.item())
 
-    expected = _FINE_HEAD_BIAS_INIT  # log(exp(0.01) - 1) ≈ -4.595
+    expected = _FINE_HEAD_BIAS_INIT  # log(exp(0.015763) - 1) ≈ -4.142
     assert abs(bias_val - expected) < 1e-5, (
         f"FineMeasureHead bias={bias_val:.4f}, expected {expected:.4f}. "
         f"softplus({bias_val:.4f}) = {math.log1p(math.exp(bias_val)):.4f}, "

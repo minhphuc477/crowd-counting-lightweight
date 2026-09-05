@@ -221,6 +221,7 @@ def compute_losses(
       rmr:             region_aux + exact-adjoint reconciliation (B5-P)
     """
     y = outputs["y"]
+    y0 = outputs["y0"]
     regions: RegionSet | None = outputs.get("regions")
     losses: dict[str, torch.Tensor] = {}
 
@@ -230,12 +231,14 @@ def compute_losses(
     )
     losses["global"] = losses["count"]  # backward-compatible key
 
+    # P0-3 fix: Flat Dirichlet-Multinomial-16 allocation loss is strictly applied to observer Y0
+    # across all variants (B0-B5) to enforce observer mass-allocation quality.
     if cfg.lambda_flat_dm16 > 0:
         losses["flat_dm16"] = flat_dm16_loss(
-            y, target_y, kappa=cfg.kappa_flat16
+            y0, target_y, kappa=cfg.kappa_flat16
         )
     else:
-        losses["flat_dm16"] = y.new_tensor(0.0)
+        losses["flat_dm16"] = y0.new_tensor(0.0)
 
     if variant in {"region_loss", "region_aux", "learned_project", "rmr"}:
         if regions is None:

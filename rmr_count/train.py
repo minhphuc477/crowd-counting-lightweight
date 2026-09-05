@@ -26,7 +26,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from .data import CrowdManifestDataset, collate_eval, collate_train
+from .data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from .losses import LossConfig, compute_losses
 from .metrics import game_single, summarize_predictions
 from .model import RMRConfig, RMRCount, count_parameters
@@ -121,6 +121,12 @@ def make_model(cfg: dict) -> RMRCount:
             "pretrained",
             True,
         ),
+        init_m0=float(
+            model_cfg.get(
+                "init_m0",
+                0.015763,
+            )
+        ),
         backbone_lr_scale=float(
             model_cfg.get(
                 "backbone_lr_scale",
@@ -213,7 +219,13 @@ def main() -> None:
     seed_everything(seed)
     torch.backends.cudnn.benchmark = True
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if "init_m0" not in cfg["model"] and "train_manifest" in cfg.get("data", {}):
+        stride = int(cfg["model"].get("output_stride", 4))
+        cfg["model"]["init_m0"] = compute_manifest_density(
+            cfg["data"]["train_manifest"],
+            output_stride=stride,
+        )
+
     out_dir = Path(cfg["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
@@ -251,6 +263,7 @@ def main() -> None:
         collate_fn=collate_eval,
     )
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = make_model(cfg).to(device)
     epochs = int(cfg["train"].get("epochs", 1000))
     lr_init = float(cfg["train"].get("lr", 3e-4))

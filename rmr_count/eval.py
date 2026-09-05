@@ -112,6 +112,12 @@ def make_model_from_ckpt(
             ),
         ),
         pretrained=False,
+        init_m0=float(
+            model_cfg.get(
+                "init_m0",
+                0.015763,
+            )
+        ),
         backbone_lr_scale=model_cfg.get(
             "backbone_lr_scale",
             0.1,

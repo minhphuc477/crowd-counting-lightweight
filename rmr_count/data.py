@@ -233,3 +233,42 @@ def collate_train(batch: list[dict]) -> dict:
 def collate_eval(batch: list[dict]) -> list[dict]:
     # Full-resolution images may differ in shape; evaluate sample-by-sample.
     return batch
+
+
+def compute_manifest_density(
+    manifest: str | Path,
+    output_stride: int = 4,
+    default_m0: float = 0.015763,
+) -> float:
+    """Empirically compute the mean cell density m0 across training images in a manifest.
+
+    m0 = total_points / total_stride4_cells.
+    """
+    manifest_path = Path(manifest)
+    if not manifest_path.exists():
+        return default_m0
+    root = manifest_path.parent
+    total_pts = 0
+    total_cells = 0
+    try:
+        with manifest_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                pts_list = item.get("points", [])
+                n_pts = len(pts_list)
+                img_path = Path(item["image"])
+                if not img_path.is_absolute():
+                    img_path = root / img_path
+                with Image.open(img_path) as img:
+                    w, h = img.size
+                cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
+                total_pts += n_pts
+                total_cells += cells
+        if total_cells > 0:
+            return float(total_pts / total_cells)
+    except Exception:
+        pass
+    return default_m0

@@ -29,13 +29,11 @@ Variant = Literal[
 RMRUpdate = Literal["latent", "jacobian", "projected_sirt"]
 
 # Data-driven prior initialization (RMR-v2):
-# For ShanghaiTech Part A, average crop has ~200 people across 128x128 = 16,384 cells.
-# Expected initial density: m0 = 200 / 16384 ≈ 0.012207 count/cell.
-# Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(m0) = log(exp(m0)-1) ≈ -4.400.
-_EXPECTED_CROP_COUNT: float = 200.0
-_CROP_CELLS_DEFAULT: float = 16384.0   # 128 * 128
-_M0_INIT: float = _EXPECTED_CROP_COUNT / _CROP_CELLS_DEFAULT  # ≈ 0.012207
-_FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.3996
+# Computed empirically from ShanghaiTech Part A training manifest:
+# m0 = total_points / total_stride4_cells = 0.015763 count/cell.
+# Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(m0) = log(exp(m0)-1) ≈ -4.1422.
+_M0_INIT: float = 0.015763
+_FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.1422
 
 
 def _gn(channels: int) -> nn.GroupNorm:
@@ -210,36 +208,75 @@ class AdditiveFPNNeck(nn.Module):
 
 
 class MobileNetV4Backbone(nn.Module):
-    """MobileNetV4 feature backbone returning stride-4, 8, 16 feature pyramid.
+    """MobileNetV4 feature backbone returning a configured feature pyramid (C4, C8, C16).
 
-    Truncated after reduction 16 (blocks.2) to drop reduction-32 and classification
-    heads, preserving a lightweight footprint (87,568 params).
+    Probes feature_info.reduction() dynamically to find target reductions {4, 8, 16},
+    selects actual channel dimensions, and physically truncates blocks after the last
+    requested feature module.
     """
 
     def __init__(
         self,
         model_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k",
-        pretrained: bool = True,
+        pretrained: bool = False,
+        target_reductions: tuple[int, ...] = (4, 8, 16),
     ):
         super().__init__()
         import timm
 
+        target_reductions = tuple(int(r) for r in target_reductions)
+        if target_reductions not in {(4, 8, 16), (4, 8, 16, 32)}:
+            raise ValueError(
+                f"MobileNetV4Backbone requires target_reductions=(4, 8, 16), got {target_reductions}"
+            )
+
         self.model_name = model_name
         self.pretrained = bool(pretrained)
-        self.out_channels = (16, 32, 48)
+        self.target_reductions = target_reductions
 
+        # Isolate RNG state when creating the probe model so feature inspection does not consume RNG
+        with torch.random.fork_rng(devices=[]):
+            probe = timm.create_model(model_name, pretrained=False, features_only=True)
+            reductions = list(probe.feature_info.reduction())
+            channels = list(probe.feature_info.channels())
+            del probe
+
+        selected_indices = []
+        selected_channels = []
+        for r in self.target_reductions:
+            matches = [i for i, rr in enumerate(reductions) if rr == r]
+            if not matches:
+                raise ValueError(f"Reduction {r} not found in {model_name}: {reductions}")
+            idx = matches[-1]
+            selected_indices.append(idx)
+            selected_channels.append(channels[idx])
+
+        self.selected_indices = tuple(selected_indices)
+        self.out_channels = tuple(selected_channels)
         self.backbone = timm.create_model(
             model_name,
             pretrained=pretrained,
             features_only=True,
-            out_indices=(1, 2, 3),
+            out_indices=self.selected_indices,
         )
 
+        selected_module_names = list(self.backbone.feature_info.module_name())
+        last_module = selected_module_names[-1]
+        if not last_module.startswith("blocks."):
+            raise RuntimeError(
+                f"Cannot safely truncate {model_name}: last selected feature is {last_module!r}"
+            )
+        last_block_index = int(last_module.split(".")[1])
         blocks = list(self.backbone.blocks.children())
-        self.backbone.blocks = nn.Sequential(*blocks[:3])
+        if last_block_index >= len(blocks):
+            raise RuntimeError(
+                f"Invalid truncation block {last_block_index} for {len(blocks)} MobileNet stages"
+            )
+        self.backbone.blocks = nn.Sequential(*blocks[: last_block_index + 1])
+        self.truncated_after = last_module
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        feats = self.backbone(x)
+        feats = tuple(self.backbone(x))
         return feats[0], feats[1], feats[2]
 
 
@@ -253,7 +290,7 @@ class FineMeasureHead(nn.Module):
     This prevents the "initialization MAE ≈ 0.693 × N_cells" problem.
     """
 
-    def __init__(self, width: int = 32):
+    def __init__(self, width: int = 32, init_bias: float = _FINE_HEAD_BIAS_INIT):
         super().__init__()
         self.body = nn.Sequential(
             ConvGNAct(width, width, 3, groups=width),
@@ -263,7 +300,7 @@ class FineMeasureHead(nn.Module):
         # Initialize final conv: small weights + calibrated bias.
         final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
         nn.init.normal_(final_conv.weight, std=0.01)
-        nn.init.constant_(final_conv.bias, _FINE_HEAD_BIAS_INIT)  # type: ignore[arg-type]
+        nn.init.constant_(final_conv.bias, init_bias)  # type: ignore[arg-type]
 
     def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
         if isinstance(f, tuple):
@@ -325,21 +362,38 @@ class ScaleMatchedRegionalEvidenceHead(nn.Module):
         device = p4.device
         dtype = p4.dtype
 
+        # Exact regional support (P0-2 fix):
+        # All feature levels are bilinearly upsampled to P4 spatial resolution.
+        # This guarantees 100% exact correspondence with regions.boxes in P4 cell space
+        # without any integer rounding mismatch on arbitrary image sizes.
+        size4 = p4.shape[-2:]
+        feat_p4 = p4
+        feat_p8_at_4 = (
+            p8 if p8.shape[-2:] == size4
+            else F.interpolate(p8, size=size4, mode="bilinear", align_corners=False)
+        )
+        feat_p16_at_4 = (
+            p16 if p16.shape[-2:] == size4
+            else F.interpolate(p16, size=size4, mode="bilinear", align_corners=False)
+        )
+
         specs = [
-            (0, p4, 1, 32.0),
-            (1, p8, 2, 64.0),
-            (2, p16, 4, 128.0),
+            (0, feat_p4, 32.0),
+            (1, feat_p8_at_4, 64.0),
+            (2, feat_p16_at_4, 128.0),
         ]
 
-        pooled_list: list[torch.Tensor] = []
-        for sid, feat, stride_ratio, scale_px in specs:
+        m_total = regions.boxes.shape[0]
+        in_dim = self.mlp[0].in_features  # 33
+        feat_all = torch.zeros((b, m_total, in_dim), device=device, dtype=dtype)
+
+        for sid, feat_s, scale_px in specs:
             mask = regions.scale_id == sid
             if not mask.any():
                 continue
             boxes_s = regions.boxes[mask]
-            if stride_ratio > 1:
-                boxes_s = boxes_s // stride_ratio
-            u_s = region_average_features(feat, boxes_s)  # [B, M_s, C]
+            # Exact regional support: uses regions.boxes directly on P4 cell grid
+            u_s = region_average_features(feat_s, boxes_s)  # [B, M_s, C]
             m_s = u_s.shape[1]
             scale_feat = torch.full(
                 (1, m_s, 1),
@@ -348,14 +402,8 @@ class ScaleMatchedRegionalEvidenceHead(nn.Module):
                 dtype=dtype,
             ).expand(b, -1, -1)
             f_s = torch.cat([u_s, scale_feat], dim=-1)   # [B, M_s, 33]
-            pooled_list.append(f_s)
+            feat_all[:, mask] = f_s
 
-        if not pooled_list:
-            u_all = region_average_features(p4, regions.boxes)
-            scale_feat = torch.zeros((b, u_all.shape[1], 1), device=device, dtype=dtype)
-            pooled_list = [torch.cat([u_all, scale_feat], dim=-1)]
-
-        feat_all = torch.cat(pooled_list, dim=1)         # [B, M, 33]
         raw = self.mlp(feat_all).squeeze(-1)            # [B, M]
         rate = F.softplus(raw)                          # [B, M]
         area = regions.area.to(dtype=dtype).view(1, -1) # [1, M]
@@ -508,9 +556,12 @@ class RMRConfig:
     projected_use_preconditioner: bool = False
     detach_region_evidence: bool = True
 
+    # Empirical prior initialization (count / stride-4 cell on ShanghaiTech Part A)
+    init_m0: float = 0.015763
+
     # Carrier backbone configuration:
     backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
-    pretrained: bool = True
+    pretrained: bool = False
     backbone_lr_scale: float = 0.1
 
 
@@ -563,8 +614,10 @@ class RMRCount(nn.Module):
             "learned_project",
             "rmr",
         }
+        init_m0 = float(getattr(cfg, "init_m0", _M0_INIT))
+        init_bias = math.log(math.exp(init_m0) - 1.0)
         self.region_head = (
-            RegionalEvidenceHead(cfg.feature_width)
+            RegionalEvidenceHead(cfg.feature_width, init_bias=init_bias)
             if needs_region_head
             else None
         )
@@ -587,7 +640,7 @@ class RMRCount(nn.Module):
                 in_channels=self.encoder.out_channels,
                 width=cfg.feature_width,
             )
-        self.fine_head = FineMeasureHead(cfg.feature_width)
+        self.fine_head = FineMeasureHead(cfg.feature_width, init_bias=init_bias)
 
         # Legacy RMR-Latent / RMR-Jacobian always use the learned positive
         # local preconditioner.
