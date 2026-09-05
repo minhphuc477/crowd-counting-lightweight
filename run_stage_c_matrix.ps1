@@ -25,9 +25,24 @@ foreach ($m in $models) {
         --lr 0.0001 `
         --output-dir $m.OutDir `
         --epochs 1000 `
-        --eval-every 10
-        
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Finished Model: $($m.Name)"
+        --eval-every 10 `
+        --patience 10
+
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Training completed/stopped for: $($m.Name)"
+
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Val set..."
+    .venv\Scripts\python -m rmr_count.eval `
+        --checkpoint "$($m.OutDir)/best_val_mae.pt" `
+        --manifest "data/sha_a_val.jsonl" `
+        --out-dir "$($m.OutDir)/eval_val"
+
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Test set..."
+    .venv\Scripts\python -m rmr_count.eval `
+        --checkpoint "$($m.OutDir)/best_val_mae.pt" `
+        --manifest "data/sha_a_test.jsonl" `
+        --out-dir "$($m.OutDir)/eval_test"
+
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed all evals for: $($m.Name)"
 }
 
 Write-Host "========================================================="
