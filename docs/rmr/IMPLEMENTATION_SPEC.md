@@ -123,6 +123,6 @@ To prevent accidental mixing of artifacts across training generations:
 ### 5.3 Training Hyperparameters
 - **Epochs:** 1000 epochs (early stopping disabled for full convergence).
 - **Optimizer:** AdamW with cosine annealing schedule.
-- **Learning Rates:** Main head LR $10^{-3}$, Backbone LR $10^{-4}$ ($0.1\times$ backbone multiplier).
+- **Learning Rates:** Main head LR $10^{-4}$, Backbone LR $10^{-5}$ ($0.1\times$ backbone multiplier).
 - **Evaluation:** Validation set (`sha_a_val.jsonl`) evaluated every 10 epochs.
 - **Final Test:** Frozen models evaluated once on `sha_a_test.jsonl` post-training via `run_final_test_eval.ps1`.
