@@ -314,8 +314,8 @@ def test_solver_effective_step_nonzero_after_warmup():
     |Δz| = eta * |M * r| should produce a visible |ΔY| = softplus(z+Δz) - softplus(z).
     This test verifies the update chain is numerically active (not flushed to zero).
 
-    Note: sigma(z) gate was REMOVED from the update (was the old RMR-Jacobian rule).
-    The current registered rule (RMR-Latent) does NOT multiply by sigma(z).
+    Note: RMR-Latent is the legacy ablation rule and does NOT multiply by sigma(z).
+    The registered main method is RMR-P (Projected-SIRT).
     For RMR-Jacobian ablation, set cfg.use_jacobian_gate=True.
     """
     torch.manual_seed(42)
@@ -814,4 +814,43 @@ def test_projected_solver_detached_b_has_no_solver_gradient():
             torch.zeros_like(b.grad),
         )
     )
+
+
+def test_rmr_p_exact_parameter_parity_with_b2():
+    """P1 audit: RMR-P has zero extra parameters and exactly matches B2 (region_aux)."""
+    cfg_p = RMRConfig(
+        update_rule="projected_sirt",
+        sirt_omega=1.0,
+        learnable_sirt_omega=False,
+        projected_use_preconditioner=False,
+    )
+    model_p = RMRCount(cfg_p, variant="rmr")
+    model_b2 = RMRCount(RMRConfig(), variant="region_aux")
+
+    assert model_p.eta_logits is None, "RMR-P must not have eta_logits parameter"
+    assert model_p.log_sirt_omega is None, "Fixed RMR-P must not have log_sirt_omega parameter"
+    assert model_p.preconditioner is None, "Registered RMR-P must not have preconditioner"
+
+    params_p = sum(p.numel() for p in model_p.parameters())
+    params_b2 = sum(p.numel() for p in model_b2.parameters())
+
+    assert params_p == 63042, f"Expected 63,042 parameters, got {params_p}"
+    assert params_p == params_b2, f"Expected exact parameter parity with B2 ({params_b2}), got {params_p}"
+
+
+def test_projected_sirt_residual_clip_zero_does_not_clip():
+    """P0 audit: residual_clip=0.0 leaves residual field unclipped (canonical SIRT)."""
+    cfg = RMRConfig(
+        update_rule="projected_sirt",
+        residual_clip=0.0,
+    )
+    model = RMRCount(cfg, variant="rmr")
+
+    y = torch.full((1, 1, 16, 16), 1.0)
+    regions, cov = model._regions_and_coverage(16, 16, y.device)
+    # Huge difference b to create large residuals (|r| > 10)
+    b_huge = torch.full((1, 1, len(regions.boxes)), 1000.0)
+
+    r = model._normalized_adjoint_field(y, b_huge, regions, coverage=cov)
+    assert r.abs().max() > 5.0, "residual_clip=0.0 must allow |r| > 5.0 without truncation"
 

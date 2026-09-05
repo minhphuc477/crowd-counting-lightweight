@@ -350,28 +350,26 @@ class RMRCount(nn.Module):
     where:
         A:   rectangular region summation operator (exact)
         A^T: exact adjoint (implemented via 2D difference arrays, O(M+HW))
-        D_a: diagonal matrix of region areas (converts count residual → rate residual)
+        D_a: diagonal matrix of region areas (converts count residual -> rate residual)
         D_c: diagonal matrix of overlap coverage counts (averages overlapping regions)
 
-    Two update rules for ablation (controlled by RMRConfig.use_jacobian_gate):
+    Update rules:
 
-        RMR-Latent (use_jacobian_gate=False, DEFAULT):
+        RMR-P (update_rule="projected_sirt", REGISTERED MAIN METHOD):
+            Y^{t+1} = \\Pi_+ [Y^t - \\omega M r_t] = \\max(0, Y^t - \\omega M r_t)
+            Direct measure-space Nonnegative Projected SIRT with fixed \\omega=1 and M=1.
+            No learned spatial preconditioner, no sigmoid Jacobian factor, no extra solver
+            parameters. Exact parameter parity with B2 (region_aux).
+
+        RMR-Latent (update_rule="latent", legacy mechanism ablation):
             z^{t+1} = z^t - eta * M * r
-            Treats z as the direct optimization variable. The field r carries the
-            regional inconsistency signal; M locally shapes the correction. No Jacobian
-            factor. This is a "latent-space preconditioned reconciliation step".
+            y^{t+1} = softplus(z^{t+1})
+            Historical latent-space preconditioned reconciliation step.
 
-        RMR-Jacobian (use_jacobian_gate=True):
+        RMR-Jacobian (update_rule="jacobian", legacy mechanism ablation):
             z^{t+1} = z^t - eta * M * sigma(z) * r
-            Interprets r as an approximate gradient in measure-space (nabla_Y E),
-            and applies the chain rule dy/dz = sigma(z) to convert to z-space.
-            Mathematically: if E(Y) is the regional consistency energy and r ≈ nabla_Y E,
-            then nabla_z E = (dY/dz) r = sigma(z) r.
-            Numerically: with z ≈ -4.6, sigma(z) ≈ 0.01 squashes the update ~100x.
-            This ablation tests whether the Jacobian factor helps or hurts in practice.
-
-    Paper must explicitly state which rule is used; do NOT call RMR-Latent a "proximal
-    gradient" without deriving the corresponding energy functional in z-space.
+            y^{t+1} = softplus(z^{t+1})
+            Historical Jacobian-gated latent rule.
 
     P0 checkpoint guard: best_val_mae.pt is only updated after solver_strength
     reaches 1.0, preventing reproducing-when-loaded inconsistency.
@@ -439,14 +437,21 @@ class RMRCount(nn.Module):
             else None
         )
 
-        # Keep eta_logits for compatibility with legacy configs/checkpoints
-        # and the learned controls.
-        n_steps = max(1, cfg.iterations)
-        frac = cfg.eta_init / max(cfg.eta_max, 1e-8)
-        init = _logit(frac)
-        self.eta_logits = nn.Parameter(
-            torch.full((n_steps,), init)
+        # P1 fix: Only allocate eta_logits for variants and rules that actually use it.
+        # Registered Projected-SIRT uses fixed omega=1 (or optional log_sirt_omega ablation)
+        # and has zero extra trainable solver parameters, achieving exact parameter parity with B2.
+        need_eta = (variant in {"local_refine", "learned_project"}) or (
+            variant == "rmr" and self.rmr_update_rule in {"latent", "jacobian"}
         )
+        if need_eta:
+            n_steps = max(1, cfg.iterations)
+            frac = cfg.eta_init / max(cfg.eta_max, 1e-8)
+            init = _logit(frac)
+            self.eta_logits = nn.Parameter(
+                torch.full((n_steps,), init)
+            )
+        else:
+            self.register_parameter("eta_logits", None)
 
         # Optional learnable relaxation for an ablation only.
         # Main method uses fixed omega=1 and has no extra solver parameter.
@@ -502,17 +507,37 @@ class RMRCount(nn.Module):
         return self._regions_and_coverage(h, w, device)[0]
 
     def _eta(self, t: int) -> torch.Tensor:
+        if self.eta_logits is None:
+            raise RuntimeError(
+                f"_eta is not defined for variant={self.variant} / "
+                f"update_rule={self.rmr_update_rule} (eta_logits is None)"
+            )
         idx = min(t, self.eta_logits.numel() - 1)
         return self.cfg.eta_max * torch.sigmoid(self.eta_logits[idx])
 
-    def _sirt_omega(self) -> torch.Tensor:
+    def _sirt_omega(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
         if self.log_sirt_omega is not None:
-            # Positive relaxation.
+            # Positive relaxation ablation.
             return torch.exp(self.log_sirt_omega)
-        # Put the scalar on the same device as model parameters.
-        return self.eta_logits.new_tensor(
-            float(self.cfg.sirt_omega)
-        )
+        if self.eta_logits is not None:
+            return self.eta_logits.new_tensor(float(self.cfg.sirt_omega))
+        if device is None:
+            try:
+                p = next(self.parameters())
+                device = p.device
+                if dtype is None:
+                    dtype = p.dtype
+            except StopIteration:
+                device = torch.device("cpu")
+                if dtype is None:
+                    dtype = torch.float32
+        if dtype is None:
+            dtype = torch.float32
+        return torch.tensor(float(self.cfg.sirt_omega), device=device, dtype=dtype)
 
     def _projected_sirt_step(
         self,
@@ -566,7 +591,7 @@ class RMRCount(nn.Module):
             # Exact registered solver: no learned spatial gate.
             m = torch.ones_like(y)
 
-        omega = self._sirt_omega()
+        omega = self._sirt_omega(device=y.device, dtype=y.dtype)
         omega_eff = omega * float(self.solver_strength)
 
         y_next = torch.clamp_min(

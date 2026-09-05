@@ -262,7 +262,12 @@ def main() -> None:
     best_mae = float("inf")
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
-        model.load_state_dict(ckpt["model"])
+        state_dict = dict(ckpt["model"])
+        if getattr(model, "eta_logits", None) is None and "eta_logits" in state_dict:
+            state_dict.pop("eta_logits", None)
+        if getattr(model, "log_sirt_omega", None) is None and "log_sirt_omega" in state_dict:
+            state_dict.pop("log_sirt_omega", None)
+        model.load_state_dict(state_dict)
         optimizer.load_state_dict(ckpt["optimizer"])
         scheduler.load_state_dict(ckpt["scheduler"])
         if "scaler" in ckpt:
@@ -409,10 +414,10 @@ def main() -> None:
             and getattr(model, "rmr_update_rule", None) == "projected_sirt"
         ):
             solver_step0 = float(
-                model._sirt_omega().detach().cpu().item()
+                model._sirt_omega(device=device).detach().cpu().item()
                 * model.solver_strength
             )
-        elif hasattr(model, "_eta"):
+        elif hasattr(model, "_eta") and getattr(model, "eta_logits", None) is not None:
             solver_step0 = float(
                 model._eta(0).detach().cpu().item()
             )

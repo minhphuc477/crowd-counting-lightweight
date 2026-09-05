@@ -23,7 +23,7 @@ model:
   learnable_sirt_omega: false
   projected_use_preconditioner: true
   detach_region_evidence: true
-  residual_clip: 5.0
+  residual_clip: 0.0
 loss:
   lambda_global: 0.1
   lambda_region_map: 0.2

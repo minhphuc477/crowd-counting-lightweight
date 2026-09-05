@@ -111,8 +111,14 @@ def make_model_from_ckpt(
         variant=model_cfg["variant"],
     )
 
+    state_dict = dict(ckpt["model"])
+    if getattr(model, "eta_logits", None) is None and "eta_logits" in state_dict:
+        state_dict.pop("eta_logits", None)
+    if getattr(model, "log_sirt_omega", None) is None and "log_sirt_omega" in state_dict:
+        state_dict.pop("log_sirt_omega", None)
+
     model.load_state_dict(
-        ckpt["model"],
+        state_dict,
         strict=True,
     )
 
