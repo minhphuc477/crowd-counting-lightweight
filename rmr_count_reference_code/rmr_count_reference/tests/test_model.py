@@ -192,15 +192,23 @@ def test_regional_head_initial_rate_calibrated():
         area = regions.area.float()
         rate_per_cell = b_region / area.clamp_min(1.0)
 
-    # All rates should be close to 0.01, definitely NOT 0.693
+    # Tight check: initial rate must be within 3x of 0.01 target (not just < 0.5)
+    # Equivalent to: softplus(bias) ∈ [0.005, 0.03]
+    # 0.5 was too loose — 0.2 would pass but is 20x the intended prior.
     mean_rate = float(rate_per_cell.mean().item())
-    assert mean_rate < 0.5, (
-        f"Regional initial rate/cell={mean_rate:.4f}. "
-        f"Expected ~0.01 (fixed init). Got ~0.693 (broken, softplus(0))."
+    assert 0.005 < mean_rate < 0.03, (
+        f"Regional initial rate/cell={mean_rate:.5f}. "
+        f"Expected 0.005 < rate < 0.03 (≈ 0.01 target). "
+        f"If mean_rate ≈ 0.693: bias init missing. If > 0.03: weight init too large."
     )
-    assert mean_rate > 1e-4, (
-        f"Regional initial rate/cell={mean_rate:.6f} suspiciously low."
-    )
+    # Also verify per-scale: all scales should be close to 0.01, not just the mean
+    for sid in torch.unique(regions.scale_id):
+        mask = regions.scale_id == sid
+        scale_rate = float((rate_per_cell[mask]).mean().item())
+        assert 0.002 < scale_rate < 0.1, (
+            f"scale_id={int(sid.item())} initial rate={scale_rate:.5f} out of expected range. "
+            f"Regional head may be scaling predictions by area incorrectly."
+        )
 
 
 def test_regional_loss_gradient_scale_balanced():
@@ -296,11 +304,19 @@ def test_padding_mean_is_zero_after_normalization():
 
 
 def test_solver_effective_step_nonzero_after_warmup():
-    """NEW Diagnostic: After solver ramp, Y1 != Y0 (solver actually changes prediction).
+    """Diagnostic: After solver ramp, Y_final != Y0 (solver produces non-trivial update).
 
-    Checks that with solver_strength=1.0, eta=0.05, the iterative update produces
-    a non-trivial change. This validates that the sigma(z) * r * eta chain is not
-    numerically collapsed to zero.
+    Validates that the RMR-Latent update rule:
+        z^{t+1} = z^t - eta * M * r
+    produces a measurable change in the predicted measure Y = softplus(z).
+
+    With z ≈ -4.6 at init and r coming from regional inconsistency, the step
+    |Δz| = eta * |M * r| should produce a visible |ΔY| = softplus(z+Δz) - softplus(z).
+    This test verifies the update chain is numerically active (not flushed to zero).
+
+    Note: sigma(z) gate was REMOVED from the update (was the old RMR-Jacobian rule).
+    The current registered rule (RMR-Latent) does NOT multiply by sigma(z).
+    For RMR-Jacobian ablation, set cfg.use_jacobian_gate=True.
     """
     torch.manual_seed(42)
     model = RMRCount(RMRConfig(iterations=2, eta_init=0.05, eta_max=0.2), variant="rmr")
@@ -311,23 +327,20 @@ def test_solver_effective_step_nonzero_after_warmup():
         out = model(x)
         iterates = out["iterates"]
         y0 = iterates[0]
-        y1 = iterates[1]
         yf = iterates[-1]
 
     rel_step = float((yf - y0).abs().sum() / (y0.abs().sum() + 1e-8))
-    delta_n = float((yf.sum() - y0.sum()).abs())
 
-    # With bias init z ≈ -4.6 → sigma(z) ≈ 0.01 → step ≈ 0.05 * 1 * 0.01 * r
-    # Even if small, must be > 0 (model is not broken)
-    assert rel_step > 0.0, "Solver produces zero relative step — update is collapsed"
-    # Warn if extremely small (< 0.0001 relative), as this may indicate sigma(z) bottleneck
-    # This is not a hard failure but should trigger the sigma(z) ablation
+    # RMR-Latent: |Δz| = eta * |M * r|, no sigma(z) suppression.
+    # Even at init (r small due to random weights), must produce non-zero update.
+    assert rel_step > 0.0, "Solver produces zero relative step — update is numerically collapsed"
+    # Warn if extremely small (< 1e-4 relative) — may indicate r is near-zero at init
     if rel_step < 1e-4:
         import warnings
         warnings.warn(
             f"Solver relative step = {rel_step:.2e} is very small. "
-            f"Consider removing sigma(z) multiplier from the update rule "
-            f"(z = z - eta * M * r without the sigmoid gate)."
+            f"Check residual field magnitudes and eta initialization. "
+            f"If using use_jacobian_gate=True, note that sigma(z)≈0.01 suppresses updates ~100x."
         )
 
 

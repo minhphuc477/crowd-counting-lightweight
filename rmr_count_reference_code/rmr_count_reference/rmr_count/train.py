@@ -36,6 +36,8 @@ def make_model(cfg: dict) -> RMRCount:
         eta_max=cfg["model"].get("eta_max", 0.20),
         eta_init=cfg["model"].get("eta_init", 0.05),
         residual_clip=cfg["model"].get("residual_clip", 5.0),
+        # Ablation: False=RMR-Latent (default/registered), True=RMR-Jacobian (ablation only).
+        use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
     )
     return RMRCount(mcfg, variant=cfg["model"]["variant"])
 
@@ -48,7 +50,12 @@ def make_loss_cfg(cfg: dict) -> LossConfig:
         lambda_region_head=x.get("lambda_region_head", 0.20),
         lambda_deep_supervision=x.get("lambda_deep_supervision", 0.10),
         cell_beta=x.get("cell_beta", 1.0),
-        region_beta=x.get("region_beta", 2.0),
+        # P1 fix: rate magnitudes are ~0.001–0.1, so beta=2.0 puts all residuals in the
+        # quadratic regime (|Δρ| ≪ 2), giving gradient ≈ Δρ/2 ≈ 0.001–0.05.
+        # After lambda_region=0.2, regional branch contributes only ~0.002 to grad.
+        # beta=0.1 keeps non-trivial residuals in the linear regime (L1-like),
+        # giving gradient ≈ sign(Δρ) and stronger regional supervision.
+        region_beta=x.get("region_beta", 0.1),
     )
 
 

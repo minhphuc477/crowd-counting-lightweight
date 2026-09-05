@@ -27,7 +27,7 @@ loss:
   lambda_region_head: 0.2
   lambda_deep_supervision: 0.1
   cell_beta: 1.0
-  region_beta: 2.0
+  region_beta: 0.1
 train:
   batch_size: 8
   workers: 0

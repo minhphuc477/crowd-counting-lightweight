@@ -324,19 +324,44 @@ class RMRConfig:
     residual_clip: float = 5.0
 
     eps: float = 1e-6
+    # Ablation flag: selects between two update rules (see RMRCount docstring).
+    #   False (default) = RMR-Latent:   z^{t+1} = z^t - eta * M * r
+    #   True            = RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
+    # RMR-Latent is used for all registered B5 results.
+    # RMR-Jacobian is an explicit ablation that must be separately labeled in the paper.
+    use_jacobian_gate: bool = False
 
 
 class RMRCount(nn.Module):
     """Regional Measure Reconciliation crowd counter and registered controls.
 
-    The core RMR update uses a diagonally preconditioned adjoint:
+    The core RMR residual field uses the diagonally preconditioned adjoint:
         r = D_c^{-1} A^T D_a^{-1} (AY - b)
     where:
         A:   rectangular region summation operator (exact)
         A^T: exact adjoint (implemented via 2D difference arrays, O(M+HW))
-        D_a: diagonal matrix of region areas (density normalization)
-        D_c: diagonal matrix of overlap coverage counts per cell (averaging)
-    Followed by a learned local preconditioner M^(t) in [m_min, m_max].
+        D_a: diagonal matrix of region areas (converts count residual → rate residual)
+        D_c: diagonal matrix of overlap coverage counts (averages overlapping regions)
+
+    Two update rules for ablation (controlled by RMRConfig.use_jacobian_gate):
+
+        RMR-Latent (use_jacobian_gate=False, DEFAULT):
+            z^{t+1} = z^t - eta * M * r
+            Treats z as the direct optimization variable. The field r carries the
+            regional inconsistency signal; M locally shapes the correction. No Jacobian
+            factor. This is a "latent-space preconditioned reconciliation step".
+
+        RMR-Jacobian (use_jacobian_gate=True):
+            z^{t+1} = z^t - eta * M * sigma(z) * r
+            Interprets r as an approximate gradient in measure-space (nabla_Y E),
+            and applies the chain rule dy/dz = sigma(z) to convert to z-space.
+            Mathematically: if E(Y) is the regional consistency energy and r ≈ nabla_Y E,
+            then nabla_z E = (dY/dz) r = sigma(z) r.
+            Numerically: with z ≈ -4.6, sigma(z) ≈ 0.01 squashes the update ~100x.
+            This ablation tests whether the Jacobian factor helps or hurts in practice.
+
+    Paper must explicitly state which rule is used; do NOT call RMR-Latent a "proximal
+    gradient" without deriving the corresponding energy functional in z-space.
 
     P0 checkpoint guard: best_val_mae.pt is only updated after solver_strength
     reaches 1.0, preventing reproducing-when-loaded inconsistency.
@@ -491,17 +516,21 @@ class RMRCount(nn.Module):
                 r = self._normalized_adjoint_field(y, b_region, regions)
                 residual_fields.append(r)
                 m = self.preconditioner(f, y, r)
-                # Direct z-space update (proximal gradient on z):
-                #     z^{t+1} = z^t - eta * M * r
-                # The previous code had: z = z - eta * M * sigma(z) * r
-                # PROBLEM with sigma(z) multiplier: after bias fix z ≈ -4.595,
-                # sigma(z) ≈ 0.01, so |Δz| ≈ 0.05 * 0.01 * r ≈ 7e-8,
-                # which is below float32 ULP at z ≈ -4.6. Solver was numerically dead.
-                # sigma(z) was intended as a "Jacobian factor" (dy/dz = sigma(z) for
-                # logistic y), but softplus uses dy/dz = sigma(z) differently, and
-                # since z is the actual optimization variable, the clean update is
-                # the direct z-space step without the extra sigmoid gate.
-                z = z - eta * m * r
+                if self.cfg.use_jacobian_gate:
+                    # RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
+                    # Interpretation: r ≈ nabla_Y E (gradient of regional consistency energy
+                    # in measure space), and dY/dz = sigma(z) is the Jacobian of the
+                    # softplus reparameterization. Together: nabla_z E = sigma(z) * r.
+                    # Ablation only — must be explicitly labeled in paper.
+                    z = z - eta * m * torch.sigmoid(z) * r
+                else:
+                    # RMR-Latent (DEFAULT): z^{t+1} = z^t - eta * M * r
+                    # Latent-space preconditioned reconciliation step.
+                    # r is the diagonally-normalized regional residual field; M locally
+                    # shapes the correction magnitude. No Jacobian factor: z is treated
+                    # as the direct optimization variable, not derived from a y-space energy.
+                    # This is the registered B5 update rule.
+                    z = z - eta * m * r
 
             elif self.variant == "learned_project":
                 assert b_region is not None and self.learned_projector is not None

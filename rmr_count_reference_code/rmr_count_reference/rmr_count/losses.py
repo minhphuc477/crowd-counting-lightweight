@@ -90,7 +90,10 @@ class LossConfig:
     lambda_region_head: float = 0.20
     lambda_deep_supervision: float = 0.10
     cell_beta: float = 1.0
-    region_beta: float = 2.0
+    # P1 fix: regional loss operates on rate (count/cell), magnitude ~0.001–0.1.
+    # beta=2.0 (old, for raw counts) placed all rate residuals in quadratic regime,
+    # giving near-zero gradients. beta=0.1 keeps typical rate errors in linear regime.
+    region_beta: float = 0.1
 
 
 def compute_losses(
