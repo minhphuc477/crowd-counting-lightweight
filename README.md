@@ -1,253 +1,136 @@
-# MICF: Measure-Consistent Integral Count Fields for Ultra-Lightweight Crowd Counting
+# RMR-Count: Regional Measure Regularization for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-40%2F40%20passed-brightgreen.svg)]()
-[![Branch](https://img.shields.io/badge/branch-MICF-blue.svg)]()
-[![Carrier](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(0.10M%20params)-orange.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-100%2F100%20passed-brightgreen.svg)]()
+[![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
+[![Model](https://img.shields.io/badge/carrier-MobileNetV4--0.50%20(82k%20params)-orange.svg)]()
+[![Venue](https://img.shields.io/badge/target-CVPR%202026-purple.svg)]()
 
-> **Research Hypothesis:** Directly predicting a spatial cumulative counting measure $\hat{C}(x, y)$ may provide a smoother, globally structured regression target that capacity-limited crowd counters learn more efficiently than sparse, high-frequency local counts $\hat{Y}(x, y)$—until the non-local spatial dependency requirement exceeds their representational capacity.
-
----
-
-## 1. Mathematical Formulation
-
-Let points $\mathcal{P} = \{(x_n, y_n)\}_{n=1}^N$ be raw 2D annotations on an image of size $H \times W$.
-
-### 1.1 Exact Local Count Map (Zero Gaussian Smoothing)
-For output stride $s$ (e.g. $s = 16$), the discrete local cell count map $Y \in \mathbb{N}_0^{H_o \times W_o}$ is constructed deterministically:
-$$Y_{ij} = \#\left\{ n : \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor = j \right\}, \qquad \sum_{i,j} Y_{ij} = N.$$
-
-### 1.2 Cumulative Count Field
-The ground-truth top-left (TL) cumulative count field $C \in \mathbb{R}_{\ge 0}^{H_o \times W_o}$ is:
-$$C_{ij} = \sum_{a \le i} \sum_{b \le j} Y_{ab} = \operatorname{CumSum}_y(\operatorname{CumSum}_x(Y)).$$
-
-In linear algebra notation with lower-triangular summation matrices $T_H, T_W$:
-$$C = T_H Y T_W^\top \iff \operatorname{vec}(C) = (T_W \otimes T_H) \operatorname{vec}(Y) = P y.$$
-
-Because $P$ is invertible with $D = T^{-1}$, **MICF adds no information** ($Y \leftrightarrow C$ is a bijection). Its contribution is a transformation of **target geometry, optimization geometry, and spatial inductive bias**.
-
-### 1.3 Exact Inversion via Discrete Mixed Differences ($\Delta_{xy}$)
-The recovered discrete mass map $\hat{Y}$ is reconstructed from $\hat{C}$ via the 2D finite difference operator:
-$$\hat{Y}_{ij} = \Delta_{xy} \hat{C}_{ij} = \hat{C}_{ij} - \hat{C}_{i-1,j} - \hat{C}_{i,j-1} + \hat{C}_{i-1,j-1},$$
-with zero-boundary conditions $\hat{C}_{0,j} = \hat{C}_{i,0} = 0$.
-
-### 1.4 Measure Consistency Constraint
-For $\hat{C}$ to define a valid non-negative counting measure:
-$$\boxed{\Delta_{xy} \hat{C}_{ij} \ge 0 \quad \forall (i, j).}$$
-
-### 1.5 Arbitrary Rectangle Count Recovery
-For any axis-aligned bounding box $R = (x_1, x_2] \times (y_1, y_2]$:
-$$N(R) = C(y_2, x_2) - C(y_1, x_2) - C(y_2, x_1) + C(y_1, x_1).$$
-Total scene count is read directly from the bottom-right corner: $\hat{N}_{corner} = \hat{C}_{H_o, W_o}$.
+> **Core Research Hypothesis:** Capacity-constrained crowd counters (< 100k parameters) suffer from severe receptive field starvation, causing local density over-prediction in clutters and under-prediction in sparse backgrounds. Decoupling spatial count estimation into a **fine local density head** and a **multi-scale regional extensivity head**, reconciled at runtime by an unrolled implicit solver via the **exact geometric adjoint operator** $A^\top$, provides global spatial regularization without the parameter or latency cost of attention mechanisms.
 
 ---
 
-## 2. Scientific Controls: The Experimental Matrix (B1–B8)
+## 1. Key Mathematical Contribution: The Adjoint Theorem
 
-To rigorously decouple **loss geometry** from **output representation**, **extent mismatch**, and **learned dependency horizon**, the benchmark tests strictly controlled variants:
+Let $Y \in \mathbb{R}_+^G$ be the discrete cell count map on spatial lattice $G$ (stride $s=4$). Let $\mathcal{R} = \{R_m\}_{m=1}^M$ be a multi-scale regional dictionary across scales $K \in \{32, 64, 128\}$ px with $50\%$ stride overlap.
 
-```
-              ┌─────────────────────────────────────────────────────────┐
-              │                Scientific Control Suite                 │
-              └─────────────────────────────────────────────────────────┘
-                     /                              \
-        Local Representation (Y)        Cumulative Representation (C)
-        ├── B1: SmoothL1(Y_hat, Y)      ├── B3: SmoothL1(C_hat, C) [Naive]
-        ├── B2: SmoothL1(PY_hat, PY)    ├── B4: B3 + Validity Penalty
-        └── B6: B1 + Integral Context   ├── B5: Full MICF-v2 (Global 4-Dir Context)
-                                        ├── B5b: MICF-v2 Extent-Aware (Global C = A * rho)
-                                        ├── B7: MICF-v2 Axial (1D Context)
-                                        └── B8: FH-CMICF (Block-Scoped Pooling + Global Fusion + Local Extent)
-```
+### 1.1 Regional Operators
+- **Forward Regional Projection Matrix** $A \in \{0, 1\}^{M \times G}$:
+  $$(AY)_m = \sum_{g \in R_m} Y_g = q_m.$$
+- **Adjoint Feedback Scatter Matrix** $A^\top \in \{0, 1\}^{G \times M}$:
+  $$(A^\top r)_g = \sum_{m: g \in R_m} r_m.$$
 
-| ID | Name | Output | Supervision / Loss | Context Scope | Purpose |
-|:---|:---|:---:|:---|:---:|:---|
-| **B1** | Local Baseline | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | None (Local only) | Standard local count regression benchmark |
-| **B2** | Integral Loss on Local | $\hat{Y}$ | $\operatorname{SmoothL1}(P\hat{Y}, PY)$ | None (Local only) | **Isolates loss geometry**: cumulative loss without cumulative output |
-| **B3** | Direct MICF (Naive) | $\hat{C}$ | $\operatorname{SmoothL1}(\hat{C}, C)$ | None | **Isolates representation**: cumulative output without validity penalty |
-| **B4** | Direct MICF + Validity | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | None | Measures impact of measure consistency constraint |
-| **B5** | **Full MICF-v2** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Global 4-Dir Integral Context | Aligned 4-direction feature context + valid cumulative field |
-| **B5b** | **MICF-v2 Extent-Aware** | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Global 4-Dir Context + Coords | **Resolves extent mismatch**: $\hat{C} = A \cdot \operatorname{softplus}(z)$ |
-| **B6** | Reviewer Control | $\hat{Y}$ | $\operatorname{SmoothL1}(\hat{Y}, Y)$ | Global 4-Dir Integral Context | Tests whether Integral Context helps local prediction independently |
-| **B7** | MICF-v2 Axial | $\hat{C}$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ | Axial Integral Context | **Cheaper context** (sec.31): 1D row/col prefix averages at -2k params / -0.5 MMAC |
-| **B8** | **FH-CMICF ($K=4$)** | $\hat{C}^G$ | $L_{\text{field}} + 1.0 \cdot L_{\text{valid}}$ (normed) | Block-Scoped Pooling ($K \times K$) + Global Fusion | **Factorizes prefix horizon**: isolates finite prefix extent without norm/conv confounders |
+### 1.2 The Adjoint Scale Invariance Theorem ($H \mathbf{1} = \mathbf{1}$)
+Let $D_a = \operatorname{diag}(A \mathbf{1}_G) \in \mathbb{R}^{M \times M}$ be regional areas, and $D_c = \operatorname{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{G \times G}$ be cell coverage counts.  
+The normalized regional transfer operator is defined as:
+$$H = D_c^{-1} A^\top D_a^{-1} A.$$
 
-### Decision Logic (Kill Rules)
-- **Primary contrast $\text{B8 vs B5b}$**: Isolates the finite-horizon factorization effect under strictly matched carrier, neck, convolution padding/receptive field scope, BatchNorm/GroupNorm spatial normalization scope, and loss normalization.
-- **$C > B > A$**: Direct cumulative representation hypothesis survives.
-- **$B \approx C > A$**: Direct cumulative output is redundant; cumulative loss is the active ingredient.
-- **$B > C$**: Cumulative supervision helps, but direct cumulative prediction is bottlenecked by non-local context.
-- **$A \ge B, C$**: **Kill** the integral-domain crowd counting hypothesis entirely.
-- **$B7 \approx B5$**: The lightweight 1D axial context is sufficient, saving 2D multi-orientation FLOPs.
-- **$B8 > B5b$**: Finite-horizon factorization makes cumulative regression easier while preserving exact global MICF semantics.
+$$\boxed{H \mathbf{1}_G = \mathbf{1}_G \quad \forall \; \mathcal{R} \text{ covering } G.}$$
+
+**Theoretical Significance:** Uniform crowd distributions are invariant fixed points of the feedback loop. Regional error back-projection is perfectly scale-balanced across multi-scale partitions, eliminating scale-dependent gradient explosion.
 
 ---
 
-## 3. Architecture: MICF-Lite & Integral Context
+## 2. Architecture & Unrolled Solver
 
 ```
-Input Image [B, 3, H, W]
-  │
-  ▼
-MobileNetV4-Conv-Small-0.50 (truncated C16, ~88k params, pretrained=True)
-  │
-  ▼
+Input Image [1, 3, H, W]
+       │
+       ▼
+MobileNetV4-Conv-Small-0.50 (truncated C16, ~65k params)
+       │
+       ▼
 Additive FPN Neck (32 channels, context dilations {1, 2, 3})
-  │  ├── Native multi-scale feature routes: P4 (stride 4), P8 (stride 8), P16 (stride 16)
-  │  └── Direct route selection matching output_stride (zero redundant downsampling)
-  │
-  ▼
-4-Directional Normalized Integral Context Block (Optional, B5 & B6; or Axial B7)
-  │  ├── F_bar^TL = sum_{a<=i, b<=j} F_{ab} / ((i+1)(j+1))
-  │  ├── F_bar^TR = sum_{a<=i, b>=j} F_{ab} / ((i+1)(W-j))
-  │  ├── F_bar^BL = sum_{a>=i, b<=j} F_{ab} / ((H-i)(j+1))
-  │  ├── F_bar^BR = sum_{a>=i, b>=j} F_{ab} / ((H-i)(W-j))
-  │  └── Fusion: Conv1x1(5C->C) -> DW-Conv3x3 -> Conv1x1 + Residual(F)
-  │      (Axial B7 uses 1D row/col prefix averages with 3C->C fusion: -2k params / -0.5 MMAC)
-  │
-  ▼
-Task Prediction Head
-  ├── Head 'local'            -> softplus(z) >= 0 (B1, B2, B6)
-  ├── Head 'cumulative'       -> raw linear z (B3, B4, B5, B7)
-  └── Head 'integrated_local' -> softplus(z) -> CumSum2D (Valid-by-construction control)
-```
-
-- **Parameters:** ~0.092M (B1: 92,049) vs ~0.097M (B7: 96,561) vs ~0.099M (B5: 98,609) — strictly capacity-matched.
-- **Computational Cost:** ~0.065–0.066 GMACs (64.7–66.3 MMACs) at $256 \times 256$ input resolution.
-- **Parallelism:** Prefix summations run in $O(HW)$ via native GPU parallel prefix scans (`torch.cumsum`). Zero learnable parameters in the pooling operator itself.
-
----
-
-## 4. Losses & Optimization
-
-### 4.1 Loss Function
-$$\mathcal{L}_{\text{MICF}} = \mathcal{L}_{\text{field}}(\hat{C}, C) + \lambda_v \mathcal{L}_{\text{valid}}(\Delta_{xy} \hat{C}) + \lambda_y \mathcal{L}_{\text{local-recon}}(\Delta_{xy}\hat{C}, Y),$$
-where:
-- $\mathcal{L}_{\text{field}} = \operatorname{SmoothL1}(\hat{C}, C)$ over all prefix cells.
-- $\mathcal{L}_{\text{valid}} = \frac{1}{HW} \sum_{i,j} \operatorname{ReLU}(-\Delta_{xy} \hat{C}_{ij})$ penalizes negative count density.
-- $\mathcal{L}_{\text{local-recon}} = \operatorname{SmoothL1}(\Delta_{xy} \hat{C}, Y)$ (optional auxiliary reconstruction, $\lambda_y \in \{0, 0.01, 0.05\}$).
-
-### 4.2 Orientation-Balanced Augmentation
-Top-left cumulative supervision naturally weights cells near $(0, 0)$ more heavily because they participate in more prefixes. To eliminate this positional bias:
-1. Horizontal flip is applied at random in the dataset loader ($p = 0.5$).
-2. **Independent vertical flip** is applied in the training loop ($p = 0.5$) with point $y \leftarrow (H - 1) - y$.
-3. Exact local $Y$ and cumulative $C$ targets are generated dynamically from the flipped points.
-By symmetry across all 4 corner orientations:
-$$[(i+1) + (H-i)] \cdot [(j+1) + (W-j)] = (H+1)(W+1) = \text{constant},$$
-guaranteeing equal expected gradient contribution across all spatial locations $(i, j) \in [0, H-1] \times [0, W-1]$.
-
-### 4.3 Training Schedule
-- **Optimizer:** AdamW, initial base LR $10^{-4}$, backbone LR scale $0.1$, weight decay $10^{-4}$.
-- **Schedule:** 25-epoch linear warmup followed by cosine annealing over 1000 epochs.
-- **Gradient Clipping:** Max norm $5.0$.
-
----
-
-## 5. Measure Diagnostics & Evaluation Regimes
-
-### 5.1 Decoupled Evaluation Regimes (Sections 29 & 40)
-To avoid confounding representation geometry with receptive-field capacity:
-- **Regime A (Crop-level MAE):** Evaluates models on fixed $256 \times 256$ crops (matching training crop size). This matches the training spatial extent and reduces receptive-field distribution shift, isolating the pure representation hypothesis: does $I \to \hat{C}$ train better than $I \to \hat{Y}$?
-- **Regime B (Full-image MAE):** Evaluates full uncropped images. Supports both **Direct Forward** ($MAE_{\text{full-direct}}$) and **Hierarchical Tile Composition** ($MAE_{\text{full-tiled}}$, Section 30) across all local and cumulative variants for rigorous across-regime comparison.
-
-### 5.2 Measure Validity Diagnostics
-- Negative-cell fraction: $f_- = \frac{\#\{\hat{Y}_{ij} < 0\}}{HW}$.
-- Negative-mass ratio: $r_- = \frac{\sum [-\hat{Y}]_+}{\sum |\hat{Y}| + \epsilon}$.
-- Violation magnitude: $V = \frac{1}{HW} \sum_{i,j} [-\hat{Y}_{ij}]_+ = \operatorname{mean}(\operatorname{ReLU}(-\hat{Y}))$.
-
-### 5.3 Multi-Scale Rectangle Count Evaluation
-Evaluates count recovery error $N(R) = C(y_2, x_2) - C(y_1, x_2) - C(y_2, x_1) + C(y_1, x_1)$ across normalized area fractions:
-$$\{1/64, \; 1/16, \; 1/4, \; 1.0\}.$$
-
-### 5.4 2D Fourier Spectral Energy Analysis
-- $E_{\text{high}}$: fraction of 2D real-FFT power at spatial frequency $\|\omega\| > \tau$.
-- Energy retention quantiles: coefficient fractions capturing 90%, 95%, 99% spectral energy.
-
----
-
-## 6. Directory Structure
-
-```text
-lightweightcrcn/
-├── MICF_full_method_design.md          # Complete mathematical & experimental design document
-├── configs/
-│   ├── generate_pilot_configs.py       # Config generator for B1-B7 pilot suite
-│   ├── generate_capacity_sweep.py      # Config generator for neck-width capacity sweep (sec. 24)
-│   ├── pilot_micf/                     # Pilot suite configs (B1-B7)
-│   │   ├── b1.yaml                     # Local Count Baseline
-│   │   ├── b2.yaml                     # Local Output + Integral Loss
-│   │   ├── b3.yaml                     # Direct Cumulative MICF Naive (lambda_valid=0)
-│   │   ├── b4.yaml                     # Direct Cumulative MICF + Validity (lambda_valid=1.0)
-│   │   ├── b5.yaml                     # Full MICF-v2 (4-Dir Context + Validity)
-│   │   ├── b6.yaml                     # Local Count + 4-Dir Context Control
-│   │   └── b7.yaml                     # MICF-v2 Axial (1D Row/Col Context + Validity)
-│   └── capacity_sweep/                 # Capacity sweep configs (b1_w16..b5_w64)
-├── hpc/
-│   ├── models/
-│   │   ├── integral_context.py         # 4-Directional & Axial Normalized Integral Context Modules
-│   │   └── micf_lite.py                # Unified MICFLite model (local, cumulative, integrated_local)
-│   │                                   # + compose_tiled_cumulative_field for exact tile stitching
-│   ├── losses/
-│   │   └── micf.py                     # discrete_mixed_difference, cell_counts_to_cumulative_field,
-│   │                                   # points_to_count_map, MICFLoss, IntegralLossOnLocalCount
-│   └── diagnostics/
-│       └── micf_diagnostics.py         # Measure diagnostics, rectangle queries, 2D FFT spectral analysis
-├── tools/
-│   ├── train_micf_pilot.py             # Authoritative trainer with orientation balancing, warmup, & Regime A/B eval
-│   ├── eval_micf_comprehensive.py      # Benchmark evaluator with hierarchical tile composition (Section 50 schema)
-│   └── architecture_table.py           # FLOP & parameter profiler per component
-└── tests/
-    └── test_micf.py                    # 13 unit tests covering all MICF math, native strides, tiling, losses, diagnostics
+       │
+       ├───────────────────────────────────────────────┐
+       ▼                                               ▼
+Fine Density Head                               Regional Extensivity Head
+Conv3x3 -> GN -> SiLU -> Conv1x1                ROI-Pooling on {32, 64, 128} px
+init: b_0 ≈ softplus(-4.595) ≈ 0.01             + 4D Geometry [log h, log w, log A, log(w/h)]
+       │                                        init: b_R = |R| * rho_R (calibrated to 0.01)
+       ▼                                               │
+Initial Latent Field z_0                               │
+       │                                               │
+       └───────────────────────┬───────────────────────┘
+                               ▼
+               RMR Implicit Unrolled Solver (T=2)
+                 │
+                 ├── Prefix2D fast regional integration: q = A Y^(t)
+                 ├── Compute rate residual: r = (q - b) / D_a
+                 ├── Adjoint back-projection: r_field = D_c^(-1) A^T r
+                 ├── Latent update: z^(t+1) = z^(t) - eta_t * M^(t) * r_field
+                 └── Re-activation: Y^(t+1) = softplus(z^(t+1))
+                               │
+                               ▼
+                     Final Density Field Y_T
 ```
 
 ---
 
-## 7. Quickstart & Verification
+## 3. Registered Experimental Matrix (B0–B5)
 
-### 7.1 Run Full Test Suite
-```powershell
-.venv\Scripts\pytest tests/ -v
+The benchmark strictly isolates loss geometry, architectural capacity, and operator validity:
+
+| ID | Variant Name | Params | Regional Head | Iterative Solver | Operator Property | Purpose |
+|:---|:---|:---:|:---:|:---:|:---:|:---|
+| **B0** | Direct Baseline | 64,581 | ✗ | ✗ | None | Standard direct regression control |
+| **B1** | Region Loss | 64,581 | ✗ | ✗ | Multi-scale loss on $AY$ | Auxiliary regional supervision without dual head |
+| **B2** | Region Aux | 82,143 | ✓ | ✗ | Passive multi-task | Dual-head feature sharing without runtime solver |
+| **B3a** | Local Refine | 88,412 | ✗ | ✓ ($T=2$) | Unconstrained GRU | Unconstrained recurrent latent refinement |
+| **B3b** | Learned Projector | 94,820 | ✓ | ✓ ($T=2$) | Blackbox MLP | Unconstrained neural projection vs exact adjoint $A^\top$ |
+| **B4** | RMR-T1 | 82,143 | ✓ | ✓ ($T=1$) | $H\mathbf{1}=\mathbf{1}$ | Single-step RMR projection |
+| **B5** | **RMR-T2 (Registered)** | **82,143** | ✓ | ✓ ($T=2$) | $H\mathbf{1}=\mathbf{1}$ | Full registered RMR-Count model |
+
+---
+
+## 4. Quickstart Guide
+
+### 4.1 Setup
+```bash
+git clone https://github.com/minhphuc477/crowd-counting-lightweight.git
+cd crowd-counting-lightweight
+git checkout RMR
+
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+pip install -e .
 ```
-*(All 40 tests pass in ~7s).*
 
-### 7.2 Run 1-Epoch Smoke Test (All Models)
+### 4.2 Data Manifest Generation
+Generate portable manifests with relative paths and coordinate alignment:
 ```powershell
-for ($i = 1; $i -le 8; $i++) {
-    .venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b$i.yaml --smoke-test
-}
+python -m rmr_count.prepare_manifest --dataset sha --data-root data/part_A_final --out-dir data --relative-to .
 ```
 
-### 7.3 Train a Pilot Model (e.g. B8 FH-CMICF K=4)
+### 4.3 Training a Model
+Train RMR-Count (B5) with mixed-precision and low-RAM safety:
 ```powershell
-.venv\Scripts\python tools/train_micf_pilot.py --config configs/pilot_micf/b8.yaml --epochs 1000
+python -m rmr_count.train --config configs/rmr/rmr_t2.yaml --output_dir runs/sha_a/rmr_t2_seed42
 ```
 
-### 7.4 Comprehensive Checkpoint Evaluation (Dual Tiled & Direct)
+### 4.4 Standalone Evaluation & Mechanism Traces
+Evaluate and generate `predictions.csv`, `summary.json`, `solver_trace.csv`, and `regional_trace.csv`:
 ```powershell
-.venv\Scripts\python tools/eval_micf_comprehensive.py --config configs/pilot_micf/b8.yaml
+python -m rmr_count.eval --checkpoint runs/sha_a/rmr_t2_seed42/best.pt --manifest data/sha_a_test.jsonl --out_dir eval_results/rmr_t2
 ```
 
-Outputs:
-- `comprehensive_summary.json`: Multi-family metrics (Window MAE/RMSE, Controlled Tiled halo=0, Practical Tiled halo=64, Direct, GAME 0–3, Validity $\tau=10^{-6}$, Representation diagnostics, Direct-Tiled gaps, and Halo effect).
-- `comprehensive_per_image.csv`: Per-image counts, GAME errors, validity metrics, and cancellation ratios.
-- `comprehensive_per_window.csv`: Per-window ground-truth and prediction counts.
-
-### 7.5 Automated Gate Decision Runner (B5b vs B8)
+### 4.5 Latency, FPS & Peak VRAM Profiling
+Measure clean single-forward peak memory and FP32 / AMP latency:
 ```powershell
-.venv\Scripts\python tools/run_gate_b5b_vs_b8.py --skip-train
+python -m rmr_count.profile --config configs/rmr/rmr_t2.yaml --device cuda
 ```
-Generates `runs/pilot_micf/gate_decision_b5b_vs_b8.md`, `runs/pilot_micf/comparison_b5b_vs_b8_curves.png`, and `runs/pilot_micf/spatial_error_map_C_b5b_vs_b8.png`.
 
-### 7.6 Model Profiling & ONNX Export
+### 4.6 Statistical Paired Comparison
+Compute sample-level paired differences $d_i = |\hat{N}_i^A - N_i| - |\hat{N}_i^B - N_i|$ with bootstrap 95% CI and paired t-test:
 ```powershell
-.venv\Scripts\python tools/profile_model.py --config configs/pilot_micf/b8.yaml
-.venv\Scripts\python tools/export_onnx.py --config configs/pilot_micf/b8.yaml --output b8.onnx --verify
+python -m rmr_count.aggregate --compare eval_results/rmr_t2/predictions.csv eval_results/direct/predictions.csv --name-a RMR_T2 --name-b Direct
 ```
 
 ---
 
-## 8. Scientific Claim Boundaries
+## 5. Specification Documents
 
-To ensure scientific defensibility:
-- **Do not claim cumulative maps are novel in machine learning**: Integral images and neural CDFs have a long history. The claim is specifically: *controlled study of directly predicted spatial cumulative counting measures for ultra-lightweight crowd counting under severe capacity constraints*.
-- **Do not claim cumulative fields contain "more information"**: $C = T Y T^\top$ is an invertible linear isomorphism ($Y = \Delta_{xy} C$). It contains identical Shannon information.
-- **Frame as a fundamental trade-off**: Integrating the target smooths optimization geometry and encodes regional sums naturally, but induces a non-local dependency structure that challenges capacity-limited receptive fields. This trade-off is the central empirical question.
+Detailed technical specifications are maintained in `docs/rmr/`:
+- [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Mathematical formulations, theorems, proofs, and experimental hypotheses.
+- [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Operator engineering, prefix-sum caching, low-RAM data loader, and training schedule.
+- [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical metric definitions (NAE, physical GAME), diagnostic trace schemas, and statistical significance testing.

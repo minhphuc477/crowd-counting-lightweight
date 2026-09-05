@@ -14,17 +14,20 @@ class RegionSet:
     boxes: [M, 4] int64 with half-open coordinates (y1, x1, y2, x2).
     scale_id: [M] int64 index of the image-pixel region scale; -1 for full image.
     area: [M] float count-grid area.
+    boxes_list: cached Python list of (y1, x1, y2, x2) tuples to eliminate GPU->CPU sync.
     """
 
     boxes: torch.Tensor
     scale_id: torch.Tensor
     area: torch.Tensor
+    boxes_list: list[tuple[int, int, int, int]] | None = None
 
     def to(self, device: torch.device | str) -> "RegionSet":
         return RegionSet(
             boxes=self.boxes.to(device),
             scale_id=self.scale_id.to(device),
             area=self.area.to(device),
+            boxes_list=self.boxes_list,
         )
 
 
@@ -33,11 +36,16 @@ def prefix2d(x: torch.Tensor) -> torch.Tensor:
 
     Input:  [B, C, H, W]
     Output: [B, C, H+1, W+1]
+
+    Forces FP32 accumulation during autocast to maintain exact precision.
     """
     if x.ndim != 4:
         raise ValueError(f"prefix2d expects [B,C,H,W], got {tuple(x.shape)}")
-    p = x.cumsum(dim=-2).cumsum(dim=-1)
-    return F.pad(p, (1, 0, 1, 0), mode="constant", value=0.0)
+    orig_dtype = x.dtype
+    work = x.float() if orig_dtype in (torch.float16, torch.bfloat16) else x
+    p = work.cumsum(dim=-2).cumsum(dim=-1)
+    p = F.pad(p, (1, 0, 1, 0), mode="constant", value=0.0)
+    return p.to(orig_dtype) if p.dtype != orig_dtype else p
 
 
 def _gather_prefix(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
@@ -83,6 +91,7 @@ def regional_adjoint(
     returns [B,C,H,W]
 
     Uses a 2-D difference buffer followed by cumulative sums.
+    Forces FP32 accumulation during autocast to maintain exact precision.
     """
     if values.ndim != 3:
         raise ValueError(f"values must be [B,C,M], got {tuple(values.shape)}")
@@ -94,20 +103,23 @@ def regional_adjoint(
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
     hp, wp = height + 1, width + 1
 
-    diff = values.new_zeros((b, c, hp * wp))
+    orig_dtype = values.dtype
+    work = values.float() if orig_dtype in (torch.float16, torch.bfloat16) else values
+    diff = work.new_zeros((b, c, hp * wp))
 
     def scatter(y: torch.Tensor, x: torch.Tensor, src: torch.Tensor) -> None:
         idx = (y * wp + x).view(1, 1, -1).expand(b, c, -1)
         diff.scatter_add_(dim=-1, index=idx, src=src)
 
-    scatter(y1, x1, values)
-    scatter(y1, x2, -values)
-    scatter(y2, x1, -values)
-    scatter(y2, x2, values)
+    scatter(y1, x1, work)
+    scatter(y1, x2, -work)
+    scatter(y2, x1, -work)
+    scatter(y2, x2, work)
 
     diff = diff.view(b, c, hp, wp)
     field = diff.cumsum(dim=-2).cumsum(dim=-1)
-    return field[..., :height, :width]
+    res = field[..., :height, :width]
+    return res.to(orig_dtype) if res.dtype != orig_dtype else res
 
 
 def _axis_starts(length: int, window: int, step: int) -> list[int]:
@@ -161,7 +173,7 @@ def build_multiscale_regions(
     box_t = torch.tensor(boxes, dtype=torch.long, device=device)
     scale_t = torch.tensor(scale_ids, dtype=torch.long, device=device)
     area_t = ((box_t[:, 2] - box_t[:, 0]) * (box_t[:, 3] - box_t[:, 1])).float()
-    return RegionSet(boxes=box_t, scale_id=scale_t, area=area_t)
+    return RegionSet(boxes=box_t, scale_id=scale_t, area=area_t, boxes_list=list(boxes))
 
 
 def region_geometry(

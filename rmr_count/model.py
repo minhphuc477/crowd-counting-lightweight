@@ -289,7 +289,8 @@ class LearnedMembershipProjector(nn.Module):
         coverage = y.new_zeros((b, 1, h, w))
 
         # Strong, fair control: each residual can influence every cell in its own region.
-        for m, box in enumerate(regions.boxes.tolist()):
+        boxes_list = regions.boxes_list if regions.boxes_list is not None else regions.boxes.tolist()
+        for m, box in enumerate(boxes_list):
             y1, x1, y2, x2 = map(int, box)
             logits = score[:, :, y1:y2, x1:x2]
             flat = logits.flatten(-2)
@@ -401,20 +402,39 @@ class RMRCount(nn.Module):
         # NOTE: this is a Python float, NOT in state_dict. Checkpoint loading always restores
         # to 1.0. Training prevents selecting best_val_mae.pt before strength == 1.0.
         self.solver_strength: float = 1.0
+        self._cache: dict[tuple, tuple[RegionSet, torch.Tensor]] = {}
 
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))
 
-    def _regions(self, h: int, w: int, device: torch.device) -> RegionSet:
-        return build_multiscale_regions(
-            height=h,
-            width=w,
-            output_stride=self.cfg.output_stride,
-            region_sizes_px=self.cfg.region_sizes_px,
-            overlap=self.cfg.region_overlap,
-            include_full_image=self.cfg.include_full_image,
-            device=device,
+    def _regions_and_coverage(self, h: int, w: int, device: torch.device) -> tuple[RegionSet, torch.Tensor]:
+        key = (
+            h, w,
+            self.cfg.output_stride,
+            self.cfg.region_sizes_px,
+            self.cfg.region_overlap,
+            self.cfg.include_full_image,
+            device.type,
+            device.index if device.type == "cuda" else None,
         )
+        if key not in self._cache:
+            regions = build_multiscale_regions(
+                height=h,
+                width=w,
+                output_stride=self.cfg.output_stride,
+                region_sizes_px=self.cfg.region_sizes_px,
+                overlap=self.cfg.region_overlap,
+                include_full_image=self.cfg.include_full_image,
+                device=device,
+            )
+            # Coverage is D_c = A^T 1_M on this grid
+            ones_m = torch.ones((1, 1, regions.boxes.shape[0]), device=device, dtype=torch.float32)
+            cov = regional_adjoint(ones_m, regions.boxes, h, w).clamp_min(1.0)
+            self._cache[key] = (regions, cov)
+        return self._cache[key]
+
+    def _regions(self, h: int, w: int, device: torch.device) -> RegionSet:
+        return self._regions_and_coverage(h, w, device)[0]
 
     def _eta(self, t: int) -> torch.Tensor:
         idx = min(t, self.eta_logits.numel() - 1)
@@ -433,6 +453,7 @@ class RMRCount(nn.Module):
         y: torch.Tensor,
         b_region: torch.Tensor,
         regions: RegionSet,
+        coverage: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Diagonally preconditioned adjoint: D_c^{-1} A^T D_a^{-1} (AY - b).
 
@@ -448,10 +469,9 @@ class RMRCount(nn.Module):
         residual_density = delta / area.clamp_min(1.0)          # D_a^{-1} (AY-b)
 
         back = regional_adjoint(residual_density, regions.boxes, h, w)
-        coverage = regional_adjoint(
-            torch.ones_like(residual_density), regions.boxes, h, w
-        )
-        r = back / coverage.clamp_min(1.0)                      # D_c^{-1} A^T
+        if coverage is None:
+            coverage = self._regions_and_coverage(h, w, y.device)[1]
+        r = back / coverage.to(y.dtype)                      # D_c^{-1} A^T
         if self.cfg.residual_clip > 0:
             r = r.clamp(-self.cfg.residual_clip, self.cfg.residual_clip)
         return r
@@ -465,34 +485,35 @@ class RMRCount(nn.Module):
         *,
         b_region_override: torch.Tensor | None = None,
         shuffle_region: bool = False,
-    ) -> dict:
+    ) -> dict[str, torch.Tensor | RegionSet | None | list]:
         c4, c8, c16 = self.encoder(x)
         f = self.fusion(c4, c8, c16)
         z0 = self.fine_head(f)
         y0 = F.softplus(z0)
         h, w = y0.shape[-2:]
 
-        # Lazy region construction: only variants that use a region head, B1 rate loss,
-        # or the iterative solver need region boxes. Skipping for direct/local_refine:
-        #  - avoids O(M) region box allocation per forward (waste training compute)
-        #  - avoids inflating direct/local_refine latency in timing benchmarks
+        # True Lazy Region Construction:
+        # Only construct multiscale regions if the variant actually uses them.
+        # Direct (B0) and local_refine (B3a) variants do not need regions at all.
+        # Skipping region construction for them:
+        #  - saves training memory and computation
+        #  - avoids inflating baseline latency
         #  - makes RMR overhead appear genuine rather than hidden in all variants
-        #
-        # eval.py: diagnostic loops guard on `model.region_head is not None`, so None
-        # regions in out["regions"] will never be dereferenced for direct/local_refine.
-        # compute_losses: also guards on variant, so regional losses are not applied.
         needs_regions = self.region_head is not None or self.variant in {
             "region_loss", "learned_project", "rmr"
         }
-        regions: RegionSet | None = (
-            self._regions(h, w, x.device) if needs_regions else None
-        )
+        if needs_regions:
+            regions, coverage = self._regions_and_coverage(h, w, x.device)
+        else:
+            regions, coverage = None, None
 
         out: dict = {
             "features": f,
             "z0": z0,
             "y0": y0,
             "regions": regions,
+            "preconditioner_fields": [],
+            "step_sizes": [],
         }
 
         if self.region_head is not None:
@@ -529,17 +550,23 @@ class RMRCount(nn.Module):
         y = y0
         iterates = [y0]
         residual_fields: list[torch.Tensor] = []
+        preconditioner_fields: list[torch.Tensor] = []
+        step_sizes: list[float] = []
 
         if self.variant in {"learned_project", "rmr"} and b_region is None:
             raise RuntimeError(f"variant {self.variant} requires regional evidence")
 
         for t in range(self.cfg.iterations):
             eta = self._eta(t) * self.solver_strength
+            eta_val = float(eta.detach().item() if isinstance(eta, torch.Tensor) else eta)
+            step_sizes.append(eta_val)
+
             if self.variant == "rmr":
                 assert b_region is not None and self.preconditioner is not None
-                r = self._normalized_adjoint_field(y, b_region, regions)
+                r = self._normalized_adjoint_field(y, b_region, regions, coverage=coverage)
                 residual_fields.append(r)
                 m = self.preconditioner(f, y, r)
+                preconditioner_fields.append(m)
                 if self.cfg.use_jacobian_gate:
                     # RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
                     # Interpretation: r ≈ nabla_Y E (gradient of regional consistency energy
@@ -585,6 +612,8 @@ class RMRCount(nn.Module):
         out["z"] = z
         out["iterates"] = iterates
         out["residual_fields"] = residual_fields
+        out["preconditioner_fields"] = preconditioner_fields
+        out["step_sizes"] = step_sizes
         return out
 
 

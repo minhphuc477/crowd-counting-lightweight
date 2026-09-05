@@ -94,24 +94,42 @@ def train_transform(
     scale_range: tuple[float, float] = (0.75, 1.25),
     hflip_prob: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Geometric augmentation that keeps point coordinates exact."""
-    image_t = TF.to_tensor(image)
+    """Geometric augmentation that keeps point coordinates exact.
+
+    Memory-efficient implementation: resize, pad, and crop are performed directly
+    in uint8 PIL space (~768 KB) before converting to float32 tensor (3 MB).
+    This avoids allocating 50+ MB of temporary full-resolution float32 tensors per sample.
+    """
     pts = points_xy.clone().float()
+    w0, h0 = image.size
 
     scale = random.uniform(*scale_range)
-    h0, w0 = image_t.shape[-2:]
-    h1 = max(32, int(round(h0 * scale)))
     w1 = max(32, int(round(w0 * scale)))
-    image_t = TF.resize(image_t, [h1, w1], interpolation=InterpolationMode.BILINEAR, antialias=True)
+    h1 = max(32, int(round(h0 * scale)))
+    if (w1, h1) != (w0, h0):
+        image = image.resize((w1, h1), Image.Resampling.BILINEAR)
     if pts.numel():
         pts[:, 0] *= w1 / w0
         pts[:, 1] *= h1 / h0
 
-    image_t, pts = _pad_to_crop(image_t, pts, crop_size, crop_size)
-    _, h, w = image_t.shape
+    pad_w = max(0, crop_size - w1)
+    pad_h = max(0, crop_size - h1)
+    if pad_w or pad_h:
+        # ImageNet mean in uint8: [round(0.485*255), round(0.456*255), round(0.406*255)] = (124, 116, 104)
+        new_w = w1 + pad_w
+        new_h = h1 + pad_h
+        canvas = Image.new("RGB", (new_w, new_h), (124, 116, 104))
+        canvas.paste(image, (0, 0))
+        image.close()
+        image = canvas
+
+    w, h = image.size
     top = random.randint(0, h - crop_size)
     left = random.randint(0, w - crop_size)
-    image_t = image_t[:, top:top + crop_size, left:left + crop_size]
+    image_crop = image.crop((left, top, left + crop_size, top + crop_size))
+    image.close()
+    image = image_crop
+
     if pts.numel():
         pts[:, 0] -= left
         pts[:, 1] -= top
@@ -122,9 +140,12 @@ def train_transform(
         pts = pts[keep]
 
     if random.random() < hflip_prob:
-        image_t = torch.flip(image_t, dims=[-1])
+        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if pts.numel():
             pts[:, 0] = (crop_size - 1) - pts[:, 0]
+
+    image_t = TF.to_tensor(image)
+    image.close()
 
     # Lightweight photometric augmentation.
     if random.random() < 0.5:
@@ -173,7 +194,8 @@ class CrowdManifestDataset(Dataset):
         path = Path(item["image"])
         if not path.is_absolute():
             path = self.root / path
-        image = Image.open(path).convert("RGB")
+        with Image.open(path) as img:
+            image = img.convert("RGB")
         pts = torch.tensor(item.get("points", []), dtype=torch.float32).reshape(-1, 2)
 
         if self.train:
@@ -184,6 +206,7 @@ class CrowdManifestDataset(Dataset):
             )
         else:
             image_t = TF.to_tensor(image)
+            image.close()
 
         h, w = image_t.shape[-2:]
         target_y = rasterize_points(pts, h, w, stride=self.output_stride)

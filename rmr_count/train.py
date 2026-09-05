@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import math
 import os
 import random
@@ -48,7 +49,7 @@ def make_loss_cfg(cfg: dict) -> LossConfig:
         lambda_global=x.get("lambda_global", 0.10),
         lambda_region_map=x.get("lambda_region_map", 0.20),
         lambda_region_head=x.get("lambda_region_head", 0.20),
-        lambda_deep_supervision=x.get("lambda_deep_supervision", 0.10),
+        lambda_deep_supervision=x.get("lambda_deep_supervision", 0.0),
         cell_beta=x.get("cell_beta", 1.0),
         # P1 fix: rate magnitudes are ~0.001–0.1, so beta=2.0 puts all residuals in the
         # quadratic regime (|Δρ| ≪ 2), giving gradient ≈ Δρ/2 ≈ 0.001–0.05.
@@ -132,12 +133,13 @@ def main() -> None:
         output_stride=cfg["model"].get("output_stride", 4),
     )
     workers = int(cfg["train"].get("workers", 0))
+    pin_mem = bool(cfg["train"].get("pin_memory", False))  # False by default for host-RAM safety
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg["train"].get("batch_size", 8),
         shuffle=True,
         num_workers=workers,
-        pin_memory=(device.type == "cuda"),
+        pin_memory=pin_mem,
         persistent_workers=(workers > 0),
         collate_fn=collate_train,
         drop_last=True,
@@ -383,6 +385,9 @@ def main() -> None:
 
         with log_path.open("a", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
+
+        # Explicit garbage collection to prevent host heap fragmentation across long runs
+        gc.collect()
 
 
 if __name__ == "__main__":

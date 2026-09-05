@@ -139,11 +139,22 @@ def evaluate(
     tile_size: int,
     practical_halo: int,
     region_mode: str = "predicted",
-) -> tuple[list[dict], dict]:
+) -> tuple[list[dict], dict, list[dict], list[dict]]:
     rows: list[dict] = []
     region_errors: dict[object, list[float]] = defaultdict(list)
     mechanism_errors: dict[tuple[int, int, str], list[float]] = defaultdict(list)
     region_count_bins: dict[str, list[float]] = defaultdict(list)
+    regional_trace_rows: list[dict] = []
+    solver_trace_rows: list[dict] = []
+
+    # Extra diagnostic accumulators for b_R vs GT
+    b_head_errors: dict[object, list[float]] = defaultdict(list)
+    all_b_preds: list[float] = []
+    all_gt_regions: list[float] = []
+    zero_region_mass_sum: float = 0.0
+    zero_region_count: int = 0
+    pos_region_miss_count: int = 0
+    pos_region_total: int = 0
 
     for batch_list in loader:
         for sample in batch_list:
@@ -174,11 +185,31 @@ def evaluate(
                 "direct_tiled_h0_norm": abs(pred - pred_t0) / max(gt, 1.0),
                 "direct_tiled_practical_norm": abs(pred - pred_th) / max(gt, 1.0),
             }
-            for level in range(4):
-                row[f"GAME{level}"] = game_single(y, target, level)
+            # Physical-support GAME when raw points and image dimensions are provided
+            if "points" in sample and "height" in sample and "width" in sample:
+                from .metrics import game_physical_image
+                game_dict = game_physical_image(
+                    y,
+                    sample["points"],
+                    image_h=sample["height"],
+                    image_w=sample["width"],
+                    stride=model.cfg.output_stride,
+                    levels=(0, 1, 2, 3),
+                )
+                for level in range(4):
+                    row[f"GAME{level}"] = game_dict[level]
+            else:
+                for level in range(4):
+                    row[f"GAME{level}"] = game_single(y, target, level)
             rows.append(row)
 
-            regions = out["regions"]
+            # P0 regression fix: Baseline controls (direct, local_refine) do not construct
+            # regions during forward. The evaluator constructs diagnostic RegionSet after
+            # inference timing so baseline latency is never inflated.
+            regions = out.get("regions")
+            if regions is None:
+                regions = model._regions(y.shape[-2], y.shape[-1], y.device)
+
             p_reg = regional_sum(y.unsqueeze(0), regions.boxes)[0, 0]
             t_reg = regional_sum(target.unsqueeze(0), regions.boxes)[0, 0]
             ae = (p_reg - t_reg).abs()
@@ -191,8 +222,7 @@ def evaluate(
                     nmae[m].detach().cpu().tolist()
                 )
 
-            # Count-stratified regional diagnostics. These are more meaningful than
-            # comparing a small-region MAE directly to whole-image MAE.
+            # Count-stratified regional diagnostics.
             gt_flat = t_reg.detach()
             ae_flat = ae.detach()
             bins = {
@@ -206,11 +236,33 @@ def evaluate(
                 if mask.any():
                     region_count_bins[name].extend(ae_flat[mask].cpu().tolist())
 
-            # Mechanism trajectory: error to GT and disagreement with predicted b_R
-            # at every iterate. This directly tests whether reconciliation reduces
-            # regional inconsistency rather than merely changing the final count.
+            # Background hallucination & positive miss diagnostics
+            zero_mask = gt_flat == 0
+            if zero_mask.any():
+                zero_region_mass_sum += float(p_reg[zero_mask].sum().item())
+                zero_region_count += int(zero_mask.sum().item())
+            pos_mask = gt_flat > 0
+            if pos_mask.any():
+                pos_region_total += int(pos_mask.sum().item())
+                pos_region_miss_count += int((p_reg[pos_mask] < 0.1).sum().item())
+
+            # Mechanism trajectory: error to GT, disagreement with b_R, and solver energy
             iterates = out.get("iterates", [y])
+            residuals = out.get("residual_fields", [])
+            preconditioners = out.get("preconditioner_fields", [])
+            step_sizes = out.get("step_sizes", [])
             b_pred = out.get("b_region")
+
+            if b_pred is not None:
+                b_i = b_pred[0, 0]
+                ae_b = (b_i - t_reg).abs()
+                all_b_preds.extend(b_i.detach().cpu().tolist())
+                all_gt_regions.extend(t_reg.detach().cpu().tolist())
+                for sid in torch.unique(regions.scale_id):
+                    m = regions.scale_id == sid
+                    sid_i = int(sid.item())
+                    b_head_errors[sid_i].extend(ae_b[m].detach().cpu().tolist())
+
             for ti, yi in enumerate(iterates):
                 q_i = regional_sum(yi.unsqueeze(0) if yi.ndim == 3 else yi, regions.boxes)[0, 0]
                 gt_ae_i = (q_i - t_reg).abs()
@@ -229,6 +281,78 @@ def evaluate(
                         mechanism_errors[(ti, sid_i, "pred_disagreement")].extend(
                             pred_dis_i[m].detach().cpu().tolist()
                         )
+
+            # Solver energy trajectory: E_a(Y) = 0.5 * sum_R ((q_R - b_R)^2 / |R|)
+            def _energy(curr_y: torch.Tensor, b_t: torch.Tensor) -> float:
+                q = regional_sum(curr_y.unsqueeze(0) if curr_y.ndim == 3 else curr_y, regions.boxes)[0, 0]
+                diff = q - b_t[0, 0]
+                area_m = regions.area.clamp_min(1.0).to(diff.device)
+                return float((0.5 * (diff ** 2) / area_m).sum().item())
+
+            for t in range(len(iterates) - 1):
+                y_curr = iterates[t]
+                y_next = iterates[t + 1]
+                eta_val = step_sizes[t] if t < len(step_sizes) else 0.0
+                r_val = residuals[t] if t < len(residuals) else None
+                m_val = preconditioners[t] if t < len(preconditioners) else None
+
+                e_before = _energy(y_curr, b_pred) if b_pred is not None else float("nan")
+                e_after = _energy(y_next, b_pred) if b_pred is not None else float("nan")
+
+                r_abs = r_val.abs() if r_val is not None else None
+                r_mean = float(r_abs.mean().item()) if r_abs is not None else 0.0
+                r_max = float(r_abs.max().item()) if r_abs is not None else 0.0
+                clip_frac = float((r_abs >= (model.cfg.residual_clip - 1e-4)).float().mean().item()) if r_abs is not None and model.cfg.residual_clip > 0 else 0.0
+
+                m_mean = float(m_val.mean().item()) if m_val is not None else float("nan")
+                m_std = float(m_val.std().item()) if m_val is not None and m_val.numel() > 1 else float("nan")
+                m_min = float(m_val.min().item()) if m_val is not None else float("nan")
+                m_max = float(m_val.max().item()) if m_val is not None else float("nan")
+
+                d_count = float(y_next.sum().item() - y_curr.sum().item())
+                d_l1 = float((y_next - y_curr).abs().sum().item())
+
+                solver_trace_rows.append({
+                    "image_id": sample["id"],
+                    "iteration": t,
+                    "eta": eta_val,
+                    "energy_before": e_before,
+                    "energy_after": e_after,
+                    "energy_decreased": int(e_after < e_before) if not math.isnan(e_before) else 0,
+                    "residual_mean": r_mean,
+                    "residual_max": r_max,
+                    "clip_fraction": clip_frac,
+                    "M_mean": m_mean,
+                    "M_std": m_std,
+                    "M_min": m_min,
+                    "M_max": m_max,
+                    "delta_count": d_count,
+                    "delta_measure_l1": d_l1,
+                })
+
+            # Long-table regional trace
+            if b_pred is not None:
+                b_val_flat = b_pred[0, 0].detach().cpu().numpy()
+                q_val_flat = p_reg.detach().cpu().numpy()
+                gt_val_flat = t_reg.detach().cpu().numpy()
+                area_flat = regions.area.detach().cpu().numpy()
+                scale_id_flat = regions.scale_id.detach().cpu().numpy()
+
+                for reg_idx in range(len(b_val_flat)):
+                    sid = int(scale_id_flat[reg_idx])
+                    scale_px = "full" if sid == -1 else model.cfg.region_sizes_px[sid]
+                    c_res = float(q_val_flat[reg_idx] - b_val_flat[reg_idx])
+                    r_res = float(c_res / max(area_flat[reg_idx], 1.0))
+                    regional_trace_rows.append({
+                        "image_id": sample["id"],
+                        "scale_px": scale_px,
+                        "region_id": reg_idx,
+                        "gt_count": float(gt_val_flat[reg_idx]),
+                        "b_pred": float(b_val_flat[reg_idx]),
+                        "q_pred": float(q_val_flat[reg_idx]),
+                        "count_residual": c_res,
+                        "rate_residual": r_res,
+                    })
 
     summary = summarize_predictions(rows)
     summary.update(density_stratified_mae(rows))
@@ -260,8 +384,35 @@ def evaluate(
             float(np.mean(vals)) if vals else float("nan")
         )
 
+    # Regional head b_R accuracy metrics
+    for sid_i, vals in b_head_errors.items():
+        scale_name = "full" if sid_i == -1 else str(model.cfg.region_sizes_px[sid_i])
+        summary[f"BHead_MAE_px_{scale_name}"] = float(np.mean(vals)) if vals else float("nan")
+    if all_b_preds and all_gt_regions:
+        arr_b = np.asarray(all_b_preds, dtype=np.float64)
+        arr_gt = np.asarray(all_gt_regions, dtype=np.float64)
+        summary["BHead_Overall_MAE"] = float(np.mean(np.abs(arr_b - arr_gt)))
+        if arr_b.std() > 1e-6 and arr_gt.std() > 1e-6:
+            r_corr = np.corrcoef(arr_b, arr_gt)[0, 1]
+            summary["BHead_Pearson_Correlation"] = float(r_corr)
+        else:
+            summary["BHead_Pearson_Correlation"] = float("nan")
+
+    # False mass & positive miss
+    summary["ZeroRegion_FalseMass_PerRegion"] = (
+        zero_region_mass_sum / max(1, zero_region_count)
+    )
+    summary["PositiveRegion_MissRate"] = (
+        pos_region_miss_count / max(1, pos_region_total)
+    )
+
+    # Solver energy reduction rate
+    if solver_trace_rows:
+        decreased = [s["energy_decreased"] for s in solver_trace_rows if not math.isnan(s["energy_before"])]
+        summary["Solver_Energy_Reduction_Rate"] = float(np.mean(decreased)) if decreased else float("nan")
+
     summary["region_mode"] = region_mode
-    return rows, summary
+    return rows, summary, regional_trace_rows, solver_trace_rows
 
 
 def main() -> None:
@@ -280,7 +431,7 @@ def main() -> None:
     ds = CrowdManifestDataset(args.manifest, train=False, output_stride=model.cfg.output_stride)
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
-    rows, summary = evaluate(
+    rows, summary, regional_trace, solver_trace = evaluate(
         model, loader, device, args.tile_size, args.practical_halo, region_mode=args.region_mode
     )
     out_dir = Path(args.out_dir)
@@ -290,6 +441,19 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+
+    if regional_trace:
+        with (out_dir / "regional_trace.csv").open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(regional_trace[0].keys()))
+            writer.writeheader()
+            writer.writerows(regional_trace)
+
+    if solver_trace:
+        with (out_dir / "solver_trace.csv").open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(solver_trace[0].keys()))
+            writer.writeheader()
+            writer.writerows(solver_trace)
+
     print(json.dumps(summary, indent=2))
 
 
