@@ -30,15 +30,20 @@ foreach ($m in $models) {
 
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Training completed/stopped for: $($m.Name)"
 
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Val set..."
+    $ckptPath = "$($m.OutDir)/best_val_mae.pt"
+    if (-not (Test-Path $ckptPath)) {
+        $ckptPath = "$($m.OutDir)/last.pt"
+    }
+
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Val set with $ckptPath..."
     .venv\Scripts\python -m rmr_count.eval `
-        --checkpoint "$($m.OutDir)/best_val_mae.pt" `
+        --checkpoint $ckptPath `
         --manifest "data/sha_a_val.jsonl" `
         --out-dir "$($m.OutDir)/eval_val"
 
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Test set..."
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Test set with $ckptPath..."
     .venv\Scripts\python -m rmr_count.eval `
-        --checkpoint "$($m.OutDir)/best_val_mae.pt" `
+        --checkpoint $ckptPath `
         --manifest "data/sha_a_test.jsonl" `
         --out-dir "$($m.OutDir)/eval_test"
 
