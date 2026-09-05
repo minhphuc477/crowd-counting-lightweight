@@ -175,6 +175,7 @@ def main() -> None:
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--eval-every", type=int, default=None)
+    ap.add_argument("--patience", type=int, default=None, help="Stop training if validation MAE does not improve for this many evaluations")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -186,6 +187,8 @@ def main() -> None:
         cfg.setdefault("train", {})["epochs"] = args.epochs
     if args.eval_every is not None:
         cfg.setdefault("train", {})["eval_every"] = args.eval_every
+    if args.patience is not None:
+        cfg.setdefault("train", {})["patience"] = args.patience
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
     seed = int(cfg.get("seed", 42))
@@ -257,6 +260,9 @@ def main() -> None:
     eval_every = int(cfg["train"].get("eval_every", 10))
     solver_warmup_epochs = int(cfg["train"].get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg["train"].get("solver_ramp_epochs", 20))
+    patience = int(cfg["train"].get("patience", 10))
+    no_improve_evals = 0
+    diverge_evals = 0
 
     start_epoch = 0
     best_mae = float("inf")
@@ -516,8 +522,15 @@ def main() -> None:
         if do_eval:
             if is_new_best:
                 best_tag = " * NEW BEST"
+                no_improve_evals = 0
+                diverge_evals = 0
             elif not math.isinf(best_mae):
                 best_tag = f" (Best: {best_mae:.2f})"
+                no_improve_evals += 1
+                if best_mae < 400 and (metrics["MAE"] > 2.0 * best_mae or metrics["MAE"] > 800):
+                    diverge_evals += 1
+                else:
+                    diverge_evals = 0
             else:
                 best_tag = " (warmup)"
             print(
@@ -528,6 +541,25 @@ def main() -> None:
                 f"Bias: {metrics['Bias']:+.2f}{best_tag}\n",
                 flush=True,
             )
+
+            # Early stopping & Divergence tracking guard
+            if (patience > 0 and no_improve_evals >= patience) or (diverge_evals >= 3):
+                reason = (
+                    f"divergence detected ({diverge_evals} consecutive evaluations > 2x best MAE or > 800)"
+                    if diverge_evals >= 3
+                    else f"patience exceeded ({no_improve_evals} evaluations without improvement)"
+                )
+                print(
+                    f"\n[TRACKING GUARD @ Epoch {epoch+1:03d}] Stopping early due to: {reason}.\n"
+                    f"Current MAE: {metrics['MAE']:.2f} | Best MAE: {best_mae:.2f}.\n"
+                    f"Preserved best model checkpoint at: {out_dir / 'best_val_mae.pt'}\n",
+                    flush=True,
+                )
+                state["best_mae"] = best_mae
+                torch.save(state, out_dir / "last.pt")
+                with log_path.open("a", newline="") as f:
+                    csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore").writerow(row)
+                break
         if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
             state["best_mae"] = best_mae
             torch.save(state, out_dir / "last.pt")
