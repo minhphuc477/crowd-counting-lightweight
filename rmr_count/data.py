@@ -70,12 +70,12 @@ def _pad_to_crop(image: torch.Tensor, points: torch.Tensor, crop_h: int, crop_w:
         # padding becomes strongly negative (~-2.1 for R channel), creating large feature
         # activations at borders that the model must learn to ignore.
         #
-        # ImageNet mean [0.485, 0.456, 0.406] → after normalization becomes exactly 0.0
-        # for all channels → padded cells produce near-zero features and near-zero
+        # MobileNetV4 mean [0.5, 0.5, 0.5] -> after normalization becomes exactly 0.0
+        # for all channels -> padded cells produce near-zero features and near-zero
         # density prediction, which is correct (no people in the padded region).
         #
         # image is in [0,1] raw tensor space here (normalize_image is called AFTER this).
-        mean = image.new_tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        mean = image.new_tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
         new_h = h + pad_h
         new_w = w + pad_w
         canvas = mean.expand(3, new_h, new_w).clone()
@@ -115,10 +115,10 @@ def train_transform(
     pad_w = max(0, crop_size - w1)
     pad_h = max(0, crop_size - h1)
     if pad_w or pad_h:
-        # ImageNet mean in uint8: [round(0.485*255), round(0.456*255), round(0.406*255)] = (124, 116, 104)
+        # MobileNetV4 mean in uint8: round(0.5 * 255) = 128
         new_w = w1 + pad_w
         new_h = h1 + pad_h
-        canvas = Image.new("RGB", (new_w, new_h), (124, 116, 104))
+        canvas = Image.new("RGB", (new_w, new_h), (128, 128, 128))
         canvas.paste(image, (0, 0))
         image.close()
         image = canvas
@@ -157,8 +157,8 @@ def train_transform(
 
 
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
-    mean = torch.tensor([0.485, 0.456, 0.406], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+    mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+    std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
     return (image_t - mean) / std
 
 

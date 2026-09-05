@@ -24,6 +24,9 @@ model:
   projected_use_preconditioner: false
   detach_region_evidence: false
   residual_clip: 0.0
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
 loss:
   lambda_global: 0.1
   lambda_region_map: 0.2
@@ -43,3 +46,5 @@ train:
   amp: true
   solver_warmup_epochs: 5
   solver_ramp_epochs: 20
+  patience: 10
+  backbone_lr_scale: 0.1

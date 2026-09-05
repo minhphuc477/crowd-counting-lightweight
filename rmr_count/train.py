@@ -113,6 +113,20 @@ def make_model(cfg: dict) -> RMRCount:
             "detach_region_evidence",
             True,
         ),
+        backbone_name=model_cfg.get(
+            "backbone_name",
+            model_cfg.get("backbone", "mobilenetv4_conv_small_050.e3000_r224_in1k"),
+        ),
+        pretrained=model_cfg.get(
+            "pretrained",
+            True,
+        ),
+        backbone_lr_scale=float(
+            model_cfg.get(
+                "backbone_lr_scale",
+                cfg["train"].get("backbone_lr_scale", 0.1),
+            )
+        ),
     )
 
     return RMRCount(
@@ -247,11 +261,35 @@ def main() -> None:
         flush=True,
     )
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=lr_init,
-        weight_decay=float(cfg["train"].get("weight_decay", 1e-4)),
+    backbone_scale = float(
+        cfg["train"].get(
+            "backbone_lr_scale",
+            getattr(model.cfg, "backbone_lr_scale", 1.0),
+        )
     )
+    if backbone_scale < 1.0 and hasattr(model, "encoder") and model.cfg.backbone_name != "tiny":
+        backbone_params = list(model.encoder.parameters())
+        backbone_ids = set(id(p) for p in backbone_params)
+        other_params = [p for p in model.parameters() if id(p) not in backbone_ids]
+        param_groups = [
+            {"params": backbone_params, "lr": lr_init * backbone_scale},
+            {"params": other_params, "lr": lr_init},
+        ]
+        print(
+            f"  Differential LR enabled: Backbone ({len(backbone_params)} tensors) @ {lr_init * backbone_scale:.2e} "
+            f"| Neck & Heads ({len(other_params)} tensors) @ {lr_init:.2e}\n",
+            flush=True,
+        )
+        optimizer = torch.optim.AdamW(
+            param_groups,
+            weight_decay=float(cfg["train"].get("weight_decay", 1e-4)),
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=lr_init,
+            weight_decay=float(cfg["train"].get("weight_decay", 1e-4)),
+        )
     scheduler = make_scheduler(optimizer, epochs, int(cfg["train"].get("warmup_epochs", 5)))
     amp = bool(cfg["train"].get("amp", True) and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp)

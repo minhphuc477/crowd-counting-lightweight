@@ -104,6 +104,18 @@ def make_model_from_ckpt(
             "detach_region_evidence",
             True,
         ),
+        backbone_name=model_cfg.get(
+            "backbone_name",
+            model_cfg.get(
+                "backbone",
+                "tiny" if any(k.startswith("encoder.stem") for k in ckpt.get("model", {})) else "mobilenetv4_conv_small_050.e3000_r224_in1k",
+            ),
+        ),
+        pretrained=False,
+        backbone_lr_scale=model_cfg.get(
+            "backbone_lr_scale",
+            0.1,
+        ),
     )
 
     model = RMRCount(

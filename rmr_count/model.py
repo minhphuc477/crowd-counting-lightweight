@@ -119,6 +119,124 @@ class AdditiveFusion(nn.Module):
         return self.out(p)
 
 
+class DSResidual(nn.Module):
+    """Depthwise-Separable Residual Refinement Block.
+
+    DW 3×3 -> GN -> SiLU -> PW 1×1 -> GN -> Residual Add -> SiLU.
+    """
+
+    def __init__(self, c: int = 32):
+        super().__init__()
+        self.dw = nn.Conv2d(c, c, kernel_size=3, padding=1, groups=c, bias=False)
+        self.n1 = _gn(c)
+        self.pw = nn.Conv2d(c, c, kernel_size=1, bias=False)
+        self.n2 = _gn(c)
+        self.act = nn.SiLU(inplace=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.act(self.n1(self.dw(x)))
+        y = self.n2(self.pw(y))
+        return self.act(x + y)
+
+
+class DepthwiseDilated(nn.Module):
+    """Depthwise 3x3 convolution with configurable dilation."""
+
+    def __init__(self, channels: int, dilation: int = 1):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            channels,
+            channels,
+            kernel_size=3,
+            padding=dilation,
+            dilation=dilation,
+            groups=channels,
+            bias=False,
+        )
+        self.norm = _gn(channels)
+        self.act = nn.SiLU(inplace=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.act(self.norm(self.conv(x)))
+
+
+class AdditiveFPNNeck(nn.Module):
+    """Additive depthwise-separable FPN neck fusing reductions 4, 8, 16 into P4."""
+
+    def __init__(
+        self,
+        in_channels: tuple[int, int, int] = (16, 32, 48),
+        width: int = 32,
+        context_dilations: tuple[int, ...] = (1, 2, 3),
+    ):
+        super().__init__()
+        c4, c8, c16 = in_channels
+        self.width = width
+        self.lat4 = ConvGNAct(c4, width, 1)
+        self.lat8 = ConvGNAct(c8, width, 1)
+        self.lat16 = ConvGNAct(c16, width, 1)
+
+        self.context_blocks = nn.ModuleList([
+            DepthwiseDilated(width, dilation=d) for d in context_dilations
+        ])
+        self.ref16 = DSResidual(width)
+        self.ref8 = DSResidual(width)
+        self.ref4 = DSResidual(width)
+
+    def forward(self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor) -> torch.Tensor:
+        l4 = self.lat4(c4)
+        l8 = self.lat8(c8)
+        l16 = self.lat16(c16)
+
+        ctx_sum = sum(ctx(l16) for ctx in self.context_blocks)
+        p16 = self.ref16(l16 + ctx_sum)
+
+        up16_to_8 = F.interpolate(
+            p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
+        )
+        p8 = self.ref8(l8 + up16_to_8)
+
+        up8_to_4 = F.interpolate(
+            p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
+        )
+        p4 = self.ref4(l4 + up8_to_4)
+        return p4
+
+
+class MobileNetV4Backbone(nn.Module):
+    """MobileNetV4 feature backbone returning stride-4, 8, 16 feature pyramid.
+
+    Truncated after reduction 16 (blocks.2) to drop reduction-32 and classification
+    heads, preserving a lightweight footprint (87,568 params).
+    """
+
+    def __init__(
+        self,
+        model_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k",
+        pretrained: bool = True,
+    ):
+        super().__init__()
+        import timm
+
+        self.model_name = model_name
+        self.pretrained = bool(pretrained)
+        self.out_channels = (16, 32, 48)
+
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=pretrained,
+            features_only=True,
+            out_indices=(1, 2, 3),
+        )
+
+        blocks = list(self.backbone.blocks.children())
+        self.backbone.blocks = nn.Sequential(*blocks[:3])
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        feats = self.backbone(x)
+        return feats[0], feats[1], feats[2]
+
+
 class FineMeasureHead(nn.Module):
     """Fine-grained density head with calibrated initial rate.
 
@@ -341,9 +459,14 @@ class RMRConfig:
     projected_use_preconditioner: bool = False
     detach_region_evidence: bool = True
 
+    # Carrier backbone configuration:
+    backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
+    pretrained: bool = True
+    backbone_lr_scale: float = 0.1
+
 
 class RMRCount(nn.Module):
-    """Regional Measure Reconciliation crowd counter and registered controls.
+    r"""Regional Measure Reconciliation crowd counter and registered controls.
 
     The core RMR residual field uses the diagonally preconditioned adjoint:
         r = D_c^{-1} A^T D_a^{-1} (AY - b)
@@ -356,8 +479,8 @@ class RMRCount(nn.Module):
     Update rules:
 
         RMR-P (update_rule="projected_sirt", REGISTERED MAIN METHOD):
-            Y^{t+1} = \\Pi_+ [Y^t - \\omega M r_t] = \\max(0, Y^t - \\omega M r_t)
-            Direct measure-space Nonnegative Projected SIRT with fixed \\omega=1 and M=1.
+            Y^{t+1} = \Pi_+ [Y^t - \omega M r_t] = \max(0, Y^t - \omega M r_t)
+            Direct measure-space Nonnegative Projected SIRT with fixed \omega=1 and M=1.
             No learned spatial preconditioner, no sigmoid Jacobian factor, no extra solver
             parameters. Exact parameter parity with B2 (region_aux).
 
@@ -377,12 +500,10 @@ class RMRCount(nn.Module):
 
     def __init__(self, cfg: RMRConfig = RMRConfig(), variant: Variant = "rmr"):
         super().__init__()
-        # P0 guard: TinyLocalEncoder is hardwired to output_stride=4 (stem=s2, body=s4 total).
-        # Any other value in the config would silently produce mismatched tensor shapes.
+        # P0 guard: output_stride=4 is required.
         if cfg.output_stride != 4:
             raise ValueError(
-                f"RMRCount only supports output_stride=4 "
-                f"(TinyLocalEncoder is hardwired to stride 4). "
+                f"RMRCount only supports output_stride=4. "
                 f"Got output_stride={cfg.output_stride}."
             )
         self.cfg = cfg
@@ -405,8 +526,18 @@ class RMRCount(nn.Module):
         self.rmr_update_rule: RMRUpdate = effective_rule
         self.update_rule: RMRUpdate = effective_rule
 
-        self.encoder = TinyLocalEncoder()
-        self.fusion = AdditiveFusion(cfg.feature_width)
+        if cfg.backbone_name == "tiny":
+            self.encoder = TinyLocalEncoder()
+            self.fusion = AdditiveFusion(cfg.feature_width)
+        else:
+            self.encoder = MobileNetV4Backbone(
+                model_name=cfg.backbone_name,
+                pretrained=cfg.pretrained,
+            )
+            self.fusion = AdditiveFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+            )
         self.fine_head = FineMeasureHead(cfg.feature_width)
 
         # Legacy RMR-Latent / RMR-Jacobian always use the learned positive

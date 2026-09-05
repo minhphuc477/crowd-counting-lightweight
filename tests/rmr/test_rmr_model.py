@@ -833,8 +833,7 @@ def test_rmr_p_exact_parameter_parity_with_b2():
 
     params_p = sum(p.numel() for p in model_p.parameters())
     params_b2 = sum(p.numel() for p in model_b2.parameters())
-
-    assert params_p == 63042, f"Expected 63,042 parameters, got {params_p}"
+    assert params_p == 101858, f"Expected 101,858 parameters, got {params_p}"
     assert params_p == params_b2, f"Expected exact parameter parity with B2 ({params_b2}), got {params_p}"
 
 

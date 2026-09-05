@@ -22,6 +22,9 @@ model:
   eta_max: 0.2
   eta_init: 0.05
   residual_clip: 5.0
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
 loss:
   lambda_global: 0.1
   lambda_region_map: 0.2
@@ -32,7 +35,7 @@ loss:
 train:
   batch_size: 8
   workers: 0
-  lr: 0.0003
+  lr: 0.0001
   weight_decay: 0.0001
   epochs: 1000
   warmup_epochs: 5
@@ -41,3 +44,5 @@ train:
   amp: true
   solver_warmup_epochs: 5
   solver_ramp_epochs: 20
+  patience: 10
+  backbone_lr_scale: 0.1
