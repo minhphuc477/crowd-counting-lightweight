@@ -96,10 +96,13 @@ def prefix2d(x: torch.Tensor, preserve_fp32: bool = True) -> torch.Tensor:
 
 Every variant is trained under matched loss objectives via `compute_losses(outputs, target_y, variant, cfg)`:
 
-### 4.1 Count Loss & Flat Dirichlet-Multinomial-16
-$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{count}} + \lambda_{\text{dm}} \cdot \mathcal{L}_{\text{flat\_dm16}} + \lambda_{\text{region}} \cdot \mathcal{L}_{\text{region}}.$$
-- $\mathcal{L}_{\text{count}}$: SmoothL1 or Negative Binomial count loss.
-- $\mathcal{L}_{\text{flat\_dm16}}$: Multi-scale spatial partitioning loss enforcing count preservation across $16 \times 16$ tile divisions.
+### 4.1 Count Loss & Count-Normalized Flat Dirichlet-Multinomial-16
+$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{count}} + \lambda_{\text{dm}} \cdot \mathcal{L}_{\text{flat\_dm16}}^{\text{norm}} + \lambda_{\text{cell}} \cdot \mathcal{L}_{\text{cell}} + \lambda_{\text{region}} \cdot \mathcal{L}_{\text{region}}.$$
+- $\mathcal{L}_{\text{count}}$: SmoothL1 or Negative Binomial count loss ($\lambda_{\text{count}} = 1.0$).
+- $\mathcal{L}_{\text{flat\_dm16}}^{\text{norm}}$: Dirichlet-Multinomial-16 allocation loss on $16\text{px}$ blocks ($4 \times 4$ stride-4 cells), normalized by crowd size:
+  $$\mathcal{L}_{\text{flat\_dm16}}^{\text{norm}} = \frac{-\log p(y \mid \alpha)}{\max(N_i, 1)}$$
+  representing spatial allocation NLL per person ($\sim 0.5 - 7 \text{ nats/person}$). This prevents dense crops from receiving hundreds of times more gradient weight than sparse crops.
+- $\mathcal{L}_{\text{cell}}$: Balanced SmoothL1 cell density loss ($\lambda_{\text{cell}} = 0.25$).
 - $\mathcal{L}_{\text{region}}$: Scale-balanced Huber rate loss on regional evidence $b$ vs ground-truth regional counts $N^*$.
 
 ### 4.2 Causal Isolation Protocol

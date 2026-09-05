@@ -93,3 +93,18 @@ def test_compute_losses_all_variants():
                 grad_found = True
                 break
         assert grad_found, f'Variant {v} produced no parameter gradients'
+
+
+def test_flat_dm16_count_normalization():
+    pred = torch.full((1, 1, 32, 32), 0.02, requires_grad=True)
+    target = torch.zeros(1, 1, 32, 32)
+    # 50 points
+    target[0, 0, :10, :5] = 1.0
+
+    raw_loss = flat_dm16_loss(pred, target, normalize_by_count=False)
+    norm_loss = flat_dm16_loss(pred, target, normalize_by_count=True)
+
+    # Norm loss must equal raw_loss / 50.0
+    torch.testing.assert_close(norm_loss, raw_loss / 50.0)
+    assert norm_loss.item() < 10.0  # bounded scale (~nats/person)
+

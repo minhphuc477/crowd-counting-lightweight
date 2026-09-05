@@ -155,6 +155,7 @@ def make_loss_cfg(cfg: dict) -> LossConfig:
         kappa_flat16=x.get("kappa_flat16", 20.0),
         cell_beta=x.get("cell_beta", 1.0),
         region_beta=x.get("region_beta", 0.1),
+        normalize_flat_dm16=x.get("normalize_flat_dm16", True),
     )
 
 
@@ -592,10 +593,21 @@ def main() -> None:
             solver_str = "Solver: N/A"
 
         clip_str = f" | clip: {row['clip_rate']*100:.1f}%" if row['clip_rate'] > 0 else ""
+        loss_breakdown = (
+            f"Loss: {row['train_total']:.4f} "
+            f"[cnt: {row['train_count']:.2f}, "
+            f"dm16: {row['train_flat_dm16']:.3f}, "
+            f"cell: {row['train_cell']:.4f}]"
+        )
+        if row.get("train_region_head", 0.0) > 0:
+            loss_breakdown += f" [reg_h: {row['train_region_head']:.3f}]"
+        if row.get("train_region_map", 0.0) > 0:
+            loss_breakdown += f" [reg_m: {row['train_region_map']:.3f}]"
+
         print(
             f"[{epoch+1:03d}/{epochs:03d}] "
-            f"Loss: {row['train_total']:.4f} | "
-            f"LR: {current_lr:.2e} | "
+            f"{loss_breakdown} | "
+            f"LR: {current_lr:.2e} (bb: {lr_backbone:.2e}) | "
             f"Grad: {row['grad_norm_mean']:.2f} (max: {row['grad_norm_max']:.2f}) | "
             f"{solver_str} | "
             f"InitCnt: {init_mean:5.1f}{clip_str}",

@@ -134,14 +134,26 @@ def flat_dm16_loss(
     kappa: float = 20.0,
     stride: int = 4,
     eps: float = 1e-8,
+    normalize_by_count: bool = True,
 ) -> torch.Tensor:
-    """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells)."""
+    """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells).
+    
+    When normalize_by_count=True (default), the Dirichlet-Multinomial NLL is normalized
+    by max(N_i, 1) per image:
+        L_{FlatDM16}^{norm} = -log p(y | alpha) / max(N, 1)
+    representing the average spatial allocation negative log-likelihood per person.
+    This keeps the loss scale bounded (~0.5 - 7 nats/person) and prevents dense crops
+    from receiving hundreds of times more gradient weight than sparse crops.
+    """
     k = max(1, 16 // stride)
     n16 = block_sum_2d(pred_map, k).flatten(1)
     y16 = block_sum_2d(target_map, k).flatten(1)
     pi = probs_from_positive_mass(n16, tiny=eps)
     alpha = float(kappa) * pi
     per_image_nll = dm_nll_none(y16, alpha, eps=eps)
+    if normalize_by_count:
+        counts = y16.sum(dim=-1).clamp_min(1.0)
+        per_image_nll = per_image_nll / counts
     return per_image_nll.mean()
 
 
@@ -193,6 +205,7 @@ class LossConfig:
     kappa_flat16: float = 20.0
     cell_beta: float = 1.0
     region_beta: float = 0.1
+    normalize_flat_dm16: bool = True
 
     # Backwards-compatibility property:
     @property
@@ -235,7 +248,10 @@ def compute_losses(
     # across all variants (B0-B5) to enforce observer mass-allocation quality.
     if cfg.lambda_flat_dm16 > 0:
         losses["flat_dm16"] = flat_dm16_loss(
-            y0, target_y, kappa=cfg.kappa_flat16
+            y0,
+            target_y,
+            kappa=cfg.kappa_flat16,
+            normalize_by_count=cfg.normalize_flat_dm16,
         )
     else:
         losses["flat_dm16"] = y0.new_tensor(0.0)
