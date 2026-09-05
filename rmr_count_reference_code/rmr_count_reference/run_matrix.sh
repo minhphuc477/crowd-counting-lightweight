@@ -14,7 +14,7 @@ done
 # Matched RQ matrix after choosing LR using validation only.
 LR=3e-4   # replace only with the validation-selected value
 for seed in 42 123 3407; do
-  for cfg in direct region_loss region_aux learned_project rmr_t1 rmr_t2; do
+  for cfg in direct region_loss region_aux local_refine learned_project rmr_t1 rmr_t2; do
     python -m rmr_count.train \
       --config "configs/${cfg}.yaml" \
       --seed "$seed" \

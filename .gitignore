@@ -14,7 +14,8 @@ venv/
 ENV/
 
 # Large Datasets & Model Caches
-/data/
+data/*
+!data/*.jsonl
 .cache/
 *.tar.gz
 *.zip

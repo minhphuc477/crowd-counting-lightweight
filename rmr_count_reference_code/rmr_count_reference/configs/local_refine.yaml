@@ -1,5 +1,5 @@
 seed: 42
-output_dir: runs/sha_a/region_aux_seed42
+output_dir: runs/sha_a/local_refine_seed42
 data:
   train_manifest: data/sha_a_train.jsonl
   val_manifest: data/sha_a_val.jsonl
@@ -8,7 +8,7 @@ data:
   - 0.75
   - 1.25
 model:
-  variant: region_aux
+  variant: local_refine
   output_stride: 4
   feature_width: 32
   region_sizes_px:

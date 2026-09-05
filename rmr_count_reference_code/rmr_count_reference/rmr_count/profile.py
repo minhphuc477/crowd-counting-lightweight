@@ -56,7 +56,7 @@ def profiler_flops(model: torch.nn.Module, x: torch.Tensor) -> float | None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--variant", default="rmr", choices=["direct", "region_loss", "region_aux", "learned_project", "rmr"])
+    ap.add_argument("--variant", default="rmr", choices=["direct", "region_loss", "region_aux", "local_refine", "learned_project", "rmr"])
     ap.add_argument("--iterations", type=int, default=2)
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--width", type=int, default=512)
@@ -64,7 +64,7 @@ def main() -> None:
     args = ap.parse_args()
 
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
-    model = RMRCount(RMRConfig(iterations=args.iterations), variant=args.variant).to(device).eval()
+    model = RMRCount(RMRConfig(iterations=args.iterations, region_sizes_px=(32,64,128), eta_max=0.20, eta_init=0.05, residual_clip=5.0), variant=args.variant).to(device).eval()
     x = torch.randn(1, 3, args.height, args.width, device=device)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()

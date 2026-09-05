@@ -84,7 +84,8 @@ def compute_losses(
       direct:          fine + global only
       region_loss:     direct + training-only regional loss on final map
       region_aux:      direct + auxiliary regional evidence head
-      learned_project: region_aux + learned inference projector
+      local_refine:    direct + purely local learned inference refinement
+      learned_project: region_aux + learned regional-membership projector
       rmr:             region_aux + exact-adjoint reconciliation
     """
     y = outputs["y"]
@@ -110,7 +111,7 @@ def compute_losses(
 
     # Optional weak deep supervision on intermediate positive measures for iterative variants.
     iterates = outputs.get("iterates", [])
-    if variant in {"learned_project", "rmr"} and len(iterates) > 2:
+    if variant in {"local_refine", "learned_project", "rmr"} and len(iterates) > 2:
         mids = iterates[1:-1]
         if mids:
             losses["deep"] = torch.stack([

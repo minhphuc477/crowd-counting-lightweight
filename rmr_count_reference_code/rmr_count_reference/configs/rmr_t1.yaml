@@ -1,33 +1,36 @@
 seed: 42
 output_dir: runs/sha_a/rmr_t1_seed42
-
 data:
   train_manifest: data/sha_a_train.jsonl
   val_manifest: data/sha_a_val.jsonl
   crop_size: 512
-  scale_range: [0.75, 1.25]
-
+  scale_range:
+  - 0.75
+  - 1.25
 model:
   variant: rmr
   output_stride: 4
   feature_width: 32
-  region_sizes_px: [16, 32, 64, 128]
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
   region_overlap: 0.5
   include_full_image: true
   iterations: 1
-  eta_max: 1.0
-
+  eta_max: 0.2
+  eta_init: 0.05
+  residual_clip: 5.0
 loss:
-  lambda_global: 0.10
-  lambda_region_map: 0.20
-  lambda_region_head: 0.20
-  lambda_deep_supervision: 0.10
+  lambda_global: 0.1
+  lambda_region_map: 0.2
+  lambda_region_head: 0.2
+  lambda_deep_supervision: 0.1
   cell_beta: 1.0
   region_beta: 2.0
-
 train:
   batch_size: 8
-  workers: 4
+  workers: 0
   lr: 0.0003
   weight_decay: 0.0001
   epochs: 1000
@@ -35,3 +38,5 @@ train:
   eval_every: 10
   grad_clip: 5.0
   amp: true
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20

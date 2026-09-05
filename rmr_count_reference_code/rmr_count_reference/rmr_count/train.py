@@ -33,7 +33,9 @@ def make_model(cfg: dict) -> RMRCount:
         region_overlap=cfg["model"].get("region_overlap", 0.5),
         include_full_image=cfg["model"].get("include_full_image", True),
         iterations=cfg["model"].get("iterations", 2),
-        eta_max=cfg["model"].get("eta_max", 1.0),
+        eta_max=cfg["model"].get("eta_max", 0.20),
+        eta_init=cfg["model"].get("eta_init", 0.05),
+        residual_clip=cfg["model"].get("residual_clip", 5.0),
     )
     return RMRCount(mcfg, variant=cfg["model"]["variant"])
 
@@ -85,6 +87,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--output-dir", default=None)
+    ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--eval-every", type=int, default=None)
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -92,6 +96,10 @@ def main() -> None:
         cfg["seed"] = args.seed
     if args.lr is not None:
         cfg.setdefault("train", {})["lr"] = args.lr
+    if args.epochs is not None:
+        cfg.setdefault("train", {})["epochs"] = args.epochs
+    if args.eval_every is not None:
+        cfg.setdefault("train", {})["eval_every"] = args.eval_every
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
     seed = int(cfg.get("seed", 42))
@@ -116,13 +124,14 @@ def main() -> None:
         train=False,
         output_stride=cfg["model"].get("output_stride", 4),
     )
+    workers = int(cfg["train"].get("workers", 0))
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg["train"].get("batch_size", 8),
         shuffle=True,
-        num_workers=cfg["train"].get("workers", 4),
-        pin_memory=True,
-        persistent_workers=cfg["train"].get("workers", 4) > 0,
+        num_workers=workers,
+        pin_memory=(device.type == "cuda"),
+        persistent_workers=(workers > 0),
         collate_fn=collate_train,
         drop_last=True,
     )
@@ -130,12 +139,12 @@ def main() -> None:
         val_ds,
         batch_size=1,
         shuffle=False,
-        num_workers=max(0, min(2, cfg["train"].get("workers", 4))),
+        num_workers=0,
         collate_fn=collate_eval,
     )
 
     model = make_model(cfg).to(device)
-    print(f"variant={model.variant} params={count_parameters(model):,}")
+    print(f"variant={model.variant} params={count_parameters(model):,}", flush=True)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -145,10 +154,12 @@ def main() -> None:
     epochs = int(cfg["train"].get("epochs", 1000))
     scheduler = make_scheduler(optimizer, epochs, int(cfg["train"].get("warmup_epochs", 25)))
     amp = bool(cfg["train"].get("amp", True) and device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp)
     loss_cfg = make_loss_cfg(cfg)
     grad_clip = float(cfg["train"].get("grad_clip", 5.0))
     eval_every = int(cfg["train"].get("eval_every", 10))
+    solver_warmup_epochs = int(cfg["train"].get("solver_warmup_epochs", 5))
+    solver_ramp_epochs = int(cfg["train"].get("solver_ramp_epochs", 20))
 
     start_epoch = 0
     best_mae = float("inf")
@@ -163,23 +174,52 @@ def main() -> None:
         best_mae = ckpt.get("best_mae", best_mae)
 
     log_path = out_dir / "train_log.csv"
-    fieldnames = ["epoch", "lr", "train_total", "train_cell", "train_global", "clip_rate", "val_MAE", "val_RMSE", "val_NAE", "val_Bias"]
+    fieldnames = ["epoch", "lr", "solver_strength", "eta0", "train_total", "train_cell", "train_global", "clip_rate", "residual_abs_mean", "residual_abs_max", "z_lt_minus10_frac", "val_MAE", "val_RMSE", "val_NAE", "val_Bias"]
     if not log_path.exists():
         with log_path.open("w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
 
     for epoch in range(start_epoch, epochs):
         model.train()
+
+        # Stabilization protocol:
+        # - first solver_warmup_epochs: direct prediction/regional head learn while solver update is off
+        # - next solver_ramp_epochs: linearly ramp reconciliation/refinement strength to 1
+        if model.variant in {"local_refine", "learned_project", "rmr"}:
+            if epoch < solver_warmup_epochs:
+                solver_strength = 0.0
+            else:
+                solver_strength = min(
+                    1.0,
+                    (epoch - solver_warmup_epochs + 1) / max(1, solver_ramp_epochs),
+                )
+            model.set_solver_strength(solver_strength)
+        else:
+            solver_strength = 0.0
+
         sums = {"total": 0.0, "cell": 0.0, "global": 0.0}
         n_steps = 0
         clipped = 0
+        residual_abs_sum = 0.0
+        residual_abs_max = 0.0
+        z_sat_sum = 0.0
         for batch in train_loader:
             image = batch["image"].to(device, non_blocking=True)
             target = batch["target_y"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=amp):
+            with torch.amp.autocast("cuda", enabled=amp):
                 outputs = model(image)
                 losses = compute_losses(outputs, target, model.variant, loss_cfg)
+
+            residuals = outputs.get("residual_fields", [])
+            if residuals:
+                r_last = residuals[-1].detach()
+                residual_abs_sum += float(r_last.abs().mean().item())
+                residual_abs_max = max(residual_abs_max, float(r_last.abs().max().item()))
+            z_last = outputs.get("z")
+            if z_last is not None:
+                z_sat_sum += float((z_last.detach() < -10.0).float().mean().item())
+
             scaler.scale(losses["total"]).backward()
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -196,10 +236,15 @@ def main() -> None:
         row = {
             "epoch": epoch,
             "lr": optimizer.param_groups[0]["lr"],
+            "solver_strength": solver_strength,
+            "eta0": float(model._eta(0).detach().cpu().item()) if hasattr(model, "_eta") else 0.0,
             "train_total": sums["total"] / max(1, n_steps),
             "train_cell": sums["cell"] / max(1, n_steps),
             "train_global": sums["global"] / max(1, n_steps),
             "clip_rate": clipped / max(1, n_steps),
+            "residual_abs_mean": residual_abs_sum / max(1, n_steps),
+            "residual_abs_max": residual_abs_max,
+            "z_lt_minus10_frac": z_sat_sum / max(1, n_steps),
             "val_MAE": "",
             "val_RMSE": "",
             "val_NAE": "",
@@ -228,9 +273,9 @@ def main() -> None:
                 best_mae = metrics["MAE"]
                 state["best_mae"] = best_mae
                 torch.save(state, out_dir / "best_val_mae.pt")
-            print(f"ep={epoch:04d} loss={row['train_total']:.4f} valMAE={metrics['MAE']:.3f} valRMSE={metrics['RMSE']:.3f} clip={row['clip_rate']:.3f}")
+            print(f"ep={epoch:04d} loss={row['train_total']:.4f} valMAE={metrics['MAE']:.3f} valRMSE={metrics['RMSE']:.3f} clip={row['clip_rate']:.3f} solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f}", flush=True)
         else:
-            print(f"ep={epoch:04d} loss={row['train_total']:.4f} clip={row['clip_rate']:.3f}")
+            print(f"ep={epoch:04d} loss={row['train_total']:.4f} clip={row['clip_rate']:.3f} solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f}", flush=True)
         if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
             state["best_mae"] = best_mae
             torch.save(state, out_dir / "last.pt")
