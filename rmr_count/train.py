@@ -256,7 +256,13 @@ def main() -> None:
                 rel_step = float(
                     ((yf_det - y0_det).abs().sum() / (y0_det.abs().sum() + 1e-8)).item()
                 )
-                delta_n = float((yf_det.sum() - y0_det.sum()).abs().item())
+                # P1 fix: per-sample |ΔN| averaged over batch.
+                # Old: (yf.sum() - y0.sum()).abs() — batch-sum first, then abs.
+                # Positive and negative shifts could cancel, hiding systematic solver drift.
+                # New: sum over spatial dims per sample → abs per sample → mean over batch.
+                delta_n = float(
+                    (yf_det - y0_det).sum(dim=(-3, -2, -1)).abs().mean().item()
+                )
                 solver_rel_step_sum += rel_step
                 solver_delta_n_sum += delta_n
 
@@ -283,6 +289,8 @@ def main() -> None:
                 if k in losses:
                     sums[k] += float(losses[k].detach().item())
             n_steps += 1
+        # P1: record LR before stepping scheduler so logged value corresponds to current epoch
+        current_lr = float(optimizer.param_groups[0]["lr"])
         scheduler.step()
 
         # P1: compute initial count distribution stats
@@ -295,7 +303,7 @@ def main() -> None:
 
         row = {
             "epoch": epoch,
-            "lr": optimizer.param_groups[0]["lr"],
+            "lr": current_lr,
             "solver_strength": solver_strength,
             "eta0": float(model._eta(0).detach().cpu().item()) if hasattr(model, "_eta") else 0.0,
             "train_total": sums["total"] / max(1, n_steps),

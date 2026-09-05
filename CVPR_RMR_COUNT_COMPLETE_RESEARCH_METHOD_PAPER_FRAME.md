@@ -908,13 +908,9 @@ Y^{(t)}
 
 Since:
 
-\[
-\frac{\partial Y}{\partial z}
-=
-\sigma(z),
-\]
+### Registered Rule: RMR-Latent (Primary B5 Model)
 
-a gradient-like update in latent space is:
+In the registered model, the reconciliation step operates directly in the unconstrained latent space without the squashing Jacobian factor:
 
 \[
 \boxed{
@@ -925,11 +921,30 @@ z^{(t)}
 \eta_t
 M^{(t)}
 \odot
-\sigma(z^{(t)})
-\odot
 r^{(t)}.
 }
 \]
+
+This is formally termed a **latent-space preconditioned reconciliation step**.
+
+### Ablation: RMR-Jacobian
+
+If one views $r^{(t)} \approx \nabla_Y \mathcal{E}_a$ as an energy gradient in measure space, applying the chain rule $\frac{\partial Y}{\partial z} = \sigma(z)$ yields:
+
+\[
+z^{(t+1)}
+=
+z^{(t)}
+-
+\eta_t
+M^{(t)}
+\odot
+\sigma(z^{(t)})
+\odot
+r^{(t)}.
+\]
+
+At calibrated initialization $\operatorname{softplus}(-4.595) \approx 0.01$ count/cell ($z \approx -4.6$), $\sigma(z) \approx 0.01$ squashes early updates $\sim 100\times$. Thus RMR-Latent is the primary registered model, and RMR-Jacobian is retained strictly as an ablation (`use_jacobian_gate: true`).
 
 Then:
 

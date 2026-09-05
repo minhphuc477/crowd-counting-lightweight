@@ -37,3 +37,36 @@ def test_adjoint_identity():
 def test_full_image_region_present():
     r = build_multiscale_regions(9, 10, output_stride=4, region_sizes_px=(16,), include_full_image=True)
     assert any(tuple(b.tolist()) == (0, 0, 9, 10) for b in r.boxes)
+
+
+def test_normalized_adjoint_preserves_uniform_residual_rate():
+    """Theorem: H = D_c^{-1} A^T D_a^{-1} A satisfies H * 1 = 1 on covered cells.
+
+    If b_R = (AY)_R + alpha * |R| (uniform regional rate discrepancy alpha across all R),
+    then the normalized adjoint field r = D_c^{-1} A^T D_a^{-1} (AY - b) must equal
+    -alpha * 1 on all cells with non-zero coverage.
+
+    This mathematically proves that the area and coverage normalizations prevent
+    distortion of uniform background or scale-dependent bias.
+    """
+    h, w = 16, 20
+    regions = build_multiscale_regions(
+        h, w, output_stride=4, region_sizes_px=(16, 32), overlap=0.5, include_full_image=True
+    )
+    y = torch.rand(1, 1, h, w, dtype=torch.float64)
+    alpha = 0.35
+    ay = regional_sum(y, regions.boxes)
+    # b has uniform rate residual alpha: (AY - b) = -alpha * |R|
+    b = ay + alpha * regions.area.view(1, 1, -1).to(torch.float64)
+
+    delta = ay - b
+    res_density = delta / regions.area.view(1, 1, -1).clamp_min(1.0).to(torch.float64)
+    back = regional_adjoint(res_density, regions.boxes, h, w)
+    cov = regional_adjoint(torch.ones_like(res_density), regions.boxes, h, w)
+    r = back / cov.clamp_min(1.0)
+
+    # Every cell covered by at least one region must have exactly r = -alpha
+    covered = cov > 0
+    assert covered.all()
+    expected = -alpha * torch.ones_like(r)
+    assert torch.allclose(r[covered], expected[covered], atol=1e-10, rtol=1e-10)

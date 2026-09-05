@@ -839,37 +839,31 @@ have cumulative implementations.
 
 ---
 
-# 17. Coverage normalization
+# 17. Coverage and area normalization
 
-Overlapping windows create unequal region coverage.
+Overlapping windows create unequal region coverage and scale-dependent gradients.
 
-Define:
+Define diagonal matrices:
+- $D_a = \operatorname{diag}(|R|) \in \mathbb{R}^{M \times M}$: converts raw count discrepancy into residual density (count/cell).
+- $D_c = \operatorname{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{HW \times HW}$: counts the number of overlapping regions covering each grid cell.
 
-\[
-c
-=
-A^\top \omega.
-\]
-
-The normalized residual field is:
+The diagonally normalized residual field is:
 
 \[
 \boxed{
 r^{(t)}
 =
-\frac{
-A^\top
-[
-\omega\odot
-(AY^{(t)}-b)
-]
-}{
-A^\top\omega+\epsilon
-}.
+D_c^{-1} A^\top D_a^{-1} (A Y^{(t)} - b).
 }
 \]
 
-This prevents central cells from receiving larger corrections solely because they belong to more windows.
+### Mathematical Properties of the Normalized Adjoint:
+1. **Uniform Rate Invariance ($H \mathbf{1} = \mathbf{1}$)**: The composite operator $H = D_c^{-1} A^\top D_a^{-1} A$ is row-stochastic on covered cells:
+   \[
+   H \mathbf{1}_{HW} = D_c^{-1} A^\top D_a^{-1} A \mathbf{1}_{HW} = D_c^{-1} A^\top \mathbf{1}_M = \mathbf{1}_{HW}.
+   \]
+   Therefore, an image-wide uniform rate error $\Delta_R = \alpha |R|$ produces an exact uniform correction field $r = \alpha \mathbf{1}_{HW}$ without center-peaking or scale distortion.
+2. **Spectral Bound**: $0 \le \lambda_i(H) \le 1$. The normalized operator is non-expansive.
 
 ---
 
@@ -900,9 +894,9 @@ m_{\min}
 \sigma(h_\theta).
 \]
 
-This network does **not** replace the mathematical residual.
+with default $[m_{\min}, m_{\max}] = [0.25, 1.75]$.
 
-It only controls local allocation/magnitude.
+This network does **not** replace the mathematical residual. It only controls local allocation/magnitude.
 
 This is the division of labor:
 
@@ -930,15 +924,9 @@ Y^{(t)}
 \operatorname{softplus}(z^{(t)}).
 \]
 
-Since:
+### 19.1 Registered Rule: RMR-Latent (Primary B5 Model)
 
-\[
-\frac{\partial Y}{\partial z}
-=
-\sigma(z),
-\]
-
-a gradient-like update in latent space is:
+In the registered model, the reconciliation step operates directly in the unconstrained latent space without the squashing Jacobian factor:
 
 \[
 \boxed{
@@ -949,11 +937,31 @@ z^{(t)}
 \eta_t
 M^{(t)}
 \odot
-\sigma(z^{(t)})
-\odot
 r^{(t)}.
 }
 \]
+
+This is formally termed a **latent-space preconditioned reconciliation step**. The field $r^{(t)}$ carries the scale-invariant regional discrepancy; $M^{(t)}$ shapes local allocation; $\eta_t > 0$ is a learned bounded step size.
+
+### 19.2 Ablation: RMR-Jacobian
+
+If one views $r^{(t)} \approx \nabla_Y \mathcal{E}_a$ as an energy gradient in measure space, applying the chain rule $\frac{\partial Y}{\partial z} = \sigma(z)$ yields:
+
+\[
+z^{(t+1)}
+=
+z^{(t)}
+-
+\eta_t
+M^{(t)}
+\odot
+\sigma(z^{(t)})
+\odot
+r^{(t)}.
+\]
+
+**Why RMR-Latent is preferred over RMR-Jacobian**:
+With the calibrated initialization $\operatorname{softplus}(-4.595) \approx 0.01$ count/cell, $z \approx -4.6$. At this initialization, $\sigma(z) \approx 0.01$, suppressing updates by $\sim 100\times$ and freezing reconciliation in early training. RMR-Latent eliminates this numerical dead zone. RMR-Jacobian is retained strictly as an explicit ablation (`use_jacobian_gate: true`).
 
 Then:
 

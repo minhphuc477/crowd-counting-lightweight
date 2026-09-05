@@ -35,14 +35,21 @@ def rasterize_points(
 
     pts = points_xy.float()
     x, y = pts[:, 0], pts[:, 1]
+    # Filter truly out-of-image points first (x < 0 or x >= image_w).
     valid = (x >= 0) & (x < image_w) & (y >= 0) & (y < image_h)
     if not valid.any():
         return out
     x, y = x[valid], y[valid]
-    j = torch.floor((x + 0.5) / stride).long()
-    i = torch.floor((y + 0.5) / stride).long()
-    valid_cell = (i >= 0) & (i < gh) & (j >= 0) & (j < gw)
-    i, j = i[valid_cell], j[valid_cell]
+
+    # Canonical assignment: i = floor((y+0.5)/stride), j = floor((x+0.5)/stride).
+    # Boundary conservation: a valid-image-space point at x=15.9, W=16, s=4 maps to
+    # j=floor(16.4/4)=floor(4.1)=4, which equals gw=4 (OOB). Clamp to [0, gw-1] so
+    # such edge points land in the last cell rather than being silently dropped.
+    # The true-OOB filter above ensures that only genuine border-ambiguity points are
+    # affected by the clamp, not points that are actually outside the image.
+    j = torch.floor((x + 0.5) / stride).long().clamp(0, gw - 1)
+    i = torch.floor((y + 0.5) / stride).long().clamp(0, gh - 1)
+
     flat = i * gw + j
     out.view(-1).scatter_add_(0, flat, torch.ones_like(flat, dtype=dtype))
     return out

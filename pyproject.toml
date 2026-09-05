@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hpc-lite"
 version = "0.1.0"
-description = "Neural Tree-Polya Crowd Counting (NTPC)"
+description = "Regional Measure Reconciliation for Crowd Counting (RMR-Count)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

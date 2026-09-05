@@ -406,3 +406,47 @@ def test_fine_head_bias_correct():
     assert 0.005 < initial_rate < 0.05, (
         f"Initial rate per cell = {initial_rate:.4f}, expected ~0.01."
     )
+
+
+def test_output_stride_guard():
+    """P0: RMRCount must reject output_stride != 4 at construction."""
+    import pytest
+    with pytest.raises(ValueError, match="only supports output_stride=4"):
+        RMRCount(RMRConfig(output_stride=8))
+
+
+def test_lazy_regions_direct_and_local_refine():
+    """P0: direct and local_refine must skip region construction (regions is None)."""
+    torch.manual_seed(0)
+    x = torch.randn(1, 3, 64, 64)
+    model_direct = RMRCount(RMRConfig(), variant="direct")
+    out_direct = model_direct(x)
+    assert out_direct["regions"] is None, "direct variant should not construct regions"
+
+    model_refine = RMRCount(RMRConfig(), variant="local_refine")
+    out_refine = model_refine(x)
+    assert out_refine["regions"] is None, "local_refine variant should not construct regions"
+
+    model_rmr = RMRCount(RMRConfig(), variant="rmr")
+    out_rmr = model_rmr(x)
+    assert out_rmr["regions"] is not None, "rmr variant requires regions"
+
+
+def test_eval_restores_jacobian_gate_and_solver_strength():
+    """P0: make_model_from_ckpt in eval.py must restore use_jacobian_gate and solver_strength."""
+    from rmr_count.eval import make_model_from_ckpt
+
+    base_model = RMRCount(RMRConfig(use_jacobian_gate=True), variant="rmr")
+    fake_ckpt = {
+        "config": {
+            "model": {
+                "variant": "rmr",
+                "use_jacobian_gate": True,
+            }
+        },
+        "model": base_model.state_dict(),
+        "solver_strength": 0.65,
+    }
+    loaded = make_model_from_ckpt(fake_ckpt, torch.device("cpu"))
+    assert loaded.cfg.use_jacobian_gate is True, "use_jacobian_gate must be restored"
+    assert abs(loaded.solver_strength - 0.65) < 1e-6, "solver_strength must be restored"

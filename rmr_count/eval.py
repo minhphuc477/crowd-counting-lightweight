@@ -30,9 +30,19 @@ def make_model_from_ckpt(ckpt: dict, device: torch.device) -> RMRCount:
         eta_max=cfg["model"].get("eta_max", 0.20),
         eta_init=cfg["model"].get("eta_init", 0.05),
         residual_clip=cfg["model"].get("residual_clip", 5.0),
+        # P0 fix: restore ablation flag — without this, RMR-Jacobian checkpoints are
+        # silently evaluated as RMR-Latent (different update rule → wrong results).
+        use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
     )
     model = RMRCount(mcfg, variant=cfg["model"]["variant"])
     model.load_state_dict(ckpt["model"], strict=True)
+    # P0 fix: restore solver_strength — without this, diagnostic checkpoints saved
+    # during solver ramp-up (strength < 1.0) are loaded with strength=1.0, making
+    # eval results not reproducible from the checkpoint's training epoch.
+    # Production best_val_mae.pt checkpoints always have strength=1.0, so this is
+    # a no-op for final results but is critical for mid-training diagnostics.
+    saved_strength = float(ckpt.get("solver_strength", 1.0))
+    model.set_solver_strength(saved_strength)
     return model.to(device).eval()
 
 
@@ -268,7 +278,7 @@ def main() -> None:
     ckpt = torch.load(args.checkpoint, map_location="cpu")
     model = make_model_from_ckpt(ckpt, device)
     ds = CrowdManifestDataset(args.manifest, train=False, output_stride=model.cfg.output_stride)
-    loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=2, collate_fn=collate_eval)
+    loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
     rows, summary = evaluate(
         model, loader, device, args.tile_size, args.practical_halo, region_mode=args.region_mode

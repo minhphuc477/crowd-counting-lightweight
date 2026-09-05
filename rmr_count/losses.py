@@ -88,7 +88,14 @@ class LossConfig:
     lambda_global: float = 0.10
     lambda_region_map: float = 0.20
     lambda_region_head: float = 0.20
-    lambda_deep_supervision: float = 0.10
+    # P0 scientific fairness: deep supervision is DISABLED by default.
+    # B5 (RMR T=2) and B3a/B3b have iterates > 2 so they would receive intermediate
+    # supervision while B2 (region_aux) and B4 (RMR T=1) do NOT.
+    # This makes B2→B5 compare "regional head" vs "regional head + reconciliation + deep sup",
+    # not "reconciliation" alone. Default=0 ensures the causal experiment is clean.
+    # To ablate deep supervision separately, explicitly set lambda_deep_supervision > 0
+    # in a dedicated config and label it "RMR+DeepSup" in the paper.
+    lambda_deep_supervision: float = 0.0
     cell_beta: float = 1.0
     # P1 fix: regional loss operates on rate (count/cell), magnitude ~0.001–0.1.
     # beta=2.0 (old, for raw counts) placed all rate residuals in quadratic regime,
@@ -113,28 +120,31 @@ def compute_losses(
       rmr:             region_aux + exact-adjoint reconciliation
     """
     y = outputs["y"]
-    regions: RegionSet = outputs["regions"]
+    regions: RegionSet | None = outputs.get("regions")
     losses: dict[str, torch.Tensor] = {}
 
     losses["cell"] = balanced_smooth_l1(y, target_y, beta=cfg.cell_beta)
     losses["global"] = global_count_loss(y, target_y)
 
-    target_region = regional_sum(target_y, regions.boxes)
+    if variant in {"region_loss", "region_aux", "learned_project", "rmr"}:
+        if regions is None:
+            raise ValueError(f"Variant {variant} requires regions in outputs")
+        target_region = regional_sum(target_y, regions.boxes)
 
-    if variant == "region_loss":
-        # B1 control: impose regional rate loss on the output density map.
-        # Uses rate loss (P0 #2 fix) for fair comparison with B2.
-        pred_region = regional_sum(y, regions.boxes)
-        losses["region_map"] = scale_balanced_region_rate_loss(
-            pred_region, target_region, regions, beta=cfg.region_beta
-        )
+        if variant == "region_loss":
+            # B1 control: impose regional rate loss on the output density map.
+            # Uses rate loss (P0 #2 fix) for fair comparison with B2.
+            pred_region = regional_sum(y, regions.boxes)
+            losses["region_map"] = scale_balanced_region_rate_loss(
+                pred_region, target_region, regions, beta=cfg.region_beta
+            )
 
-    if variant in {"region_aux", "learned_project", "rmr"}:
-        # Regional evidence head loss: rate-normalized for scale-balanced gradient.
-        b_region = outputs["b_region"]
-        losses["region_head"] = scale_balanced_region_rate_loss(
-            b_region, target_region, regions, beta=cfg.region_beta
-        )
+        if variant in {"region_aux", "learned_project", "rmr"}:
+            # Regional evidence head loss: rate-normalized for scale-balanced gradient.
+            b_region = outputs["b_region"]
+            losses["region_head"] = scale_balanced_region_rate_loss(
+                b_region, target_region, regions, beta=cfg.region_beta
+            )
 
     # Optional weak deep supervision on intermediate positive measures for iterative variants.
     iterates = outputs.get("iterates", [])

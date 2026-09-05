@@ -369,6 +369,14 @@ class RMRCount(nn.Module):
 
     def __init__(self, cfg: RMRConfig = RMRConfig(), variant: Variant = "rmr"):
         super().__init__()
+        # P0 guard: TinyLocalEncoder is hardwired to output_stride=4 (stem=s2, body=s4 total).
+        # Any other value in the config would silently produce mismatched tensor shapes.
+        if cfg.output_stride != 4:
+            raise ValueError(
+                f"RMRCount only supports output_stride=4 "
+                f"(TinyLocalEncoder is hardwired to stride 4). "
+                f"Got output_stride={cfg.output_stride}."
+            )
         self.cfg = cfg
         self.variant = variant
         self.encoder = TinyLocalEncoder()
@@ -463,7 +471,22 @@ class RMRCount(nn.Module):
         z0 = self.fine_head(f)
         y0 = F.softplus(z0)
         h, w = y0.shape[-2:]
-        regions = self._regions(h, w, x.device)
+
+        # Lazy region construction: only variants that use a region head, B1 rate loss,
+        # or the iterative solver need region boxes. Skipping for direct/local_refine:
+        #  - avoids O(M) region box allocation per forward (waste training compute)
+        #  - avoids inflating direct/local_refine latency in timing benchmarks
+        #  - makes RMR overhead appear genuine rather than hidden in all variants
+        #
+        # eval.py: diagnostic loops guard on `model.region_head is not None`, so None
+        # regions in out["regions"] will never be dereferenced for direct/local_refine.
+        # compute_losses: also guards on variant, so regional losses are not applied.
+        needs_regions = self.region_head is not None or self.variant in {
+            "region_loss", "learned_project", "rmr"
+        }
+        regions: RegionSet | None = (
+            self._regions(h, w, x.device) if needs_regions else None
+        )
 
         out: dict = {
             "features": f,
@@ -473,6 +496,7 @@ class RMRCount(nn.Module):
         }
 
         if self.region_head is not None:
+            assert regions is not None
             b_region = self.region_head(f, regions)
             if b_region_override is not None:
                 if b_region_override.shape != b_region.shape:

@@ -25,7 +25,7 @@ loss:
   lambda_global: 0.1
   lambda_region_map: 0.2
   lambda_region_head: 0.2
-  lambda_deep_supervision: 0.1
+  lambda_deep_supervision: 0.0
   cell_beta: 1.0
   region_beta: 0.1
 train:

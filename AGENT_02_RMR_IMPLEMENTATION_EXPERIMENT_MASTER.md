@@ -348,9 +348,10 @@ M^{(t)}
 [0.25,1.75].
 \]
 
-Update:
+Update (Registered B5 rule: RMR-Latent):
 
 \[
+\boxed{
 z^{(t+1)}
 =
 z^{(t)}
@@ -358,10 +359,11 @@ z^{(t)}
 \eta_t
 M^{(t)}
 \odot
-\sigma(z^{(t)})
-\odot
 r^{(t)}.
+}
 \]
+
+*(Note: The Jacobian-gated variant $z^{(t+1)} = z^{(t)} - \eta_t M^{(t)} \odot \sigma(z^{(t)}) \odot r^{(t)}$ is retained as an explicit ablation `use_jacobian_gate: true`. At $z \approx -4.6$, $\sigma(z) \approx 0.01$ suppresses early updates $\sim 100\times$, so RMR-Latent is the primary registered model).*
 
 Then:
 
