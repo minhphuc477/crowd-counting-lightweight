@@ -23,16 +23,19 @@ def make_model_from_ckpt(ckpt: dict, device: torch.device) -> RMRCount:
     mcfg = RMRConfig(
         output_stride=cfg["model"].get("output_stride", 4),
         feature_width=cfg["model"].get("feature_width", 32),
-        region_sizes_px=tuple(cfg["model"].get("region_sizes_px", [16, 32, 64, 128])),
+        region_sizes_px=tuple(cfg["model"].get("region_sizes_px", [32, 64, 128])),
         region_overlap=cfg["model"].get("region_overlap", 0.5),
-        include_full_image=cfg["model"].get("include_full_image", True),
+        include_full_image=cfg["model"].get("include_full_image", False),
         iterations=cfg["model"].get("iterations", 2),
         eta_max=cfg["model"].get("eta_max", 0.20),
         eta_init=cfg["model"].get("eta_init", 0.05),
         residual_clip=cfg["model"].get("residual_clip", 5.0),
-        # P0 fix: restore ablation flag — without this, RMR-Jacobian checkpoints are
-        # silently evaluated as RMR-Latent (different update rule → wrong results).
+        update_rule=cfg["model"].get("update_rule", "latent"),
         use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
+        sirt_omega=cfg["model"].get("sirt_omega", 1.0),
+        learnable_sirt_omega=cfg["model"].get("learnable_sirt_omega", False),
+        projected_use_preconditioner=cfg["model"].get("projected_use_preconditioner", False),
+        detach_region_evidence=cfg["model"].get("detach_region_evidence", True),
     )
     model = RMRCount(mcfg, variant=cfg["model"]["variant"])
     model.load_state_dict(ckpt["model"], strict=True)

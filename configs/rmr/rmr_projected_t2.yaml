@@ -1,5 +1,5 @@
 seed: 42
-output_dir: runs/sha_a/rmr_t2_seed42
+output_dir: runs/sha_a/rmr_projected_t2_seed42
 data:
   train_manifest: data/sha_a_train.jsonl
   val_manifest: data/sha_a_val.jsonl
@@ -18,9 +18,11 @@ model:
   region_overlap: 0.5
   include_full_image: false
   iterations: 2
-  update_rule: latent
-  eta_max: 0.2
-  eta_init: 0.05
+  update_rule: projected_sirt
+  sirt_omega: 1.0
+  learnable_sirt_omega: false
+  projected_use_preconditioner: false
+  detach_region_evidence: true
   residual_clip: 5.0
 loss:
   lambda_global: 0.1
@@ -32,7 +34,7 @@ loss:
 train:
   batch_size: 8
   workers: 0
-  lr: 0.0003
+  lr: 0.0001
   weight_decay: 0.0001
   epochs: 1000
   warmup_epochs: 5

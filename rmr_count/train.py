@@ -50,8 +50,12 @@ def make_model(cfg: dict) -> RMRCount:
         eta_max=cfg["model"].get("eta_max", 0.20),
         eta_init=cfg["model"].get("eta_init", 0.05),
         residual_clip=cfg["model"].get("residual_clip", 5.0),
-        # Ablation: False=RMR-Latent (default/registered), True=RMR-Jacobian (ablation only).
+        update_rule=cfg["model"].get("update_rule", "latent"),
         use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
+        sirt_omega=cfg["model"].get("sirt_omega", 1.0),
+        learnable_sirt_omega=cfg["model"].get("learnable_sirt_omega", False),
+        projected_use_preconditioner=cfg["model"].get("projected_use_preconditioner", False),
+        detach_region_evidence=cfg["model"].get("detach_region_evidence", True),
     )
     return RMRCount(mcfg, variant=cfg["model"]["variant"])
 
@@ -208,7 +212,7 @@ def main() -> None:
     # P1: expanded logging with loss components, grad norm, initial count, solver diagnostics
     log_path = out_dir / "train_log.csv"
     fieldnames = [
-        "epoch", "lr", "solver_strength", "eta0",
+        "epoch", "lr", "solver_strength", "rmr_update_rule", "solver_step0", "eta0",
         "train_total", "train_cell", "train_global", "train_region_head", "train_region_map", "train_deep",
         "grad_norm_mean", "grad_norm_max", "clip_rate",
         "residual_abs_mean", "residual_abs_max", "z_lt_minus10_frac",
@@ -339,10 +343,20 @@ def main() -> None:
         else:
             init_mean = init_std = 0.0
 
+        rule_name = getattr(model, "update_rule", "latent")
+        if rule_name == "projected_sirt":
+            step0 = float(model._sirt_omega().detach().cpu().item()) * solver_strength
+        elif hasattr(model, "_eta"):
+            step0 = float(model._eta(0).detach().cpu().item()) * solver_strength
+        else:
+            step0 = 0.0
+
         row = {
             "epoch": epoch,
             "lr": current_lr,
             "solver_strength": solver_strength,
+            "rmr_update_rule": rule_name,
+            "solver_step0": step0,
             "eta0": float(model._eta(0).detach().cpu().item()) if hasattr(model, "_eta") else 0.0,
             "train_total": sums["total"] / max(1, n_steps),
             "train_cell": sums["cell"] / max(1, n_steps),
@@ -403,8 +417,9 @@ def main() -> None:
         # Formatted readable epoch log (pure ASCII for cross-platform compatibility)
         if model.variant in {"local_refine", "learned_project", "rmr"}:
             sgn = "+" if row["solver_signed_delta_n_mean"] >= 0 else ""
+            rule_str = f" [{rule_name}]" if model.variant == "rmr" else ""
             solver_str = (
-                f"Solver: {solver_strength:4.2f} "
+                f"Solver{rule_str}: {solver_strength:4.2f} "
                 f"(step: {row['solver_rel_step_mean']:.4f}, "
                 f"dN: {sgn}{row['solver_signed_delta_n_mean']:.1f}, "
                 f"|dN|: {row['solver_delta_n_mean']:.1f}, "

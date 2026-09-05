@@ -26,6 +26,8 @@ Variant = Literal[
     "rmr",
 ]
 
+RMRUpdate = Literal["latent", "jacobian", "projected_sirt"]
+
 # Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(y) = log(exp(y)-1).
 # For target initial rate mu0 = 0.01 count/cell:
 # softplus^{-1}(0.01) = log(exp(0.01)-1) ≈ -4.595
@@ -325,12 +327,19 @@ class RMRConfig:
     residual_clip: float = 5.0
 
     eps: float = 1e-6
-    # Ablation flag: selects between two update rules (see RMRCount docstring).
-    #   False (default) = RMR-Latent:   z^{t+1} = z^t - eta * M * r
-    #   True            = RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
-    # RMR-Latent is used for all registered B5 results.
-    # RMR-Jacobian is an explicit ablation that must be separately labeled in the paper.
+    # Update rule selection:
+    #   "latent":         z^{t+1} = z^t - eta * M * r  (legacy default)
+    #   "jacobian":       z^{t+1} = z^t - eta * M * sigma(z) * r  (ablation)
+    #   "projected_sirt": Y^{t+1} = max(0, Y^t - omega * M * r)  (RMR-P registered)
+    update_rule: RMRUpdate = "latent"
+    # Legacy ablation flag: if True and update_rule=="latent", sets update_rule to "jacobian"
     use_jacobian_gate: bool = False
+
+    # Projected SIRT parameters (RMR-P):
+    sirt_omega: float = 1.0
+    learnable_sirt_omega: bool = False
+    projected_use_preconditioner: bool = False
+    detach_region_evidence: bool = True
 
 
 class RMRCount(nn.Module):
@@ -380,6 +389,15 @@ class RMRCount(nn.Module):
             )
         self.cfg = cfg
         self.variant = variant
+
+        # Resolve effective update rule with backward compatibility
+        if cfg.update_rule == "projected_sirt":
+            self.update_rule: RMRUpdate = "projected_sirt"
+        elif cfg.use_jacobian_gate or cfg.update_rule == "jacobian":
+            self.update_rule = "jacobian"
+        else:
+            self.update_rule = "latent"
+
         self.encoder = TinyLocalEncoder()
         self.fusion = AdditiveFusion(cfg.feature_width)
         self.fine_head = FineMeasureHead(cfg.feature_width)
@@ -387,7 +405,16 @@ class RMRCount(nn.Module):
         needs_region_head = variant in {"region_aux", "learned_project", "rmr"}
         self.region_head = RegionalEvidenceHead(cfg.feature_width) if needs_region_head else None
 
-        self.preconditioner = LocalPreconditioner(cfg.feature_width) if variant == "rmr" else None
+        needs_preconditioner = (
+            variant == "rmr"
+            and (
+                self.update_rule in {"latent", "jacobian"}
+                or cfg.projected_use_preconditioner
+            )
+        )
+        self.preconditioner = (
+            LocalPreconditioner(cfg.feature_width) if needs_preconditioner else None
+        )
         self.local_refiner = LocalCNNRefiner(cfg.feature_width) if variant == "local_refine" else None
         self.learned_projector = (
             LearnedMembershipProjector(cfg.feature_width) if variant == "learned_project" else None
@@ -397,6 +424,11 @@ class RMRCount(nn.Module):
         frac = cfg.eta_init / max(cfg.eta_max, 1e-8)
         init = _logit(frac)
         self.eta_logits = nn.Parameter(torch.full((n_steps,), init))
+
+        if cfg.learnable_sirt_omega:
+            self.log_sirt_omega = nn.Parameter(torch.tensor(math.log(max(cfg.sirt_omega, 1e-4))))
+        else:
+            self.register_parameter("log_sirt_omega", None)
 
         # Training script ramps this from 0 -> 1 after the direct prediction has stabilized.
         # NOTE: this is a Python float, NOT in state_dict. Checkpoint loading always restores
@@ -439,6 +471,37 @@ class RMRCount(nn.Module):
     def _eta(self, t: int) -> torch.Tensor:
         idx = min(t, self.eta_logits.numel() - 1)
         return self.cfg.eta_max * torch.sigmoid(self.eta_logits[idx])
+
+    def _sirt_omega(
+        self, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> torch.Tensor:
+        if self.log_sirt_omega is None:
+            return torch.tensor(self.cfg.sirt_omega, dtype=dtype or torch.float32, device=device)
+        omega = torch.exp(self.log_sirt_omega)
+        if device is not None:
+            omega = omega.to(device=device)
+        if dtype is not None:
+            omega = omega.to(dtype=dtype)
+        return omega
+
+    def _projected_sirt_step(
+        self,
+        y: torch.Tensor,
+        b_region: torch.Tensor,
+        regions: RegionSet,
+        coverage: torch.Tensor,
+        f: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        r = self._normalized_adjoint_field(y, b_region, regions, coverage=coverage)
+        if self.cfg.projected_use_preconditioner and self.preconditioner is not None:
+            m = self.preconditioner(f, y, r)
+        else:
+            m = torch.ones_like(y)
+        omega = self._sirt_omega(device=y.device, dtype=y.dtype)
+        omega_eff = omega * self.solver_strength
+        y_next = torch.clamp_min(y - omega_eff * m * r, 0.0)
+        omega_val = float(omega_eff.detach().item())
+        return y_next, r, m, omega_val
 
     def _raw_region_delta(
         self,
@@ -536,8 +599,10 @@ class RMRCount(nn.Module):
                         perm = idx[torch.randperm(idx.numel(), device=idx.device)]
                         b_region[..., idx] = b_region[..., perm]
             out["b_region"] = b_region
+            b_solver = b_region.detach() if self.cfg.detach_region_evidence else b_region
         else:
             b_region = None
+            b_solver = None
 
         if self.variant in {"direct", "region_loss", "region_aux"}:
             out["y"] = y0
@@ -553,21 +618,33 @@ class RMRCount(nn.Module):
         preconditioner_fields: list[torch.Tensor] = []
         step_sizes: list[float] = []
 
-        if self.variant in {"learned_project", "rmr"} and b_region is None:
+        if self.variant in {"learned_project", "rmr"} and b_solver is None:
             raise RuntimeError(f"variant {self.variant} requires regional evidence")
 
         for t in range(self.cfg.iterations):
+            if self.variant == "rmr" and self.update_rule == "projected_sirt":
+                assert b_solver is not None
+                assert regions is not None and coverage is not None
+                y, r, m, step_val = self._projected_sirt_step(
+                    y, b_solver, regions, coverage=coverage, f=f
+                )
+                residual_fields.append(r)
+                preconditioner_fields.append(m)
+                step_sizes.append(step_val)
+                iterates.append(y)
+                continue
+
             eta = self._eta(t) * self.solver_strength
             eta_val = float(eta.detach().item() if isinstance(eta, torch.Tensor) else eta)
             step_sizes.append(eta_val)
 
             if self.variant == "rmr":
-                assert b_region is not None and self.preconditioner is not None
-                r = self._normalized_adjoint_field(y, b_region, regions, coverage=coverage)
+                assert b_solver is not None and self.preconditioner is not None
+                r = self._normalized_adjoint_field(y, b_solver, regions, coverage=coverage)
                 residual_fields.append(r)
                 m = self.preconditioner(f, y, r)
                 preconditioner_fields.append(m)
-                if self.cfg.use_jacobian_gate:
+                if self.update_rule == "jacobian":
                     # RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
                     # Interpretation: r ≈ nabla_Y E (gradient of regional consistency energy
                     # in measure space), and dY/dz = sigma(z) is the Jacobian of the
@@ -584,8 +661,8 @@ class RMRCount(nn.Module):
                     z = z - eta * m * r
 
             elif self.variant == "learned_project":
-                assert b_region is not None and self.learned_projector is not None
-                delta = self._raw_region_delta(y, b_region, regions)
+                assert b_solver is not None and self.learned_projector is not None
+                delta = self._raw_region_delta(y, b_solver, regions)
                 learned_field = self.learned_projector.project(f, y, delta, regions)
                 if self.cfg.residual_clip > 0:
                     learned_field = learned_field.clamp(
@@ -609,7 +686,7 @@ class RMRCount(nn.Module):
             iterates.append(y)
 
         out["y"] = y
-        out["z"] = z
+        out["z"] = None if (self.variant == "rmr" and self.update_rule == "projected_sirt") else z
         out["iterates"] = iterates
         out["residual_fields"] = residual_fields
         out["preconditioner_fields"] = preconditioner_fields
