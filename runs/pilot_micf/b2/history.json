@@ -1,0 +1,16 @@
+[
+  {
+    "epoch": 1,
+    "loss": 29.868223190307617,
+    "lr": 0.0,
+    "mae_crop": 78.81796875,
+    "mae_full": 1024.217138671875,
+    "mae": 78.81796875,
+    "rmse": 1187.2128720398985,
+    "violation_rate": 0.0,
+    "best_mae": 78.81796875,
+    "time_sec": 10.568222045898438,
+    "violation_magnitude": 0.0,
+    "neg_mass_ratio": 0.0
+  }
+]

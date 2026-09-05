@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import os
+import random
+from pathlib import Path
+
+import numpy as np
+import torch
+import yaml
+from torch.utils.data import DataLoader
+
+from .data import CrowdManifestDataset, collate_eval, collate_train
+from .losses import LossConfig, compute_losses
+from .metrics import game_single, summarize_predictions
+from .model import RMRConfig, RMRCount, count_parameters
+
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def make_model(cfg: dict) -> RMRCount:
+    mcfg = RMRConfig(
+        output_stride=cfg["model"].get("output_stride", 4),
+        feature_width=cfg["model"].get("feature_width", 32),
+        region_sizes_px=tuple(cfg["model"].get("region_sizes_px", [16, 32, 64, 128])),
+        region_overlap=cfg["model"].get("region_overlap", 0.5),
+        include_full_image=cfg["model"].get("include_full_image", True),
+        iterations=cfg["model"].get("iterations", 2),
+        eta_max=cfg["model"].get("eta_max", 1.0),
+    )
+    return RMRCount(mcfg, variant=cfg["model"]["variant"])
+
+
+def make_loss_cfg(cfg: dict) -> LossConfig:
+    x = cfg.get("loss", {})
+    return LossConfig(
+        lambda_global=x.get("lambda_global", 0.10),
+        lambda_region_map=x.get("lambda_region_map", 0.20),
+        lambda_region_head=x.get("lambda_region_head", 0.20),
+        lambda_deep_supervision=x.get("lambda_deep_supervision", 0.10),
+        cell_beta=x.get("cell_beta", 1.0),
+        region_beta=x.get("region_beta", 2.0),
+    )
+
+
+def make_scheduler(optimizer: torch.optim.Optimizer, epochs: int, warmup: int):
+    def fn(epoch: int) -> float:
+        if epoch < warmup:
+            return max(1e-3, (epoch + 1) / max(1, warmup))
+        p = (epoch - warmup) / max(1, epochs - warmup)
+        return 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fn)
+
+
+@torch.no_grad()
+def evaluate(model: RMRCount, loader: DataLoader, device: torch.device) -> dict[str, float]:
+    model.eval()
+    rows = []
+    for batch_list in loader:
+        for sample in batch_list:
+            image = sample["image"].unsqueeze(0).to(device)
+            target = sample["target_y"].to(device)
+            out = model(image)
+            y = out["y"][0]
+            pred = float(y.sum().item())
+            gt = float(target.sum().item())
+            row = {"gt": gt, "pred": pred}
+            for level in range(4):
+                row[f"GAME{level}"] = game_single(y, target, level)
+            rows.append(row)
+    return summarize_predictions(rows)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--resume", default=None)
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--lr", type=float, default=None)
+    ap.add_argument("--output-dir", default=None)
+    args = ap.parse_args()
+
+    cfg = yaml.safe_load(Path(args.config).read_text())
+    if args.seed is not None:
+        cfg["seed"] = args.seed
+    if args.lr is not None:
+        cfg.setdefault("train", {})["lr"] = args.lr
+    if args.output_dir is not None:
+        cfg["output_dir"] = args.output_dir
+    seed = int(cfg.get("seed", 42))
+    seed_everything(seed)
+    torch.backends.cudnn.benchmark = True
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    out_dir = Path(cfg["output_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+
+    train_ds = CrowdManifestDataset(
+        cfg["data"]["train_manifest"],
+        train=True,
+        output_stride=cfg["model"].get("output_stride", 4),
+        crop_size=cfg["data"].get("crop_size", 512),
+        scale_range=tuple(cfg["data"].get("scale_range", [0.75, 1.25])),
+    )
+    val_manifest = cfg["data"].get("val_manifest")
+    val_ds = None if not val_manifest else CrowdManifestDataset(
+        val_manifest,
+        train=False,
+        output_stride=cfg["model"].get("output_stride", 4),
+    )
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=cfg["train"].get("batch_size", 8),
+        shuffle=True,
+        num_workers=cfg["train"].get("workers", 4),
+        pin_memory=True,
+        persistent_workers=cfg["train"].get("workers", 4) > 0,
+        collate_fn=collate_train,
+        drop_last=True,
+    )
+    val_loader = None if val_ds is None else DataLoader(
+        val_ds,
+        batch_size=1,
+        shuffle=False,
+        num_workers=max(0, min(2, cfg["train"].get("workers", 4))),
+        collate_fn=collate_eval,
+    )
+
+    model = make_model(cfg).to(device)
+    print(f"variant={model.variant} params={count_parameters(model):,}")
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(cfg["train"].get("lr", 3e-4)),
+        weight_decay=float(cfg["train"].get("weight_decay", 1e-4)),
+    )
+    epochs = int(cfg["train"].get("epochs", 1000))
+    scheduler = make_scheduler(optimizer, epochs, int(cfg["train"].get("warmup_epochs", 25)))
+    amp = bool(cfg["train"].get("amp", True) and device.type == "cuda")
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    loss_cfg = make_loss_cfg(cfg)
+    grad_clip = float(cfg["train"].get("grad_clip", 5.0))
+    eval_every = int(cfg["train"].get("eval_every", 10))
+
+    start_epoch = 0
+    best_mae = float("inf")
+    if args.resume:
+        ckpt = torch.load(args.resume, map_location="cpu")
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        if "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
+        start_epoch = ckpt["epoch"] + 1
+        best_mae = ckpt.get("best_mae", best_mae)
+
+    log_path = out_dir / "train_log.csv"
+    fieldnames = ["epoch", "lr", "train_total", "train_cell", "train_global", "clip_rate", "val_MAE", "val_RMSE", "val_NAE", "val_Bias"]
+    if not log_path.exists():
+        with log_path.open("w", newline="") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        sums = {"total": 0.0, "cell": 0.0, "global": 0.0}
+        n_steps = 0
+        clipped = 0
+        for batch in train_loader:
+            image = batch["image"].to(device, non_blocking=True)
+            target = batch["target_y"].to(device, non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
+            with torch.cuda.amp.autocast(enabled=amp):
+                outputs = model(image)
+                losses = compute_losses(outputs, target, model.variant, loss_cfg)
+            scaler.scale(losses["total"]).backward()
+            scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            clipped += int(float(grad_norm) > grad_clip)
+            scaler.step(optimizer)
+            scaler.update()
+
+            for k in sums:
+                if k in losses:
+                    sums[k] += float(losses[k].detach().item())
+            n_steps += 1
+        scheduler.step()
+
+        row = {
+            "epoch": epoch,
+            "lr": optimizer.param_groups[0]["lr"],
+            "train_total": sums["total"] / max(1, n_steps),
+            "train_cell": sums["cell"] / max(1, n_steps),
+            "train_global": sums["global"] / max(1, n_steps),
+            "clip_rate": clipped / max(1, n_steps),
+            "val_MAE": "",
+            "val_RMSE": "",
+            "val_NAE": "",
+            "val_Bias": "",
+        }
+
+        do_eval = val_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == epochs - 1)
+        state = {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "best_mae": best_mae,
+            "config": cfg,
+        }
+        if do_eval:
+            metrics = evaluate(model, val_loader, device)
+            row.update({
+                "val_MAE": metrics["MAE"],
+                "val_RMSE": metrics["RMSE"],
+                "val_NAE": metrics["NAE"],
+                "val_Bias": metrics["Bias"],
+            })
+            if metrics["MAE"] < best_mae:
+                best_mae = metrics["MAE"]
+                state["best_mae"] = best_mae
+                torch.save(state, out_dir / "best_val_mae.pt")
+            print(f"ep={epoch:04d} loss={row['train_total']:.4f} valMAE={metrics['MAE']:.3f} valRMSE={metrics['RMSE']:.3f} clip={row['clip_rate']:.3f}")
+        else:
+            print(f"ep={epoch:04d} loss={row['train_total']:.4f} clip={row['clip_rate']:.3f}")
+        if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
+            state["best_mae"] = best_mae
+            torch.save(state, out_dir / "last.pt")
+
+        with log_path.open("a", newline="") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
+
+
+if __name__ == "__main__":
+    main()

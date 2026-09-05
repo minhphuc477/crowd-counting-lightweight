@@ -1,0 +1,207 @@
+{
+  "checkpoint": "F:\\lightweightcrcn\\runs\\pilot_micf\\b8_k4\\best.pt",
+  "checkpoint_epoch": 785,
+  "checkpoint_best_mae_stored": 21.539348261369454,
+  "model_head_type": "cumulative",
+  "model_output_stride": 16,
+  "model_finite_horizon": 4,
+  "dataset_split": "test_data",
+  "num_images": 182,
+  "num_windows": 1754,
+  "tile_size": 256,
+  "halo": 64,
+  "controlled_halo": 0,
+  "game_levels": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "window": {
+    "mae": 13.445950575856791,
+    "rmse": 30.194360102026423,
+    "signed_bias": -7.061360400654333,
+    "median_ae": 4.683636233210564,
+    "p90_ae": 34.47496910095215,
+    "p95_ae": 54.15794296264647,
+    "max_ae": 317.47203063964844,
+    "window_mae": 13.445950575856791,
+    "window_rmse": 30.194360102026423,
+    "window_mae_micro": 13.445950575856791,
+    "window_rmse_micro": 30.194360102026423,
+    "window_mae_macro": 14.552418985790986,
+    "window_rmse_macro": 20.96797224644043,
+    "full_window_mae": 17.173958469154453,
+    "full_window_rmse": 36.27984047393757,
+    "full_window_count": 1072,
+    "edge_window_mae": 7.58609066146516,
+    "edge_window_rmse": 16.60854988522874,
+    "edge_window_count": 682,
+    "nae_nonzero": 0.4466136599534467,
+    "nonempty_window_mae": 15.098175067868498,
+    "empty_window_mae": 2.1606672152411193,
+    "empty_window_mean_prediction": 2.1606672152411193,
+    "empty_window_fraction": 0.12770809578107184,
+    "pmae": 13.445950575856791,
+    "prmse": 30.194360102026423,
+    "pmae_micro": 13.445950575856791,
+    "prmse_micro": 30.194360102026423,
+    "pmae_macro": 14.552418985790986,
+    "prmse_macro": 20.96797224644043,
+    "full_window_pmae": 17.173958469154453,
+    "full_window_prmse": 36.27984047393757,
+    "edge_window_pmae": 7.58609066146516,
+    "edge_window_prmse": 16.60854988522874
+  },
+  "full_tiled": {
+    "mae": 105.97991052564684,
+    "rmse": 184.31400124157673,
+    "nae": 0.2689199136784467,
+    "sre": 7.59004079450344,
+    "signed_bias": -68.64629789499136,
+    "median_ae": 55.9659423828125,
+    "p90_ae": 251.398016357422,
+    "p95_ae": 395.7351745605467,
+    "max_ae": 1002.9413452148438
+  },
+  "full_tiled_practical": {
+    "mae": 105.97991052564684,
+    "rmse": 184.31400124157673,
+    "nae": 0.2689199136784467,
+    "sre": 7.59004079450344,
+    "signed_bias": -68.64629789499136,
+    "median_ae": 55.9659423828125,
+    "p90_ae": 251.398016357422,
+    "p95_ae": 395.7351745605467,
+    "max_ae": 1002.9413452148438
+  },
+  "full_tiled_controlled": {
+    "mae": 103.22781814323677,
+    "rmse": 184.4557941245497,
+    "nae": 0.2616724184823146,
+    "sre": 7.477422909548836,
+    "signed_bias": -46.271046711848335,
+    "median_ae": 58.531822204589844,
+    "p90_ae": 243.88134765625014,
+    "p95_ae": 382.20435028076133,
+    "max_ae": 1037.8658752441406
+  },
+  "full_direct": {
+    "mae": 115.21922029767718,
+    "rmse": 188.76099811769876,
+    "nae": 0.30089837257285235,
+    "sre": 8.05106381772882,
+    "signed_bias": -73.00187595073993,
+    "median_ae": 70.10794067382812,
+    "p90_ae": 268.23465557098393,
+    "p95_ae": 395.4145263671871,
+    "max_ae": 1013.829833984375
+  },
+  "direct_minus_tiled": {
+    "mae_gap": 9.239309772030339,
+    "rmse_gap": 4.446996876122029,
+    "nae_gap": 0.03197845889440565,
+    "sre_gap": 0.4610230232253807
+  },
+  "direct_minus_tiled_practical": {
+    "mae_gap": 9.239309772030339,
+    "rmse_gap": 4.446996876122029,
+    "nae_gap": 0.03197845889440565,
+    "sre_gap": 0.4610230232253807
+  },
+  "direct_minus_tiled_controlled": {
+    "mae_gap": 11.991402154440408,
+    "rmse_gap": 4.305203993149064,
+    "nae_gap": 0.03922595409053775,
+    "sre_gap": 0.5736409081799847
+  },
+  "halo_effect_practical_minus_controlled": {
+    "mae_gap": 2.752092382410069,
+    "rmse_gap": -0.14179288297296466,
+    "nae_gap": 0.007247495196132103,
+    "sre_gap": 0.11261788495460401
+  },
+  "cancellation": {
+    "mean": 0.2872634750148734,
+    "median": 0.13844439846359047,
+    "p90": 0.7885000074850116
+  },
+  "game_pixel_direct": {
+    "L0": 115.3781763957097,
+    "L1": 138.89846093641532,
+    "L2": 166.41711174942307,
+    "L3": 205.44102008265168
+  },
+  "game_pixel_tiled": {
+    "L0": 106.34112942873777,
+    "L1": 124.90575218266183,
+    "L2": 150.37639583725033,
+    "L3": 190.87377925814707
+  },
+  "game_stride16_direct": {
+    "L0": 114.8675715477912,
+    "L1": 137.706420313526,
+    "L2": 166.16902197152376,
+    "L3": 207.33323831481675
+  },
+  "game_stride16_tiled": {
+    "L0": 105.65024055229439,
+    "L1": 123.40519470369424,
+    "L2": 149.25309327216104,
+    "L3": 191.30953656804778
+  },
+  "micf_validity_direct": {
+    "macro_violation_rate": 0.037840592668334505,
+    "macro_violation_rate_raw": 0.037840592668334505,
+    "macro_violation_rate_tau": 0.03783401793771524,
+    "macro_violation_magnitude": 0.001302321526536816,
+    "macro_negative_mass_ratio": 0.014698325270314849,
+    "micro_violation_rate": 0.045566732234145195,
+    "micro_violation_rate_raw": 0.045566732234145195,
+    "micro_violation_rate_tau": 0.04556140154483376,
+    "micro_violation_magnitude": 0.0014816372005333044,
+    "micro_negative_mass_ratio": 0.00832226804550729,
+    "negative_mass_total": 555.8895347192883,
+    "violation_rate": 0.037840592668334505,
+    "violation_magnitude": 0.001302321526536816,
+    "negative_mass_ratio": 0.014698325270314849
+  },
+  "micf_validity_tiled": {
+    "macro_violation_rate": 0.04456478621338305,
+    "macro_violation_rate_raw": 0.04456478621338305,
+    "macro_violation_rate_tau": 0.04456333110069913,
+    "macro_violation_magnitude": 0.0005795911049005384,
+    "macro_negative_mass_ratio": 0.005842699510121439,
+    "micro_violation_rate": 0.052707190566812195,
+    "micro_violation_rate_raw": 0.052707190566812195,
+    "micro_violation_rate_tau": 0.052704525222156476,
+    "micro_violation_magnitude": 0.0005647373686566745,
+    "micro_negative_mass_ratio": 0.0031671318585802773,
+    "negative_mass_total": 211.88155439682305,
+    "violation_rate": 0.04456478621338305,
+    "violation_magnitude": 0.0005795911049005384,
+    "negative_mass_ratio": 0.005842699510121439
+  },
+  "representation_direct": {
+    "cumulative_field_nmae": 0.09864178342887989,
+    "measure_nl1": 1.320965768170082,
+    "conservation_error": 5.47052739740728e-06
+  },
+  "representation_tiled": {
+    "cumulative_field_nmae": 0.08923391807967654,
+    "measure_nl1": 1.3260055236570352,
+    "conservation_error": 4.967490395346841e-06
+  },
+  "game_direct": {
+    "L0": 115.3781763957097,
+    "L1": 138.89846093641532,
+    "L2": 166.41711174942307,
+    "L3": 205.44102008265168
+  },
+  "game_tiled": {
+    "L0": 106.34112942873777,
+    "L1": 124.90575218266183,
+    "L2": 150.37639583725033,
+    "L3": 190.87377925814707
+  }
+}

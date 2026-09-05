@@ -1,0 +1,1034 @@
+{
+  "metadata": {
+    "checkpoint_r2": "runs/factorial_a_crop256_c16/best.pt",
+    "checkpoint_r4": "runs/ntpc_sha/best.pt",
+    "crop_size": 256,
+    "valid_crops": 5,
+    "skipped_images": 0,
+    "kappas_swept": [
+      2.0,
+      5.0,
+      10.0,
+      20.0,
+      50.0,
+      100.0
+    ],
+    "elapsed_seconds": 3.909938335418701
+  },
+  "r2_native_summary": {
+    "all": {
+      "count": 5,
+      "mean_gt_count": 81.2,
+      "mean_pred_count": 82.24689483642578,
+      "mean_count_error": 1.0468948364257813,
+      "r2": {
+        "flat16_norm": 220.1943737137404,
+        "flat16_euler_cos": -1.590262377845243e-09,
+        "flat16_param_cos": 0.3099183828000687,
+        "root_param_cos": 0.1999999994857142,
+        "total_param_cos": 0.3021053394614347,
+        "cos_root_vs_flat16": 0.10472722900877052,
+        "conflict_root_vs_flat16": 0.2,
+        "cancellation_root_vs_flat16": 0.019896515514666424
+      },
+      "r4": {
+        "32_16_norm": NaN,
+        "64_32_norm": NaN,
+        "32_16_euler_cos": NaN,
+        "64_32_euler_cos": NaN,
+        "32_16_param_cos": NaN,
+        "64_32_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_64_32_vs_32_16": NaN,
+        "conflict_64_32_vs_32_16": NaN,
+        "cancellation_64_32_vs_32_16": NaN,
+        "cos_root_vs_32_16": NaN,
+        "conflict_root_vs_32_16": NaN
+      }
+    },
+    "low (<50)": {
+      "count": 1,
+      "mean_gt_count": 48.0,
+      "mean_pred_count": 49.849456787109375,
+      "mean_count_error": 1.849456787109375,
+      "r2": {
+        "flat16_norm": 228.7339237798735,
+        "flat16_euler_cos": 3.5166968776911286e-09,
+        "flat16_param_cos": 0.42613624611724954,
+        "root_param_cos": 0.9999999918087101,
+        "total_param_cos": 0.548562244842989,
+        "cos_root_vs_flat16": 0.06701310023216422,
+        "conflict_root_vs_flat16": 0.0,
+        "cancellation_root_vs_flat16": 0.004811451168458936
+      },
+      "r4": {
+        "32_16_norm": NaN,
+        "64_32_norm": NaN,
+        "32_16_euler_cos": NaN,
+        "64_32_euler_cos": NaN,
+        "32_16_param_cos": NaN,
+        "64_32_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_64_32_vs_32_16": NaN,
+        "conflict_64_32_vs_32_16": NaN,
+        "cancellation_64_32_vs_32_16": NaN,
+        "cos_root_vs_32_16": NaN,
+        "conflict_root_vs_32_16": NaN
+      }
+    },
+    "medium (50-150)": {
+      "count": 4,
+      "mean_gt_count": 89.5,
+      "mean_pred_count": 90.34625434875488,
+      "mean_count_error": 0.8462543487548828,
+      "r2": {
+        "flat16_norm": 218.0594861972071,
+        "flat16_euler_cos": -2.8670021917293362e-09,
+        "flat16_param_cos": 0.2808639169707735,
+        "root_param_cos": 1.4049652274916724e-09,
+        "total_param_cos": 0.24049111311604612,
+        "cos_root_vs_flat16": 0.11415576120292209,
+        "conflict_root_vs_flat16": 0.25,
+        "cancellation_root_vs_flat16": 0.023667781601218296
+      },
+      "r4": {
+        "32_16_norm": NaN,
+        "64_32_norm": NaN,
+        "32_16_euler_cos": NaN,
+        "64_32_euler_cos": NaN,
+        "32_16_param_cos": NaN,
+        "64_32_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_64_32_vs_32_16": NaN,
+        "conflict_64_32_vs_32_16": NaN,
+        "cancellation_64_32_vs_32_16": NaN,
+        "cos_root_vs_32_16": NaN,
+        "conflict_root_vs_32_16": NaN
+      }
+    },
+    "high (>=150)": {
+      "count": 0
+    }
+  },
+  "r4_native_summary": {
+    "all": {
+      "count": 5,
+      "mean_gt_count": 81.2,
+      "mean_pred_count": 78.98453979492187,
+      "mean_count_error": -2.215460205078125,
+      "r2": {
+        "flat16_norm": NaN,
+        "flat16_euler_cos": NaN,
+        "flat16_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_root_vs_flat16": NaN,
+        "conflict_root_vs_flat16": NaN,
+        "cancellation_root_vs_flat16": NaN
+      },
+      "r4": {
+        "32_16_norm": 149.7655844250692,
+        "64_32_norm": 57.283734034730095,
+        "32_16_euler_cos": 7.621761586413137e-10,
+        "64_32_euler_cos": 3.759766063281242e-10,
+        "32_16_param_cos": -0.046724723280740246,
+        "64_32_param_cos": 0.10587073580124895,
+        "root_param_cos": -0.1999999984313073,
+        "total_param_cos": 0.07672962981116056,
+        "cos_64_32_vs_32_16": -0.02759073056768003,
+        "conflict_64_32_vs_32_16": 0.4,
+        "cancellation_64_32_vs_32_16": 0.2317854280116423,
+        "cos_root_vs_32_16": 0.013400266700763528,
+        "conflict_root_vs_32_16": 0.4
+      }
+    },
+    "low (<50)": {
+      "count": 1,
+      "mean_gt_count": 48.0,
+      "mean_pred_count": 54.925323486328125,
+      "mean_count_error": 6.925323486328125,
+      "r2": {
+        "flat16_norm": NaN,
+        "flat16_euler_cos": NaN,
+        "flat16_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_root_vs_flat16": NaN,
+        "conflict_root_vs_flat16": NaN,
+        "cancellation_root_vs_flat16": NaN
+      },
+      "r4": {
+        "32_16_norm": 159.7627859629387,
+        "64_32_norm": 62.348334627935586,
+        "32_16_euler_cos": -8.30391621266556e-11,
+        "64_32_euler_cos": 4.523423125210765e-09,
+        "32_16_param_cos": -0.19510191336296376,
+        "64_32_param_cos": 0.5311111503023312,
+        "root_param_cos": 0.9999999906463088,
+        "total_param_cos": 0.4834456491645607,
+        "cos_64_32_vs_32_16": -0.2521232673536192,
+        "conflict_64_32_vs_32_16": 1.0,
+        "cancellation_64_32_vs_32_16": 0.2968889147485523,
+        "cos_root_vs_32_16": 0.0748279237945772,
+        "conflict_root_vs_32_16": 0.0
+      }
+    },
+    "medium (50-150)": {
+      "count": 4,
+      "mean_gt_count": 89.5,
+      "mean_pred_count": 84.99934387207031,
+      "mean_count_error": -4.5006561279296875,
+      "r2": {
+        "flat16_norm": NaN,
+        "flat16_euler_cos": NaN,
+        "flat16_param_cos": NaN,
+        "root_param_cos": NaN,
+        "total_param_cos": NaN,
+        "cos_root_vs_flat16": NaN,
+        "conflict_root_vs_flat16": NaN,
+        "cancellation_root_vs_flat16": NaN
+      },
+      "r4": {
+        "32_16_norm": 147.26628404060182,
+        "64_32_norm": 56.017583886428724,
+        "32_16_euler_cos": 9.73479988833306e-10,
+        "64_32_euler_cos": -6.608850233925359e-10,
+        "32_16_param_cos": -0.009630425760184374,
+        "64_32_param_cos": -0.00043936782402163865,
+        "root_param_cos": -0.49999999570071135,
+        "total_param_cos": -0.02494937502718947,
+        "cos_64_32_vs_32_16": 0.028542403628804756,
+        "conflict_64_32_vs_32_16": 0.25,
+        "cancellation_64_32_vs_32_16": 0.21550955632741484,
+        "cos_root_vs_32_16": -0.001956647572689892,
+        "conflict_root_vs_32_16": 0.5
+      }
+    },
+    "high (>=150)": {
+      "count": 0
+    }
+  },
+  "kappa_sweep_summary": {
+    "k_2": {
+      "kappa": 2.0,
+      "cos_64_32_vs_32_16_mean": -0.040927143359250275,
+      "cancellation_64_32_vs_32_16_mean": 0.2184401774381262,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.016931175488048813,
+      "r4_32_to_16_norm_mean": 201.30528537113673,
+      "r2_flat16_norm_mean": 216.4872280076889
+    },
+    "k_5": {
+      "kappa": 5.0,
+      "cos_64_32_vs_32_16_mean": -0.04756418461169546,
+      "cancellation_64_32_vs_32_16_mean": 0.2261394037419172,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.017670361871934413,
+      "r4_32_to_16_norm_mean": 202.0482707141974,
+      "r2_flat16_norm_mean": 216.53274291964786
+    },
+    "k_10": {
+      "kappa": 10.0,
+      "cos_64_32_vs_32_16_mean": -0.05143199385466033,
+      "cancellation_64_32_vs_32_16_mean": 0.2322883962892689,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.017888919452969734,
+      "r4_32_to_16_norm_mean": 202.4759043364369,
+      "r2_flat16_norm_mean": 216.60570650407877
+    },
+    "k_20": {
+      "kappa": 20.0,
+      "cos_64_32_vs_32_16_mean": -0.054006082892156436,
+      "cancellation_64_32_vs_32_16_mean": 0.23734464333907754,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.017955314042014846,
+      "r4_32_to_16_norm_mean": 202.76215337195825,
+      "r2_flat16_norm_mean": 216.74083876913164
+    },
+    "k_50": {
+      "kappa": 50.0,
+      "cos_64_32_vs_32_16_mean": -0.05585291289220653,
+      "cancellation_64_32_vs_32_16_mean": 0.24159975150832044,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.01796593017916015,
+      "r4_32_to_16_norm_mean": 202.9713145880161,
+      "r2_flat16_norm_mean": 217.07196824815696
+    },
+    "k_100": {
+      "kappa": 100.0,
+      "cos_64_32_vs_32_16_mean": -0.05653265445087633,
+      "cancellation_64_32_vs_32_16_mean": 0.24332542869665663,
+      "conflict_rate_64_32_vs_32_16": 0.3333333333333333,
+      "cos_root_vs_32_16_mean": 0.01796191335614096,
+      "r4_32_to_16_norm_mean": 203.0494959149875,
+      "r2_flat16_norm_mean": 217.4560721906066
+    }
+  },
+  "records_r2": [
+    {
+      "image_index": 0,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_1.jpg",
+      "gt_count": 82.0,
+      "pred_count": 65.53915405273438,
+      "signed_error": -16.460845947265625,
+      "r2": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 6.956199645996094,
+            "grad_sum": -445.19677734375,
+            "count_push": 445.19677734375,
+            "euler_dot": -7.123491768199125,
+            "euler_cos": -0.5813526488021545,
+            "uniform_cos": -1.0
+          },
+          "flat_16": {
+            "norm": 145.37210891281805,
+            "grad_sum": 1683.1415967941284,
+            "count_push": -1683.1415967941284,
+            "euler_dot": -1.905754638764634e-06,
+            "euler_cos": -7.442256970445477e-09,
+            "uniform_cos": 0.18090875647735313
+          },
+          "total": {
+            "norm": 144.27596799977837,
+            "grad_sum": 1237.944821357727,
+            "count_push": -1237.944821357727,
+            "euler_dot": -7.123493804285921,
+            "euler_cos": -0.028029659421097072,
+            "uniform_cos": 0.1340686747895824
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_flat_16": -0.18090875647735313
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_flat_16": 0.0528617378849191
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 3426.9525566056045,
+            "count_dot_theta": -108050300.45089422,
+            "count_cos_theta": -0.9999999915525966
+          },
+          "flat_16": {
+            "norm_theta": 6006.334464921071,
+            "count_dot_theta": 106699001.2984207,
+            "count_cos_theta": 0.5634208981098189
+          },
+          "total": {
+            "norm_theta": 4963.380028002752,
+            "count_dot_theta": -1336376.604166098,
+            "count_cos_theta": -0.00853951969608999
+          }
+        }
+      }
+    },
+    {
+      "image_index": 1,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_10.jpg",
+      "gt_count": 48.0,
+      "pred_count": 49.849456787109375,
+      "signed_error": 1.849456787109375,
+      "r2": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 1.1890182495117188,
+            "grad_sum": 76.09716796875,
+            "count_push": -76.09716796875,
+            "euler_dot": 0.9261236711015646,
+            "euler_cos": 0.5395931275219216,
+            "uniform_cos": 1.0
+          },
+          "flat_16": {
+            "norm": 228.7339237798735,
+            "grad_sum": 981.0028390884399,
+            "count_push": -981.0028390884399,
+            "euler_dot": 1.1611265896549483e-06,
+            "euler_cos": 3.5166968776911286e-09,
+            "uniform_cos": 0.06701310023216422
+          },
+          "total": {
+            "norm": 228.81668193457025,
+            "grad_sum": 1057.0999975204468,
+            "count_push": -1057.0999975204468,
+            "euler_dot": 0.92612482923775,
+            "euler_cos": 0.0028039340175150754,
+            "uniform_cos": 0.07218524157246561
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_flat_16": 0.06701310023216422
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_flat_16": 0.004811451168458936
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 415.2800600546704,
+            "count_dot_theta": 9282407.190989245,
+            "count_cos_theta": 0.9999999918087101
+          },
+          "flat_16": {
+            "norm_theta": 2481.35542663133,
+            "count_dot_theta": 23635075.446148794,
+            "count_cos_theta": 0.42613624611724954
+          },
+          "total": {
+            "norm_theta": 2684.745211814202,
+            "count_dot_theta": 32919143.77794779,
+            "count_cos_theta": 0.548562244842989
+          }
+        }
+      }
+    },
+    {
+      "image_index": 2,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_100.jpg",
+      "gt_count": 65.0,
+      "pred_count": 61.41094207763672,
+      "signed_error": -3.5890579223632812,
+      "r2": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 1.6786346435546875,
+            "grad_sum": -107.4326171875,
+            "count_push": 107.4326171875,
+            "euler_dot": -1.6107271898093012,
+            "euler_cos": -0.591050119955335,
+            "uniform_cos": -1.0
+          },
+          "flat_16": {
+            "norm": 592.3679680045406,
+            "grad_sum": -1446.9774913787842,
+            "count_push": 1446.9774913787842,
+            "euler_dot": 4.2191365021704286e-06,
+            "euler_cos": 4.3872311021649425e-09,
+            "uniform_cos": -0.03816719425082114
+          },
+          "total": {
+            "norm": 592.4344169354245,
+            "grad_sum": -1554.4101238250732,
+            "count_push": 1554.4101238250732,
+            "euler_dot": -1.6107228512043128,
+            "euler_cos": -0.0016747077931812495,
+            "uniform_cos": -0.04099636599508048
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_flat_16": 0.03816719425082114
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_flat_16": 0.002713913615288166
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 545.0975032269969,
+            "count_dot_theta": -11328847.070143197,
+            "count_cos_theta": -0.9999999901786583
+          },
+          "flat_16": {
+            "norm_theta": 3241.105822382781,
+            "count_dot_theta": 14722012.228809197,
+            "count_cos_theta": 0.218555850927
+          },
+          "total": {
+            "norm_theta": 3167.3780802746846,
+            "count_dot_theta": 3395423.7256224276,
+            "count_cos_theta": 0.05158014354090082
+          }
+        }
+      }
+    },
+    {
+      "image_index": 3,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_101.jpg",
+      "gt_count": 90.0,
+      "pred_count": 103.61924743652344,
+      "signed_error": 13.619247436523438,
+      "r2": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 2.737895965576172,
+            "grad_sum": 175.225341796875,
+            "count_push": -175.225341796875,
+            "euler_dot": 4.432792602558231,
+            "euler_cos": 0.5879261461530159,
+            "uniform_cos": 1.0
+          },
+          "flat_16": {
+            "norm": 46.636623863381885,
+            "grad_sum": 1549.390986919403,
+            "count_push": -1549.390986919403,
+            "euler_dot": -3.9133437934602e-07,
+            "euler_cos": -3.0470754187578225e-09,
+            "uniform_cos": 0.5191034891705414
+          },
+          "total": {
+            "norm": 48.114815852616324,
+            "grad_sum": 1724.6163268089294,
+            "count_push": -1724.6163268089294,
+            "euler_dot": 4.432792175240916,
+            "euler_cos": 0.03345498553643456,
+            "uniform_cos": 0.560058884750449
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_flat_16": 0.5191034891705415
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_flat_16": 0.025513243347673242
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 2024.236618595324,
+            "count_dot_theta": 95782449.99200109,
+            "count_cos_theta": 0.9999999928654444
+          },
+          "flat_16": {
+            "norm_theta": 3601.9530743779983,
+            "count_dot_theta": 44169512.33282727,
+            "count_cos_theta": 0.25915517530732074
+          },
+          "total": {
+            "norm_theta": 4565.646718503795,
+            "count_dot_theta": 139939892.8207039,
+            "count_cos_theta": 0.6477606555601415
+          }
+        }
+      }
+    },
+    {
+      "image_index": 4,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_102.jpg",
+      "gt_count": 121.0,
+      "pred_count": 130.815673828125,
+      "signed_error": 9.815673828125,
+      "r2": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 1.3279266357421875,
+            "grad_sum": 84.9873046875,
+            "count_push": -84.9873046875,
+            "euler_dot": 2.7142754661539135,
+            "euler_cos": 0.7535664752332853,
+            "uniform_cos": 1.0
+          },
+          "flat_16": {
+            "norm": 87.86124400808792,
+            "grad_sum": 451.3178663253784,
+            "count_push": -451.3178663253784,
+            "euler_dot": -1.278788723801938e-06,
+            "euler_cos": -5.365907479878988e-09,
+            "uniform_cos": 0.08026111786767887
+          },
+          "total": {
+            "norm": 87.9777820855225,
+            "grad_sum": 536.3051748275757,
+            "count_push": -536.3051748275757,
+            "euler_dot": 2.714274209135003,
+            "euler_cos": 0.011374241394978547,
+            "uniform_cos": 0.0952486884533525
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_flat_16": 0.08026111786767885
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_flat_16": 0.013582231556992674
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 702.9700242985527,
+            "count_dot_theta": 23816194.594237138,
+            "count_cos_theta": 0.9999999944856713
+          },
+          "flat_16": {
+            "norm_theta": 3542.610970074322,
+            "count_dot_theta": 9880618.708397144,
+            "count_cos_theta": 0.08232374353895448
+          },
+          "total": {
+            "norm_theta": 3667.8740486327547,
+            "count_dot_theta": 33696181.38522548,
+            "count_cos_theta": 0.27116317305923215
+          }
+        }
+      }
+    }
+  ],
+  "records_r4": [
+    {
+      "image_index": 0,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_1.jpg",
+      "gt_count": 82.0,
+      "pred_count": 70.20013427734375,
+      "signed_error": -11.79986572265625,
+      "r4": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 4.474906921386719,
+            "grad_sum": -286.39404296875,
+            "count_push": 286.39404296875,
+            "euler_dot": -4.908423187966309,
+            "euler_cos": -0.5491591820226525,
+            "uniform_cos": -1.0
+          },
+          "root_to_64": {
+            "norm": 27.42108801923192,
+            "grad_sum": -64.10045146942139,
+            "count_push": 64.10045146942139,
+            "euler_dot": 3.0540713737148284e-07,
+            "euler_cos": 5.57615395893244e-09,
+            "uniform_cos": -0.036525522018209244
+          },
+          "64_to_32": {
+            "norm": 46.92511432318753,
+            "grad_sum": 1108.2872630357742,
+            "count_push": -1108.2872630357742,
+            "euler_dot": 2.155356864097513e-07,
+            "euler_cos": 2.2996095539428502e-09,
+            "uniform_cos": 0.36903455078801956
+          },
+          "32_to_16": {
+            "norm": 152.43455144479321,
+            "grad_sum": -148.93469774723053,
+            "count_push": 148.93469774723053,
+            "euler_dot": 7.052167445564805e-07,
+            "euler_cos": 2.3162181218338677e-09,
+            "uniform_cos": -0.015266254469501148
+          },
+          "total": {
+            "norm": 161.93149908676548,
+            "grad_sum": 608.858104467392,
+            "count_push": -608.858104467392,
+            "euler_dot": -4.908421902617924,
+            "euler_cos": -0.015175772440303029,
+            "uniform_cos": 0.05874958198963849
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_root_to_64": 0.036525522018209244,
+          "root_magnitude_vs_64_to_32": -0.36903455078801956,
+          "root_magnitude_vs_32_to_16": 0.015266254469501148,
+          "root_to_64_vs_64_to_32": -0.3686251690312276,
+          "root_to_64_vs_32_to_16": 0.114752862783467,
+          "64_to_32_vs_32_to_16": 0.008817127440603681
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_root_to_64": 0.1238814605790639,
+          "root_magnitude_vs_64_to_32": 0.11547989434866368,
+          "root_magnitude_vs_32_to_16": 0.027665428828078098,
+          "root_to_64_vs_64_to_32": 0.3976848206764876,
+          "root_to_64_vs_32_to_16": 0.12180761249640848,
+          "64_to_32_vs_32_to_16": 0.19798871703422294
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 2640.9804097563497,
+            "count_dot_theta": -99755225.79871087,
+            "count_cos_theta": -0.9999999831211258
+          },
+          "root_to_64": {
+            "norm_theta": 1249.9683415391564,
+            "count_dot_theta": -1647104.224911219,
+            "count_cos_theta": -0.0348860327349246
+          },
+          "64_to_32": {
+            "norm_theta": 2719.9554472231234,
+            "count_dot_theta": 58395524.99579899,
+            "count_cos_theta": 0.5683911317281409
+          },
+          "32_to_16": {
+            "norm_theta": 2351.8946987413656,
+            "count_dot_theta": 19159448.166876666,
+            "count_cos_theta": 0.21567243392698357
+          },
+          "total": {
+            "norm_theta": 3675.2525146129074,
+            "count_dot_theta": -23837893.343160152,
+            "count_cos_theta": -0.171715779344431
+          }
+        }
+      }
+    },
+    {
+      "image_index": 1,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_10.jpg",
+      "gt_count": 48.0,
+      "pred_count": 54.925323486328125,
+      "signed_error": 6.925323486328125,
+      "r4": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 3.8453598022460938,
+            "grad_sum": 246.10302734375,
+            "count_push": -246.10302734375,
+            "euler_dot": 3.3001192357366236,
+            "euler_cos": 0.5302509193969286,
+            "uniform_cos": 1.0
+          },
+          "root_to_64": {
+            "norm": 12.678538258452818,
+            "grad_sum": -90.0038948059082,
+            "count_push": 90.0038948059082,
+            "euler_dot": 4.427827884345703e-07,
+            "euler_cos": 2.1577957141327526e-08,
+            "uniform_cos": -0.11092058308888442
+          },
+          "64_to_32": {
+            "norm": 62.348334627935586,
+            "grad_sum": 551.0259394645691,
+            "count_push": -551.0259394645691,
+            "euler_dot": 4.564605937673605e-07,
+            "euler_cos": 4.523423125210765e-09,
+            "uniform_cos": 0.13809158425021065
+          },
+          "32_to_16": {
+            "norm": 159.7627859629387,
+            "grad_sum": 765.101924687624,
+            "count_push": -765.101924687624,
+            "euler_dot": -2.147186672907253e-08,
+            "euler_cos": -8.30391621266556e-11,
+            "uniform_cos": 0.0748279237945772
+          },
+          "total": {
+            "norm": 155.99752801553163,
+            "grad_sum": 1472.227005124092,
+            "count_push": -1472.227005124092,
+            "euler_dot": 3.3001198265775122,
+            "euler_cos": 0.013070757989230132,
+            "uniform_cos": 0.14746097100188427
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_root_to_64": -0.11092058308888442,
+          "root_magnitude_vs_64_to_32": 0.13809158425021062,
+          "root_magnitude_vs_32_to_16": 0.0748279237945772,
+          "root_to_64_vs_64_to_32": 0.040022100199169984,
+          "root_to_64_vs_32_to_16": -0.10851479571113573,
+          "64_to_32_vs_32_to_16": -0.2521232673536192
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_root_to_64": 0.22329490561221754,
+          "root_magnitude_vs_64_to_32": 0.04832960443133383,
+          "root_magnitude_vs_32_to_16": 0.02146403285240117,
+          "root_to_64_vs_64_to_32": 0.14537708680453643,
+          "root_to_64_vs_32_to_16": 0.07859872996980166,
+          "64_to_32_vs_32_to_16": 0.2968889147485523
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 1410.6997744723396,
+            "count_dot_theta": 33122060.697815202,
+            "count_cos_theta": 0.9999999906463088
+          },
+          "root_to_64": {
+            "norm_theta": 338.7158522625902,
+            "count_dot_theta": -3239806.385878002,
+            "count_cos_theta": -0.407381008236149
+          },
+          "64_to_32": {
+            "norm_theta": 1500.297215289392,
+            "count_dot_theta": 18708780.43816357,
+            "count_cos_theta": 0.5311111503023312
+          },
+          "32_to_16": {
+            "norm_theta": 2552.870892555938,
+            "count_dot_theta": -11694270.5190574,
+            "count_cos_theta": -0.19510191336296376
+          },
+          "total": {
+            "norm_theta": 3249.8997226653114,
+            "count_dot_theta": 36889296.473329246,
+            "count_cos_theta": 0.4834456491645607
+          }
+        }
+      }
+    },
+    {
+      "image_index": 2,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_100.jpg",
+      "gt_count": 65.0,
+      "pred_count": 63.08161926269531,
+      "signed_error": -1.9183807373046875,
+      "r4": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 0.8605804443359375,
+            "grad_sum": -55.0771484375,
+            "count_push": 55.0771484375,
+            "euler_dot": -0.8482314012426673,
+            "euler_cos": -0.5795531752261791,
+            "uniform_cos": -1.0
+          },
+          "root_to_64": {
+            "norm": 7.705830704640218,
+            "grad_sum": -77.77591896057129,
+            "count_push": 77.77591896057129,
+            "euler_dot": 1.966426687871614e-07,
+            "euler_cos": 1.5004748243537854e-08,
+            "uniform_cos": -0.1577050911626102
+          },
+          "64_to_32": {
+            "norm": 127.96885746291844,
+            "grad_sum": -704.1151311397552,
+            "count_push": 704.1151311397552,
+            "euler_dot": 6.669853891416722e-08,
+            "euler_cos": 3.064661021433643e-10,
+            "uniform_cos": -0.0859724712885451
+          },
+          "32_to_16": {
+            "norm": 296.0891227081429,
+            "grad_sum": 686.5143459439278,
+            "count_push": -686.5143459439278,
+            "euler_dot": 4.0449100735528987e-08,
+            "euler_cos": 8.032612825897063e-11,
+            "uniform_cos": 0.03622823613803382
+          },
+          "total": {
+            "norm": 332.00341806890503,
+            "grad_sum": -150.4538722038269,
+            "count_push": 150.4538722038269,
+            "euler_dot": -0.848231435614794,
+            "euler_cos": -0.0015022500435816746,
+            "uniform_cos": -0.007080775754835435
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_root_to_64": 0.1577050911626102,
+          "root_magnitude_vs_64_to_32": 0.0859724712885451,
+          "root_magnitude_vs_32_to_16": -0.03622823613803382,
+          "root_to_64_vs_64_to_32": 0.027716096489512572,
+          "root_to_64_vs_32_to_16": -0.021015835539259207,
+          "64_to_32_vs_32_to_16": 0.08128789123654621
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_root_to_64": 0.07925707416392225,
+          "root_magnitude_vs_64_to_32": 0.006083420385380789,
+          "root_magnitude_vs_32_to_16": 0.00299885342270112,
+          "root_to_64_vs_64_to_32": 0.05351786266361236,
+          "root_to_64_vs_32_to_16": 0.025568258925583454,
+          "64_to_32_vs_32_to_16": 0.21715629823445737
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 286.9769229476549,
+            "count_dot_theta": -6124630.799594568,
+            "count_cos_theta": -0.9999999937762512
+          },
+          "root_to_64": {
+            "norm_theta": 306.559668475248,
+            "count_dot_theta": -4306436.447899166,
+            "count_cos_theta": -0.6582184973068076
+          },
+          "64_to_32": {
+            "norm_theta": 1548.5518373367727,
+            "count_dot_theta": -15040878.720351486,
+            "count_cos_theta": -0.45510805219926614
+          },
+          "32_to_16": {
+            "norm_theta": 4003.8409335661668,
+            "count_dot_theta": 34110488.565586895,
+            "count_cos_theta": 0.39918864803232557
+          },
+          "total": {
+            "norm_theta": 4204.312193046073,
+            "count_dot_theta": 8641640.569949927,
+            "count_cos_theta": 0.09630931622523803
+          }
+        }
+      }
+    },
+    {
+      "image_index": 3,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_101.jpg",
+      "gt_count": 90.0,
+      "pred_count": 96.28076171875,
+      "signed_error": 6.28076171875,
+      "r4": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 1.4270401000976562,
+            "grad_sum": 91.33056640625,
+            "count_push": -91.33056640625,
+            "euler_dot": 2.1468203673460713,
+            "euler_cos": 0.5508408238446371,
+            "uniform_cos": 1.0
+          },
+          "root_to_64": {
+            "norm": 17.207524723982253,
+            "grad_sum": 567.9001498222351,
+            "count_push": -567.9001498222351,
+            "euler_dot": 3.9929882011957574e-08,
+            "euler_cos": 8.496620363010658e-10,
+            "uniform_cos": 0.5156720669188082
+          },
+          "64_to_32": {
+            "norm": 24.807716996867963,
+            "grad_sum": 372.01321840286255,
+            "count_push": -372.01321840286255,
+            "euler_dot": -4.516182949831915e-08,
+            "euler_cos": -6.665785238540682e-10,
+            "uniform_cos": 0.23431041793481425
+          },
+          "32_to_16": {
+            "norm": 39.726999644267295,
+            "grad_sum": 155.80069988965988,
+            "count_push": -155.80069988965988,
+            "euler_dot": 5.941487080107777e-08,
+            "euler_cos": 5.476158124246361e-10,
+            "uniform_cos": 0.06127787040487523
+          },
+          "total": {
+            "norm": 47.752940275432664,
+            "grad_sum": 1187.044625043869,
+            "count_push": -1187.044625043869,
+            "euler_dot": 2.1468203845110443,
+            "euler_cos": 0.016461226181014754,
+            "uniform_cos": 0.3884069160837113
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_root_to_64": 0.5156720669188083,
+          "root_magnitude_vs_64_to_32": 0.23431041793481422,
+          "root_magnitude_vs_32_to_16": 0.06127787040487523,
+          "root_to_64_vs_64_to_32": -0.16967330740042483,
+          "root_to_64_vs_32_to_16": -0.0262661723971212,
+          "64_to_32_vs_32_to_16": -0.04035434420643059
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_root_to_64": 0.03485711577626849,
+          "root_magnitude_vs_64_to_32": 0.04019185552443527,
+          "root_magnitude_vs_32_to_16": 0.03193183777583508,
+          "root_to_64_vs_64_to_32": 0.3409854502651949,
+          "root_to_64_vs_32_to_16": 0.24690992897514585,
+          "64_to_32_vs_32_to_16": 0.2875227554043249
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 880.8211522395995,
+            "count_dot_theta": 34796656.709601276,
+            "count_cos_theta": 0.9999999880735917
+          },
+          "root_to_64": {
+            "norm_theta": 1523.650448565874,
+            "count_dot_theta": 27568217.79277551,
+            "count_cos_theta": 0.4580085219662084
+          },
+          "64_to_32": {
+            "norm_theta": 1956.522447036125,
+            "count_dot_theta": 40329462.28385717,
+            "count_cos_theta": 0.5217804563068339
+          },
+          "32_to_16": {
+            "norm_theta": 2421.715394973789,
+            "count_dot_theta": -57340760.93510697,
+            "count_cos_theta": -0.5993638713569068
+          },
+          "total": {
+            "norm_theta": 2589.5491244041373,
+            "count_dot_theta": 45340376.95829242,
+            "count_cos_theta": 0.443211666828872
+          }
+        }
+      }
+    },
+    {
+      "image_index": 4,
+      "img_path": "./data/ShanghaiTech\\part_A\\test_data\\images\\IMG_102.jpg",
+      "gt_count": 121.0,
+      "pred_count": 110.43486022949219,
+      "signed_error": -10.565139770507812,
+      "r4": {
+        "component_metrics": {
+          "root_magnitude": {
+            "norm": 1.9081878662109375,
+            "grad_sum": -122.1240234375,
+            "count_push": 122.1240234375,
+            "euler_dot": -3.292663374345022,
+            "euler_cos": -0.6875673270161743,
+            "uniform_cos": -1.0
+          },
+          "root_to_64": {
+            "norm": 2.0324762954374576,
+            "grad_sum": 10.510424613952637,
+            "count_push": -10.510424613952637,
+            "euler_dot": -4.962812639314196e-08,
+            "euler_cos": -9.729520075191792e-09,
+            "uniform_cos": 0.08080063957531328
+          },
+          "64_to_32": {
+            "norm": 24.368646762740955,
+            "grad_sum": -140.92482686042786,
+            "count_push": 140.92482686042786,
+            "euler_dot": -2.8028236245813964e-07,
+            "euler_cos": -4.58303722580229e-09,
+            "uniform_cos": -0.090359979408496
+          },
+          "32_to_16": {
+            "norm": 100.81446236520388,
+            "grad_sum": 310.6213209629059,
+            "count_push": -310.6213209629059,
+            "euler_dot": 2.402966057246658e-07,
+            "euler_cos": 9.497598928157496e-10,
+            "uniform_cos": 0.04814247902710213
+          },
+          "total": {
+            "norm": 105.48511047808252,
+            "grad_sum": 58.082872450351715,
+            "count_push": -58.082872450351715,
+            "euler_dot": -3.2926637969525054,
+            "euler_cos": -0.01243784827131665,
+            "uniform_cos": 0.008603535398726377
+          }
+        },
+        "pairwise_cosines": {
+          "root_magnitude_vs_root_to_64": -0.08080063957531328,
+          "root_magnitude_vs_64_to_32": 0.090359979408496,
+          "root_magnitude_vs_32_to_16": -0.04814247902710213,
+          "root_to_64_vs_64_to_32": 0.0738901814605254,
+          "root_to_64_vs_32_to_16": 0.11922354305172912,
+          "64_to_32_vs_32_to_16": 0.06441894004449972
+        },
+        "pairwise_cancellations": {
+          "root_magnitude_vs_root_to_64": 0.3216658241850021,
+          "root_magnitude_vs_64_to_32": 0.06326082699486268,
+          "root_magnitude_vs_32_to_16": 0.01929487771353655,
+          "root_to_64_vs_64_to_32": 0.06812809683340626,
+          "root_to_64_vs_32_to_16": 0.017210147603043402,
+          "64_to_32_vs_32_to_16": 0.1593704546366541
+        },
+        "param_metrics": {
+          "root_magnitude": {
+            "norm_theta": 938.634328589546,
+            "count_dot_theta": -29550043.121035624,
+            "count_cos_theta": -0.9999999939790601
+          },
+          "root_to_64": {
+            "norm_theta": 129.15447795565552,
+            "count_dot_theta": -2689502.362286613,
+            "count_cos_theta": -0.6614557159409172
+          },
+          "64_to_32": {
+            "norm_theta": 1337.5957796281814,
+            "count_dot_theta": -26816615.129158366,
+            "count_cos_theta": -0.6368210071317952
+          },
+          "32_to_16": {
+            "norm_theta": 3390.8770676488425,
+            "count_dot_theta": -5766596.701242808,
+            "count_cos_theta": -0.0540189136431398
+          },
+          "total": {
+            "norm_theta": 4403.696869507998,
+            "count_dot_theta": -64827028.953674346,
+            "count_cos_theta": -0.4676027038184369
+          }
+        }
+      }
+    }
+  ]
+}

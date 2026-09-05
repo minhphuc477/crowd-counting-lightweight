@@ -22,13 +22,13 @@ ENV/
 *.npy
 
 # Training Checkpoints & Runs
-runs/
+runs/*
 !runs/e0_v2/
-!runs/e0_v2/**
 !runs/e0_v3/
-!runs/e0_v3/**
 !runs/objective_audit/
-!runs/objective_audit/**
+!runs/pilot_micf/
+runs/pilot_micf/**/last.pt
+runs/pilot_micf/**/per_region.csv
 analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
@@ -37,6 +37,8 @@ profile*.json
 *.pth
 *.onnx
 *.ckpt
+!runs/pilot_micf/**/best.pt
+
 
 # IDE & System
 .vscode/

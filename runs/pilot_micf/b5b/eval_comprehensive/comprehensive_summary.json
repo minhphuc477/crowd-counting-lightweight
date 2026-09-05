@@ -1,0 +1,207 @@
+{
+  "checkpoint": "F:\\lightweightcrcn\\runs\\pilot_micf\\b5b\\best.pt",
+  "checkpoint_epoch": 780,
+  "checkpoint_best_mae_stored": 23.987911912111137,
+  "model_head_type": "cumulative",
+  "model_output_stride": 16,
+  "model_finite_horizon": null,
+  "dataset_split": "test_data",
+  "num_images": 182,
+  "num_windows": 1754,
+  "tile_size": 256,
+  "halo": 64,
+  "controlled_halo": 0,
+  "game_levels": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "window": {
+    "mae": 16.352159720727645,
+    "rmse": 33.81095945694436,
+    "signed_bias": -0.6610904224662953,
+    "median_ae": 6.912036895751953,
+    "p90_ae": 38.95685729980469,
+    "p95_ae": 61.03473205566398,
+    "max_ae": 385.95164489746094,
+    "window_mae": 16.352159720727645,
+    "window_rmse": 33.81095945694436,
+    "window_mae_micro": 16.352159720727645,
+    "window_rmse_micro": 33.81095945694436,
+    "window_mae_macro": 17.19545704927022,
+    "window_rmse_macro": 23.945268798891618,
+    "full_window_mae": 20.280385901748357,
+    "full_window_rmse": 40.21525769553464,
+    "full_window_count": 1072,
+    "edge_window_mae": 10.177587189856382,
+    "edge_window_rmse": 19.949689868840537,
+    "edge_window_count": 682,
+    "nae_nonzero": 0.7112095480776166,
+    "nonempty_window_mae": 18.369663889857094,
+    "empty_window_mae": 2.571885708370246,
+    "empty_window_mean_prediction": 2.5718484395017316,
+    "empty_window_fraction": 0.12770809578107184,
+    "pmae": 16.352159720727645,
+    "prmse": 33.81095945694436,
+    "pmae_micro": 16.352159720727645,
+    "prmse_micro": 33.81095945694436,
+    "pmae_macro": 17.19545704927022,
+    "prmse_macro": 23.945268798891618,
+    "full_window_pmae": 20.280385901748357,
+    "full_window_prmse": 40.21525769553464,
+    "edge_window_pmae": 10.177587189856382,
+    "edge_window_prmse": 19.949689868840537
+  },
+  "full_tiled": {
+    "mae": 118.31434013031341,
+    "rmse": 191.32283004190862,
+    "nae": 0.3160226496859472,
+    "sre": 8.800471721247753,
+    "signed_bias": -6.964573137052766,
+    "median_ae": 65.89764404296875,
+    "p90_ae": 256.9214233398438,
+    "p95_ae": 450.21829223632767,
+    "max_ae": 961.03076171875
+  },
+  "full_tiled_practical": {
+    "mae": 118.31434013031341,
+    "rmse": 191.32283004190862,
+    "nae": 0.3160226496859472,
+    "sre": 8.800471721247753,
+    "signed_bias": -6.964573137052766,
+    "median_ae": 65.89764404296875,
+    "p90_ae": 256.9214233398438,
+    "p95_ae": 450.21829223632767,
+    "max_ae": 961.03076171875
+  },
+  "full_tiled_controlled": {
+    "mae": 110.17568355602222,
+    "rmse": 186.81052459577433,
+    "nae": 0.2871950999604862,
+    "sre": 8.16347718973327,
+    "signed_bias": -21.313461366590563,
+    "median_ae": 67.22216033935547,
+    "p90_ae": 219.6258728027344,
+    "p95_ae": 450.8984893798824,
+    "max_ae": 960.369140625
+  },
+  "full_direct": {
+    "mae": 209.63023812430245,
+    "rmse": 308.52485073321407,
+    "nae": 0.5909608317930887,
+    "sre": 15.541884221257876,
+    "signed_bias": 137.81454165951237,
+    "median_ae": 139.1712646484375,
+    "p90_ae": 516.86416015625,
+    "p95_ae": 697.699835205078,
+    "max_ae": 1427.663818359375
+  },
+  "direct_minus_tiled": {
+    "mae_gap": 91.31589799398904,
+    "rmse_gap": 117.20202069130545,
+    "nae_gap": 0.2749381821071415,
+    "sre_gap": 6.741412500010123
+  },
+  "direct_minus_tiled_practical": {
+    "mae_gap": 91.31589799398904,
+    "rmse_gap": 117.20202069130545,
+    "nae_gap": 0.2749381821071415,
+    "sre_gap": 6.741412500010123
+  },
+  "direct_minus_tiled_controlled": {
+    "mae_gap": 99.45455456828023,
+    "rmse_gap": 121.71432613743974,
+    "nae_gap": 0.30376573183260247,
+    "sre_gap": 7.378407031524606
+  },
+  "halo_effect_practical_minus_controlled": {
+    "mae_gap": 8.13865657429119,
+    "rmse_gap": 4.512305446134292,
+    "nae_gap": 0.028827549725460977,
+    "sre_gap": 0.6369945315144836
+  },
+  "cancellation": {
+    "mean": 0.31430746875330545,
+    "median": 0.22677597847307318,
+    "p90": 0.797928222155218
+  },
+  "game_pixel_direct": {
+    "L0": 199.92930639707126,
+    "L1": 278.20223450791707,
+    "L2": 338.9732131815546,
+    "L3": 421.4130581889588
+  },
+  "game_pixel_tiled": {
+    "L0": 118.46349024510646,
+    "L1": 146.71495977797352,
+    "L2": 176.68731033818406,
+    "L3": 224.25370206209257
+  },
+  "game_stride16_direct": {
+    "L0": 209.92694414578952,
+    "L1": 290.6699570312605,
+    "L2": 351.98890736993854,
+    "L3": 436.676367194356
+  },
+  "game_stride16_tiled": {
+    "L0": 118.50115319136735,
+    "L1": 147.31798571806686,
+    "L2": 177.44507567981606,
+    "L3": 225.20363409356162
+  },
+  "micf_validity_direct": {
+    "macro_violation_rate": 0.20756930796058398,
+    "macro_violation_rate_raw": 0.20756930796058398,
+    "macro_violation_rate_tau": 0.20756352628465335,
+    "macro_violation_magnitude": 0.10328805094820212,
+    "macro_negative_mass_ratio": 0.19443768439623366,
+    "micro_violation_rate": 0.2443934475166984,
+    "micro_violation_rate_raw": 0.2443934475166984,
+    "micro_violation_rate_tau": 0.24438545148273122,
+    "micro_violation_magnitude": 0.12765484133498617,
+    "micro_negative_mass_ratio": 0.23966223783809232,
+    "negative_mass_total": 47894.30930110812,
+    "violation_rate": 0.20756930796058398,
+    "violation_magnitude": 0.10328805094820212,
+    "negative_mass_ratio": 0.19443768439623366
+  },
+  "micf_validity_tiled": {
+    "macro_violation_rate": 0.06120318043346246,
+    "macro_violation_rate_raw": 0.06120318043346246,
+    "macro_violation_rate_tau": 0.06119331058380077,
+    "macro_violation_magnitude": 0.0017784949260655043,
+    "macro_negative_mass_ratio": 0.011274063742651762,
+    "micro_violation_rate": 0.0737181024878327,
+    "micro_violation_rate_raw": 0.0737181024878327,
+    "micro_violation_rate_tau": 0.07370744110920983,
+    "micro_violation_magnitude": 0.0020131591883085485,
+    "micro_negative_mass_ratio": 0.009535158581927385,
+    "negative_mass_total": 755.3091432247311,
+    "violation_rate": 0.06120318043346246,
+    "violation_magnitude": 0.0017784949260655043,
+    "negative_mass_ratio": 0.011274063742651762
+  },
+  "representation_direct": {
+    "cumulative_field_nmae": 0.117391324847691,
+    "measure_nl1": 3.109837907183926,
+    "conservation_error": 5.994524274553571e-06
+  },
+  "representation_tiled": {
+    "cumulative_field_nmae": 0.09703885177457398,
+    "measure_nl1": 1.4871122859666395,
+    "conservation_error": 6.497561276614011e-06
+  },
+  "game_direct": {
+    "L0": 199.92930639707126,
+    "L1": 278.20223450791707,
+    "L2": 338.9732131815546,
+    "L3": 421.4130581889588
+  },
+  "game_tiled": {
+    "L0": 118.46349024510646,
+    "L1": 146.71495977797352,
+    "L2": 176.68731033818406,
+    "L3": 224.25370206209257
+  }
+}
