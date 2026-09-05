@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
-
 import torch
 import torch.nn.functional as F
 
@@ -31,37 +29,136 @@ def balanced_smooth_l1(
     return torch.stack(terms).mean()
 
 
-def global_count_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Stable global count loss on log1p counts."""
-    pn = pred.sum(dim=(-2, -1))
-    tn = target.sum(dim=(-2, -1))
-    return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
+_MAX_DISPERSION = 1e4
+
+
+def negative_binomial_nll_mean_dispersion(
+    target: torch.Tensor,
+    mean: torch.Tensor,
+    dispersion: float | torch.Tensor = 50.0,
+    eps: float = 1e-8,
+    reduction: str = "mean",
+) -> torch.Tensor:
+    """Negative-Binomial NLL with Var(Y) = mu + mu^2 / r evaluated in float32."""
+    y = target.to(device=mean.device, dtype=torch.float32)
+    mu = mean.to(dtype=torch.float32).clamp_min(eps)
+    r = torch.as_tensor(dispersion, device=mean.device, dtype=torch.float32)
+
+    if torch.any(r <= 0) or torch.any(r > _MAX_DISPERSION) or not torch.isfinite(r).all():
+        raise ValueError(
+            f"Negative-Binomial dispersion parameter r must be in (0, {_MAX_DISPERSION}], got {dispersion}"
+        )
+    if torch.any(y < 0):
+        raise ValueError("Negative-Binomial targets must be non-negative")
+
+    log_r_plus_mu = torch.log(r + mu)
+    nll = -(
+        torch.lgamma(y + r)
+        - torch.lgamma(r)
+        - torch.lgamma(y + 1.0)
+        + r * (torch.log(r) - log_r_plus_mu)
+        + y * (torch.log(mu) - log_r_plus_mu)
+    )
+    if reduction == "none":
+        return nll
+    if reduction == "sum":
+        return nll.sum()
+    if reduction == "mean":
+        return nll.mean()
+    raise ValueError(f"Unsupported reduction: {reduction}")
+
+
+def count_magnitude_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mode: str = "nb",
+    dispersion: float = 50.0,
+) -> torch.Tensor:
+    """Total crop count loss using Negative Binomial NLL or log1p smooth L1."""
+    pn = pred.sum(dim=(-2, -1)).view(-1)
+    tn = target.sum(dim=(-2, -1)).view(-1)
+    if mode == "nb":
+        return negative_binomial_nll_mean_dispersion(tn, pn, dispersion=dispersion, reduction="mean")
+    elif mode == "log1p":
+        return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
+    elif mode == "l1":
+        return F.l1_loss(pn, tn, reduction="mean")
+    raise ValueError(f"Unsupported count loss mode: {mode}")
+
+
+# Backward-compatible alias
+global_count_loss = count_magnitude_loss
+
+
+def block_sum_2d(x: torch.Tensor, k: int = 4) -> torch.Tensor:
+    """Sum non-overlapping k x k blocks via reshape."""
+    had_channel = x.ndim == 4
+    if not had_channel:
+        x = x.unsqueeze(1)
+    b, c, h, w = x.shape
+    h_trim = (h // k) * k
+    w_trim = (w // k) * k
+    if h != h_trim or w != w_trim:
+        x = x[:, :, :h_trim, :w_trim]
+        h, w = h_trim, w_trim
+    out = x.reshape(b, c, h // k, k, w // k, k).sum((3, 5))
+    return out if had_channel else out.squeeze(1)
+
+
+def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 1e-8) -> torch.Tensor:
+    mass = mass.float().clamp_min(tiny)
+    return mass / mass.sum(dim=-1, keepdim=True).clamp_min(tiny)
+
+
+def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Dirichlet-Multinomial NLL; empty parents contribute exactly zero."""
+    y = y.float()
+    alpha = alpha.float().clamp_min(eps)
+    if torch.any(y < 0):
+        raise ValueError("Dirichlet-Multinomial targets must be non-negative")
+    n = y.sum(dim=-1)
+    alpha0 = alpha.sum(dim=-1)
+    log_prob = (
+        torch.lgamma(n + 1.0)
+        - torch.lgamma(y + 1.0).sum(dim=-1)
+        + torch.lgamma(alpha0)
+        - torch.lgamma(n + alpha0)
+        + (torch.lgamma(y + alpha) - torch.lgamma(alpha)).sum(dim=-1)
+    )
+    return torch.where(n == 0, torch.zeros_like(n), -log_prob)
+
+
+def flat_dm16_loss(
+    pred_map: torch.Tensor,
+    target_map: torch.Tensor,
+    kappa: float = 20.0,
+    stride: int = 4,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells)."""
+    k = max(1, 16 // stride)
+    n16 = block_sum_2d(pred_map, k).flatten(1)
+    y16 = block_sum_2d(target_map, k).flatten(1)
+    pi = probs_from_positive_mass(n16, tiny=eps)
+    alpha = float(kappa) * pi
+    per_image_nll = dm_nll_none(y16, alpha, eps=eps)
+    return per_image_nll.mean()
 
 
 def scale_balanced_region_rate_loss(
     pred_region: torch.Tensor,
     target_region: torch.Tensor,
     regions: RegionSet,
-    beta: float = 1.0,
+    beta: float = 0.1,
 ) -> torch.Tensor:
     """Scale-balanced loss on per-cell RATE, not raw count.
 
     P0 #2 fix — normalize by area before computing loss:
         pred_rate   = b_R   / |R|    [predicted count/cell for each region]
         target_rate = N_R   / |R|    [GT count/cell for each region]
-        L = (1/S) sum_s mean_{R in scale s} SmoothL1(pred_rate_R, target_rate_R)
+        L = (1/S) sum_s mean_{R in scale s} SmoothL1(pred_rate_R, target_rate_R, beta)
 
-    Rationale: the regional head predicts b_R = |R| * softplus(z_R), so:
-        dL/dz_R  ∝  |R| * sigma(z_R)     [via chain rule through b_R]
-    This means gradient magnitude scales with |R| even when loss is averaged per-scale.
-    A 128px region (1024 cells) would produce gradients 16× larger than a 32px region
-    (64 cells), breaking scale balance despite the scale-averaging wrapper.
-
-    Training on rate eliminates this: dL_rate/dz_R ∝ sigma(z_R) regardless of |R|.
-    This is consistent with the head actually estimating a PER-CELL rate.
-
-    Applied to both `region_head` (regional evidence head b_R vs N_R) and
-    `region_map` (B1 control: sum-of-map vs N_R). Fair comparison requires same objective.
+    Training on rate eliminates area-proportional gradient imbalance.
     """
     if pred_region.shape != target_region.shape:
         raise ValueError(f"shape mismatch: {pred_region.shape} vs {target_region.shape}")
@@ -85,22 +182,26 @@ def scale_balanced_region_rate_loss(
 
 @dataclass
 class LossConfig:
-    lambda_global: float = 0.10
-    lambda_region_map: float = 0.20
+    lambda_count: float = 1.0
+    lambda_flat_dm16: float = 1.0
+    lambda_cell: float = 0.25
     lambda_region_head: float = 0.20
-    # P0 scientific fairness: deep supervision is DISABLED by default.
-    # B5 (RMR T=2) and B3a/B3b have iterates > 2 so they would receive intermediate
-    # supervision while B2 (region_aux) and B4 (RMR T=1) do NOT.
-    # This makes B2→B5 compare "regional head" vs "regional head + reconciliation + deep sup",
-    # not "reconciliation" alone. Default=0 ensures the causal experiment is clean.
-    # To ablate deep supervision separately, explicitly set lambda_deep_supervision > 0
-    # in a dedicated config and label it "RMR+DeepSup" in the paper.
+    lambda_region_map: float = 0.20
     lambda_deep_supervision: float = 0.0
+    count_loss_mode: str = "nb"
+    nb_dispersion: float = 50.0
+    kappa_flat16: float = 20.0
     cell_beta: float = 1.0
-    # P1 fix: regional loss operates on rate (count/cell), magnitude ~0.001–0.1.
-    # beta=2.0 (old, for raw counts) placed all rate residuals in quadratic regime,
-    # giving near-zero gradients. beta=0.1 keeps typical rate errors in linear regime.
     region_beta: float = 0.1
+
+    # Backwards-compatibility property:
+    @property
+    def lambda_global(self) -> float:
+        return self.lambda_count
+
+    @lambda_global.setter
+    def lambda_global(self, val: float) -> None:
+        self.lambda_count = val
 
 
 def compute_losses(
@@ -109,22 +210,32 @@ def compute_losses(
     variant: str,
     cfg: LossConfig = LossConfig(),
 ) -> dict[str, torch.Tensor]:
-    """Losses for all matched RQ variants.
+    """Losses for all matched RQ variants (RMR-v2).
 
     Variant semantics:
-      direct:          fine + global only
-      region_loss:     direct + training-only regional rate loss on final map (B1)
-      region_aux:      direct + auxiliary regional evidence rate head (B2)
-      local_refine:    direct + purely local learned inference refinement
-      learned_project: region_aux + learned regional-membership projector
-      rmr:             region_aux + exact-adjoint reconciliation
+      direct:          L_count + L_FlatDM16 + L_cell
+      region_loss:     direct + training-only regional rate loss on output density map (B1)
+      region_aux:      direct + auxiliary regional evidence head loss (B2)
+      local_refine:    direct + purely local learned inference refinement (B3a)
+      learned_project: region_aux + learned regional-membership projector (B3b)
+      rmr:             region_aux + exact-adjoint reconciliation (B5-P)
     """
     y = outputs["y"]
     regions: RegionSet | None = outputs.get("regions")
     losses: dict[str, torch.Tensor] = {}
 
     losses["cell"] = balanced_smooth_l1(y, target_y, beta=cfg.cell_beta)
-    losses["global"] = global_count_loss(y, target_y)
+    losses["count"] = count_magnitude_loss(
+        y, target_y, mode=cfg.count_loss_mode, dispersion=cfg.nb_dispersion
+    )
+    losses["global"] = losses["count"]  # backward-compatible key
+
+    if cfg.lambda_flat_dm16 > 0:
+        losses["flat_dm16"] = flat_dm16_loss(
+            y, target_y, kappa=cfg.kappa_flat16
+        )
+    else:
+        losses["flat_dm16"] = y.new_tensor(0.0)
 
     if variant in {"region_loss", "region_aux", "learned_project", "rmr"}:
         if regions is None:
@@ -132,15 +243,12 @@ def compute_losses(
         target_region = regional_sum(target_y, regions.boxes)
 
         if variant == "region_loss":
-            # B1 control: impose regional rate loss on the output density map.
-            # Uses rate loss (P0 #2 fix) for fair comparison with B2.
             pred_region = regional_sum(y, regions.boxes)
             losses["region_map"] = scale_balanced_region_rate_loss(
                 pred_region, target_region, regions, beta=cfg.region_beta
             )
 
         if variant in {"region_aux", "learned_project", "rmr"}:
-            # Regional evidence head loss: rate-normalized for scale-balanced gradient.
             b_region = outputs["b_region"]
             losses["region_head"] = scale_balanced_region_rate_loss(
                 b_region, target_region, regions, beta=cfg.region_beta
@@ -155,12 +263,17 @@ def compute_losses(
                 balanced_smooth_l1(m, target_y, beta=cfg.cell_beta) for m in mids
             ]).mean()
 
-    total = losses["cell"] + cfg.lambda_global * losses["global"]
+    total = (
+        cfg.lambda_count * losses["count"]
+        + cfg.lambda_flat_dm16 * losses["flat_dm16"]
+        + cfg.lambda_cell * losses["cell"]
+    )
     if "region_map" in losses:
         total = total + cfg.lambda_region_map * losses["region_map"]
     if "region_head" in losses:
         total = total + cfg.lambda_region_head * losses["region_head"]
-    if "deep" in losses:
+    if "deep" in losses and cfg.lambda_deep_supervision > 0:
         total = total + cfg.lambda_deep_supervision * losses["deep"]
+
     losses["total"] = total
     return losses

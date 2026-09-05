@@ -28,10 +28,14 @@ Variant = Literal[
 
 RMRUpdate = Literal["latent", "jacobian", "projected_sirt"]
 
-# Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(y) = log(exp(y)-1).
-# For target initial rate mu0 = 0.01 count/cell:
-# softplus^{-1}(0.01) = log(exp(0.01)-1) ≈ -4.595
-_FINE_HEAD_BIAS_INIT: float = math.log(math.exp(0.01) - 1.0)   # ≈ -4.595
+# Data-driven prior initialization (RMR-v2):
+# For ShanghaiTech Part A, average crop has ~200 people across 128x128 = 16,384 cells.
+# Expected initial density: m0 = 200 / 16384 ≈ 0.012207 count/cell.
+# Softplus inverse: softplus(x) = log(exp(x)-1), softplus^{-1}(m0) = log(exp(m0)-1) ≈ -4.400.
+_EXPECTED_CROP_COUNT: float = 200.0
+_CROP_CELLS_DEFAULT: float = 16384.0   # 128 * 128
+_M0_INIT: float = _EXPECTED_CROP_COUNT / _CROP_CELLS_DEFAULT  # ≈ 0.012207
+_FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.3996
 
 
 def _gn(channels: int) -> nn.GroupNorm:
@@ -111,12 +115,14 @@ class AdditiveFusion(nn.Module):
             ConvGNAct(width, width, 1),
         )
 
-    def forward(self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor) -> torch.Tensor:
+    def forward(self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         size = c4.shape[-2:]
-        p = self.p4(c4)
-        p = p + F.interpolate(self.p8(c8), size=size, mode="bilinear", align_corners=False)
-        p = p + F.interpolate(self.p16(c16), size=size, mode="bilinear", align_corners=False)
-        return self.out(p)
+        p4 = self.p4(c4)
+        p8 = self.p8(c8)
+        p16 = self.p16(c16)
+        p = p4 + F.interpolate(p8, size=size, mode="bilinear", align_corners=False)
+        p = p + F.interpolate(p16, size=size, mode="bilinear", align_corners=False)
+        return self.out(p), p8, p16
 
 
 class DSResidual(nn.Module):
@@ -161,7 +167,7 @@ class DepthwiseDilated(nn.Module):
 
 
 class AdditiveFPNNeck(nn.Module):
-    """Additive depthwise-separable FPN neck fusing reductions 4, 8, 16 into P4."""
+    """Additive depthwise-separable FPN neck fusing reductions 4, 8, 16 into (P4, P8, P16)."""
 
     def __init__(
         self,
@@ -183,7 +189,7 @@ class AdditiveFPNNeck(nn.Module):
         self.ref8 = DSResidual(width)
         self.ref4 = DSResidual(width)
 
-    def forward(self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor) -> torch.Tensor:
+    def forward(self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         l4 = self.lat4(c4)
         l8 = self.lat8(c8)
         l16 = self.lat16(c16)
@@ -200,7 +206,7 @@ class AdditiveFPNNeck(nn.Module):
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )
         p4 = self.ref4(l4 + up8_to_4)
-        return p4
+        return p4, p8, p16
 
 
 class MobileNetV4Backbone(nn.Module):
@@ -259,62 +265,105 @@ class FineMeasureHead(nn.Module):
         nn.init.normal_(final_conv.weight, std=0.01)
         nn.init.constant_(final_conv.bias, _FINE_HEAD_BIAS_INIT)  # type: ignore[arg-type]
 
-    def forward(self, f: torch.Tensor) -> torch.Tensor:
+    def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+        if isinstance(f, tuple):
+            f = f[0]
         return self.body(f)
 
 
-class RegionalEvidenceHead(nn.Module):
-    """Shared regional count regressor: predicts rate rho_R then scales by area.
+class ScaleMatchedRegionalEvidenceHead(nn.Module):
+    """Scale-matched regional count regressor observing feature pyramid (P4, P8, P16).
 
-    P0 fix (rate × area formulation):
-        rho_R = softplus(MLP(avg_feat_R, geom_R))   [counts/cell]
-        b_R   = |R| * rho_R                          [total counts in region]
+    Architecture (RMR-v2):
+        32px regions  -> observed on P4 (stride 4, 8x8 window)
+        64px regions  -> observed on P8 (stride 8, 8x8 window)
+        128px regions -> observed on P16 (stride 16, 8x8 window)
 
-    This enforces extensivity by construction: same visual crowd density in a
-    larger region correctly predicts a proportionally larger count.
+    Feature representation per region:
+        [u_R, log(s_R / 32.0)] in R^33 (32 feature channels + 1 scale feature)
 
-    P0 #1 fix (bias calibration):
-        Final Linear bias initialized to _FINE_HEAD_BIAS_INIT ≈ -4.595 so that
-        softplus(bias) ≈ 0.01 count/cell at initialization — same density prior
-        as FineMeasureHead. Without this, softplus(0) = 0.693 per cell, which
-        causes b_128 ≈ 710 while Y_0 ≈ 164 → solver tries to inject mass.
+    Shared MLP:
+        Linear(33, 48) -> SiLU -> Linear(48, 48) -> SiLU -> Linear(48, 1)
 
-    P1 #1 fix (position-free geometry, geom_dim=4):
-        geom = [log(h), log(w), log(|R|), log(w/h)]
-        Positional terms cy/H, cx/W are dropped because they change value for the
-        SAME physical region depending on whether it sits inside a random 512-crop
-        (training), a full-resolution image (direct eval), or a tile (tiled eval).
-        This mismatch creates three different "geometric identities" for the same
-        window and contaminates the regional evidence head with spurious position cues.
-        Positional ablation can be added later with globally-consistent coordinates.
+    Rate & Measure:
+        rho_R = softplus(raw_R)       [count / stride-4 cell]
+        b_R   = |R| * rho_R           [total count in region R]
+    where |R| is the area in stride-4 cells (64, 256, 1024).
     """
 
-    def __init__(self, feature_dim: int = 32, hidden: int = 48, geom_dim: int = 4):
+    def __init__(
+        self,
+        feature_dim: int = 32,
+        hidden: int = 48,
+        init_bias: float = _FINE_HEAD_BIAS_INIT,
+    ):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(feature_dim + geom_dim, hidden),
+            nn.Linear(feature_dim + 1, hidden),
             nn.SiLU(inplace=True),
             nn.Linear(hidden, hidden),
             nn.SiLU(inplace=True),
             nn.Linear(hidden, 1),
         )
-        # P0 #1 fix: calibrate final Linear so initial rate ≈ 0.01 count/cell.
-        # softplus^{-1}(0.01) = log(exp(0.01) - 1) ≈ -4.595 = _FINE_HEAD_BIAS_INIT.
         final_linear: nn.Linear = self.mlp[-1]  # type: ignore[assignment]
         nn.init.normal_(final_linear.weight, std=0.01)
-        nn.init.constant_(final_linear.bias, _FINE_HEAD_BIAS_INIT)
+        nn.init.constant_(final_linear.bias, init_bias)
 
-    def forward(self, f: torch.Tensor, regions: RegionSet) -> torch.Tensor:
-        b, _, h, w = f.shape
-        pooled = region_average_features(f, regions.boxes)  # [B,M,C]
-        geom = region_geometry(regions.boxes, h, w).to(dtype=f.dtype)
-        geom = geom.unsqueeze(0).expand(b, -1, -1)
-        raw = self.mlp(torch.cat([pooled, geom], dim=-1)).squeeze(-1)  # [B,M]
-        # rate per cell (positive), then scale by region area for total count
-        area = regions.area.to(dtype=f.dtype).view(1, -1)  # [1,M]
-        rate = F.softplus(raw)                              # [B,M] rate per cell
-        b_region = rate * area                              # [B,M] total count
-        return b_region.unsqueeze(1)                        # [B,1,M]
+    def forward(
+        self,
+        pyramid_or_f: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | torch.Tensor,
+        regions: RegionSet,
+    ) -> torch.Tensor:
+        if isinstance(pyramid_or_f, tuple):
+            p4, p8, p16 = pyramid_or_f
+        else:
+            p4 = pyramid_or_f
+            p8 = F.interpolate(p4, scale_factor=0.5, mode="bilinear", align_corners=False)
+            p16 = F.interpolate(p8, scale_factor=0.5, mode="bilinear", align_corners=False)
+
+        b = p4.shape[0]
+        device = p4.device
+        dtype = p4.dtype
+
+        specs = [
+            (0, p4, 1, 32.0),
+            (1, p8, 2, 64.0),
+            (2, p16, 4, 128.0),
+        ]
+
+        pooled_list: list[torch.Tensor] = []
+        for sid, feat, stride_ratio, scale_px in specs:
+            mask = regions.scale_id == sid
+            if not mask.any():
+                continue
+            boxes_s = regions.boxes[mask]
+            if stride_ratio > 1:
+                boxes_s = boxes_s // stride_ratio
+            u_s = region_average_features(feat, boxes_s)  # [B, M_s, C]
+            m_s = u_s.shape[1]
+            scale_feat = torch.full(
+                (1, m_s, 1),
+                math.log(scale_px / 32.0),
+                device=device,
+                dtype=dtype,
+            ).expand(b, -1, -1)
+            f_s = torch.cat([u_s, scale_feat], dim=-1)   # [B, M_s, 33]
+            pooled_list.append(f_s)
+
+        if not pooled_list:
+            u_all = region_average_features(p4, regions.boxes)
+            scale_feat = torch.zeros((b, u_all.shape[1], 1), device=device, dtype=dtype)
+            pooled_list = [torch.cat([u_all, scale_feat], dim=-1)]
+
+        feat_all = torch.cat(pooled_list, dim=1)         # [B, M, 33]
+        raw = self.mlp(feat_all).squeeze(-1)            # [B, M]
+        rate = F.softplus(raw)                          # [B, M]
+        area = regions.area.to(dtype=dtype).view(1, -1) # [1, M]
+        b_region = rate * area                          # [B, M]
+        return b_region.unsqueeze(1)                    # [B, 1, M]
+
+
+RegionalEvidenceHead = ScaleMatchedRegionalEvidenceHead
 
 
 class LocalPreconditioner(nn.Module):
@@ -449,7 +498,7 @@ class RMRConfig:
     #   "latent":         z^{t+1} = z^t - eta * M * r  (legacy default)
     #   "jacobian":       z^{t+1} = z^t - eta * M * sigma(z) * r  (ablation)
     #   "projected_sirt": Y^{t+1} = max(0, Y^t - omega * M * r)  (RMR-P registered)
-    update_rule: RMRUpdate = "latent"
+    update_rule: RMRUpdate = "projected_sirt"
     # Legacy ablation flag: if True and update_rule=="latent", sets update_rule to "jacobian"
     use_jacobian_gate: bool = False
 
@@ -521,7 +570,7 @@ class RMRCount(nn.Module):
         )
 
         effective_rule = cfg.update_rule
-        if cfg.use_jacobian_gate and effective_rule == "latent":
+        if cfg.use_jacobian_gate:
             effective_rule = "jacobian"
         self.rmr_update_rule: RMRUpdate = effective_rule
         self.update_rule: RMRUpdate = effective_rule
@@ -779,7 +828,8 @@ class RMRCount(nn.Module):
         shuffle_region: bool = False,
     ) -> dict[str, torch.Tensor | RegionSet | None | list]:
         c4, c8, c16 = self.encoder(x)
-        f = self.fusion(c4, c8, c16)
+        p4, p8, p16 = self.fusion(c4, c8, c16)
+        f = p4
         z0 = self.fine_head(f)
         y0 = F.softplus(z0)
         h, w = y0.shape[-2:]
@@ -801,6 +851,7 @@ class RMRCount(nn.Module):
 
         out: dict = {
             "features": f,
+            "pyramid": (p4, p8, p16),
             "z0": z0,
             "y0": y0,
             "regions": regions,
@@ -810,7 +861,7 @@ class RMRCount(nn.Module):
 
         if self.region_head is not None:
             assert regions is not None
-            b_region = self.region_head(f, regions)
+            b_region = self.region_head((p4, p8, p16), regions)
             if b_region_override is not None:
                 if b_region_override.shape != b_region.shape:
                     raise ValueError(

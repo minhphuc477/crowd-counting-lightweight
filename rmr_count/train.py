@@ -138,16 +138,16 @@ def make_model(cfg: dict) -> RMRCount:
 def make_loss_cfg(cfg: dict) -> LossConfig:
     x = cfg.get("loss", {})
     return LossConfig(
-        lambda_global=x.get("lambda_global", 0.10),
+        lambda_count=x.get("lambda_count", x.get("lambda_global", 1.0)),
+        lambda_flat_dm16=x.get("lambda_flat_dm16", 1.0),
+        lambda_cell=x.get("lambda_cell", 0.25),
         lambda_region_map=x.get("lambda_region_map", 0.20),
         lambda_region_head=x.get("lambda_region_head", 0.20),
         lambda_deep_supervision=x.get("lambda_deep_supervision", 0.0),
+        count_loss_mode=x.get("count_loss_mode", "nb"),
+        nb_dispersion=x.get("nb_dispersion", 50.0),
+        kappa_flat16=x.get("kappa_flat16", 20.0),
         cell_beta=x.get("cell_beta", 1.0),
-        # P1 fix: rate magnitudes are ~0.001–0.1, so beta=2.0 puts all residuals in the
-        # quadratic regime (|Δρ| ≪ 2), giving gradient ≈ Δρ/2 ≈ 0.001–0.05.
-        # After lambda_region=0.2, regional branch contributes only ~0.002 to grad.
-        # beta=0.1 keeps non-trivial residuals in the linear regime (L1-like),
-        # giving gradient ≈ sign(Δρ) and stronger regional supervision.
         region_beta=x.get("region_beta", 0.1),
     )
 
@@ -294,7 +294,7 @@ def main() -> None:
     amp = bool(cfg["train"].get("amp", True) and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
     loss_cfg = make_loss_cfg(cfg)
-    grad_clip = float(cfg["train"].get("grad_clip", 5.0))
+    grad_clip = float(cfg["train"].get("grad_clip", 500.0))
     eval_every = int(cfg["train"].get("eval_every", 10))
     solver_warmup_epochs = int(cfg["train"].get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg["train"].get("solver_ramp_epochs", 20))
@@ -354,8 +354,8 @@ def main() -> None:
             solver_strength = 1.0  # non-iterative variants: strength always 1 for guard below
 
         sums: dict[str, float] = {
-            "total": 0.0, "cell": 0.0, "global": 0.0,
-            "region_head": 0.0, "region_map": 0.0, "deep": 0.0,
+            "total": 0.0, "cell": 0.0, "count": 0.0, "global": 0.0,
+            "flat_dm16": 0.0, "region_head": 0.0, "region_map": 0.0, "deep": 0.0,
         }
         n_steps = 0
         clipped = 0
@@ -478,6 +478,8 @@ def main() -> None:
             "eta0": solver_step0,
             "train_total": sums["total"] / max(1, n_steps),
             "train_cell": sums["cell"] / max(1, n_steps),
+            "train_count": sums["count"] / max(1, n_steps),
+            "train_flat_dm16": sums["flat_dm16"] / max(1, n_steps),
             "train_global": sums["global"] / max(1, n_steps),
             "train_region_head": sums["region_head"] / max(1, n_steps),
             "train_region_map": sums["region_map"] / max(1, n_steps),

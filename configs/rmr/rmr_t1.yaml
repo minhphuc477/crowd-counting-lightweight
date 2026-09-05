@@ -25,10 +25,15 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
 loss:
-  lambda_global: 0.1
-  lambda_region_map: 0.2
+  lambda_count: 1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell: 0.25
   lambda_region_head: 0.2
+  lambda_region_map: 0.2
   lambda_deep_supervision: 0.0
+  count_loss_mode: nb
+  nb_dispersion: 50.0
+  kappa_flat16: 20.0
   cell_beta: 1.0
   region_beta: 0.1
 train:
@@ -39,7 +44,7 @@ train:
   epochs: 1000
   warmup_epochs: 5
   eval_every: 10
-  grad_clip: 5.0
+  grad_clip: 500.0
   amp: true
   solver_warmup_epochs: 5
   solver_ramp_epochs: 20

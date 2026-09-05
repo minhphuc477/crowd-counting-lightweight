@@ -53,7 +53,7 @@ def test_learned_project_same_regional_scope_runs():
 
 
 def test_small_bounded_eta_initialization():
-    model = RMRCount(RMRConfig(iterations=2, eta_max=0.2, eta_init=0.05), variant="rmr")
+    model = RMRCount(RMRConfig(iterations=2, eta_max=0.2, eta_init=0.05, update_rule="latent"), variant="rmr")
     eta0 = float(model._eta(0).detach())
     assert abs(eta0 - 0.05) < 1e-5
 
@@ -833,7 +833,7 @@ def test_rmr_p_exact_parameter_parity_with_b2():
 
     params_p = sum(p.numel() for p in model_p.parameters())
     params_b2 = sum(p.numel() for p in model_b2.parameters())
-    assert params_p == 101858, f"Expected 101,858 parameters, got {params_p}"
+    assert params_p == 101714, f"Expected 101,714 parameters, got {params_p}"
     assert params_p == params_b2, f"Expected exact parameter parity with B2 ({params_b2}), got {params_p}"
 
 
