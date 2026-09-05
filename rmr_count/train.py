@@ -40,24 +40,85 @@ def seed_everything(seed: int) -> None:
 
 
 def make_model(cfg: dict) -> RMRCount:
+    model_cfg = cfg["model"]
+
+    # Backward compatibility:
+    # old configs did not contain update_rule.
+    # They must continue to mean the historical latent implementation.
+    update_rule = model_cfg.get("update_rule")
+    if update_rule is None:
+        update_rule = (
+            "jacobian"
+            if model_cfg.get("use_jacobian_gate", False)
+            else "latent"
+        )
+
     mcfg = RMRConfig(
-        output_stride=cfg["model"].get("output_stride", 4),
-        feature_width=cfg["model"].get("feature_width", 32),
-        region_sizes_px=tuple(cfg["model"].get("region_sizes_px", [32, 64, 128])),
-        region_overlap=cfg["model"].get("region_overlap", 0.5),
-        include_full_image=cfg["model"].get("include_full_image", False),  # P0: False for pilot
-        iterations=cfg["model"].get("iterations", 2),
-        eta_max=cfg["model"].get("eta_max", 0.20),
-        eta_init=cfg["model"].get("eta_init", 0.05),
-        residual_clip=cfg["model"].get("residual_clip", 5.0),
-        update_rule=cfg["model"].get("update_rule", "latent"),
-        use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
-        sirt_omega=cfg["model"].get("sirt_omega", 1.0),
-        learnable_sirt_omega=cfg["model"].get("learnable_sirt_omega", False),
-        projected_use_preconditioner=cfg["model"].get("projected_use_preconditioner", False),
-        detach_region_evidence=cfg["model"].get("detach_region_evidence", True),
+        output_stride=model_cfg.get(
+            "output_stride",
+            4,
+        ),
+        feature_width=model_cfg.get(
+            "feature_width",
+            32,
+        ),
+        region_sizes_px=tuple(
+            model_cfg.get(
+                "region_sizes_px",
+                [32, 64, 128],
+            )
+        ),
+        region_overlap=model_cfg.get(
+            "region_overlap",
+            0.5,
+        ),
+        include_full_image=model_cfg.get(
+            "include_full_image",
+            False,
+        ),
+        iterations=model_cfg.get(
+            "iterations",
+            2,
+        ),
+        eta_max=model_cfg.get(
+            "eta_max",
+            0.20,
+        ),
+        eta_init=model_cfg.get(
+            "eta_init",
+            0.05,
+        ),
+        residual_clip=model_cfg.get(
+            "residual_clip",
+            5.0,
+        ),
+        update_rule=update_rule,
+        use_jacobian_gate=model_cfg.get(
+            "use_jacobian_gate",
+            False,
+        ),
+        sirt_omega=model_cfg.get(
+            "sirt_omega",
+            1.0,
+        ),
+        learnable_sirt_omega=model_cfg.get(
+            "learnable_sirt_omega",
+            False,
+        ),
+        projected_use_preconditioner=model_cfg.get(
+            "projected_use_preconditioner",
+            False,
+        ),
+        detach_region_evidence=model_cfg.get(
+            "detach_region_evidence",
+            True,
+        ),
     )
-    return RMRCount(mcfg, variant=cfg["model"]["variant"])
+
+    return RMRCount(
+        mcfg,
+        variant=model_cfg["variant"],
+    )
 
 
 def make_loss_cfg(cfg: dict) -> LossConfig:
@@ -343,21 +404,29 @@ def main() -> None:
         else:
             init_mean = init_std = 0.0
 
-        rule_name = getattr(model, "update_rule", "latent")
-        if rule_name == "projected_sirt":
-            step0 = float(model._sirt_omega().detach().cpu().item()) * solver_strength
+        if (
+            model.variant == "rmr"
+            and getattr(model, "rmr_update_rule", None) == "projected_sirt"
+        ):
+            solver_step0 = float(
+                model._sirt_omega().detach().cpu().item()
+                * model.solver_strength
+            )
         elif hasattr(model, "_eta"):
-            step0 = float(model._eta(0).detach().cpu().item()) * solver_strength
+            solver_step0 = float(
+                model._eta(0).detach().cpu().item()
+            )
         else:
-            step0 = 0.0
+            solver_step0 = 0.0
+        rule_name = getattr(model, "rmr_update_rule", "latent")
 
         row = {
             "epoch": epoch,
             "lr": current_lr,
             "solver_strength": solver_strength,
             "rmr_update_rule": rule_name,
-            "solver_step0": step0,
-            "eta0": float(model._eta(0).detach().cpu().item()) if hasattr(model, "_eta") else 0.0,
+            "solver_step0": solver_step0,
+            "eta0": solver_step0,
             "train_total": sums["total"] / max(1, n_steps),
             "train_cell": sums["cell"] / max(1, n_steps),
             "train_global": sums["global"] / max(1, n_steps),

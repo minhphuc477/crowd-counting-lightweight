@@ -18,34 +18,114 @@ from .model import RMRConfig, RMRCount
 from .operators import regional_sum
 
 
-def make_model_from_ckpt(ckpt: dict, device: torch.device) -> RMRCount:
+def make_model_from_ckpt(
+    ckpt: dict,
+    device: torch.device,
+) -> RMRCount:
     cfg = ckpt["config"]
+    model_cfg = cfg["model"]
+
+    # --------------------------------------------------------------
+    # Backward compatibility.
+    # Historical RMR checkpoints did not store update_rule.
+    # They are RMR-Latent unless use_jacobian_gate=True.
+    # --------------------------------------------------------------
+    update_rule = model_cfg.get("update_rule")
+    if update_rule is None:
+        update_rule = (
+            "jacobian"
+            if model_cfg.get("use_jacobian_gate", False)
+            else "latent"
+        )
+
     mcfg = RMRConfig(
-        output_stride=cfg["model"].get("output_stride", 4),
-        feature_width=cfg["model"].get("feature_width", 32),
-        region_sizes_px=tuple(cfg["model"].get("region_sizes_px", [32, 64, 128])),
-        region_overlap=cfg["model"].get("region_overlap", 0.5),
-        include_full_image=cfg["model"].get("include_full_image", False),
-        iterations=cfg["model"].get("iterations", 2),
-        eta_max=cfg["model"].get("eta_max", 0.20),
-        eta_init=cfg["model"].get("eta_init", 0.05),
-        residual_clip=cfg["model"].get("residual_clip", 5.0),
-        update_rule=cfg["model"].get("update_rule", "latent"),
-        use_jacobian_gate=cfg["model"].get("use_jacobian_gate", False),
-        sirt_omega=cfg["model"].get("sirt_omega", 1.0),
-        learnable_sirt_omega=cfg["model"].get("learnable_sirt_omega", False),
-        projected_use_preconditioner=cfg["model"].get("projected_use_preconditioner", False),
-        detach_region_evidence=cfg["model"].get("detach_region_evidence", True),
+        output_stride=model_cfg.get(
+            "output_stride",
+            4,
+        ),
+        feature_width=model_cfg.get(
+            "feature_width",
+            32,
+        ),
+
+        # Use current registered geometry as fallback.
+        region_sizes_px=tuple(
+            model_cfg.get(
+                "region_sizes_px",
+                [32, 64, 128],
+            )
+        ),
+        region_overlap=model_cfg.get(
+            "region_overlap",
+            0.5,
+        ),
+        include_full_image=model_cfg.get(
+            "include_full_image",
+            False,
+        ),
+
+        iterations=model_cfg.get(
+            "iterations",
+            2,
+        ),
+
+        eta_max=model_cfg.get(
+            "eta_max",
+            0.20,
+        ),
+        eta_init=model_cfg.get(
+            "eta_init",
+            0.05,
+        ),
+        residual_clip=model_cfg.get(
+            "residual_clip",
+            5.0,
+        ),
+
+        update_rule=update_rule,
+        use_jacobian_gate=model_cfg.get(
+            "use_jacobian_gate",
+            False,
+        ),
+
+        sirt_omega=model_cfg.get(
+            "sirt_omega",
+            1.0,
+        ),
+        learnable_sirt_omega=model_cfg.get(
+            "learnable_sirt_omega",
+            False,
+        ),
+        projected_use_preconditioner=model_cfg.get(
+            "projected_use_preconditioner",
+            False,
+        ),
+        detach_region_evidence=model_cfg.get(
+            "detach_region_evidence",
+            True,
+        ),
     )
-    model = RMRCount(mcfg, variant=cfg["model"]["variant"])
-    model.load_state_dict(ckpt["model"], strict=True)
-    # P0 fix: restore solver_strength — without this, diagnostic checkpoints saved
-    # during solver ramp-up (strength < 1.0) are loaded with strength=1.0, making
-    # eval results not reproducible from the checkpoint's training epoch.
-    # Production best_val_mae.pt checkpoints always have strength=1.0, so this is
-    # a no-op for final results but is critical for mid-training diagnostics.
-    saved_strength = float(ckpt.get("solver_strength", 1.0))
-    model.set_solver_strength(saved_strength)
+
+    model = RMRCount(
+        mcfg,
+        variant=model_cfg["variant"],
+    )
+
+    model.load_state_dict(
+        ckpt["model"],
+        strict=True,
+    )
+
+    saved_strength = float(
+        ckpt.get(
+            "solver_strength",
+            1.0,
+        )
+    )
+    model.set_solver_strength(
+        saved_strength
+    )
+
     return model.to(device).eval()
 
 

@@ -390,51 +390,84 @@ class RMRCount(nn.Module):
         self.cfg = cfg
         self.variant = variant
 
-        # Resolve effective update rule with backward compatibility
-        if cfg.update_rule == "projected_sirt":
-            self.update_rule: RMRUpdate = "projected_sirt"
-        elif cfg.use_jacobian_gate or cfg.update_rule == "jacobian":
-            self.update_rule = "jacobian"
-        else:
-            self.update_rule = "latent"
+        needs_region_head = variant in {
+            "region_aux",
+            "learned_project",
+            "rmr",
+        }
+        self.region_head = (
+            RegionalEvidenceHead(cfg.feature_width)
+            if needs_region_head
+            else None
+        )
+
+        effective_rule = cfg.update_rule
+        if cfg.use_jacobian_gate and effective_rule == "latent":
+            effective_rule = "jacobian"
+        self.rmr_update_rule: RMRUpdate = effective_rule
+        self.update_rule: RMRUpdate = effective_rule
 
         self.encoder = TinyLocalEncoder()
         self.fusion = AdditiveFusion(cfg.feature_width)
         self.fine_head = FineMeasureHead(cfg.feature_width)
 
-        needs_region_head = variant in {"region_aux", "learned_project", "rmr"}
-        self.region_head = RegionalEvidenceHead(cfg.feature_width) if needs_region_head else None
-
-        needs_preconditioner = (
+        # Legacy RMR-Latent / RMR-Jacobian always use the learned positive
+        # local preconditioner.
+        # Registered Projected-SIRT uses M=1 unless explicitly ablated.
+        need_preconditioner = (
             variant == "rmr"
             and (
-                self.update_rule in {"latent", "jacobian"}
+                self.rmr_update_rule in {"latent", "jacobian"}
                 or cfg.projected_use_preconditioner
             )
         )
         self.preconditioner = (
-            LocalPreconditioner(cfg.feature_width) if needs_preconditioner else None
-        )
-        self.local_refiner = LocalCNNRefiner(cfg.feature_width) if variant == "local_refine" else None
-        self.learned_projector = (
-            LearnedMembershipProjector(cfg.feature_width) if variant == "learned_project" else None
+            LocalPreconditioner(cfg.feature_width)
+            if need_preconditioner
+            else None
         )
 
+        self.local_refiner = (
+            LocalCNNRefiner(cfg.feature_width)
+            if variant == "local_refine"
+            else None
+        )
+
+        self.learned_projector = (
+            LearnedMembershipProjector(cfg.feature_width)
+            if variant == "learned_project"
+            else None
+        )
+
+        # Keep eta_logits for compatibility with legacy configs/checkpoints
+        # and the learned controls.
         n_steps = max(1, cfg.iterations)
         frac = cfg.eta_init / max(cfg.eta_max, 1e-8)
         init = _logit(frac)
-        self.eta_logits = nn.Parameter(torch.full((n_steps,), init))
+        self.eta_logits = nn.Parameter(
+            torch.full((n_steps,), init)
+        )
 
-        if cfg.learnable_sirt_omega:
-            self.log_sirt_omega = nn.Parameter(torch.tensor(math.log(max(cfg.sirt_omega, 1e-4))))
+        # Optional learnable relaxation for an ablation only.
+        # Main method uses fixed omega=1 and has no extra solver parameter.
+        if (
+            variant == "rmr"
+            and self.rmr_update_rule == "projected_sirt"
+            and cfg.learnable_sirt_omega
+        ):
+            if cfg.sirt_omega <= 0:
+                raise ValueError("sirt_omega must be > 0")
+            self.log_sirt_omega = nn.Parameter(
+                torch.tensor(math.log(cfg.sirt_omega), dtype=torch.float32)
+            )
         else:
             self.register_parameter("log_sirt_omega", None)
 
-        # Training script ramps this from 0 -> 1 after the direct prediction has stabilized.
-        # NOTE: this is a Python float, NOT in state_dict. Checkpoint loading always restores
-        # to 1.0. Training prevents selecting best_val_mae.pt before strength == 1.0.
         self.solver_strength: float = 1.0
-        self._cache: dict[tuple, tuple[RegionSet, torch.Tensor]] = {}
+        self._cache: dict[
+            tuple,
+            tuple[RegionSet, torch.Tensor]
+        ] = {}
 
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))
@@ -472,17 +505,14 @@ class RMRCount(nn.Module):
         idx = min(t, self.eta_logits.numel() - 1)
         return self.cfg.eta_max * torch.sigmoid(self.eta_logits[idx])
 
-    def _sirt_omega(
-        self, device: torch.device | None = None, dtype: torch.dtype | None = None
-    ) -> torch.Tensor:
-        if self.log_sirt_omega is None:
-            return torch.tensor(self.cfg.sirt_omega, dtype=dtype or torch.float32, device=device)
-        omega = torch.exp(self.log_sirt_omega)
-        if device is not None:
-            omega = omega.to(device=device)
-        if dtype is not None:
-            omega = omega.to(dtype=dtype)
-        return omega
+    def _sirt_omega(self) -> torch.Tensor:
+        if self.log_sirt_omega is not None:
+            # Positive relaxation.
+            return torch.exp(self.log_sirt_omega)
+        # Put the scalar on the same device as model parameters.
+        return self.eta_logits.new_tensor(
+            float(self.cfg.sirt_omega)
+        )
 
     def _projected_sirt_step(
         self,
@@ -490,18 +520,61 @@ class RMRCount(nn.Module):
         b_region: torch.Tensor,
         regions: RegionSet,
         coverage: torch.Tensor,
-        f: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
-        r = self._normalized_adjoint_field(y, b_region, regions, coverage=coverage)
-        if self.cfg.projected_use_preconditioner and self.preconditioner is not None:
-            m = self.preconditioner(f, y, r)
+        *,
+        features: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """One nonnegative projected RMR/SIRT reconciliation step.
+
+        r = Dc^-1 A^T Da^-1 (AY - b)
+
+        Main registered method:
+            M = 1
+            omega = 1
+            y_next = clamp_min(y - omega * r, 0)
+
+        solver_strength multiplies omega during warm-up/ramp.
+
+        Returns:
+            y_next
+            residual field r
+            preconditioner field M
+            effective omega
+        """
+        r = self._normalized_adjoint_field(
+            y,
+            b_region,
+            regions,
+            coverage=coverage,
+        )
+
+        if self.cfg.projected_use_preconditioner:
+            if self.preconditioner is None:
+                raise RuntimeError(
+                    "projected_use_preconditioner=True "
+                    "but no LocalPreconditioner was constructed"
+                )
+            if features is None:
+                raise ValueError(
+                    "features required for learned preconditioner"
+                )
+            m = self.preconditioner(
+                features,
+                y,
+                r,
+            )
         else:
+            # Exact registered solver: no learned spatial gate.
             m = torch.ones_like(y)
-        omega = self._sirt_omega(device=y.device, dtype=y.dtype)
-        omega_eff = omega * self.solver_strength
-        y_next = torch.clamp_min(y - omega_eff * m * r, 0.0)
-        omega_val = float(omega_eff.detach().item())
-        return y_next, r, m, omega_val
+
+        omega = self._sirt_omega()
+        omega_eff = omega * float(self.solver_strength)
+
+        y_next = torch.clamp_min(
+            y - omega_eff * m * r,
+            0.0,
+        )
+
+        return y_next, r, m, omega_eff
 
     def _raw_region_delta(
         self,
@@ -622,15 +695,28 @@ class RMRCount(nn.Module):
             raise RuntimeError(f"variant {self.variant} requires regional evidence")
 
         for t in range(self.cfg.iterations):
-            if self.variant == "rmr" and self.update_rule == "projected_sirt":
+            if (
+                self.variant == "rmr"
+                and self.rmr_update_rule == "projected_sirt"
+            ):
                 assert b_solver is not None
-                assert regions is not None and coverage is not None
-                y, r, m, step_val = self._projected_sirt_step(
-                    y, b_solver, regions, coverage=coverage, f=f
+                assert regions is not None
+                assert coverage is not None
+
+                y, r, m, omega_eff = self._projected_sirt_step(
+                    y,
+                    b_solver,
+                    regions,
+                    coverage,
+                    features=f,
                 )
+
                 residual_fields.append(r)
                 preconditioner_fields.append(m)
-                step_sizes.append(step_val)
+                step_sizes.append(
+                    float(omega_eff.detach().item())
+                )
+
                 iterates.append(y)
                 continue
 
