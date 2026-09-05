@@ -672,10 +672,8 @@ class RMRCount(nn.Module):
                         perm = idx[torch.randperm(idx.numel(), device=idx.device)]
                         b_region[..., idx] = b_region[..., perm]
             out["b_region"] = b_region
-            b_solver = b_region.detach() if self.cfg.detach_region_evidence else b_region
         else:
             b_region = None
-            b_solver = None
 
         if self.variant in {"direct", "region_loss", "region_aux"}:
             out["y"] = y0
@@ -686,15 +684,40 @@ class RMRCount(nn.Module):
 
         z = z0
         y = y0
+
         iterates = [y0]
         residual_fields: list[torch.Tensor] = []
         preconditioner_fields: list[torch.Tensor] = []
         step_sizes: list[float] = []
 
-        if self.variant in {"learned_project", "rmr"} and b_solver is None:
-            raise RuntimeError(f"variant {self.variant} requires regional evidence")
+        if self.variant in {"learned_project", "rmr"} and b_region is None:
+            raise RuntimeError(
+                f"variant {self.variant} requires regional evidence"
+            )
+
+        # --------------------------------------------------------------
+        # Solver measurement.
+        #
+        # Keep out["b_region"] connected to the regional head so that
+        # L_region_head trains it normally.
+        #
+        # Only the copy used inside RMR is detached for the registered
+        # causal B2-vs-B5 comparison.
+        # --------------------------------------------------------------
+        if (
+            self.variant == "rmr"
+            and b_region is not None
+            and self.cfg.detach_region_evidence
+        ):
+            b_solver = b_region.detach()
+        else:
+            b_solver = b_region
 
         for t in range(self.cfg.iterations):
+
+            # ==========================================================
+            # Registered upgraded RMR-P
+            # ==========================================================
             if (
                 self.variant == "rmr"
                 and self.rmr_update_rule == "projected_sirt"
@@ -720,63 +743,126 @@ class RMRCount(nn.Module):
                 iterates.append(y)
                 continue
 
+            # ==========================================================
+            # Legacy / learned-control latent rules
+            # ==========================================================
             eta = self._eta(t) * self.solver_strength
-            eta_val = float(eta.detach().item() if isinstance(eta, torch.Tensor) else eta)
-            step_sizes.append(eta_val)
+            step_sizes.append(
+                float(eta.detach().item())
+            )
 
             if self.variant == "rmr":
-                assert b_solver is not None and self.preconditioner is not None
-                r = self._normalized_adjoint_field(y, b_solver, regions, coverage=coverage)
+                assert b_solver is not None
+                assert regions is not None
+                assert coverage is not None
+                assert self.preconditioner is not None
+
+                r = self._normalized_adjoint_field(
+                    y,
+                    b_solver,
+                    regions,
+                    coverage=coverage,
+                )
                 residual_fields.append(r)
-                m = self.preconditioner(f, y, r)
+
+                m = self.preconditioner(
+                    f,
+                    y,
+                    r,
+                )
                 preconditioner_fields.append(m)
-                if self.update_rule == "jacobian":
-                    # RMR-Jacobian: z^{t+1} = z^t - eta * M * sigma(z) * r
-                    # Interpretation: r ≈ nabla_Y E (gradient of regional consistency energy
-                    # in measure space), and dY/dz = sigma(z) is the Jacobian of the
-                    # softplus reparameterization. Together: nabla_z E = sigma(z) * r.
-                    # Ablation only — must be explicitly labeled in paper.
-                    z = z - eta * m * torch.sigmoid(z) * r
-                else:
-                    # RMR-Latent (DEFAULT): z^{t+1} = z^t - eta * M * r
-                    # Latent-space preconditioned reconciliation step.
-                    # r is the diagonally-normalized regional residual field; M locally
-                    # shapes the correction magnitude. No Jacobian factor: z is treated
-                    # as the direct optimization variable, not derived from a y-space energy.
-                    # This is the registered B5 update rule.
+
+                if self.rmr_update_rule == "jacobian":
+                    z = (
+                        z
+                        - eta
+                        * m
+                        * torch.sigmoid(z)
+                        * r
+                    )
+                elif self.rmr_update_rule == "latent":
                     z = z - eta * m * r
+                else:
+                    raise RuntimeError(
+                        f"unsupported RMR update rule "
+                        f"{self.rmr_update_rule}"
+                    )
+
+                y = F.softplus(z)
 
             elif self.variant == "learned_project":
-                assert b_solver is not None and self.learned_projector is not None
-                delta = self._raw_region_delta(y, b_solver, regions)
-                learned_field = self.learned_projector.project(f, y, delta, regions)
+                assert b_region is not None
+                assert regions is not None
+                assert self.learned_projector is not None
+
+                delta = self._raw_region_delta(
+                    y,
+                    b_region,
+                    regions,
+                )
+                learned_field = self.learned_projector.project(
+                    f,
+                    y,
+                    delta,
+                    regions,
+                )
+
                 if self.cfg.residual_clip > 0:
                     learned_field = learned_field.clamp(
-                        -self.cfg.residual_clip, self.cfg.residual_clip
+                        -self.cfg.residual_clip,
+                        self.cfg.residual_clip,
                     )
-                residual_fields.append(learned_field)
+
+                residual_fields.append(
+                    learned_field
+                )
+
                 z = z - eta * learned_field
+                y = F.softplus(z)
 
             elif self.variant == "local_refine":
                 assert self.local_refiner is not None
-                dz = self.local_refiner(f, y)
+
+                dz = self.local_refiner(
+                    f,
+                    y,
+                )
+
                 if self.cfg.residual_clip > 0:
-                    dz = dz.clamp(-self.cfg.residual_clip, self.cfg.residual_clip)
+                    dz = dz.clamp(
+                        -self.cfg.residual_clip,
+                        self.cfg.residual_clip,
+                    )
+
                 residual_fields.append(dz)
+
                 z = z - eta * dz
+                y = F.softplus(z)
 
             else:
-                raise RuntimeError(f"Unknown variant {self.variant}")
+                raise RuntimeError(
+                    f"Unknown variant {self.variant}"
+                )
 
-            y = F.softplus(z)
             iterates.append(y)
 
         out["y"] = y
-        out["z"] = None if (self.variant == "rmr" and self.update_rule == "projected_sirt") else z
+
+        # Projected-SIRT optimizes Y directly.
+        # There is no meaningful final latent z after Y0.
+        if (
+            self.variant == "rmr"
+            and self.rmr_update_rule == "projected_sirt"
+        ):
+            out["z"] = None
+        else:
+            out["z"] = z
+
         out["iterates"] = iterates
         out["residual_fields"] = residual_fields
         out["preconditioner_fields"] = preconditioner_fields
         out["step_sizes"] = step_sizes
+
         return out
 
 
