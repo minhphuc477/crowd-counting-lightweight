@@ -70,3 +70,38 @@ def test_normalized_adjoint_preserves_uniform_residual_rate():
     assert covered.all()
     expected = -alpha * torch.ones_like(r)
     assert torch.allclose(r[covered], expected[covered], atol=1e-10, rtol=1e-10)
+
+
+def test_operators_half_precision_exactness():
+    """P1 audit: operators maintain FP32 precision under FP16/BF16 to prevent cancellation error."""
+    torch.manual_seed(42)
+    x64 = torch.rand(2, 1, 64, 64, dtype=torch.float64) * 10.0
+    boxes = torch.tensor([
+        [0, 0, 16, 16],
+        [8, 8, 24, 24],
+        [16, 16, 48, 48],
+        [0, 0, 64, 64],
+    ], dtype=torch.long)
+
+    # Reference in double precision
+    ref_sum = regional_sum(x64, boxes)
+
+    # Test float16 and bfloat16
+    for dt in (torch.float16, torch.bfloat16):
+        x_half = x64.to(dt)
+        half_sum = regional_sum(x_half, boxes, out_dtype=torch.float32)
+
+        # Confirm exactness: relative error should be bounded by half-precision representation error (~1e-3),
+        # without explosive prefix cancellation error.
+        err = (half_sum.double() - ref_sum).abs() / ref_sum.clamp_min(1e-4)
+        assert err.max() < 5e-3, f"Half-precision regional sum for {dt} had excessive error {err.max():.4e}"
+
+    # Test adjoint
+    values64 = torch.rand(2, 1, 4, dtype=torch.float64)
+    ref_adj = regional_adjoint(values64, boxes, 64, 64)
+    for dt in (torch.float16, torch.bfloat16):
+        val_half = values64.to(dt)
+        adj_half = regional_adjoint(val_half, boxes, 64, 64, out_dtype=torch.float32)
+        err = (adj_half.double() - ref_adj).abs()
+        assert err.max() < 5e-3, f"Half-precision regional adjoint for {dt} had excessive error {err.max():.4e}"
+

@@ -197,6 +197,7 @@ def main() -> None:
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None, help="Stop training if validation MAE does not improve for this many evaluations")
     ap.add_argument("--disable-early-stopping", action="store_true", default=False, help="Disable early stopping completely to train for full epochs")
+    ap.add_argument("--overwrite", action="store_true", default=False, help="Overwrite output directory if it already exists")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -227,6 +228,20 @@ def main() -> None:
         )
 
     out_dir = Path(cfg["output_dir"])
+    if out_dir.exists() and not args.resume:
+        existing_artifacts = list(out_dir.glob("*.pt")) + list(out_dir.glob("*.csv"))
+        if existing_artifacts:
+            if not args.overwrite:
+                raise RuntimeError(
+                    f"Output directory '{out_dir}' already exists and contains run artifacts: "
+                    f"{[f.name for f in existing_artifacts]}. "
+                    f"Use --overwrite to start fresh or --resume to continue."
+                )
+            for f in existing_artifacts:
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception:
+                    pass
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
@@ -342,8 +357,8 @@ def main() -> None:
     # P1: expanded logging with loss components, grad norm, initial count, solver diagnostics
     log_path = out_dir / "train_log.csv"
     fieldnames = [
-        "epoch", "lr", "solver_strength", "rmr_update_rule", "solver_step0", "eta0",
-        "train_total", "train_cell", "train_global", "train_region_head", "train_region_map", "train_deep",
+        "epoch", "lr", "lr_backbone", "lr_main", "solver_strength", "rmr_update_rule", "solver_step0", "eta0",
+        "train_total", "train_count", "train_flat_dm16", "train_cell", "train_global", "train_region_head", "train_region_map", "train_deep",
         "grad_norm_mean", "grad_norm_max", "clip_rate",
         "residual_abs_mean", "residual_abs_max", "z_lt_minus10_frac",
         "initial_pred_count_mean", "initial_pred_count_std",
@@ -461,8 +476,14 @@ def main() -> None:
                 if k in losses:
                     sums[k] += float(losses[k].detach().item())
             n_steps += 1
-        # P1: record LR before stepping scheduler so logged value corresponds to current epoch
-        current_lr = float(optimizer.param_groups[0]["lr"])
+        # P1: record LRs before stepping scheduler so logged values correspond to current epoch
+        if hasattr(optimizer, "param_groups") and len(optimizer.param_groups) > 1:
+            lr_backbone = float(optimizer.param_groups[0]["lr"])
+            lr_main = float(optimizer.param_groups[-1]["lr"])
+        else:
+            lr_backbone = float(optimizer.param_groups[0]["lr"])
+            lr_main = lr_backbone
+        current_lr = lr_main
         scheduler.step()
 
         # P1: compute initial count distribution stats
@@ -492,14 +513,16 @@ def main() -> None:
         row = {
             "epoch": epoch,
             "lr": current_lr,
+            "lr_backbone": lr_backbone,
+            "lr_main": lr_main,
             "solver_strength": solver_strength,
             "rmr_update_rule": rule_name,
             "solver_step0": solver_step0,
             "eta0": solver_step0,
             "train_total": sums["total"] / max(1, n_steps),
-            "train_cell": sums["cell"] / max(1, n_steps),
             "train_count": sums["count"] / max(1, n_steps),
             "train_flat_dm16": sums["flat_dm16"] / max(1, n_steps),
+            "train_cell": sums["cell"] / max(1, n_steps),
             "train_global": sums["global"] / max(1, n_steps),
             "train_region_head": sums["region_head"] / max(1, n_steps),
             "train_region_map": sums["region_map"] / max(1, n_steps),

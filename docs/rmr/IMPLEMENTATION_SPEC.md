@@ -11,19 +11,21 @@
 ```
 rmr_count/
 ├── __init__.py           # Package exports
-├── model.py              # TinyLocalEncoder, AdditiveFusion, Fine/Regional Heads, Unrolled Reconciler
-├── operators.py          # prefix2d, regional_sum, regional_adjoint, RegionSet geometry caching
-├── losses.py             # LossConfig, compute_losses (balanced cell & regional rate Huber losses)
+├── model.py              # MobileNetV4 Carrier, Additive FPN, ScaleMatched Head, Projected-SIRT & B3b
+├── operators.py          # prefix2d, regional_sum, regional_adjoint (FP32 AMP-safe), RegionSet caching
+├── losses.py             # LossConfig, compute_losses (Flat-DM16, NB count, Scale-Balanced Huber)
 ├── data.py               # CrowdManifestDataset, Low-RAM PIL cropping, rasterize_points
 ├── eval.py               # Evaluator, Tiled & Direct Inference, Diagnostic Traces
 ├── metrics.py            # Canonical NAE, Physical-support GAME(0..3), MAE, RMSE
 ├── profile.py            # Config-driven FP32 & AMP Latency, Peak VRAM, FLOPs Profiler
 ├── aggregate.py          # Multi-seed mean/std, Paired Bootstrap 95% CI comparisons
+├── localization/otm.py   # Canonical normalize_image [0.5, 0.5, 0.5] for localization testing
 └── prepare_manifest.py   # Dataset preprocessor: SHA, UCF-QNRF, NWPU multi-format
 
-# Root Scripts
-run_rmr_matrix.sh         # Matrix execution script for registered benchmark B0–B5 across 3 seeds
-run_lr_sweep.ps1          # Pilot learning rate sweep script (1e-4, 3e-4, 1e-3)
+# Root Runners & Scripts
+run_stage_c_matrix.ps1    # Matrix execution script for registered benchmark B0–B5 (Val-only evaluation)
+run_final_test_eval.ps1   # Post-freeze test benchmark on sha_a_test.jsonl (run once after matrix completes)
+scripts/legacy/           # Archived exploratory and legacy pilot runners
 ```
 
 ---
@@ -31,98 +33,96 @@ run_lr_sweep.ps1          # Pilot learning rate sweep script (1e-4, 3e-4, 1e-3)
 ## 2. Model Architecture & Exact Parameter Counts
 
 The concrete model architecture consists of:
-- **`TinyLocalEncoder` (~52k params):** Native local-first convolutional backbone.
-  - Stem: `ConvGNAct(3 -> 16, k=3, stride=2)`
-  - $C_4$ stage: `TinyIR(16 -> 24, stride=2)` + `TinyIR(24 -> 24)`
-  - $C_8$ stage: `TinyIR(24 -> 40, stride=2)` + 2x `TinyIR(40 -> 40)`
-  - $C_{16}$ stage: `TinyIR(40 -> 64, stride=2)` + `TinyIR(64 -> 64)`
-- **`AdditiveFusion` Neck (~3.5k params, width=32):**
-  - $1 \times 1$ projections of $C_4, C_8, C_{16}$ to 32 channels.
-  - Bilinear interpolation to $C_4$ spatial resolution followed by additive fusion.
-  - Depthwise-separable $3 \times 3$ `ConvGNAct` + $1 \times 1$ `ConvGNAct`.
+- **Pretrained `MobileNetV4-Conv-Small-0.5` Carrier (~87k params):**
+  - Truncated at feature reduction 16 ($C_4: 16\text{ch}, C_8: 32\text{ch}, C_{16}: 48\text{ch}$).
+  - Physically excludes $C_{32}$ to maximize mobile-edge efficiency.
+  - Backbone learning rate is scaled by $0.1\times$ relative to heads.
+- **Additive FPN Neck (~7.3k params, width=32):**
+  - $1 \times 1$ lateral projections of $C_4, C_8, C_{16}$ to 32 channels.
+  - Dilated depthwise-separable $3 \times 3$ convolutions with dilation factors $d \in \{1, 2, 3\}$ for $P_4, P_8, P_{16}$.
+  - Multi-scale representations for scale-matched feature routing.
 - **`FineMeasureHead` (~3.2k params, width=32):**
-  - Depthwise-separable conv + Conv $1 \times 1$.
-  - Calibrated bias init $\approx -4.595$ yielding initial count rate $\operatorname{softplus}(-4.595) \approx 0.01$ count/cell.
-- **`RegionalMeasureHead` (~4.2k params):**
-  - Multi-scale ROI-pooling on bounding boxes $\{32, 64, 128\}$ px with 4D geometry $[ \log h, \log w, \log |R|, \log(w/h) ]$.
-  - Predicts regional rate $\rho_R$ such that $b_R = |R| \cdot \rho_R$.
-- **Unrolled Reconciliation Layer (~1.5k params):**
-  - Parameterized step size $\eta_t = \eta_{\text{max}} \cdot \sigma(\alpha_t)$ with learnable logits $\alpha_t$, initialized to $\eta_t(0) = \eta_{\text{init}} = 0.05$ (with $\eta_{\text{max}} = 0.20$).
-  - Preconditioner block $M^{(t)}$ producing local confidence weights in $[0, 1]$.
+  - Depthwise-separable $3 \times 3$ conv + Conv $1 \times 1$ on $P_4$ (output stride $s=4$).
+  - Data-driven prior bias init $\approx -4.1422$ yielding empirical mean density $m_0 \approx 0.015763$ count/cell.
+- **`ScaleMatchedRegionalEvidenceHead` (~4.0k params):**
+  - Multi-scale ROI-pooling with physical pixel scale routing:
+    - $\le 48\text{px} \to P_4$
+    - $48\text{px} < s \le 96\text{px} \to P_8$
+    - $> 96\text{px} \to P_{16}$
+  - Concatenates 4D geometry $[ \log h, \log w, \log |R|, \log(w/h) ]$.
+  - Predicts regional count mass $b$.
+- **Projected SIRT Reconciliation Layer (0 params):**
+  - Measure-space nonnegative projection $\Pi_+ [Y_t - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y_t - b)]$.
+  - Parameter-free with canonical $\omega = 1.0, T = 2$.
+  - Regional evidence $b$ is detached during unrolled steps to isolate causal reconciliation.
 
 ### Verified Parameter Counts:
 Exact values returned by `count_parameters(model)`:
-- **B0 (`direct`):** 58,867
-- **B1 (`region_loss`):** 58,867
-- **B2 (`region_aux`):** 63,044 (+4,177 params from regional head)
-- **B3a (`local_refine`):** 61,876 (+3,009 params from local recurrent refinement)
-- **B3b (`learned_project`):** 66,086 (+3,042 params from neural membership projector)
-- **B4 (`rmr_t1`, $T=1$):** 64,580 (+1,536 preconditioner + 1 step logit)
-- **B5 (`rmr_t2`, $T=2$):** 64,581 (+1,536 preconditioner + 2 step logits)
+- **B0 (`direct`):** 97,681
+- **B1 (`region_loss`):** 97,681
+- **B2 (`region_aux`):** 101,714 (+4,033 params from regional head)
+- **B3a (`local_refine`):** 100,692 (+3,011 params from local refinement conv)
+- **B3b (`learned_project`):** 104,756 (+3,042 params from measure-space $P_\theta$)
+- **B5-P (`rmr_p`, $T=2$):** 101,714 (0 extra parameters over B2)
 
 ---
 
-## 3. Mathematical Operators & Memory Safeguards
+## 3. Mathematical Operators & FP32 AMP Numerical Safeguards
 
 ### 3.1 2D Prefix Sum (`prefix2d`)
-Fast $O(1)$ rectangle count querying uses 2D integral images with AMP float32 safety:
+Fast $O(1)$ rectangle count querying uses 2D integral images. To prevent mantissa cancellation under AMP (FP16/BF16):
 ```python
-def prefix2d(x: torch.Tensor) -> torch.Tensor:
+def prefix2d(x: torch.Tensor, preserve_fp32: bool = True) -> torch.Tensor:
     orig_dtype = x.dtype
-    if x.is_cuda and torch.is_autocast_enabled():
+    if preserve_fp32 and x.dtype in (torch.float16, torch.bfloat16):
         x = x.float()
     p = torch.cumsum(torch.cumsum(x, dim=-1), dim=-2)
     p = F.pad(p, (1, 0, 1, 0), mode="constant", value=0.0)
-    return p.to(dtype=orig_dtype)
+    return p if preserve_fp32 else p.to(dtype=orig_dtype)
 ```
 
-### 3.2 Geometry & Coverage Caching
-1. `model._regions_and_coverage(h, w)` caches $(RegionSet, D_c)$ where $D_c = A^\top \mathbf{1}_M$. In iterative solver loops ($T=2$), this eliminates redundant adjoint calls, saving 8 `index_add_` and 4 cumsum operations per forward pass.
-2. `RegionSet.boxes_list` is pre-cached as Python tuples, preventing GPU $\leftrightarrow$ CPU device synchronization during B3b (`LearnedMembershipProjector`) execution.
+### 3.2 FP32 Accumulation in `regional_sum` and `regional_adjoint`
+- `regional_sum(x, boxes)` computes prefix sum in FP32, extracts 4-point rectangle differences strictly in FP32, and casts to target dtype at the output boundary.
+- `regional_adjoint(values, boxes, ...)` populates the 2D difference buffer and evaluates 2D cumsums strictly in FP32 before returning.
+- All operator tests in `tests/rmr/test_rmr_operators.py` verify that FP16 and BF16 execution matches FP32 reference with relative error $< 5 \times 10^{-3}$ and zero numerical cancellation.
 
-### 3.3 Low-RAM PIL Data Pipeline
-To prevent Windows memory thrashing and `ArrayMemoryError`:
-1. Images are loaded as PIL RGB images (~768 KB uint8).
-2. Random scale resizing (0.75x–1.25x) and 512x512 random cropping execute strictly within PIL uint8 space.
-3. Only the final 512x512 crop is converted to a PyTorch tensor and normalized with ImageNet statistics (~3 MB peak per sample).
+### 3.3 Geometry & Coverage Caching
+1. `model._regions_and_coverage(h, w)` caches $(RegionSet, D_c)$ where $D_c = A^\top \mathbf{1}_M$. In iterative solver loops ($T=2$), this eliminates redundant adjoint calls, saving 8 `index_add_` and 4 cumsum operations per forward pass.
+2. `ScaleMatchedRegionalEvidenceHead` routes regions based on physical pixel size regardless of dictionary ordering or scale permutations.
 
 ---
 
-## 4. Loss Formulation & Variant Dispatch
+## 4. Loss Formulation & Training Objectives
 
 Every variant is trained under matched loss objectives via `compute_losses(outputs, target_y, variant, cfg)`:
 
-### 4.1 Fine Cell & Global Losses
-$$\mathcal{L}_{\text{cell}} = \operatorname{SmoothL1}(Y, Y^*; \; \beta = 1.0), \qquad \mathcal{L}_{\text{global}} = |N_{\text{pred}} - N_{\text{gt}}|.$$
+### 4.1 Count Loss & Flat Dirichlet-Multinomial-16
+$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{count}} + \lambda_{\text{dm}} \cdot \mathcal{L}_{\text{flat\_dm16}} + \lambda_{\text{region}} \cdot \mathcal{L}_{\text{region}}.$$
+- $\mathcal{L}_{\text{count}}$: SmoothL1 or Negative Binomial count loss.
+- $\mathcal{L}_{\text{flat\_dm16}}$: Multi-scale spatial partitioning loss enforcing count preservation across $16 \times 16$ tile divisions.
+- $\mathcal{L}_{\text{region}}$: Scale-balanced Huber rate loss on regional evidence $b$ vs ground-truth regional counts $N^*$.
 
-### 4.2 Regional Rate Loss (Scale-Balanced Huber)
-$$\mathcal{L}_{\text{region}}(b, N^*) = \frac{1}{|\mathcal{S}|} \sum_{s \in \mathcal{S}} \frac{1}{|R_s|} \sum_{m \in R_s} \operatorname{SmoothL1}\left(\frac{b_m}{|R_m|}, \; \frac{N_m^*}{|R_m|}; \; \beta = 0.1\right).$$
-
-### 4.3 Loss Dispatch Matrix
-- **B0 (`direct`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}}$
-- **B1 (`region_loss`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}} + 0.2 \cdot \mathcal{L}_{\text{region}}(A Y, N^*)$
-- **B2 (`region_aux`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}} + 0.2 \cdot \mathcal{L}_{\text{region}}(b, N^*)$
-- **B3a (`local_refine`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}}$
-- **B3b (`learned_project`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}} + 0.2 \cdot \mathcal{L}_{\text{region}}(b, N^*)$
-- **B4 / B5 (`rmr_t1` / `rmr_t2`):** $\mathcal{L} = \mathcal{L}_{\text{cell}} + 0.1 \cdot \mathcal{L}_{\text{global}} + 0.2 \cdot \mathcal{L}_{\text{region}}(b, N^*)$
-
-*Critical Scientific Property:* RMR does **not** receive $\mathcal{L}_{\text{region\_map}}$ on the output map $AY$. Fine map reconciliation occurs entirely via the unrolled forward operator dynamics, ensuring a clean causal comparison with B2 and B3b. Deep supervision is disabled by default ($\lambda_{\text{deep\_supervision}} = 0.0$).
+### 4.2 Causal Isolation Protocol
+- Fine map reconciliation in RMR-P occurs entirely via the unrolled forward operator dynamics.
+- Regional evidence $b$ is detached (`b.detach()`) during solver unrolling, ensuring that the backward pass does not backpropagate through the solver into the regional head.
+- B3b uses the exact same detached regional evidence and measure-space parameterization.
 
 ---
 
-## 5. Training Protocol & Schedules
+## 5. Training Protocol & Directory Safeguards
 
-- **Registered Benchmark Matrix:**
-  - Configs: `configs/rmr/*.yaml`
-  - Total Epochs: **1000**
-  - Learning Rate: CosineAnnealingLR with 5-epoch linear warmup.
-  - Evaluation Schedule: Validation every **10 epochs**.
-  - Checkpoint Rule: `best_val_mae.pt` updated only when `solver_strength == 1.0`.
-  - Gradient Clipping: $\text{clip\_norm} = 5.0$.
-  - Precision: Automatic Mixed Precision (AMP).
+### 5.1 Directory Overwrite Guard
+To prevent accidental mixing of artifacts across training generations:
+- `rmr_count/train.py` verifies `output_dir` before training starts.
+- If `output_dir` exists and contains artifacts (e.g. checkpoints or CSV logs), training terminates with `FileExistsError` unless `--overwrite` or `--resume` is explicitly passed.
 
-- **Pilot Learning Rate Sweep:**
-  - Script: `run_lr_sweep.ps1`
-  - Total Epochs: **100**
-  - Evaluation Schedule: Validation every **5 epochs**.
-  - Grid: $\eta \in \{1\text{e-}4, 3\text{e-}4, 1\text{e-}3\}$.
+### 5.2 Logging Fieldnames
+`train_log.csv` records comprehensive per-epoch dynamics:
+`epoch,train_loss,train_count,train_flat_dm16,train_region,lr_backbone,lr_main,val_mae,val_rmse,val_game0,val_game1,val_game2,val_game3`.
+
+### 5.3 Training Hyperparameters
+- **Epochs:** 1000 epochs (early stopping disabled for full convergence).
+- **Optimizer:** AdamW with cosine annealing schedule.
+- **Learning Rates:** Main head LR $10^{-3}$, Backbone LR $10^{-4}$ ($0.1\times$ backbone multiplier).
+- **Evaluation:** Validation set (`sha_a_val.jsonl`) evaluated every 10 epochs.
+- **Final Test:** Frozen models evaluated once on `sha_a_test.jsonl` post-training via `run_final_test_eval.ps1`.

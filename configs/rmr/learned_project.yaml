@@ -18,8 +18,8 @@ model:
   region_overlap: 0.5
   include_full_image: false
   iterations: 2
-  eta_max: 0.2
-  eta_init: 0.05
+  sirt_omega: 1.0
+  detach_region_evidence: true
   residual_clip: 5.0
   backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true

@@ -20,8 +20,8 @@ def create_synthetic_eval_loader(stride: int = 4, size: int = 128):
     pts = torch.tensor([[10.0, 15.0], [20.0, 25.0], [30.0, 35.0], [50.0, 60.0], [70.0, 80.0]], dtype=torch.float32)
     tgt1 = torch.zeros((1, gh, gw), dtype=torch.float32)
     for p in pts:
-        cy = min(gh - 1, int(p[0] / stride))
-        cx = min(gw - 1, int(p[1] / stride))
+        cx = min(gw - 1, int(p[0] / stride))
+        cy = min(gh - 1, int(p[1] / stride))
         tgt1[0, cy, cx] += 1.0
 
     sample1 = {

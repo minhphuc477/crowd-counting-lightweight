@@ -34,14 +34,11 @@ Every standalone evaluation run (`python -m rmr_count.eval --checkpoint <path> -
 Records the trajectory of the unrolled reconciliation layer at each step $t \in \{0, \dots, T-1\}$:
 - `image_id`: Unique sample identifier.
 - `iteration`: Step index $t$.
-- `eta`: Effective step size $\eta_t$.
+- `omega`: Preconditioned step size ($\omega = 1.0$).
 - `energy_before`: $\mathcal{E}_a(Y^{(t)}) = \frac{1}{2} \sum_{m=1}^M \frac{(q_m^{(t)} - b_m)^2}{|R_m|}$.
 - `energy_after`: $\mathcal{E}_a(Y^{(t+1)})$.
 - `residual_mean`: Average magnitude of the rate residual field $|\nabla_Y \mathcal{E}_a|$.
 - `residual_max`: Peak rate residual magnitude.
-- `clip_fraction`: Percentage of cells whose updates hit the clipping threshold $\tau = 5.0$.
-- `preconditioner_mean`: Average gating magnitude of $M^{(t)}$.
-- `preconditioner_max`: Peak gating magnitude.
 - `delta_n`: Absolute change in total count across the step $|\sum Y^{(t+1)} - \sum Y^{(t)}|$.
 - `delta_l1`: Total absolute cell displacement $\|Y^{(t+1)} - Y^{(t)}\|_1$.
 
@@ -65,7 +62,7 @@ Records region-level predictions against ground truth for mechanistic analysis:
 
 ## 3. Statistical Significance & Paired Comparisons
 
-To verify whether RMR (B5) statistically outperforms baselines rather than benefitting from stochastic seed variation, `rmr_count/aggregate.py` performs paired image-level analyses:
+To verify whether RMR (B5-P) statistically outperforms baselines rather than benefitting from stochastic seed variation, `rmr_count/aggregate.py` performs paired image-level analyses:
 
 $$d_i = |\hat{N}_i^{\text{treatment}} - N_i| - |\hat{N}_i^{\text{control}} - N_i|.$$
 
@@ -74,11 +71,11 @@ The tool computes:
 2. **Bootstrap 95% Confidence Interval:** Empirical percentile bootstrap over 10,000 resamples: $[\text{CI}_{\text{lo}}, \text{CI}_{\text{hi}}]$.
 3. **Paired Two-Tailed t-test:** Testing null hypothesis $H_0: \mathbb{E}[d] = 0$.
 4. **Wilcoxon Signed-Rank Test:** Non-parametric test robust to heavy-tailed crowd count outliers.
-5. **Win / Loss / Tie Counts:** Sample-level tally across the test set.
+5. **Win / Loss / Tie Counts:** Sample-level tally across the evaluation set.
 
 CLI Usage:
 ```powershell
-python -m rmr_count.aggregate --compare runs/sha_a/rmr_t2_seed42/predictions.csv runs/sha_a/direct_seed42/predictions.csv --name-a B5_RMR --name-b B0_Direct
+python -m rmr_count.aggregate --compare runs/sha_a/stage_c_rmr_seed42/predictions.csv runs/sha_a/stage_c_learned_project_seed42/predictions.csv --name-a B5_RMR --name-b B3b_Learned
 ```
 
 ---
@@ -89,3 +86,16 @@ python -m rmr_count.aggregate --compare runs/sha_a/rmr_t2_seed42/predictions.csv
 - **Clean Single-Forward Peak VRAM:** Measured via `reset_peak_memory_stats() -> synchronize() -> model(x) -> synchronize() -> max_memory_allocated()` prior to loop execution.
 - **Latency & FPS:** Measured across 50 warmup iterations and 200 timed iterations using CUDA events for both FP32 and AMP (`torch.amp.autocast('cuda')`).
 - **Complexity Notes:** Outputs `profiler_supported_flops` with explicit documentation that PyTorch profiler measures convolution and linear operations, while prefix-sum cumsum and scatter-add operations are $O(G + M)$ memory-bound primitives.
+
+---
+
+## 5. Benchmarking Protocol & Dataset Separation Guard
+
+To ensure strict scientific integrity and avoid test-set contamination:
+
+1. **Development & Training Matrix Protocol:**
+   - During training, hyperparameter exploration, and the full 1000-epoch Stage C matrix (`run_stage_c_matrix.ps1`), all evaluations are performed strictly on the validation set (`data/manifests/sha_a_val.jsonl`).
+   - Best checkpoint selection (`best_val_mae.pt`) is governed exclusively by validation MAE.
+2. **Post-Freeze Test Protocol:**
+   - The test set (`data/manifests/sha_a_test.jsonl`) is frozen and never touched during training or architecture search.
+   - Once all Stage C models are fully trained and checkpoints are frozen, `run_final_test_eval.ps1` evaluates each frozen model on `sha_a_test.jsonl` exactly once to produce final paper numbers.

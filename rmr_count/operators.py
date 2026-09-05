@@ -31,13 +31,16 @@ class RegionSet:
         )
 
 
-def prefix2d(x: torch.Tensor) -> torch.Tensor:
+def prefix2d(x: torch.Tensor, preserve_fp32: bool = True) -> torch.Tensor:
     """Inclusive 2-D prefix sum with a zero top row/left column.
 
     Input:  [B, C, H, W]
     Output: [B, C, H+1, W+1]
 
     Forces FP32 accumulation during autocast to maintain exact precision.
+    When preserve_fp32=True (default), output is kept in at least float32
+    so subsequent rectangle subtractions (br - tr - bl + tl) do not suffer
+    from catastrophic cancellation in float16/bfloat16.
     """
     if x.ndim != 4:
         raise ValueError(f"prefix2d expects [B,C,H,W], got {tuple(x.shape)}")
@@ -45,7 +48,9 @@ def prefix2d(x: torch.Tensor) -> torch.Tensor:
     work = x.float() if orig_dtype in (torch.float16, torch.bfloat16) else x
     p = work.cumsum(dim=-2).cumsum(dim=-1)
     p = F.pad(p, (1, 0, 1, 0), mode="constant", value=0.0)
-    return p.to(orig_dtype) if p.dtype != orig_dtype else p
+    if not preserve_fp32 and orig_dtype in (torch.float16, torch.bfloat16):
+        return p.to(orig_dtype)
+    return p
 
 
 def _gather_prefix(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
@@ -73,9 +78,20 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     return br - tr - bl + tl
 
 
-def regional_sum(x: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
-    """Linear regional-count operator A: [B,C,H,W] -> [B,C,M]."""
-    return rectangle_sum_from_prefix(prefix2d(x), boxes)
+def regional_sum(
+    x: torch.Tensor,
+    boxes: torch.Tensor,
+    out_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """Linear regional-count operator A: [B,C,H,W] -> [B,C,M].
+
+    Always evaluates prefix accumulation and 4-point rectangle difference in FP32
+    before converting to out_dtype (defaults to x.dtype).
+    """
+    orig_dtype = x.dtype if out_dtype is None else out_dtype
+    pref = prefix2d(x, preserve_fp32=True)
+    res = rectangle_sum_from_prefix(pref, boxes)
+    return res.to(orig_dtype) if res.dtype != orig_dtype else res
 
 
 def regional_adjoint(
@@ -83,6 +99,7 @@ def regional_adjoint(
     boxes: torch.Tensor,
     height: int,
     width: int,
+    out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     """Exact adjoint A^T of rectangular summation.
 
@@ -103,8 +120,8 @@ def regional_adjoint(
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
     hp, wp = height + 1, width + 1
 
-    orig_dtype = values.dtype
-    work = values.float() if orig_dtype in (torch.float16, torch.bfloat16) else values
+    orig_dtype = values.dtype if out_dtype is None else out_dtype
+    work = values.float() if values.dtype in (torch.float16, torch.bfloat16) else values
     diff = work.new_zeros((b, c, hp * wp))
 
     def scatter(y: torch.Tensor, x: torch.Tensor, src: torch.Tensor) -> None:

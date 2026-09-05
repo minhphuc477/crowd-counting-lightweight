@@ -251,6 +251,7 @@ def evaluate_model_otm(
     device: str = "cuda",
 ) -> dict[str, Any]:
     """Runs L3 Predicted Model OT-M evaluation on a dataset manifest using trained weights."""
+    from rmr_count.data import normalize_image
     from rmr_count.eval import make_model_from_ckpt, predict_tiled
     from torchvision import transforms
 
@@ -264,9 +265,10 @@ def evaluate_model_otm(
     model.to(device_t)
     model.eval()
 
+    # Canonical RMR normalization: mean=0.5, std=0.5
     tf = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        normalize_image,
     ])
 
     path = Path(manifest_path)

@@ -333,8 +333,10 @@ class ScaleMatchedRegionalEvidenceHead(nn.Module):
         feature_dim: int = 32,
         hidden: int = 48,
         init_bias: float = _FINE_HEAD_BIAS_INIT,
+        region_sizes_px: tuple[int, ...] | Sequence[int] = (32, 64, 128),
     ):
         super().__init__()
+        self.region_sizes_px = tuple(int(s) for s in region_sizes_px)
         self.mlp = nn.Sequential(
             nn.Linear(feature_dim + 1, hidden),
             nn.SiLU(inplace=True),
@@ -362,9 +364,9 @@ class ScaleMatchedRegionalEvidenceHead(nn.Module):
         device = p4.device
         dtype = p4.dtype
 
-        # Exact regional support (P0-2 fix):
+        # Shared P4-coordinate regional support without integer box quantization mismatch:
         # All feature levels are bilinearly upsampled to P4 spatial resolution.
-        # This guarantees 100% exact correspondence with regions.boxes in P4 cell space
+        # This guarantees 1:1 correspondence with regions.boxes in P4 cell space
         # without any integer rounding mismatch on arbitrary image sizes.
         size4 = p4.shape[-2:]
         feat_p4 = p4
@@ -377,32 +379,49 @@ class ScaleMatchedRegionalEvidenceHead(nn.Module):
             else F.interpolate(p16, size=size4, mode="bilinear", align_corners=False)
         )
 
-        specs = [
-            (0, feat_p4, 32.0),
-            (1, feat_p8_at_4, 64.0),
-            (2, feat_p16_at_4, 128.0),
-        ]
-
         m_total = regions.boxes.shape[0]
         in_dim = self.mlp[0].in_features  # 33
         feat_all = torch.zeros((b, m_total, in_dim), device=device, dtype=dtype)
 
-        for sid, feat_s, scale_px in specs:
+        # Map each scale to its feature pyramid level based on actual physical pixel size,
+        # robust to arbitrary ordering or subsetting of region_sizes_px:
+        for sid, size_px in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
             if not mask.any():
                 continue
+            if size_px <= 48:
+                feat_s = feat_p4
+            elif size_px <= 96:
+                feat_s = feat_p8_at_4
+            else:
+                feat_s = feat_p16_at_4
+
             boxes_s = regions.boxes[mask]
-            # Exact regional support: uses regions.boxes directly on P4 cell grid
             u_s = region_average_features(feat_s, boxes_s)  # [B, M_s, C]
             m_s = u_s.shape[1]
             scale_feat = torch.full(
                 (1, m_s, 1),
-                math.log(scale_px / 32.0),
+                math.log(float(size_px) / 32.0),
                 device=device,
                 dtype=dtype,
             ).expand(b, -1, -1)
             f_s = torch.cat([u_s, scale_feat], dim=-1)   # [B, M_s, 33]
             feat_all[:, mask] = f_s
+
+        # Handle full image region (scale_id == -1) if present
+        mask_full = regions.scale_id == -1
+        if mask_full.any():
+            boxes_full = regions.boxes[mask_full]
+            u_full = region_average_features(feat_p16_at_4, boxes_full)
+            m_f = u_full.shape[1]
+            full_scale = max(size4[0], size4[1]) * 4.0
+            scale_feat = torch.full(
+                (1, m_f, 1),
+                math.log(max(full_scale, 32.0) / 32.0),
+                device=device,
+                dtype=dtype,
+            ).expand(b, -1, -1)
+            feat_all[:, mask_full] = torch.cat([u_full, scale_feat], dim=-1)
 
         raw = self.mlp(feat_all).squeeze(-1)            # [B, M]
         rate = F.softplus(raw)                          # [B, M]
@@ -617,7 +636,11 @@ class RMRCount(nn.Module):
         init_m0 = float(getattr(cfg, "init_m0", _M0_INIT))
         init_bias = math.log(math.exp(init_m0) - 1.0)
         self.region_head = (
-            RegionalEvidenceHead(cfg.feature_width, init_bias=init_bias)
+            RegionalEvidenceHead(
+                cfg.feature_width,
+                init_bias=init_bias,
+                region_sizes_px=cfg.region_sizes_px,
+            )
             if needs_region_head
             else None
         )
@@ -671,9 +694,9 @@ class RMRCount(nn.Module):
         )
 
         # P1 fix: Only allocate eta_logits for variants and rules that actually use it.
-        # Registered Projected-SIRT uses fixed omega=1 (or optional log_sirt_omega ablation)
-        # and has zero extra trainable solver parameters, achieving exact parameter parity with B2.
-        need_eta = (variant in {"local_refine", "learned_project"}) or (
+        # Registered Projected-SIRT and matched learned_project use fixed omega=1
+        # and have zero extra trainable step-size solver parameters.
+        need_eta = (variant == "local_refine") or (
             variant == "rmr" and self.rmr_update_rule in {"latent", "jacobian"}
         )
         if need_eta:
@@ -827,10 +850,11 @@ class RMRCount(nn.Module):
         omega = self._sirt_omega(device=y.device, dtype=y.dtype)
         omega_eff = omega * float(self.solver_strength)
 
+        # Projection and update evaluated in FP32 to prevent underflow/overflow
         y_next = torch.clamp_min(
-            y - omega_eff * m * r,
+            y.float() - (omega_eff * m).float() * r.float(),
             0.0,
-        )
+        ).to(y.dtype)
 
         return y_next, r, m, omega_eff
 
@@ -840,7 +864,7 @@ class RMRCount(nn.Module):
         b_region: torch.Tensor,
         regions: RegionSet,
     ) -> torch.Tensor:
-        return regional_sum(y, regions.boxes) - b_region
+        return regional_sum(y, regions.boxes, out_dtype=torch.float32) - b_region.float()
 
     def _normalized_adjoint_field(
         self,
@@ -858,17 +882,21 @@ class RMRCount(nn.Module):
         the update scale-invariant with respect to region size and overlap density.
         """
         _, _, h, w = y.shape
-        delta = self._raw_region_delta(y, b_region, regions)   # [B,1,M]
-        area = regions.area.to(y.dtype).view(1, 1, -1)
-        residual_density = delta / area.clamp_min(1.0)          # D_a^{-1} (AY-b)
+        # Entire operator reconciliation path executes in FP32 to avoid half-precision cancellation
+        work_y = y.float()
+        work_b = b_region.float()
+        work_area = regions.area.float().view(1, 1, -1)
 
-        back = regional_adjoint(residual_density, regions.boxes, h, w)
+        delta = self._raw_region_delta(work_y, work_b, regions)   # [B,1,M] in FP32
+        residual_density = delta / work_area.clamp_min(1.0)       # D_a^{-1} (AY-b) in FP32
+
+        back = regional_adjoint(residual_density, regions.boxes, h, w, out_dtype=torch.float32)
         if coverage is None:
             coverage = self._regions_and_coverage(h, w, y.device)[1]
-        r = back / coverage.to(y.dtype)                      # D_c^{-1} A^T
+        r = back / coverage.float()                               # D_c^{-1} A^T in FP32
         if self.cfg.residual_clip > 0:
             r = r.clamp(-self.cfg.residual_clip, self.cfg.residual_clip)
-        return r
+        return r.to(y.dtype)
 
     # Keep legacy name for backward compatibility in tests.
     _rmr_field = _normalized_adjoint_field
@@ -965,7 +993,10 @@ class RMRCount(nn.Module):
         # causal B2-vs-B5 comparison.
         # --------------------------------------------------------------
         if (
-            self.variant == "rmr"
+            (
+                (self.variant == "rmr" and self.rmr_update_rule == "projected_sirt")
+                or self.variant == "learned_project"
+            )
             and b_region is not None
             and self.cfg.detach_region_evidence
         ):
@@ -1004,7 +1035,49 @@ class RMRCount(nn.Module):
                 continue
 
             # ==========================================================
-            # Legacy / learned-control latent rules
+            # Matched learned-projector control in direct measure space
+            # ==========================================================
+            if self.variant == "learned_project":
+                assert b_solver is not None
+                assert regions is not None
+                assert self.learned_projector is not None
+
+                delta = self._raw_region_delta(
+                    y,
+                    b_solver,
+                    regions,
+                )
+                learned_field = self.learned_projector.project(
+                    f,
+                    y,
+                    delta,
+                    regions,
+                )
+
+                if self.cfg.residual_clip > 0:
+                    learned_field = learned_field.clamp(
+                        -self.cfg.residual_clip,
+                        self.cfg.residual_clip,
+                    )
+
+                residual_fields.append(learned_field)
+
+                # Direct measure-space update matching Projected-SIRT:
+                # Y_{t+1} = \Pi_+ [Y_t - \omega_{eff} * r_\theta]
+                omega = self._sirt_omega(device=y.device, dtype=y.dtype)
+                omega_eff = omega * float(self.solver_strength)
+                step_sizes.append(float(omega_eff.detach().item()))
+
+                y = torch.clamp_min(
+                    y.float() - omega_eff.float() * learned_field.float(),
+                    0.0,
+                ).to(y.dtype)
+
+                iterates.append(y)
+                continue
+
+            # ==========================================================
+            # Legacy / local-refine latent rules
             # ==========================================================
             eta = self._eta(t) * self.solver_strength
             step_sizes.append(
@@ -1050,36 +1123,6 @@ class RMRCount(nn.Module):
 
                 y = F.softplus(z)
 
-            elif self.variant == "learned_project":
-                assert b_region is not None
-                assert regions is not None
-                assert self.learned_projector is not None
-
-                delta = self._raw_region_delta(
-                    y,
-                    b_region,
-                    regions,
-                )
-                learned_field = self.learned_projector.project(
-                    f,
-                    y,
-                    delta,
-                    regions,
-                )
-
-                if self.cfg.residual_clip > 0:
-                    learned_field = learned_field.clamp(
-                        -self.cfg.residual_clip,
-                        self.cfg.residual_clip,
-                    )
-
-                residual_fields.append(
-                    learned_field
-                )
-
-                z = z - eta * learned_field
-                y = F.softplus(z)
-
             elif self.variant == "local_refine":
                 assert self.local_refiner is not None
 
@@ -1108,11 +1151,11 @@ class RMRCount(nn.Module):
 
         out["y"] = y
 
-        # Projected-SIRT optimizes Y directly.
+        # Measure-space solvers (Projected-SIRT and matched learned_project) optimize Y directly.
         # There is no meaningful final latent z after Y0.
         if (
-            self.variant == "rmr"
-            and self.rmr_update_rule == "projected_sirt"
+            (self.variant == "rmr" and self.rmr_update_rule == "projected_sirt")
+            or self.variant == "learned_project"
         ):
             out["z"] = None
         else:

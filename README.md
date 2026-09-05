@@ -1,20 +1,20 @@
 # RMR-Count: Regional Measure Reconciliation for Ultra-Lightweight Crowd Counting
 
-[![Tests](https://img.shields.io/badge/pytest-100%2F100%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-131%2F131%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
-[![Parameters](https://img.shields.io/badge/carrier-64.5k%20params-orange.svg)]()
+[![Parameters](https://img.shields.io/badge/carrier-101.7k%20params-orange.svg)]()
 [![Target](https://img.shields.io/badge/venue-CVPR%202026-purple.svg)]()
 
-> **Core Research Question:** In ultra-lightweight crowd counting (< 100k parameters), maintaining both high-resolution local spatial fidelity and long-range spatial consistency is challenging under strict mobile computation budgets. Because learning dense global self-attention or deep multi-scale dilated receptive fields is parameter-prohibitive, we explore:  
+> **Core Research Question:** In ultra-lightweight crowd counting (< 105k parameters), maintaining both fine spatial cell fidelity and long-range spatial consistency is challenging under strict mobile computation budgets. Because learning dense global self-attention or deep multi-scale dilated receptive fields is parameter-prohibitive, we explore:  
 > $$\boxed{\textbf{Can known discrete regional-count operators replace part of learned contextual reasoning in ultra-lightweight models?}}$$  
 >  
-> **Scope:** RMR-Count is an explicit counting and spatial density estimation model. Point localization, detection bounding boxes, and Hungarian matching are outside the scope of this work.
+> **Scope:** RMR-Count is an explicit counting and spatial density estimation model. Point localization, detection bounding boxes, and Hungarian matching are outside the primary causal contribution.
 
 ---
 
-## 1. Key Mathematical Contribution: The Adjoint Theorem
+## 1. Key Mathematical Contribution: The Adjoint Transfer Operator
 
-Let $Y \in \mathbb{R}_+^G$ be the discrete cell count map on spatial lattice $G$ (stride $s=4$). The canonical ground truth per discrete cell is:
+Let $Y \in \mathbb{R}_+^G$ be the discrete cell count measure on spatial lattice $G$ (stride $s=4$). The canonical ground truth per discrete cell is:
 $$Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\left\lfloor \frac{y_n + 0.5}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor = j\right),$$
 with cell coordinates clamped to valid feature grid bounds $[0, H_o - 1] \times [0, W_o - 1]$.
 
@@ -26,96 +26,112 @@ Let $\mathcal{R} = \{R_m\}_{m=1}^M$ be a multi-scale regional dictionary across 
 - **Adjoint Back-Projection Matrix** $A^\top \in \{0, 1\}^{G \times M}$:
   $$(A^\top r)_g = \sum_{m: g \in R_m} r_m.$$
 
-### 1.2 The Adjoint Scale Invariance Theorem ($H \mathbf{1} = \mathbf{1}$)
+### 1.2 The Adjoint Transfer Theorem ($H \mathbf{1} = \mathbf{1}$)
 Let $D_a = \operatorname{diag}(A \mathbf{1}_G) \in \mathbb{R}^{M \times M}$ be regional areas, and $D_c = \operatorname{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{G \times G}$ be cell coverage counts.  
 The normalized regional transfer operator is defined as:
 $$H = D_c^{-1} A^\top D_a^{-1} A.$$
 
 $$\boxed{H \mathbf{1}_G = \mathbf{1}_G \quad \forall \; \mathcal{R} \text{ covering } G.}$$
 
-**Theoretical Significance:** Uniform crowd distributions are invariant fixed points of the feedback loop. Regional error back-projection is scale-balanced across multi-scale partitions, preventing scale-dependent gradient explosion or boundary artifacts.
+**Theoretical Significance:** The normalized transfer operator preserves constant fields: a uniform regional rate discrepancy induces an identically uniform spatial correction across all covered cells, regardless of the multi-scale overlap dictionary.
 
 ---
 
-## 2. Architecture & Operator-Guided Reconciliation
+## 2. Canonical RMR-v2 Architecture
 
-The framework uses an ultra-lightweight custom convolutional backbone and neck, decoupling fine local density prediction from regional extensivity estimation, followed by explicit unrolled reconciliation:
+The architecture uses a pretrained MobileNetV4 carrier, decoupling fine local density prediction from multi-scale regional evidence, followed by unrolled Nonnegative Projected SIRT in measure space:
 
 ```
 Input Image [1, 3, H, W]
        │
        ▼
-TinyLocalEncoder (~52k params)
-  ├── Stem: ConvGNAct(3 -> 16, k=3, stride=2)
-  ├── s4:   TinyIR(16 -> 24, stride=2) + TinyIR(24 -> 24)
-  ├── s8:   TinyIR(24 -> 40, stride=2) + 2x TinyIR(40 -> 40)
-  └── s16:  TinyIR(40 -> 64, stride=2) + TinyIR(64 -> 64)
+Pretrained MobileNetV4-Conv-Small-0.5 (truncated at reduction 16, 87,568 params)
+   C4 (stride 4, 16 ch), C8 (stride 8, 32 ch), C16 (stride 16, 48 ch)
        │
        ▼
-AdditiveFusion Neck (~3.5k params, width=32)
-  ├── 1x1 Projections of C4, C8, C16 to 32 ch
-  ├── Bilinear upsampling to C4 resolution + elementwise addition
-  └── Fused via depthwise-separable 3x3 ConvGNAct + 1x1 ConvGNAct
+Additive FPN Neck (~6.9k params, width=32 ch)
+   ├── 1x1 lateral projections of C4, C8, C16 -> 32 ch
+   ├── P16 context dilation: [1, 2, 3] depthwise dilated blocks
+   └── Top-down additive pyramid -> (P4, P8, P16)
        │
        ├───────────────────────────────────────────────┐
        ▼                                               ▼
-Fine Density Head (~3.2k params)               Regional Extensivity Head (~4.2k params)
-Depthwise-sep Conv3x3 + Conv1x1                ROI-Pooling on {32, 64, 128} px
-init bias: b_0 ≈ -4.595 (softplus ≈ 0.01)      + 4D Geometry [log h, log w, log A, log(w/h)]
-       │                                        init: b_R = |R| * rho_R (calibrated to 0.01)
+Fine Measure Head (~3.2k params)               Scale-Matched Regional Evidence Head (~4.0k params)
+Depthwise-sep Conv3x3 + Conv1x1                Shared P4-coordinate regional support:
+init bias: b_0 ≈ -4.142 (softplus ≈ 0.0158)    32px -> P4, 64px -> P8 (up to P4), 128px -> P16 (up to P4)
+       │                                       MLP([u_R, log(s_R/32.0)]) -> rate * |R| = b_R
        ▼                                               │
-Initial Latent Field z_0                               │
-       │                                               │
+Observer Measure Y_0                                   ▼
+       │                                     Regional Evidence b (detached)
        └───────────────────────┬───────────────────────┘
                                ▼
-            Unrolled Regional Reconciliation (T=2, ~1.5k params)
+            Nonnegative Projected SIRT (RMR-P, T=2, 0 extra params)
                  │
-                 ├── Fast 2D Prefix Sum: q = A Y^(t)
-                 ├── Rate residual: r = (q - b) / D_a
-                 ├── Adjoint feedback: r_field = D_c^(-1) A^T r
-                 ├── Latent update: z^(t+1) = z^(t) - eta_t * M^(t) * r_field
-                 └── Re-activation: Y^(t+1) = softplus(z^(t+1))
+                 ├── Regional count: q = A Y^(t)
+                 ├── Rate residual: r_rate = (q - b) / D_a
+                 ├── Adjoint field: r_field = D_c^(-1) A^T r_rate
+                 └── Measure projection: Y^(t+1) = max(0, Y^(t) - omega * r_field)
                                │
                                ▼
-                     Final Density Field Y_T
+                     Final Measure Field Y_T
 ```
 
-Step sizes are parameterized as $\eta_t = \eta_{\text{max}} \cdot \sigma(\alpha_t)$ with per-iteration learnable logits $\alpha_t$ initialized to $\eta_t(0) = 0.05$ (with $\eta_{\text{max}} = 0.20$).
+### 2.1 Measure-Space Nonnegative Projected SIRT (RMR-P)
+RMR-P operates directly in measure space with fixed relaxation $\omega = 1.0$, identity spatial gate $M = 1.0$, and non-negativity projection $\Pi_+$:
+$$\boxed{Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y^{(t)} - b) \right] = \max\left(0, \; Y^{(t)} - \omega \cdot r^{(t)}\right).}$$
+Regional evidence $b$ is detached during reconciliation (`detach_region_evidence: true`), causally isolating observer estimation from runtime reconciliation. RMR-P requires **zero additional solver parameters**, achieving exact parameter parity with B2 (Region Aux).
+
+### 2.2 Symmetrical Matched Control: Learned Projector (B3b)
+To strictly isolate the mathematical adjoint $D_c^{-1} A^\top D_a^{-1}$ against a learned allocator, B3b is evaluated under identical measure-space dynamics:
+$$\boxed{Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot P_\theta(F, Y^{(t)}, A Y^{(t)} - b) \right]}$$
+with same $T=2, \omega=1.0$, same detached $b$, and no latent Softplus bottleneck.
 
 ---
 
-## 3. Registered Experimental Matrix (B0–B5)
+## 3. Training Objective
 
-Exact parameter counts computed via `count_parameters(model)`:
+The joint multi-scale objective cleanly separates observer mass allocation from magnitude and regional supervision:
+$$\boxed{\mathcal{L} = 1.0 \cdot \mathcal{L}_{\text{count}}^{\text{NB}_{50}}(Y_T) + 1.0 \cdot \mathcal{L}_{\text{FlatDM16}}^{\kappa=20}(Y_0) + 0.25 \cdot \mathcal{L}_{\text{cell}}(Y_T) + 0.20 \cdot \mathcal{L}_{\text{region}}(b)}$$
 
-| ID | Variant Name | Parameter Count | Regional Head | Unrolled Reconciliation | Exact Adjoint $A^\top$ | Scientific Hypothesis Tested |
+1. **$\mathcal{L}_{\text{count}}$ (Negative Binomial, $r=50$)**: Robust count magnitude supervision on final iterate $Y_T$.
+2. **$\mathcal{L}_{\text{FlatDM16}}$ (Flat Dirichlet-Multinomial-16, $\kappa=20$)**: Supervises observer spatial mass allocation directly on $Y_0$.
+3. **$\mathcal{L}_{\text{cell}}$ (Smooth L1)**: Fine local density calibration on $Y_T$.
+4. **$\mathcal{L}_{\text{region}}$ (Smooth L1)**: Supervises regional evidence head predictions $b$.
+
+Optimization: AdamW with differential learning rates (backbone @ $10^{-5}$, neck & task heads @ $10^{-4}$), gradient clipping at 500.0.
+
+---
+
+## 4. Registered Experimental Matrix (B0–B5)
+
+Parameter counts measured via `count_parameters(model)`:
+
+| ID | Variant Name | Parameter Count | Regional Head | Measure Space Solver | Operator / Allocator | Causal Hypothesis Tested |
 |:---|:---|:---:|:---:|:---:|:---:|:---|
-| **B0** | Direct Baseline | 58,867 | ✗ | ✗ | ✗ | Direct regression control without regional reasoning |
-| **B1** | Region Loss | 58,867 | ✗ (Loss on $AY$) | ✗ | ✗ | Auxiliary regional rate loss without dual head |
-| **B2** | Region Aux | 63,044 | ✓ | ✗ | ✗ | Multi-task dual head without runtime reconciliation |
-| **B3a** | Local Refine | 61,876 | ✗ | ✓ ($T=2$) | ✗ (Unconstrained) | Receptive field expansion via local recurrent refinement |
-| **B3b** | Learned Projector | 66,086 | ✓ | ✓ ($T=2$) | ✗ (Blackbox MLP) | Learned neural projection vs exact mathematical adjoint $A^\top$ |
-| **B4** | RMR-T1 | 64,580 | ✓ | ✓ ($T=1$) | ✓ ($H\mathbf{1}=\mathbf{1}$) | Single-step unrolled reconciliation |
-| **B5** | **RMR-T2 (Registered)** | **64,581** | ✓ | ✓ ($T=2$) | ✓ ($H\mathbf{1}=\mathbf{1}$) | Two-step registered RMR-Count model |
+| **B0** | Direct Baseline | 97,681 | ✗ | ✗ | None | Baseline observer without regional head or solver |
+| **B1** | Region Loss | 97,681 | ✗ | ✗ | None | Auxiliary regional rate loss on $AY$ without dual head |
+| **B2** | Region Aux | 101,714 | ✓ | ✗ | None | Multi-task dual head without runtime reconciliation |
+| **B3a** | Local Refine | 100,642 | ✗ | Local Conv ($T=2$) | Local 3x3 DWConv | Local neural refinement without regional constraints |
+| **B3b** | Learned Projector | 104,851 | ✓ | Measure ($\Pi_+$, $T=2$) | Learned $P_\theta$ | Learned neural allocator vs exact adjoint $A^\top$ |
+| **B5-P**| **RMR-P (Registered)**| **101,714** | ✓ | Measure ($\Pi_+$, $T=2$) | Exact $D_c^{-1} A^\top D_a^{-1}$ | Exact mathematical adjoint reconciliation (parity with B2) |
 
 ---
 
-## 4. Quickstart Guide
+## 5. Quickstart Guide
 
-### 4.1 Environment Setup
+### 5.1 Environment Setup
 ```bash
 git clone https://github.com/minhphuc477/crowd-counting-lightweight.git
 cd crowd-counting-lightweight
 git checkout RMR
 
 python -m venv .venv
-# Windows:
 .venv\Scripts\activate
 pip install -e .
 ```
 
-### 4.2 Dataset Preprocessing & Manifests
-Generate portable manifests with relative image references and boundary coordinate alignment:
+### 5.2 Dataset Manifests
+Generate portable JSONL manifests with boundary coordinate preservation:
 ```powershell
 python -m rmr_count.prepare_manifest `
     --images data/part_A_final/train_data/images `
@@ -125,45 +141,24 @@ python -m rmr_count.prepare_manifest `
     --relative-to .
 ```
 
-### 4.3 Training
-Train RMR-Count (B5) using mixed precision and low-RAM safe cropping:
+### 5.3 Stage C Training Matrix (Val-Only)
+Train models for 1000 epochs with validation evaluation:
 ```powershell
-python -m rmr_count.train `
-    --config configs/rmr/rmr_t2.yaml `
-    --seed 42 `
-    --lr 3e-4 `
-    --output-dir runs/sha_a/rmr_t2_seed42
+powershell -ExecutionPolicy Bypass -File .\run_stage_c_matrix.ps1
 ```
 
-### 4.4 Standalone Evaluation & Diagnostic Traces
-Evaluate a trained model and output `predictions.csv`, `summary.json`, `solver_trace.csv`, and `regional_trace.csv`:
+### 5.4 Final Test Set Benchmark (Post-Freeze)
+Evaluate frozen checkpoints on the test set exactly once:
 ```powershell
-python -m rmr_count.eval `
-    --checkpoint runs/sha_a/rmr_t2_seed42/best_val_mae.pt `
-    --manifest data/sha_a_val.jsonl `
-    --out-dir eval_results/rmr_t2
-```
-
-### 4.5 Latency, FPS & Peak VRAM Profiling
-Measure clean single-forward peak memory and FP32 / AMP latency:
-```powershell
-python -m rmr_count.profile --config configs/rmr/rmr_t2.yaml --device cuda
-```
-
-### 4.6 Statistical Paired Comparison
-Compute sample-level paired differences $d_i = |\hat{N}_i^A - N_i| - |\hat{N}_i^B - N_i|$ with bootstrap 95% CI and paired t-test:
-```powershell
-python -m rmr_count.aggregate `
-    --compare eval_results/rmr_t2/predictions.csv eval_results/direct/predictions.csv `
-    --name-a RMR_T2 `
-    --name-b Direct
+powershell -ExecutionPolicy Bypass -File .\run_final_test_eval.ps1
 ```
 
 ---
 
-## 5. Canonical Documentation
+## 6. Canonical Documentation
 
-Detailed technical specifications are maintained in `docs/rmr/`:
-- [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Theoretical derivations, proofs ($H\mathbf{1}=\mathbf{1}$), step-size formulation, and experimental hypotheses.
-- [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Exact layer dimensions, operator caching, low-RAM data contracts, and loss variant dispatch.
-- [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical metric definitions (NAE, physical GAME), diagnostic trace schemas, and statistical significance testing.
+Detailed specifications in `docs/rmr/`:
+- [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Derivations, transfer theorems, measure-space SIRT, and causal control claims.
+- [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Dynamic MobileNetV4 reduction probing, FP32 AMP operators, and loss dispatch.
+- [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical NAE, physical GAME, diagnostic traces, and paired significance tests.
+

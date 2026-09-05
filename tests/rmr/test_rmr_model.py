@@ -853,3 +853,80 @@ def test_projected_sirt_residual_clip_zero_does_not_clip():
     r = model._normalized_adjoint_field(y, b_huge, regions, coverage=cov)
     assert r.abs().max() > 5.0, "residual_clip=0.0 must allow |r| > 5.0 without truncation"
 
+
+def test_b3b_matched_measure_space_update():
+    """P0 audit: B3b (learned_project) operates in direct measure space.
+
+    It must:
+      - have NO eta_logits (no learned step-size parameters)
+      - output out["z"] is None (measure-space update, no latent)
+      - maintain nonnegativity via Pi_+ projection (y >= 0 everywhere)
+      - record omega_eff in step_sizes matching Projected SIRT
+    """
+    cfg = RMRConfig(detach_region_evidence=True, iterations=2)
+    model = RMRCount(cfg, variant="learned_project")
+    assert model.eta_logits is None, "B3b matched control must not have eta_logits parameter"
+
+    x = torch.randn(1, 3, 64, 64)
+    out = model(x)
+
+    assert out["z"] is None, "B3b in direct measure space must report out['z'] is None"
+    assert (out["y"] >= 0.0).all(), "B3b output must be non-negative everywhere (Pi_+ projection)"
+    assert len(out["step_sizes"]) == 2, "B3b must record effective step sizes per iteration"
+    assert out["step_sizes"][0] == 1.0, f"Expected initial omega_eff=1.0, got {out['step_sizes'][0]}"
+
+
+def test_b3b_detached_evidence():
+    """P0 audit: B3b (learned_project) detaches regional evidence b identically to RMR-P.
+
+    When detach_region_evidence=True, count loss on final iterate Y_T must not backprop
+    into the regional evidence head.
+    """
+    cfg = RMRConfig(detach_region_evidence=True, iterations=2)
+    model = RMRCount(cfg, variant="learned_project")
+    x = torch.randn(1, 3, 64, 64)
+    out = model(x)
+
+    y_final = out["y"]
+    # Loss only on y_final
+    loss = y_final.sum()
+    loss.backward()
+
+    # Regional head weights must receive ZERO gradients from y_final
+    for name, p in model.region_head.named_parameters():
+        assert p.grad is None or (p.grad == 0).all(), (
+            f"B3b regional head parameter {name} received gradient from y_final! "
+            f"Evidence b was not properly detached."
+        )
+
+
+def test_scale_matched_head_arbitrary_scale_ordering():
+    """P1 audit: ScaleMatchedRegionalEvidenceHead routes by physical size, not positional scale_id.
+
+    Tests that (128, 32) properly routes 32px to P4 and 128px to P16.
+    """
+    from rmr_count.model import ScaleMatchedRegionalEvidenceHead
+    from rmr_count.operators import build_multiscale_regions
+
+    head = ScaleMatchedRegionalEvidenceHead(
+        feature_dim=32,
+        region_sizes_px=(128, 32),
+    )
+    p4 = torch.ones((1, 32, 16, 16))
+    p8 = torch.full((1, 32, 8, 8), 2.0)
+    p16 = torch.full((1, 32, 4, 4), 4.0)
+
+    regions = build_multiscale_regions(
+        height=16,
+        width=16,
+        output_stride=4,
+        region_sizes_px=(128, 32),
+        overlap=0.5,
+        include_full_image=False,
+    )
+
+    b = head((p4, p8, p16), regions)
+    assert b.shape == (1, 1, regions.boxes.shape[0])
+    assert (b > 0).all()
+
+

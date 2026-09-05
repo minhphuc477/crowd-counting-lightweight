@@ -26,7 +26,8 @@ foreach ($m in $models) {
         --output-dir $m.OutDir `
         --epochs 1000 `
         --eval-every 10 `
-        --disable-early-stopping
+        --disable-early-stopping `
+        --overwrite
 
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Training completed/stopped for: $($m.Name)"
 
@@ -41,13 +42,7 @@ foreach ($m in $models) {
         --manifest "data/sha_a_val.jsonl" `
         --out-dir "$($m.OutDir)/eval_val"
 
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Test set with $ckptPath..."
-    .venv\Scripts\python -m rmr_count.eval `
-        --checkpoint $ckptPath `
-        --manifest "data/sha_a_test.jsonl" `
-        --out-dir "$($m.OutDir)/eval_test"
-
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed all evals for: $($m.Name)"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed validation eval for: $($m.Name)"
 }
 
 Write-Host "========================================================="
