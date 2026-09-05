@@ -153,14 +153,24 @@ def main() -> None:
     )
 
     model = make_model(cfg).to(device)
-    print(f"variant={model.variant} params={count_parameters(model):,}", flush=True)
+    epochs = int(cfg["train"].get("epochs", 1000))
+    lr_init = float(cfg["train"].get("lr", 3e-4))
+    bs = int(cfg["train"].get("batch_size", 8))
+    print(
+        f"\n{'=' * 80}\n"
+        f"  RMR-Count Training Initialized\n"
+        f"  Variant: {model.variant.upper()} | Parameters: {count_parameters(model):,} | Device: {device}\n"
+        f"  Epochs: {epochs} | Batch Size: {bs} | Initial LR: {lr_init:.2e}\n"
+        f"  Output Directory: {out_dir}\n"
+        f"{'=' * 80}\n",
+        flush=True,
+    )
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(cfg["train"].get("lr", 3e-4)),
+        lr=lr_init,
         weight_decay=float(cfg["train"].get("weight_decay", 1e-4)),
     )
-    epochs = int(cfg["train"].get("epochs", 1000))
     scheduler = make_scheduler(optimizer, epochs, int(cfg["train"].get("warmup_epochs", 5)))
     amp = bool(cfg["train"].get("amp", True) and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
@@ -355,28 +365,38 @@ def main() -> None:
             solver_fully_ramped = (solver_strength >= 1.0) or (
                 model.variant not in {"local_refine", "learned_project", "rmr"}
             )
+            is_new_best = False
             if metrics["MAE"] < best_mae and solver_fully_ramped:
                 best_mae = metrics["MAE"]
                 state["best_mae"] = best_mae
                 torch.save(state, out_dir / "best_val_mae.pt")
-            print(
-                f"ep={epoch:04d} loss={row['train_total']:.4f} "
-                f"valMAE={metrics['MAE']:.3f} valRMSE={metrics['RMSE']:.3f} "
-                f"clip={row['clip_rate']:.3f} gnorm_mean={row['grad_norm_mean']:.3f} "
-                f"gnorm_max={row['grad_norm_max']:.3f} "
-                f"solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f} "
-                f"srel={row['solver_rel_step_mean']:.4f} dn={row['solver_delta_n_mean']:.2f} "
-                f"init_count={init_mean:.1f}",
-                flush=True,
-            )
+                is_new_best = True
+
+        # Formatted readable epoch log
+        if model.variant in {"local_refine", "learned_project", "rmr"}:
+            solver_str = f"Solver: {solver_strength:4.2f} (step: {row['solver_rel_step_mean']:.4f}, ΔN: {row['solver_delta_n_mean']:4.1f})"
         else:
+            solver_str = "Solver: N/A"
+
+        clip_str = f" | clip: {row['clip_rate']*100:.1f}%" if row['clip_rate'] > 0 else ""
+        print(
+            f"[{epoch+1:03d}/{epochs:03d}] "
+            f"Loss: {row['train_total']:.4f} | "
+            f"LR: {current_lr:.2e} | "
+            f"Grad: {row['grad_norm_mean']:.2f} (max: {row['grad_norm_max']:.2f}) | "
+            f"{solver_str} | "
+            f"InitCnt: {init_mean:5.1f}{clip_str}",
+            flush=True,
+        )
+
+        if do_eval:
+            best_tag = " ★ NEW BEST" if is_new_best else f" (Best: {best_mae:.2f})"
             print(
-                f"ep={epoch:04d} loss={row['train_total']:.4f} "
-                f"clip={row['clip_rate']:.3f} gnorm_mean={row['grad_norm_mean']:.3f} "
-                f"gnorm_max={row['grad_norm_max']:.3f} "
-                f"solver={solver_strength:.2f} rmax={row['residual_abs_max']:.3f} "
-                f"srel={row['solver_rel_step_mean']:.4f} dn={row['solver_delta_n_mean']:.2f} "
-                f"init_count={init_mean:.1f}",
+                f"       └──> [VAL @ Epoch {epoch+1:03d}] "
+                f"MAE: {metrics['MAE']:.2f} | "
+                f"RMSE: {metrics['RMSE']:.2f} | "
+                f"NAE: {metrics['NAE']:.3f} | "
+                f"Bias: {metrics['Bias']:+.2f}{best_tag}\n",
                 flush=True,
             )
         if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
