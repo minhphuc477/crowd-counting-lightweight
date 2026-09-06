@@ -520,5 +520,190 @@ def test_manifest_density_warning():
         assert "does not exist" in str(w[0].message)
 
 
+# ---------------------------------------------------------------------------
+# Test 14: Energy autograd vs analytical gradient
+# ---------------------------------------------------------------------------
+def test_energy_autograd_vs_analytical_gradient():
+    """Autograd \nabla_Y E_w(Y) matches analytical adjoint A^T W D_a^-1 (AY - mu)."""
+    torch.manual_seed(42)
+    h, w = 32, 32
+    regions = build_multiscale_regions(
+        h, w, output_stride=4, region_sizes_px=(32, 64, 128),
+        overlap=0.5, include_full_image=False, device="cpu",
+    )
+    y = torch.rand(2, 1, h, w, dtype=torch.float32, requires_grad=True)
+    b = regional_sum(y.detach(), regions.boxes, out_dtype=torch.float32) + 1.0
+    w_reg = torch.rand_like(b) * 2.0 + 0.5
+
+    # Scalar energy = 0.5 * sum_R w_R * ((AY)_R - b_R)^2 / |R|
+    energy = weighted_regional_energy(y, b, w_reg, regions).sum()
+    energy.backward()
+    autograd_grad = y.grad.clone()
+
+    # Analytical gradient: A^T (w * (AY - b) / area)
+    q = regional_sum(y.detach(), regions.boxes, out_dtype=torch.float32)
+    area = regions.area.float().view(1, 1, -1)
+    res_scaled = w_reg * (q - b) / area
+    analytical_grad = regional_adjoint(res_scaled, regions.boxes, h, w, out_dtype=torch.float32)
+
+    assert torch.allclose(autograd_grad, analytical_grad, atol=1e-6, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Test 15: Bounded region cache (LRU maxsize=32)
+# ---------------------------------------------------------------------------
+def test_bounded_region_cache():
+    """Region cache in RMRv3 must be an LRU cache bounded at maxsize=32."""
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg)
+    device = torch.device("cpu")
+
+    # Access cache with 40 distinct grid dimensions
+    for i in range(40):
+        h, w = 16 + i, 16 + i
+        _ = model._regions(h, w, device)
+
+    assert len(model._region_cache) <= 32
+    assert len(model._region_cache) == 32
+
+
+# ---------------------------------------------------------------------------
+# Test 16: Strict YAML configuration validation
+# ---------------------------------------------------------------------------
+def test_strict_yaml_validation():
+    """validate_v3_config must reject unknown/misspelled keys at top level and section levels."""
+    from rmr_v3.config import validate_v3_config
+
+    valid_cfg = {
+        "seed": 42,
+        "output_dir": "runs/test",
+        "data": {"train_manifest": "a.jsonl", "val_manifest": "b.jsonl"},
+        "model": {"output_stride": 4, "feature_width": 32},
+        "loss": {"lambda_count": 1.0},
+        "train": {"batch_size": 4, "lr": 1e-4},
+        "eval": {"density_bins": [100.0, 500.0]},
+    }
+    validate_v3_config(valid_cfg)
+
+    # Unknown top-level key
+    with pytest.raises(ValueError, match="Unknown top-level config key 'bad_top_level'"):
+        validate_v3_config({**valid_cfg, "bad_top_level": 123})
+
+    # Unknown key in section
+    bad_model_cfg = dict(valid_cfg)
+    bad_model_cfg["model"] = {**valid_cfg["model"], "misspelled_feature_width": 32}
+    with pytest.raises(ValueError, match="Unknown config key 'misspelled_feature_width' in section 'model'"):
+        validate_v3_config(bad_model_cfg)
+
+
+# ---------------------------------------------------------------------------
+# Test 17: AMP loss numerical precision
+# ---------------------------------------------------------------------------
+def test_amp_loss_numerical_precision():
+    """Loss computation with float32 reductions is numerically stable under FP16."""
+    loss_cfg = RMRv3LossConfig()
+    b, h, w = 2, 32, 32
+    target = torch.rand(b, 1, h, w, dtype=torch.float32)
+
+    regions = build_multiscale_regions(h, w, 4, (32, 64, 128), 0.5, False, "cpu")
+    num_regions = regions.boxes.shape[0]
+
+    outputs_fp32 = {
+        "y": torch.rand(b, 1, h, w, dtype=torch.float32),
+        "y0": torch.rand(b, 1, h, w, dtype=torch.float32),
+        "b_region": torch.rand(b, 1, num_regions, dtype=torch.float32),
+        "region_dispersion": torch.full((b, 1, num_regions), 50.0, dtype=torch.float32),
+        "regions": regions,
+    }
+    losses_fp32 = compute_rmr_v3_losses(outputs_fp32, target, loss_cfg)
+
+    outputs_fp16 = {
+        "y": outputs_fp32["y"].half(),
+        "y0": outputs_fp32["y0"].half(),
+        "b_region": outputs_fp32["b_region"].half(),
+        "region_dispersion": outputs_fp32["region_dispersion"].half(),
+        "regions": regions,
+    }
+    losses_fp16 = compute_rmr_v3_losses(outputs_fp16, target.half(), loss_cfg)
+
+    for k in ("total", "count", "flat_dm16", "cell", "region_nb"):
+        assert torch.isfinite(losses_fp16[k]), f"Loss {k} was not finite in FP16"
+        assert torch.isfinite(losses_fp32[k]), f"Loss {k} was not finite in FP32"
+        rel_diff = abs(losses_fp16[k].item() - losses_fp32[k].item()) / (abs(losses_fp32[k].item()) + 1e-6)
+        assert rel_diff < 0.05, f"Loss {k} deviated too much between FP32 and FP16: {rel_diff}"
+
+
+# ---------------------------------------------------------------------------
+# Test 18: Resume exact trajectory reproducibility
+# ---------------------------------------------------------------------------
+def test_resume_exact_reproducibility():
+    """Continuous 2-step training equals 1-step + checkpoint save/restore + 1-step."""
+    from rmr_core.training import load_rng_state, save_rng_state, seed_everything
+
+    def make_setup():
+        seed_everything(999, deterministic=True)
+        m = RMRv3(RMRv3Config(feature_width=16, pretrained=False))
+        opt = torch.optim.AdamW(m.parameters(), lr=1e-3)
+        return m, opt
+
+    # Setup continuous run
+    m_cont, opt_cont = make_setup()
+    torch.manual_seed(100)
+    x1 = torch.randn(2, 3, 64, 64)
+    x2 = torch.randn(2, 3, 64, 64)
+
+    # Step 1
+    out1 = m_cont(x1)
+    loss1 = out1["y"].sum()
+    loss1.backward()
+    opt_cont.step()
+    opt_cont.zero_grad()
+
+    # Step 2
+    out2 = m_cont(x2)
+    loss2 = out2["y"].sum()
+    loss2.backward()
+    opt_cont.step()
+    opt_cont.zero_grad()
+
+    # Setup resumed run
+    m_res, opt_res = make_setup()
+    torch.manual_seed(100)
+    _x1 = torch.randn(2, 3, 64, 64)
+    _x2 = torch.randn(2, 3, 64, 64)
+
+    # Step 1
+    _out1 = m_res(_x1)
+    _loss1 = _out1["y"].sum()
+    _loss1.backward()
+    opt_res.step()
+    opt_res.zero_grad()
+
+    # Checkpoint
+    ckpt = {
+        "model": m_res.state_dict(),
+        "optimizer": opt_res.state_dict(),
+        "rng_state": save_rng_state(),
+    }
+
+    # Simulate fresh load
+    m_loaded = RMRv3(RMRv3Config(feature_width=16, pretrained=False))
+    opt_loaded = torch.optim.AdamW(m_loaded.parameters(), lr=1e-3)
+    m_loaded.load_state_dict(ckpt["model"])
+    opt_loaded.load_state_dict(ckpt["optimizer"])
+    load_rng_state(ckpt["rng_state"])
+
+    # Step 2 on loaded model
+    _out2 = m_loaded(_x2)
+    _loss2 = _out2["y"].sum()
+    _loss2.backward()
+    opt_loaded.step()
+    opt_loaded.zero_grad()
+
+    # Compare parameters
+    for p_c, p_l in zip(m_cont.parameters(), m_loaded.parameters()):
+        assert torch.equal(p_c, p_l), "Parameters after resumed training did not match continuous run!"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

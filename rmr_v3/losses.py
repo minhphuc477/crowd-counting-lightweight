@@ -83,18 +83,22 @@ class RMRv3LossConfig:
 def compute_rmr_v3_losses(
     outputs: dict,
     target_y: torch.Tensor,
-    cfg: RMRv3LossConfig = RMRv3LossConfig(),
+    cfg: RMRv3LossConfig | None = None,
 ) -> dict[str, torch.Tensor]:
-    y = outputs["y"]
-    y0 = outputs["y0"]
+    if cfg is None:
+        cfg = RMRv3LossConfig()
+
+    y = outputs["y"].float()
+    y0 = outputs["y0"].float()
+    target_float = target_y.float()
 
     regions: RegionSet = outputs["regions"]
 
-    mean_region = outputs["b_region"]
-    dispersion_region = outputs["region_dispersion"]
+    mean_region = outputs["b_region"].float()
+    dispersion_region = outputs["region_dispersion"].float()
 
     target_region = regional_sum(
-        target_y,
+        target_float,
         regions.boxes,
         out_dtype=torch.float32,
     )
@@ -103,28 +107,28 @@ def compute_rmr_v3_losses(
 
     losses["count"] = count_magnitude_loss(
         y,
-        target_y,
+        target_float,
         mode=cfg.count_loss_mode,
         dispersion=cfg.count_nb_dispersion,
     )
 
     losses["flat_dm16"] = flat_dm16_loss(
         y0,
-        target_y,
+        target_float,
         kappa=cfg.kappa_flat16,
         normalize_by_count=cfg.normalize_flat_dm16,
     )
 
     losses["cell"] = balanced_smooth_l1(
         y,
-        target_y,
+        target_float,
         beta=cfg.cell_beta,
     )
 
     losses["region_nb"] = scale_balanced_regional_nb_nll(
-        target_region.float(),
-        mean_region.float(),
-        dispersion_region.float(),
+        target_region,
+        mean_region,
+        dispersion_region,
         regions,
     )
 

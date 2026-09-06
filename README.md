@@ -36,7 +36,7 @@ The repository is organized into a modular, clean hierarchy:
 
 ### 2.1 Discrete Regional Operators
 Let $Y \in \mathbb{R}_+^G$ be the discrete cell count measure on spatial lattice $G$ (stride $s=4$). The canonical ground truth per cell is:
-$$Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\left\lfloor \frac{y_n + 0.5}{s} \right\rfloor = i, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor = j\right).$$
+$$Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\min\left(G_h - 1, \; \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor\right) = i, \; \min\left(G_w - 1, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor\right) = j\right).$$
 
 - **Forward Regional Projection** $A \in \{0, 1\}^{M \times G}$: $(AY)_m = \sum_{g \in R_m} Y_g = q_m$.
 - **Adjoint Back-Projection** $A^\top \in \{0, 1\}^{G \times M}$: $(A^\top r)_g = \sum_{m: g \in R_m} r_m$.

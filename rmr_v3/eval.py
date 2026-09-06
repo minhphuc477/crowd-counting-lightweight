@@ -87,12 +87,24 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
     return model, uniform_reliability, cfg
 
 
+import datetime
+import subprocess
+import sys
+
+def get_git_commit() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+    except Exception:
+        return "unknown"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate RMR-v3 checkpoint")
     ap.add_argument("--checkpoint", required=True, help="Path to .pt checkpoint")
     ap.add_argument("--manifest", default=None, help="Path to eval manifest jsonl")
     ap.add_argument("--output-dir", default=None, help="Directory to save evaluation artifacts")
-    ap.add_argument("--uniform-reliability", action="store_true", default=None, help="Override uniform reliability setting")
+    ap.add_argument("--uniform-reliability", dest="uniform_reliability", action="store_true", default=None, help="Force uniform reliability (W=I)")
+    ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Force weighted reliability (W=diag(w_R))")
     ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
     args = ap.parse_args()
@@ -105,7 +117,10 @@ def main() -> None:
 
     manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_val.jsonl")
     manifest_path = Path(manifest)
-    out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / f"eval_{manifest_path.stem}"
+    mode_tag = "uniform" if uniform_reliability else "weighted"
+    tiling_tag = "" if args.tiling else "_notiling"
+    default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}"
+    out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stride = int(cfg.get("model", {}).get("output_stride", 4))
@@ -178,6 +193,17 @@ def main() -> None:
     summary["weight_max"] = float(np.max(weights))
     summary["solver_weight_mean"] = float(np.mean(solver_weights))
     summary["solver_weight_std"] = float(np.std(solver_weights))
+    summary["provenance"] = {
+        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "git_commit": get_git_commit(),
+        "python_version": sys.version,
+        "torch_version": torch.__version__,
+        "parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "mode": mode_tag,
+        "tiling": args.tiling,
+        "checkpoint": str(ckpt_path),
+        "manifest": str(manifest_path),
+    }
 
     save_evaluation_artifacts(out_dir, rows, summary)
 

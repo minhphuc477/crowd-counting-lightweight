@@ -72,8 +72,8 @@ def count_magnitude_loss(
     dispersion: float = 50.0,
 ) -> torch.Tensor:
     """Total crop count loss using Negative Binomial NLL or log1p smooth L1."""
-    pn = pred.sum(dim=(-2, -1)).view(-1)
-    tn = target.sum(dim=(-2, -1)).view(-1)
+    pn = pred.float().sum(dim=(-2, -1)).view(-1)
+    tn = target.float().sum(dim=(-2, -1)).view(-1)
     if mode == "nb":
         return negative_binomial_nll_mean_dispersion(tn, pn, dispersion=dispersion, reduction="mean")
     elif mode == "log1p":
@@ -134,8 +134,8 @@ def flat_dm16_loss(
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells)."""
     k = max(1, 16 // stride)
-    n16 = block_sum_2d(pred_map, k).flatten(1)
-    y16 = block_sum_2d(target_map, k).flatten(1)
+    n16 = block_sum_2d(pred_map.float(), k).flatten(1)
+    y16 = block_sum_2d(target_map.float(), k).flatten(1)
     pi = probs_from_positive_mass(n16, tiny=eps)
     alpha = float(kappa) * pi
     per_image_nll = dm_nll_none(y16, alpha, eps=eps)

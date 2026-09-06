@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import math
 
@@ -445,9 +446,12 @@ class RMRv3(nn.Module):
 
     def __init__(
         self,
-        cfg: RMRv3Config = RMRv3Config(),
+        cfg: RMRv3Config | None = None,
     ) -> None:
         super().__init__()
+
+        if cfg is None:
+            cfg = RMRv3Config()
 
         if cfg.output_stride != 4:
             raise ValueError(
@@ -522,10 +526,10 @@ class RMRv3(nn.Module):
 
         self.solver_strength: float = 1.0
 
-        self._region_cache: dict[
+        self._region_cache: OrderedDict[
             tuple,
             RegionSet,
-        ] = {}
+        ] = OrderedDict()
 
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))
@@ -546,18 +550,24 @@ class RMRv3(nn.Module):
             device.index if device.type == "cuda" else None,
         )
 
-        if key not in self._region_cache:
-            self._region_cache[key] = build_multiscale_regions(
-                height=h,
-                width=w,
-                output_stride=self.cfg.output_stride,
-                region_sizes_px=self.cfg.region_sizes_px,
-                overlap=self.cfg.region_overlap,
-                include_full_image=False,
-                device=device,
-            )
+        if key in self._region_cache:
+            self._region_cache.move_to_end(key)
+            return self._region_cache[key]
 
-        return self._region_cache[key]
+        if len(self._region_cache) >= 32:
+            self._region_cache.popitem(last=False)
+
+        region_set = build_multiscale_regions(
+            height=h,
+            width=w,
+            output_stride=self.cfg.output_stride,
+            region_sizes_px=self.cfg.region_sizes_px,
+            overlap=self.cfg.region_overlap,
+            include_full_image=False,
+            device=device,
+        )
+        self._region_cache[key] = region_set
+        return region_set
 
     def forward(
         self,

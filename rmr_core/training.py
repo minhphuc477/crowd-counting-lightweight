@@ -20,9 +20,11 @@ def seed_everything(seed: int, deterministic: bool = False) -> None:
     if deterministic:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        torch.use_deterministic_algorithms(True, warn_only=True)
     else:
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True
+        torch.use_deterministic_algorithms(False)
 
 
 def save_rng_state() -> dict[str, Any]:

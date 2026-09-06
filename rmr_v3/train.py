@@ -35,6 +35,8 @@ from rmr_core.data import (
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 
+from .config import validate_v3_config
+
 from .diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
@@ -238,6 +240,7 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
+    validate_v3_config(cfg)
     if args.seed is not None:
         cfg["seed"] = args.seed
     if args.lr is not None:
@@ -256,6 +259,7 @@ def main() -> None:
 
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
+    cfg.setdefault("train", {})["deterministic"] = deterministic
     seed_everything(seed, deterministic=deterministic)
 
     if "init_m0" not in cfg.get("model", {}) and "train_manifest" in cfg.get("data", {}):
@@ -267,18 +271,15 @@ def main() -> None:
 
     out_dir = Path(cfg["output_dir"])
     if out_dir.exists() and not args.resume:
-        existing = list(out_dir.glob("*.pt")) + list(out_dir.glob("*.csv"))
+        existing = list(out_dir.iterdir())
         if existing:
             if not args.overwrite:
                 raise RuntimeError(
                     f"Output directory '{out_dir}' already exists with artifacts: "
-                    f"{[f.name for f in existing]}. Use --overwrite or --resume."
+                    f"{[f.name for f in existing[:10]]}. Use --overwrite or --resume."
                 )
-            for f in existing:
-                try:
-                    f.unlink(missing_ok=True)
-                except Exception:
-                    pass
+            import shutil
+            shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
@@ -392,6 +393,14 @@ def main() -> None:
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
+        if "config" in ckpt:
+            ckpt_model_cfg = ckpt["config"].get("model", {})
+            for key in ("feature_width", "output_stride", "backbone_name", "backbone"):
+                if key in ckpt_model_cfg and key in cfg.get("model", {}):
+                    if str(ckpt_model_cfg[key]) != str(cfg["model"][key]):
+                        raise ValueError(
+                            f"Resume config mismatch for model.{key}: checkpoint has {ckpt_model_cfg[key]} but config has {cfg['model'][key]}"
+                        )
         model.load_state_dict(ckpt["model"])
         if "optimizer" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer"])
@@ -405,12 +414,24 @@ def main() -> None:
         # Exactly resume at the next epoch index
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
+        epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0))
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
 
     if not log_csv.exists() or start_epoch == 0:
         with open(log_csv, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
+    else:
+        try:
+            with open(log_csv, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                rows_to_keep = [r for r in reader if int(r.get("epoch", 0)) <= start_epoch]
+            with open(log_csv, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows_to_keep)
+        except Exception as e:
+            print(f"Warning: could not filter train_log.csv on resume ({e}), proceeding with append.")
 
     for epoch in range(start_epoch, epochs):
         # Solver warmup and ramp protocol:
@@ -609,6 +630,7 @@ def main() -> None:
                         "solver_strength": solver_strength,
                         "config": cfg,
                         "best_mae": best_mae,
+                        "epochs_without_improvement": epochs_without_improvement,
                     },
                     out_dir / "best_val_mae.pt",
                 )
@@ -650,6 +672,7 @@ def main() -> None:
                 "solver_strength": solver_strength,
                 "config": cfg,
                 "best_mae": best_mae,
+                "epochs_without_improvement": epochs_without_improvement,
             },
             out_dir / "last.pt",
         )
