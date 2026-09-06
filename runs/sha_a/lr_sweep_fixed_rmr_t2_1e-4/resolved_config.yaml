@@ -1,0 +1,42 @@
+seed: 42
+output_dir: runs/sha_a/lr_sweep_fixed_rmr_t2_1e-4
+data:
+  train_manifest: data/sha_a_train.jsonl
+  val_manifest: data/sha_a_val.jsonl
+  crop_size: 512
+  scale_range:
+  - 0.75
+  - 1.25
+model:
+  variant: rmr
+  output_stride: 4
+  feature_width: 32
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  iterations: 2
+  eta_max: 0.2
+  eta_init: 0.05
+  residual_clip: 5.0
+loss:
+  lambda_global: 0.1
+  lambda_region_map: 0.2
+  lambda_region_head: 0.2
+  lambda_deep_supervision: 0.0
+  cell_beta: 1.0
+  region_beta: 0.1
+train:
+  batch_size: 8
+  workers: 0
+  lr: 0.0001
+  weight_decay: 0.0001
+  epochs: 100
+  warmup_epochs: 5
+  eval_every: 5
+  grad_clip: 5.0
+  amp: true
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20
