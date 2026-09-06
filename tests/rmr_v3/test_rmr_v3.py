@@ -412,19 +412,35 @@ def test_expanded_diagnostics():
         assert f"spearman_pred_weight_error_{s}" in corrs
     assert "spearman_pred_weight_error" in corrs
 
-    # 3. Calibration bins
+    # 3. Calibration bins (pooled and per-scale)
     calib = compute_uncertainty_calibration_bins(rows, num_bins=4)
     assert len(calib["bins"]) == 4
     assert "mean_std_residual" in calib
     assert "p50_std_residual" in calib
     assert "p90_std_residual" in calib
+    assert "calibration_pooled" in calib
+    assert "calibration_32" in calib
+    assert "calibration_64" in calib
+    assert "calibration_128" in calib
 
-    # 4. Dispersion saturation
-    sat = compute_dispersion_saturation(rows)
+    # 4. Negative Binomial Predictive Interval Coverage
+    from rmr_v3.diagnostics import compute_nb_interval_coverage
+    cov = compute_nb_interval_coverage(rows, nominal_levels=(0.50, 0.80, 0.95))
+    for pct in (50, 80, 95):
+        assert f"coverage_{pct}" in cov
+        assert f"calib_gap_{pct}" in cov
+        assert 0.0 <= cov[f"coverage_{pct}"] <= 1.0
+        for s in (32, 64, 128):
+            assert f"coverage_{pct}_{s}" in cov
+            assert f"calib_gap_{pct}_{s}" in cov
+            assert 0.0 <= cov[f"coverage_{pct}_{s}"] <= 1.0
+
+    # 5. Dispersion saturation with dynamic bounds
+    sat = compute_dispersion_saturation(rows, disp_min=cfg.dispersion_min, disp_max=cfg.dispersion_max)
     assert 0.0 <= sat["dispersion_sat_low_fraction"] <= 1.0
     assert 0.0 <= sat["dispersion_sat_high_fraction"] <= 1.0
 
-    # 5. Solver trajectory
+    # 6. Solver trajectory
     traj = compute_solver_trajectory_diagnostics(out, target)
     assert "mae_reg_y0" in traj
     assert "mae_reg_y1" in traj
@@ -437,6 +453,71 @@ def test_expanded_diagnostics():
     assert 0.0 <= traj["energy_monotonic_fraction"] <= 1.0
     assert 0.0 <= traj["solver_help_fraction"] <= 1.0
     assert 0.0 <= traj["solver_harm_fraction"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Positive reliability weight guard
+# ---------------------------------------------------------------------------
+def test_positive_weight_guard():
+    """RMR-v3 must strictly enforce reliability_weight_min > 0."""
+    with pytest.raises(ValueError, match="reliability_weight_min .* must be > 0"):
+        RMRv3(RMRv3Config(reliability_weight_min=0.0, pretrained=False))
+
+    with pytest.raises(ValueError, match="reliability_weight_min .* must be > 0"):
+        RMRv3(RMRv3Config(reliability_weight_min=-0.5, pretrained=False))
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Exact RNG state save/restore reproducibility
+# ---------------------------------------------------------------------------
+def test_rng_state_exact_reproducibility():
+    """save_rng_state and load_rng_state must identically reproduce random trajectories."""
+    import random
+    import numpy as np
+    from rmr_core.training import load_rng_state, save_rng_state, seed_everything
+
+    seed_everything(12345, deterministic=True)
+
+    # Advance generators
+    _ = [random.random() for _ in range(10)]
+    _ = np.random.randn(10)
+    _ = torch.randn(10)
+
+    # Save state
+    saved_state = save_rng_state()
+
+    # Trajectory 1
+    py_1 = [random.random() for _ in range(50)]
+    np_1 = np.random.randn(50)
+    th_1 = torch.randn(50)
+
+    # Restore state
+    load_rng_state(saved_state)
+
+    # Trajectory 2
+    py_2 = [random.random() for _ in range(50)]
+    np_2 = np.random.randn(50)
+    th_2 = torch.randn(50)
+
+    assert py_1 == py_2, "Python random generator did not reproduce identical trajectory"
+    assert np.array_equal(np_1, np_2), "NumPy random generator did not reproduce identical trajectory"
+    assert torch.equal(th_1, th_2), "PyTorch random generator did not reproduce identical trajectory"
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Manifest density fallback warning
+# ---------------------------------------------------------------------------
+def test_manifest_density_warning():
+    """compute_manifest_density must warn on missing or unparseable manifest."""
+    import warnings
+    from rmr_core.data import compute_manifest_density
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        val = compute_manifest_density("nonexistent_manifest_file_12345.jsonl", default_m0=0.042)
+        assert abs(val - 0.042) < 1e-6
+        assert len(w) >= 1
+        assert "does not exist" in str(w[0].message)
 
 
 if __name__ == "__main__":

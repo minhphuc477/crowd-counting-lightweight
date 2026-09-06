@@ -13,6 +13,7 @@ from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
 from .diagnostics import (
     compute_dispersion_saturation,
+    compute_nb_interval_coverage,
     compute_reliability_correlations,
     compute_solver_trajectory_diagnostics,
     compute_uncertainty_calibration_bins,
@@ -145,8 +146,14 @@ def main() -> None:
     calib = compute_uncertainty_calibration_bins(diag_rows)
     summary["calibration"] = calib
 
-    sat = compute_dispersion_saturation(diag_rows)
+    disp_min = float(getattr(model.cfg, "dispersion_min", cfg.get("model", {}).get("dispersion_min", 0.5)))
+    disp_max = float(getattr(model.cfg, "dispersion_max", cfg.get("model", {}).get("dispersion_max", 500.0)))
+    sat = compute_dispersion_saturation(diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
+
+    nb_cov = compute_nb_interval_coverage(diag_rows)
+    summary["nb_interval_coverage"] = nb_cov
+    summary.update(nb_cov)
 
     if traj_rows:
         traj_summary: dict[str, float] = {}
@@ -191,6 +198,8 @@ def main() -> None:
         print(f"  Pearson(var, err): {summary['pearson_rate_var_error']:.4f}")
         print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")
         print(f"  Spearman(weight, err): {summary['spearman_weight_error']:.4f}")
+    if "coverage_95" in summary:
+        print(f"  Coverage: 50%={summary['coverage_50']:.1%} (gap: {summary['calib_gap_50']:+.1%}), 80%={summary['coverage_80']:.1%} (gap: {summary['calib_gap_80']:+.1%}), 95%={summary['coverage_95']:.1%} (gap: {summary['calib_gap_95']:+.1%})")
     print(f"Saved artifacts to {out_dir}\n")
 
 

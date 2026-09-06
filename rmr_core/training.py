@@ -7,12 +7,67 @@ import numpy as np
 import torch
 
 
-def seed_everything(seed: int) -> None:
-    """Set deterministic seeds across random, numpy, and torch."""
+from typing import Any
+
+
+def seed_everything(seed: int, deterministic: bool = False) -> None:
+    """Set seeds across random, numpy, and torch, with optional strict determinism."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    else:
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+
+
+def save_rng_state() -> dict[str, Any]:
+    """Capture random, numpy, torch, and CUDA RNG states for exact resume reproducibility."""
+    state: dict[str, Any] = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def load_rng_state(state: dict[str, Any] | None) -> None:
+    """Restore random, numpy, torch, and CUDA RNG states."""
+    if not isinstance(state, dict):
+        return
+    py_state = state.get("python", state.get("python_random"))
+    if py_state is not None:
+        try:
+            random.setstate(py_state)
+        except Exception:
+            pass
+
+    np_state = state.get("numpy")
+    if np_state is not None:
+        try:
+            np.random.set_state(np_state)
+        except Exception:
+            pass
+
+    torch_state = state.get("torch")
+    if torch_state is not None and isinstance(torch_state, torch.Tensor):
+        try:
+            torch.set_rng_state(torch_state)
+        except Exception:
+            pass
+
+    cuda_state = state.get("cuda")
+    if cuda_state is not None and torch.cuda.is_available() and isinstance(cuda_state, (list, tuple)):
+        try:
+            torch.cuda.set_rng_state_all(cuda_state)
+        except Exception:
+            pass
 
 
 def make_scheduler(

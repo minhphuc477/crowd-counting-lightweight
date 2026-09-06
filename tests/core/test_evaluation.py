@@ -68,3 +68,70 @@ def test_evaluate_dataset_and_artifacts():
         data = json.loads(content)
         assert "MAE" in data
         assert "mae_ci95" in data
+
+
+class LocalConvModel(nn.Module):
+    """Local convolutional operator where direct forward algebraically equals tiled prediction."""
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(3, 1, kernel_size=1, stride=4, bias=True)
+        nn.init.constant_(self.conv.weight, 0.25)
+        nn.init.constant_(self.conv.bias, 0.05)
+
+    def forward(self, x, **kwargs):
+        return {"y": torch.relu(self.conv(x))}
+
+
+def test_tiled_prediction_invariant():
+    """Verify the mathematical invariant: Direct Forward == Tiled Forward for local models."""
+    torch.manual_seed(42)
+    model = LocalConvModel().eval()
+    image = torch.rand(3, 128, 128)
+
+    with torch.no_grad():
+        direct_out = model(image.unsqueeze(0))["y"][0]
+        tiled_out = predict_tiled(
+            model=model,
+            image=image,
+            output_stride=4,
+            tile_size=64,
+            halo=16,
+        )
+
+    assert direct_out.shape == tiled_out.shape
+    assert torch.allclose(direct_out, tiled_out, atol=1e-6)
+
+
+def test_evaluate_dataset_with_tiling():
+    """Verify evaluate_dataset computes tiling discrepancies and metrics when run_tiling=True."""
+    device = torch.device("cpu")
+    model = LocalConvModel()
+
+    sample_batch = [
+        {
+            "image": torch.rand((3, 64, 64)),
+            "target_y": torch.ones((1, 16, 16)) * 0.1,
+            "points": torch.zeros((10, 2)),
+            "id": "img_tile_001",
+            "height": 64,
+            "width": 64,
+        }
+    ]
+    loader = [sample_batch]
+
+    rows, summary = evaluate_dataset(
+        model=model,
+        loader=loader,
+        device=device,
+        output_stride=4,
+        run_tiling=True,
+        tile_size=32,
+        practical_halo=8,
+    )
+
+    assert len(rows) == 1
+    assert "pred_tiled_h0" in rows[0]
+    assert "pred_tiled_practical" in rows[0]
+    assert "direct_tiled_discrepancy_mean" in summary
+    assert "direct_tiled_h0_discrepancy_mean" in summary
+    assert "MAE" in summary

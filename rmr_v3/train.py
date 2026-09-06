@@ -33,10 +33,11 @@ from rmr_core.data import (
     compute_manifest_density,
 )
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
-from rmr_core.training import make_scheduler, seed_everything
+from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 
 from .diagnostics import (
     compute_dispersion_saturation,
+    compute_nb_interval_coverage,
     compute_reliability_correlations,
     compute_solver_trajectory_diagnostics,
     compute_uncertainty_calibration_bins,
@@ -191,8 +192,13 @@ def evaluate_v3(
     summary["p50_std_residual"] = calib["p50_std_residual"]
     summary["p90_std_residual"] = calib["p90_std_residual"]
 
-    sat = compute_dispersion_saturation(all_diag_rows)
+    disp_min = float(getattr(model.cfg, "dispersion_min", 0.5))
+    disp_max = float(getattr(model.cfg, "dispersion_max", 500.0))
+    sat = compute_dispersion_saturation(all_diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
+
+    nb_cov = compute_nb_interval_coverage(all_diag_rows)
+    summary.update(nb_cov)
 
     if traj_rows:
         for k in traj_rows[0].keys():
@@ -227,6 +233,7 @@ def main() -> None:
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
+    ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
     args = ap.parse_args()
 
@@ -248,8 +255,8 @@ def main() -> None:
         cfg["output_dir"] = args.output_dir
 
     seed = int(cfg.get("seed", 42))
-    seed_everything(seed)
-    torch.backends.cudnn.benchmark = True
+    deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
+    seed_everything(seed, deterministic=deterministic)
 
     if "init_m0" not in cfg.get("model", {}) and "train_manifest" in cfg.get("data", {}):
         stride = int(cfg.get("model", {}).get("output_stride", 4))
@@ -371,6 +378,8 @@ def main() -> None:
         "spearman_pred_weight_error",
         "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
         "mean_std_residual",
+        "coverage_50", "coverage_80", "coverage_95",
+        "calib_gap_50", "calib_gap_80", "calib_gap_95",
         "dispersion_sat_low_fraction", "dispersion_sat_high_fraction",
         "solver_help_fraction", "solver_harm_fraction", "energy_monotonic_fraction",
         "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
@@ -378,6 +387,8 @@ def main() -> None:
 
     start_epoch = 0
     best_mae = float("inf")
+    patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
+    epochs_without_improvement = 0
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
@@ -388,6 +399,9 @@ def main() -> None:
             scheduler.load_state_dict(ckpt["scheduler"])
         if "scaler" in ckpt:
             scaler.load_state_dict(ckpt["scaler"])
+        if "rng_state" in ckpt:
+            load_rng_state(ckpt["rng_state"])
+            print("Restored exact RNG states (random, numpy, torch, cuda)")
         # Exactly resume at the next epoch index
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
@@ -561,6 +575,12 @@ def main() -> None:
                 "spearman_rate_var_error_64": float(val_metrics.get("spearman_rate_var_error_64", 0.0)),
                 "spearman_rate_var_error_128": float(val_metrics.get("spearman_rate_var_error_128", 0.0)),
                 "mean_std_residual": float(val_metrics.get("mean_std_residual", 0.0)),
+                "coverage_50": float(val_metrics.get("coverage_50", 0.0)),
+                "coverage_80": float(val_metrics.get("coverage_80", 0.0)),
+                "coverage_95": float(val_metrics.get("coverage_95", 0.0)),
+                "calib_gap_50": float(val_metrics.get("calib_gap_50", 0.0)),
+                "calib_gap_80": float(val_metrics.get("calib_gap_80", 0.0)),
+                "calib_gap_95": float(val_metrics.get("calib_gap_95", 0.0)),
                 "dispersion_sat_low_fraction": float(val_metrics.get("dispersion_sat_low_fraction", 0.0)),
                 "dispersion_sat_high_fraction": float(val_metrics.get("dispersion_sat_high_fraction", 0.0)),
                 "solver_help_fraction": float(val_metrics.get("solver_help_fraction", 0.0)),
@@ -572,10 +592,12 @@ def main() -> None:
             })
 
             cur_mae = float(val_metrics["MAE"])
-            # Guard: only update best_mae after solver ramp has fully engaged (solver_strength >= 1.0)
-            is_best = (cur_mae < best_mae) and (solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs)
+            solver_engaged = solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs
+            # Guard: only update best_mae after solver ramp has fully engaged
+            is_best = (cur_mae < best_mae) and solver_engaged
             if is_best:
                 best_mae = cur_mae
+                epochs_without_improvement = 0
                 torch.save(
                     {
                         "epoch": epoch + 1,
@@ -583,6 +605,7 @@ def main() -> None:
                         "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict(),
                         "scaler": scaler.state_dict(),
+                        "rng_state": save_rng_state(),
                         "solver_strength": solver_strength,
                         "config": cfg,
                         "best_mae": best_mae,
@@ -591,6 +614,9 @@ def main() -> None:
                 )
                 (out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
                 (out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
+            else:
+                if solver_engaged:
+                    epochs_without_improvement += eval_every
 
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
@@ -620,6 +646,7 @@ def main() -> None:
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
+                "rng_state": save_rng_state(),
                 "solver_strength": solver_strength,
                 "config": cfg,
                 "best_mae": best_mae,
@@ -630,6 +657,14 @@ def main() -> None:
         with open(log_csv, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writerow(row_log)
+
+        if is_eval_epoch and val_loader is not None and patience > 0 and epochs_without_improvement >= patience:
+            print(
+                f"\n[Early Stopping] No validation MAE improvement for {epochs_without_improvement} epochs "
+                f"(patience={patience}). Terminating training at epoch {epoch + 1}.",
+                flush=True,
+            )
+            break
 
 
 if __name__ == "__main__":

@@ -475,6 +475,11 @@ class RMRv3(nn.Module):
                 f"RMR-v3 registered canonical method requires region_sizes_px=(32, 64, 128), got {cfg.region_sizes_px}"
             )
 
+        if cfg.reliability_weight_min <= 0:
+            raise ValueError(
+                f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0"
+            )
+
         if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
             raise ValueError(
                 f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"

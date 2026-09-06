@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
-from rmr_core.training import make_scheduler, seed_everything
+from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
 
@@ -133,6 +133,7 @@ def main() -> None:
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
+    ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
     args = ap.parse_args()
 
@@ -153,8 +154,8 @@ def main() -> None:
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
     seed = int(cfg.get("seed", 42))
-    seed_everything(seed)
-    torch.backends.cudnn.benchmark = True
+    deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
+    seed_everything(seed, deterministic=deterministic)
 
     if "init_m0" not in cfg["model"] and "train_manifest" in cfg.get("data", {}):
         stride = int(cfg["model"].get("output_stride", 4))
@@ -282,6 +283,8 @@ def main() -> None:
         scheduler.load_state_dict(ckpt["scheduler"])
         if "scaler" in ckpt:
             scaler.load_state_dict(ckpt["scaler"])
+        if "rng_state" in ckpt:
+            load_rng_state(ckpt["rng_state"])
         start_epoch = ckpt["epoch"] + 1
         best_mae = ckpt.get("best_mae", best_mae)
 
@@ -463,6 +466,7 @@ def main() -> None:
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
+            "rng_state": save_rng_state(),
             "solver_strength": solver_strength,
             "best_mae": best_mae,
             "config": cfg,

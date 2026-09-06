@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import warnings
 from pathlib import Path
 from typing import Callable
 
@@ -225,6 +226,11 @@ def compute_manifest_density(
     """
     manifest_path = Path(manifest)
     if not manifest_path.exists():
+        warnings.warn(
+            f"Manifest '{manifest_path}' does not exist; falling back to default_m0={default_m0}",
+            UserWarning,
+            stacklevel=2,
+        )
         return default_m0
     root = manifest_path.parent
     total_pts = 0
@@ -248,6 +254,10 @@ def compute_manifest_density(
                 total_cells += cells
         if total_cells > 0:
             return float(total_pts / total_cells)
-    except Exception:
-        pass
+    except Exception as e:
+        warnings.warn(
+            f"Failed to compute manifest density from '{manifest_path}': {e}; falling back to default_m0={default_m0}",
+            UserWarning,
+            stacklevel=2,
+        )
     return default_m0

@@ -1,3 +1,9 @@
+"""RMR-Count / RMR-v2 Legacy Training Entrypoint.
+
+NOTE: This is a frozen compatibility path maintained for Stage C workflows and
+active training runs. New canonical RMR-v2 training should use `rmr_v2.train` and
+RMR-v3 should use `rmr_v3.train`.
+"""
 from __future__ import annotations
 
 import argparse

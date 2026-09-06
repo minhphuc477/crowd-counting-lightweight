@@ -1,4 +1,4 @@
-﻿"""RMR-v3: Reliability-Weighted Regional Measure Reconciliation.
+"""RMR-v3: Reliability-Weighted Regional Measure Reconciliation.
 
 Isolated module -- does NOT overwrite rmr_count (RMR-v2).
 """

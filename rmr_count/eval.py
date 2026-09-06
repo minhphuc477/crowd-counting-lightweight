@@ -1,3 +1,8 @@
+"""RMR-Count / RMR-v2 Legacy Evaluation Entrypoint.
+
+NOTE: This is a frozen compatibility path maintained for Stage C workflows and
+active benchmarks. Canonical evaluation should use `rmr_v2.eval` or `rmr_v3.eval`.
+"""
 from __future__ import annotations
 
 import argparse
