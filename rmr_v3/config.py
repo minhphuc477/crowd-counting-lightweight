@@ -130,3 +130,96 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         iters = int(m_cfg["iterations"])
         if iters < 0:
             raise ValueError(f"iterations must be non-negative, got {iters}")
+
+
+METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
+    "model": [
+        "output_stride",
+        "feature_width",
+        "backbone_name",
+        "backbone",
+        "region_sizes_px",
+        "region_overlap",
+        "include_full_image",
+        "iterations",
+        "omega",
+        "sirt_omega",
+        "residual_clip",
+        "dispersion_init",
+        "dispersion_min",
+        "dispersion_max",
+        "reliability_mode",
+        "reliability_rate_std_floor",
+        "reliability_weight_min",
+        "reliability_weight_max",
+        "normalize_reliability_within_scale",
+        "detach_region_mean_in_solver",
+        "detach_reliability_in_solver",
+        "uniform_reliability",
+        "eps",
+    ],
+    "loss": [
+        "lambda_count",
+        "lambda_flat_dm16",
+        "lambda_cell",
+        "lambda_region_nb",
+        "count_loss_mode",
+        "count_nb_dispersion",
+        "kappa_flat16",
+        "normalize_flat_dm16",
+        "cell_beta",
+    ],
+    "train": [
+        "weight_decay",
+        "solver_warmup_epochs",
+        "solver_ramp_epochs",
+    ],
+    "data": [
+        "crop_size",
+    ],
+}
+
+
+def _are_values_compatible(v1: Any, v2: Any) -> bool:
+    if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
+        if isinstance(v1, bool) or isinstance(v2, bool):
+            return bool(v1) == bool(v2)
+        return abs(float(v1) - float(v2)) < 1e-7
+    if isinstance(v1, (list, tuple)) and isinstance(v2, (list, tuple)):
+        if len(v1) != len(v2):
+            return False
+        return all(_are_values_compatible(x, y) for x, y in zip(v1, v2))
+    return str(v1) == str(v2)
+
+
+def validate_resume_compatibility(ckpt_cfg: dict[str, Any], incoming_cfg: dict[str, Any]) -> None:
+    """Validate that incoming config matches checkpoint across all method-critical fields."""
+    if not isinstance(ckpt_cfg, dict) or not isinstance(incoming_cfg, dict):
+        return
+
+    for section, fields in METHOD_CRITICAL_FIELDS.items():
+        ckpt_sec = ckpt_cfg.get(section, {})
+        inc_sec = incoming_cfg.get(section, {})
+        if not isinstance(ckpt_sec, dict) or not isinstance(inc_sec, dict):
+            continue
+
+        for field in fields:
+            # Handle backbone alias
+            if field in ("backbone", "backbone_name"):
+                v_ckpt = ckpt_sec.get("backbone", ckpt_sec.get("backbone_name"))
+                v_inc = inc_sec.get("backbone", inc_sec.get("backbone_name"))
+            elif field in ("omega", "sirt_omega"):
+                v_ckpt = ckpt_sec.get("omega", ckpt_sec.get("sirt_omega"))
+                v_inc = inc_sec.get("omega", inc_sec.get("sirt_omega"))
+            else:
+                v_ckpt = ckpt_sec.get(field)
+                v_inc = inc_sec.get(field)
+
+            if v_ckpt is not None and v_inc is not None:
+                if not _are_values_compatible(v_ckpt, v_inc):
+                    raise ValueError(
+                        f"Resume config mismatch for '{section}.{field}': "
+                        f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
+                        f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
+                    )
+

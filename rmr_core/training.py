@@ -7,20 +7,23 @@ import numpy as np
 import torch
 
 
+import os
 from typing import Any
 
 
-def seed_everything(seed: int, deterministic: bool = False) -> None:
-    """Set seeds across random, numpy, and torch, with optional strict determinism."""
+def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = False) -> None:
+    """Set seeds across random, numpy, and torch, with deterministic algorithm controls."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     if deterministic:
+        if "CUBLAS_WORKSPACE_CONFIG" not in os.environ:
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.use_deterministic_algorithms(True, warn_only=warn_only)
     else:
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True

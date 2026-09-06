@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,7 +36,7 @@ from rmr_core.data import (
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 
-from .config import validate_v3_config
+from .config import validate_resume_compatibility, validate_v3_config
 
 from .diagnostics import (
     compute_dispersion_saturation,
@@ -85,6 +86,7 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
     detach_reliability_in_solver = bool(m_cfg.get("detach_reliability_in_solver", True))
 
     uniform_reliability = bool(m_cfg.get("uniform_reliability", False))
+    eps = float(m_cfg.get("eps", 1e-6))
 
     config = RMRv3Config(
         output_stride=output_stride,
@@ -109,6 +111,7 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
         normalize_reliability_within_scale=normalize_reliability_within_scale,
         detach_region_mean_in_solver=detach_region_mean_in_solver,
         detach_reliability_in_solver=detach_reliability_in_solver,
+        eps=eps,
     )
 
     model = RMRv3(config)
@@ -224,6 +227,19 @@ def evaluate_v3(
     return summary
 
 
+def get_git_info() -> tuple[str, bool]:
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+    except Exception:
+        commit = "unknown"
+    try:
+        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        dirty = bool(status)
+    except Exception:
+        dirty = False
+    return commit, dirty
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train RMR-v3 (RW-RMR)")
     ap.add_argument("--config", required=True, help="Path to config YAML")
@@ -256,6 +272,11 @@ def main() -> None:
         cfg.setdefault("train", {})["patience"] = 0
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
+
+    resume_ckpt = None
+    if args.resume:
+        resume_ckpt = torch.load(args.resume, map_location="cpu")
+        validate_resume_compatibility(resume_ckpt.get("config", {}), cfg)
 
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
@@ -391,16 +412,8 @@ def main() -> None:
     patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
     epochs_without_improvement = 0
 
-    if args.resume:
-        ckpt = torch.load(args.resume, map_location="cpu")
-        if "config" in ckpt:
-            ckpt_model_cfg = ckpt["config"].get("model", {})
-            for key in ("feature_width", "output_stride", "backbone_name", "backbone"):
-                if key in ckpt_model_cfg and key in cfg.get("model", {}):
-                    if str(ckpt_model_cfg[key]) != str(cfg["model"][key]):
-                        raise ValueError(
-                            f"Resume config mismatch for model.{key}: checkpoint has {ckpt_model_cfg[key]} but config has {cfg['model'][key]}"
-                        )
+    if resume_ckpt is not None:
+        ckpt = resume_ckpt
         model.load_state_dict(ckpt["model"])
         if "optimizer" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer"])
@@ -615,7 +628,7 @@ def main() -> None:
             cur_mae = float(val_metrics["MAE"])
             solver_engaged = solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs
             # Guard: only update best_mae after solver ramp has fully engaged
-            is_best = (cur_mae < best_mae) and solver_engaged
+            git_commit, git_dirty = get_git_info()
             if is_best:
                 best_mae = cur_mae
                 epochs_without_improvement = 0
@@ -631,6 +644,8 @@ def main() -> None:
                         "config": cfg,
                         "best_mae": best_mae,
                         "epochs_without_improvement": epochs_without_improvement,
+                        "git_commit": git_commit,
+                        "git_dirty": git_dirty,
                     },
                     out_dir / "best_val_mae.pt",
                 )
@@ -661,6 +676,7 @@ def main() -> None:
             )
 
         # Save last checkpoint
+        git_commit, git_dirty = get_git_info()
         torch.save(
             {
                 "epoch": epoch + 1,
@@ -673,6 +689,8 @@ def main() -> None:
                 "config": cfg,
                 "best_mae": best_mae,
                 "epochs_without_improvement": epochs_without_improvement,
+                "git_commit": git_commit,
+                "git_dirty": git_dirty,
             },
             out_dir / "last.pt",
         )

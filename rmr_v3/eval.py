@@ -55,6 +55,7 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
     detach_reliability_in_solver = bool(m_cfg.get("detach_reliability_in_solver", True))
 
     uniform_reliability = bool(m_cfg.get("uniform_reliability", False))
+    eps = float(m_cfg.get("eps", 1e-6))
 
     config = RMRv3Config(
         output_stride=output_stride,
@@ -78,24 +79,44 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         normalize_reliability_within_scale=normalize_reliability_within_scale,
         detach_region_mean_in_solver=detach_region_mean_in_solver,
         detach_reliability_in_solver=detach_reliability_in_solver,
+        eps=eps,
     )
 
     model = RMRv3(config)
     model.load_state_dict(ckpt["model"])
     model.set_solver_strength(1.0)
     model.to(device).eval()
-    return model, uniform_reliability, cfg
+    return model, uniform_reliability, cfg, ckpt
 
 
 import datetime
+import hashlib
 import subprocess
 import sys
 
-def get_git_commit() -> str:
+
+def compute_file_sha256(path: Path | str) -> str:
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return "not_found"
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def get_git_info() -> tuple[str, bool]:
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
     except Exception:
-        return "unknown"
+        commit = "unknown"
+    try:
+        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        dirty = bool(status)
+    except Exception:
+        dirty = False
+    return commit, dirty
 
 
 def main() -> None:
@@ -112,7 +133,7 @@ def main() -> None:
     ckpt_path = Path(args.checkpoint)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model, ckpt_uniform, cfg = load_model_from_ckpt(ckpt_path, device)
+    model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device)
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
     manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_val.jsonl")
@@ -193,16 +214,29 @@ def main() -> None:
     summary["weight_max"] = float(np.max(weights))
     summary["solver_weight_mean"] = float(np.mean(solver_weights))
     summary["solver_weight_std"] = float(np.std(solver_weights))
+    eval_commit, eval_dirty = get_git_info()
+    resolved_cfg_file = ckpt_path.parent / "resolved_config.yaml"
+    if resolved_cfg_file.exists():
+        cfg_sha = compute_file_sha256(resolved_cfg_file)
+    else:
+        cfg_sha = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode("utf-8")).hexdigest()
+
     summary["provenance"] = {
         "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "git_commit": get_git_commit(),
+        "evaluation_commit": eval_commit,
+        "git_dirty": eval_dirty,
+        "training_commit": str(ckpt.get("git_commit", ckpt.get("provenance", {}).get("git_commit", "unknown"))),
+        "training_git_dirty": ckpt.get("git_dirty", ckpt.get("provenance", {}).get("git_dirty")),
+        "checkpoint_path": str(ckpt_path),
+        "checkpoint_sha256": compute_file_sha256(ckpt_path),
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": compute_file_sha256(manifest_path),
+        "resolved_config_sha256": cfg_sha,
         "python_version": sys.version,
         "torch_version": torch.__version__,
         "parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "mode": mode_tag,
         "tiling": args.tiling,
-        "checkpoint": str(ckpt_path),
-        "manifest": str(manifest_path),
     }
 
     save_evaluation_artifacts(out_dir, rows, summary)

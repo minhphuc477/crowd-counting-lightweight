@@ -638,6 +638,8 @@ def test_amp_loss_numerical_precision():
 # ---------------------------------------------------------------------------
 def test_resume_exact_reproducibility():
     """Continuous 2-step training equals 1-step + checkpoint save/restore + 1-step."""
+    import random
+    import numpy as np
     from rmr_core.training import load_rng_state, save_rng_state, seed_everything
 
     def make_setup():
@@ -648,18 +650,16 @@ def test_resume_exact_reproducibility():
 
     # Setup continuous run
     m_cont, opt_cont = make_setup()
-    torch.manual_seed(100)
+    # Step 1: generate x1
     x1 = torch.randn(2, 3, 64, 64)
-    x2 = torch.randn(2, 3, 64, 64)
-
-    # Step 1
     out1 = m_cont(x1)
     loss1 = out1["y"].sum()
     loss1.backward()
     opt_cont.step()
     opt_cont.zero_grad()
 
-    # Step 2
+    # Step 2: generate x2 from continuous RNG trajectory
+    x2 = torch.randn(2, 3, 64, 64)
     out2 = m_cont(x2)
     loss2 = out2["y"].sum()
     loss2.backward()
@@ -668,30 +668,37 @@ def test_resume_exact_reproducibility():
 
     # Setup resumed run
     m_res, opt_res = make_setup()
-    torch.manual_seed(100)
+    # Step 1: generate _x1 from same initial RNG
     _x1 = torch.randn(2, 3, 64, 64)
-    _x2 = torch.randn(2, 3, 64, 64)
-
-    # Step 1
+    assert torch.equal(_x1, x1), "Initial data generation did not match"
     _out1 = m_res(_x1)
     _loss1 = _out1["y"].sum()
     _loss1.backward()
     opt_res.step()
     opt_res.zero_grad()
 
-    # Checkpoint
+    # Checkpoint saved AFTER step 1 (captures post-step-1 RNG state)
     ckpt = {
         "model": m_res.state_dict(),
         "optimizer": opt_res.state_dict(),
         "rng_state": save_rng_state(),
     }
 
-    # Simulate fresh load
+    # Advance and corrupt RNG states to prove that load_rng_state is active
+    _ = torch.randn(100, 100)
+    _ = [random.random() for _ in range(100)]
+    _ = np.random.randn(100)
+
+    # Fresh load
     m_loaded = RMRv3(RMRv3Config(feature_width=16, pretrained=False))
     opt_loaded = torch.optim.AdamW(m_loaded.parameters(), lr=1e-3)
     m_loaded.load_state_dict(ckpt["model"])
     opt_loaded.load_state_dict(ckpt["optimizer"])
     load_rng_state(ckpt["rng_state"])
+
+    # Step 2: generate data AFTER RNG restoration
+    _x2 = torch.randn(2, 3, 64, 64)
+    assert torch.equal(_x2, x2), "Restored RNG did not reproduce identical step-2 data generation!"
 
     # Step 2 on loaded model
     _out2 = m_loaded(_x2)
@@ -703,6 +710,63 @@ def test_resume_exact_reproducibility():
     # Compare parameters
     for p_c, p_l in zip(m_cont.parameters(), m_loaded.parameters()):
         assert torch.equal(p_c, p_l), "Parameters after resumed training did not match continuous run!"
+
+
+# ---------------------------------------------------------------------------
+# Test 19: Resume compatibility validation guards
+# ---------------------------------------------------------------------------
+def test_resume_compatibility_validation():
+    """validate_resume_compatibility must reject incompatible method-critical fields."""
+    from rmr_v3.config import validate_resume_compatibility
+
+    base_cfg = {
+        "model": {"omega": 1.0, "iterations": 2, "feature_width": 32, "output_stride": 4, "eps": 1e-6},
+        "loss": {"lambda_count": 1.0, "lambda_cell": 0.25},
+        "train": {"weight_decay": 1e-4, "solver_warmup_epochs": 5},
+        "data": {"crop_size": 512},
+    }
+
+    # Exact match passes
+    validate_resume_compatibility(base_cfg, dict(base_cfg))
+
+    # Changing omega rejected
+    bad_omega = {"model": {"omega": 0.5}}
+    with pytest.raises(ValueError, match="Resume config mismatch for 'model.omega'"):
+        validate_resume_compatibility(base_cfg, bad_omega)
+
+    # Changing iterations rejected
+    bad_iters = {"model": {"iterations": 3}}
+    with pytest.raises(ValueError, match="Resume config mismatch for 'model.iterations'"):
+        validate_resume_compatibility(base_cfg, bad_iters)
+
+    # Changing loss weights rejected
+    bad_loss = {"loss": {"lambda_count": 2.0}}
+    with pytest.raises(ValueError, match="Resume config mismatch for 'loss.lambda_count'"):
+        validate_resume_compatibility(base_cfg, bad_loss)
+
+    # Changing crop size rejected
+    bad_crop = {"data": {"crop_size": 256}}
+    with pytest.raises(ValueError, match="Resume config mismatch for 'data.crop_size'"):
+        validate_resume_compatibility(base_cfg, bad_crop)
+
+
+# ---------------------------------------------------------------------------
+# Test 20: Model eps parameter wiring
+# ---------------------------------------------------------------------------
+def test_model_eps_wiring():
+    """RMRv3Config and make_model/load_model must properly propagate eps."""
+    from rmr_v3.train import make_model
+    from rmr_v3.eval import load_model_from_ckpt
+
+    cfg = {
+        "model": {
+            "eps": 1e-4,
+            "feature_width": 16,
+            "pretrained": False,
+        }
+    }
+    model, _ = make_model(cfg)
+    assert model.cfg.eps == 1e-4, f"make_model did not propagate eps: got {model.cfg.eps}"
 
 
 if __name__ == "__main__":
