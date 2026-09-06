@@ -5,8 +5,8 @@ $models = @(
     @{ Name = "B1 (region_loss)"; Config = "configs/rmr/region_loss.yaml"; OutDir = "runs/sha_a/stage_c_b1_region_loss_seed42" },
     @{ Name = "B2 (region_aux)"; Config = "configs/rmr/region_aux.yaml"; OutDir = "runs/sha_a/stage_c_b2_region_aux_seed42" },
     @{ Name = "B3a (local_refine)"; Config = "configs/rmr/local_refine.yaml"; OutDir = "runs/sha_a/stage_c_b3a_local_refine_seed42" },
-    @{ Name = "B3b (learned_project)"; Config = "configs/rmr/learned_project.yaml"; OutDir = "runs/sha_a/stage_c_b3b_learned_project_seed42" },
-    @{ Name = "B5-P (rmr_projected_t2)"; Config = "configs/rmr/rmr_projected_t2.yaml"; OutDir = "runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42" }
+    @{ Name = "B5-P (rmr_projected_t2)"; Config = "configs/rmr/rmr_projected_t2.yaml"; OutDir = "runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42" },
+    @{ Name = "B3b (learned_project)"; Config = "configs/rmr/learned_project.yaml"; OutDir = "runs/sha_a/stage_c_b3b_learned_project_seed42" }
 )
 
 Write-Host "========================================================="
@@ -14,6 +14,11 @@ Write-Host "STARTING STAGE C FULL MATCHED MATRIX (1000 EPOCHS, SEED 42)"
 Write-Host "========================================================="
 
 foreach ($m in $models) {
+    if (Test-Path "$($m.OutDir)/eval_val/summary.json") {
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Skipping $($m.Name) - already completed with eval_val/summary.json"
+        continue
+    }
+
     Write-Host "---------------------------------------------------------"
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting Model: $($m.Name)"
     Write-Host "Config: $($m.Config) | Output: $($m.OutDir)"

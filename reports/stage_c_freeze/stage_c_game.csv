@@ -1,0 +1,6 @@
+model_id,variant,game0,game1,game2,game3
+B0,direct,95.72,120.97,146.02,189.65
+B1,region_loss,87.82,105.86,132.72,183.50
+B2,region_aux,87.74,118.23,147.70,189.19
+B3a,local_refine,84.50,99.90,127.59,179.08
+B5-P,rmr_projected_t2,79.38,102.14,128.16,177.57

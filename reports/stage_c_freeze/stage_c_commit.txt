@@ -1,0 +1,32 @@
+================================================================================
+RMR-COUNT STAGE C OFFICIAL EXPERIMENTAL FREEZE RECORD
+================================================================================
+Git Commit SHA: 65eba08722c4d356c3b7becdafbd618b3ae209de
+Branch: RMR
+Repo: minhphuc477/crowd-counting-lightweight (f:\lightweightcrcn)
+Date: 2026-09-07T03:25:00+07:00
+
+Dataset Manifests:
+  - Validation: data/sha_a_val.jsonl (Held-out validation protocol)
+  - Test: data/sha_a_test.jsonl (STRICTLY FROZEN - Zero evaluations before freeze release)
+  - Train: data/sha_a_train.jsonl (1000 epochs, seed 42)
+
+Model Checkpoints Frozen:
+  - B0:  runs/sha_a/stage_c_b0_direct_seed42/best_val_mae.pt
+  - B1:  runs/sha_a/stage_c_b1_region_loss_seed42/best_val_mae.pt
+  - B2:  runs/sha_a/stage_c_b2_region_aux_seed42/best_val_mae.pt
+  - B3a: runs/sha_a/stage_c_b3a_local_refine_seed42/best_val_mae.pt
+  - B5-P: runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42/best_val_mae.pt
+  - B3b: runs/sha_a/stage_c_b3b_learned_project_seed42/train_log.csv (Running control, E62)
+
+Core Hyperparameters:
+  - Base Backbone: MobileNetV4-Small (0.50x, timm pretrained)
+  - Stride: 4 (P4 feature level)
+  - LR Backbone: 1.00e-05
+  - LR Main/Neck: 1.00e-04
+  - Optimizer: AdamW (weight_decay=1e-4, grad_clip=500.0)
+  - Crop size: 512 x 512
+  - Batch size: 8
+  - Loss weights: lambda_count=1.0, lambda_dm16=1.0, lambda_cell=0.25, lambda_region=0.20
+  - Solver: B5-P Projected SIRT (T=2, omega=1.0, non-negative projection)
+================================================================================

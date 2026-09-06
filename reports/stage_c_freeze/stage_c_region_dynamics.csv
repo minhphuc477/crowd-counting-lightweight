@@ -1,0 +1,4 @@
+model_id,scale,disagreement_t0,disagreement_t1,disagreement_t2,disagreement_reduction_pct,gt_mae_t0,gt_mae_t1,gt_mae_t2,gt_mae_reduction_pct,energy_reduction_rate
+B5-P,32px,0.542,0.229,0.196,63.8%,0.785,0.595,0.595,24.2%,1.000
+B5-P,64px,2.136,0.641,0.501,76.6%,2.509,1.523,1.518,39.5%,1.000
+B5-P,128px,7.740,2.095,1.916,75.3%,8.930,4.316,4.303,51.8%,1.000

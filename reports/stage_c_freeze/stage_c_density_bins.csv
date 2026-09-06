@@ -1,0 +1,6 @@
+model_id,variant,sparse_le100,mid_101_500,dense_gt500
+B0,direct,30.71,53.60,147.13
+B1,region_loss,27.34,52.75,131.52
+B2,region_aux,30.24,54.04,129.65
+B3a,local_refine,29.34,54.31,122.57
+B5-P,rmr_projected_t2,20.47,70.36,96.80

@@ -1,0 +1,6 @@
+model_id,variant,direct_tiled_h0_mean_abs,direct_tiled_h0_mean_norm,direct_tiled_practical_mean_abs,direct_tiled_practical_mean_norm,ci95_lo,ci95_hi
+B0,direct,22.03,0.0332,14.45,0.0243,0.0163,0.0338
+B1,region_loss,24.85,0.0394,16.44,0.0276,0.0181,0.0383
+B2,region_aux,19.05,0.0340,14.68,0.0272,0.0194,0.0360
+B3a,local_refine,19.84,0.0410,13.05,0.0248,0.0170,0.0332
+B5-P,rmr_projected_t2,20.93,0.0542,13.66,0.0272,0.0209,0.0341

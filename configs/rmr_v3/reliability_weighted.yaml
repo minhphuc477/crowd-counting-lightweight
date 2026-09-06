@@ -1,0 +1,70 @@
+﻿# configs/rmr_v3/reliability_weighted.yaml
+# V3-B: Reliability-Weighted RMR (MAIN VARIANT)
+# uniform_reliability: false -> uses learned w_R from ReliabilityRegionalHead
+
+experiment:
+  name: "rmr_v3_reliability_weighted"
+  seed: 42
+  dataset: "sha_a"
+  output_stride: 4
+
+model:
+  backbone_name: "mobilenetv4_conv_small_050.e3000_r224_in1k"
+  pretrained: true                  # ImageNet pretrained
+  backbone_lr_scale: 0.1
+  feature_width: 32
+  region_sizes_px: [32, 64, 128]
+  region_overlap: 0.5
+  include_full_image: false         # MUST remain false
+  regional_hidden: 48
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+  rate_std_floor: 0.01
+  w_min: 0.25
+  w_max: 4.0
+  scale_neutral_normalize: true
+  iterations: 2
+  sirt_omega: 1.0
+  detach_region_mean_in_solver: true   # registered main variant
+  detach_reliability_in_solver: true   # registered main variant
+  uniform_reliability: false           # V3-B: uses learned weights
+  init_m0: 0.015763
+  eps: 1.0e-6
+
+training:
+  epochs: 200                    # PILOT: 200 epochs, then decide on 1000-epoch run
+  batch_size: 8
+  crop_size: 256
+  optimizer: "adamw"
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 5
+  scheduler: "cosine"
+  grad_clip: 1.0
+  amp: true                      # mixed precision, but regional algebra in FP32
+
+loss:
+  lambda_count: 1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell: 0.25
+  lambda_region_head: 0.20
+  count_loss_mode: "nb"
+  nb_dispersion: 50.0            # fallback; model uses learned dispersion
+  kappa_flat16: 20.0
+  cell_beta: 1.0
+  region_beta: 0.1
+  normalize_flat_dm16: true
+  lambda_reliability_entropy: 0.0  # disabled by default
+
+eval:
+  val_file: "data/sha_a_val.jsonl"
+  # test_file: FROZEN until architecture, checkpoint-selection, config freeze
+  density_bins: [25.0, 200.0]   # sparse / moderate / dense
+  run_diagnostics: true          # reliability gate check at each eval
+
+checkpoint:
+  metric: "val_mae"
+  mode: "min"
+  save_best: true
+  save_last: true
