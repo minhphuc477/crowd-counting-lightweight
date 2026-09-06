@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import math
@@ -497,10 +497,15 @@ class RMRv3(nn.Module):
             dispersion_max=cfg.dispersion_max,
         )
 
+        self.solver_strength: float = 1.0
+
         self._region_cache: dict[
             tuple,
             RegionSet,
         ] = {}
+
+    def set_solver_strength(self, strength: float) -> None:
+        self.solver_strength = float(min(max(strength, 0.0), 1.0))
 
     def _regions(
         self,
@@ -536,6 +541,7 @@ class RMRv3(nn.Module):
         x: torch.Tensor,
         *,
         uniform_reliability: bool = False,
+        solver_strength: float | None = None,
     ) -> dict:
         c4, c8, c16 = self.encoder(x)
 
@@ -601,6 +607,13 @@ class RMRv3(nn.Module):
             eps=self.cfg.eps,
         )
 
+        strength = float(
+            self.solver_strength
+            if solver_strength is None
+            else min(max(solver_strength, 0.0), 1.0)
+        )
+        effective_omega = float(self.cfg.omega) * strength
+
         y = y0
 
         iterates = [y0]
@@ -627,7 +640,7 @@ class RMRv3(nn.Module):
 
             y_next = torch.clamp_min(
                 y.float()
-                - float(self.cfg.omega) * field,
+                - effective_omega * field,
                 0.0,
             ).to(y.dtype)
 
@@ -662,6 +675,7 @@ class RMRv3(nn.Module):
             "region_log_dispersion": regional["log_dispersion"],
 
             "region_weight": weight,
+            "solver_region_weight": weight_solver,
             "region_precision": reliability["precision"],
             "region_rate_variance": reliability["rate_variance"],
             "region_count_variance": reliability["count_variance"],
@@ -671,4 +685,5 @@ class RMRv3(nn.Module):
             "energy_trace": energy_trace,
 
             "uniform_reliability": uniform_reliability,
+            "solver_strength": strength,
         }

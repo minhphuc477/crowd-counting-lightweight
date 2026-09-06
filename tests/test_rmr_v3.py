@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import os
@@ -293,6 +293,49 @@ def test_parameter_budget():
     n = count_parameters(model)
     assert n < 105_000, f"OVER BUDGET: {n:,} >= 105,000"
     assert n == 101_763, f"Expected exactly 101,763 parameters, got {n:,}"
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Solver strength warmup protocol
+# ---------------------------------------------------------------------------
+def test_solver_strength_warmup():
+    """When solver_strength=0.0, final measure equals initial measure Y0."""
+    torch.manual_seed(42)
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg).eval()
+
+    x = torch.rand(2, 3, 128, 128)
+    with torch.no_grad():
+        out_zero = model(x, solver_strength=0.0)
+        out_full = model(x, solver_strength=1.0)
+
+    # When strength = 0.0, y == y0
+    assert torch.allclose(out_zero["y"], out_zero["y0"], atol=1e-6)
+    # When strength = 1.0, solver updates fine measure
+    assert not torch.allclose(out_full["y"], out_full["y0"], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Solver region weight separation for V3-A control
+# ---------------------------------------------------------------------------
+def test_solver_region_weight():
+    """V3-A has uniform solver weights (w=1) while preserving predicted reliability."""
+    torch.manual_seed(42)
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg).eval()
+
+    x = torch.rand(2, 3, 128, 128)
+    with torch.no_grad():
+        out_v3a = model(x, uniform_reliability=True)
+        out_v3b = model(x, uniform_reliability=False)
+
+    # In V3-A, solver_region_weight is strictly 1.0 everywhere
+    assert torch.allclose(out_v3a["solver_region_weight"], torch.ones_like(out_v3a["solver_region_weight"]))
+    # But predicted reliability is preserved
+    assert not torch.allclose(out_v3a["region_weight"], torch.ones_like(out_v3a["region_weight"]))
+
+    # In V3-B, solver_region_weight matches region_weight
+    assert torch.allclose(out_v3b["solver_region_weight"], out_v3b["region_weight"])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import csv
@@ -79,6 +79,7 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
 
     model = RMRv3(config)
     model.load_state_dict(ckpt["model"])
+    model.set_solver_strength(1.0)
     model.to(device).eval()
     return model, uniform_reliability, cfg
 
@@ -138,6 +139,11 @@ def main() -> None:
                 diag_rows.extend(d_rows)
 
     summary = summarize_predictions(pred_rows)
+    summary["mae"] = summary["MAE"]
+    summary["rmse"] = summary["RMSE"]
+    summary["nae"] = summary["NAE"]
+    summary["bias"] = summary["Bias"]
+
     corrs = compute_reliability_correlations(diag_rows)
     summary.update(corrs)
 
@@ -158,11 +164,15 @@ def main() -> None:
     summary["n_dense"] = int(np.sum(dense_mask))
 
     # Weight distribution
-    weights = np.array([r["weight"] for r in diag_rows])
+    weights = np.array([r["weight"] for r in diag_rows]) if diag_rows else np.array([1.0])
+    solver_weights = np.array([r.get("solver_weight", r["weight"]) for r in diag_rows]) if diag_rows else np.array([1.0])
+
     summary["weight_mean"] = float(np.mean(weights))
     summary["weight_std"] = float(np.std(weights))
     summary["weight_min"] = float(np.min(weights))
     summary["weight_max"] = float(np.max(weights))
+    summary["solver_weight_mean"] = float(np.mean(solver_weights))
+    summary["solver_weight_std"] = float(np.std(solver_weights))
 
     # Save summary.json
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -181,7 +191,7 @@ def main() -> None:
             writer.writerows(diag_rows)
 
     print(f"\nEvaluation Results:")
-    print(f"  MAE: {summary['mae']:.2f} | RMSE: {summary['rmse']:.2f} | NAE: {summary['nae']:.3f} | Bias: {summary['bias']:+.2f}")
+    print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}")
     print(f"  GAME0: {summary['GAME0']:.2f} | GAME1: {summary['GAME1']:.2f} | GAME2: {summary['GAME2']:.2f} | GAME3: {summary['GAME3']:.2f}")
     print(f"  Sparse MAE (<=100): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
     print(f"  Moderate MAE (101-500): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")

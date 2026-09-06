@@ -1,8 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 from typing import Sequence
 import numpy as np
+import scipy.stats
 import torch
 
 from rmr_count.operators import regional_sum
@@ -18,6 +19,7 @@ def regional_reliability_rows(
     mu = outputs["b_region"].float()
     disp = outputs["region_dispersion"].float()
     weight = outputs["region_weight"].float()
+    solver_weight = outputs.get("solver_region_weight", weight).float()
     rate_var = outputs["region_rate_variance"].float()
 
     gt = regional_sum(
@@ -65,6 +67,9 @@ def regional_reliability_rows(
                     "weight": float(
                         weight[bi, 0, ri].item()
                     ),
+                    "solver_weight": float(
+                        solver_weight[bi, 0, ri].item()
+                    ),
                     "abs_count_error": float(
                         abs_count_error[
                             bi, 0, ri
@@ -82,34 +87,37 @@ def regional_reliability_rows(
 
 
 def compute_reliability_correlations(rows: list[dict], eps: float = 1e-8) -> dict[str, float]:
-    """Compute Pearson and Spearman correlations between uncertainty and error."""
+    """Compute Pearson and Spearman correlations between uncertainty and error using scipy.stats.spearmanr."""
     if not rows:
         return {
             "pearson_rate_var_error": 0.0,
             "spearman_rate_var_error": 0.0,
             "spearman_weight_error": 0.0,
+            "spearman_pred_weight_error": 0.0,
         }
 
     rate_vars = np.array([r["rate_variance"] for r in rows], dtype=np.float64)
-    weights = np.array([r["weight"] for r in rows], dtype=np.float64)
+    solver_weights = np.array([r.get("solver_weight", r["weight"]) for r in rows], dtype=np.float64)
+    pred_weights = np.array([r["weight"] for r in rows], dtype=np.float64)
     errors = np.array([r["abs_rate_error"] for r in rows], dtype=np.float64)
 
-    def _pearson(x: np.ndarray, y: np.ndarray) -> float:
+    def _safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
         if len(x) < 2 or np.std(x) < eps or np.std(y) < eps:
             return 0.0
         return float(np.corrcoef(x, y)[0, 1])
 
-    def _spearman(x: np.ndarray, y: np.ndarray) -> float:
-        if len(x) < 2:
+    def _safe_spearman(x: np.ndarray, y: np.ndarray) -> float:
+        if len(x) < 2 or np.std(x) < eps or np.std(y) < eps:
             return 0.0
-        rx = np.argsort(np.argsort(x)).astype(np.float64)
-        ry = np.argsort(np.argsort(y)).astype(np.float64)
-        return _pearson(rx, ry)
+        res = scipy.stats.spearmanr(x, y)
+        stat = getattr(res, "statistic", getattr(res, "correlation", 0.0))
+        return float(stat) if np.isfinite(stat) else 0.0
 
     return {
-        "pearson_rate_var_error": _pearson(rate_vars, errors),
-        "spearman_rate_var_error": _spearman(rate_vars, errors),
-        "spearman_weight_error": _spearman(weights, errors),
+        "pearson_rate_var_error": _safe_pearson(rate_vars, errors),
+        "spearman_rate_var_error": _safe_spearman(rate_vars, errors),
+        "spearman_weight_error": _safe_spearman(solver_weights, errors),
+        "spearman_pred_weight_error": _safe_spearman(pred_weights, errors),
     }
 
 

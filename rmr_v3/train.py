@@ -154,7 +154,7 @@ def evaluate_v3(
             image = sample["image"].unsqueeze(0).to(device)
             target = sample["target_y"].to(device)
 
-            out = model(image, uniform_reliability=uniform_reliability)
+            out = model(image, uniform_reliability=uniform_reliability, solver_strength=1.0)
             y = out["y"][0]
             pred = float(y.sum().item())
             gt = float(target.sum().item())
@@ -168,6 +168,13 @@ def evaluate_v3(
             all_diag_rows.extend(d_rows)
 
     summary = summarize_predictions(pred_rows)
+
+    # Provide lowercase aliases for robustness
+    summary["mae"] = summary["MAE"]
+    summary["rmse"] = summary["RMSE"]
+    summary["nae"] = summary["NAE"]
+    summary["bias"] = summary["Bias"]
+
     corrs = compute_reliability_correlations(all_diag_rows)
     summary.update(corrs)
 
@@ -323,12 +330,16 @@ def main() -> None:
     eval_every = int(cfg.get("train", {}).get("eval_every", 10))
     density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
 
+    solver_warmup_epochs = int(cfg.get("train", {}).get("solver_warmup_epochs", 5))
+    solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 20))
+
     log_csv = out_dir / "train_log.csv"
     fieldnames = [
-        "epoch", "lr_backbone", "lr_main",
+        "epoch", "lr_backbone", "lr_main", "solver_strength",
         "train_total", "train_count", "train_flat_dm16", "train_cell", "train_region_nb",
         "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
         "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
+        "solver_weight_mean", "solver_weight_std",
         "weight_clip_low_fraction", "weight_clip_high_fraction",
         "solver_energy_before", "solver_energy_after", "solver_energy_reduction",
         "weight_mean_32", "weight_mean_64", "weight_mean_128",
@@ -346,9 +357,10 @@ def main() -> None:
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
         scheduler.load_state_dict(ckpt["scheduler"])
-        start_epoch = ckpt["epoch"] + 1
-        best_mae = ckpt.get("best_mae", float("inf"))
-        print(f"Resumed from epoch {start_epoch}, best MAE: {best_mae:.2f}")
+        # Exactly resume at the next epoch index
+        start_epoch = int(ckpt["epoch"])
+        best_mae = float(ckpt.get("best_mae", float("inf")))
+        print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
 
     if not log_csv.exists() or start_epoch == 0:
         with open(log_csv, "w", newline="") as f:
@@ -356,6 +368,16 @@ def main() -> None:
             writer.writeheader()
 
     for epoch in range(start_epoch, epochs):
+        # Solver warmup and ramp protocol:
+        # - epoch 0..solver_warmup_epochs-1: solver_strength = 0
+        # - epoch solver_warmup_epochs..solver_warmup_epochs+solver_ramp_epochs-1: linear ramp 0->1
+        # - epoch >= solver_warmup_epochs+solver_ramp_epochs: full solver strength 1.0
+        if epoch < solver_warmup_epochs:
+            solver_strength = 0.0
+        else:
+            solver_strength = min(1.0, float(epoch - solver_warmup_epochs + 1) / max(1.0, float(solver_ramp_epochs)))
+        model.set_solver_strength(solver_strength)
+
         model.train()
         total_loss_accum = 0.0
         count_loss_accum = 0.0
@@ -366,7 +388,8 @@ def main() -> None:
         mu_means = []
         disp_means = []
         all_disps = []
-        all_weights = []
+        all_pred_weights = []
+        all_solver_weights = []
         e_befores = []
         e_afters = []
 
@@ -378,13 +401,14 @@ def main() -> None:
         cur_lr_main = optimizer.param_groups[1]["lr"]
 
         for batch in train_loader:
-            images = batch["images"].to(device)
-            targets = batch["targets"].to(device)
+            # Correct collate_train keys: "image" and "target_y"
+            images = batch["image"].to(device)
+            targets = batch["target_y"].to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=amp):
-                outputs = model(images, uniform_reliability=uniform_reliability)
+                outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
                 losses = compute_rmr_v3_losses(outputs, targets, loss_cfg)
                 loss = losses["total"]
 
@@ -405,7 +429,8 @@ def main() -> None:
                 mu_means.append(float(outputs["b_region"].mean().item()))
                 disp_means.append(float(outputs["region_dispersion"].mean().item()))
                 all_disps.extend(outputs["region_dispersion"].float().cpu().numpy().flatten().tolist())
-                all_weights.extend(outputs["region_weight"].float().cpu().numpy().flatten().tolist())
+                all_pred_weights.extend(outputs["region_weight"].float().cpu().numpy().flatten().tolist())
+                all_solver_weights.extend(outputs["solver_region_weight"].float().cpu().numpy().flatten().tolist())
 
                 et = outputs.get("energy_trace", [])
                 if et:
@@ -413,7 +438,7 @@ def main() -> None:
                     e_afters.append(float(et[-1]["after"].mean().item()))
 
                 regions = outputs["regions"]
-                w = outputs["region_weight"]
+                w = outputs["solver_region_weight"]
                 m32 = regions.scale_id == 0
                 m64 = regions.scale_id == 1
                 m128 = regions.scale_id == 2
@@ -434,7 +459,8 @@ def main() -> None:
         train_region_nb = reg_nb_loss_accum / num_batches
 
         disps_np = np.array(all_disps) if all_disps else np.array([50.0])
-        weights_np = np.array(all_weights) if all_weights else np.array([1.0])
+        pred_weights_np = np.array(all_pred_weights) if all_pred_weights else np.array([1.0])
+        solver_weights_np = np.array(all_solver_weights) if all_solver_weights else np.array([1.0])
 
         e_b = float(np.mean(e_befores)) if e_befores else 0.0
         e_a = float(np.mean(e_afters)) if e_afters else 0.0
@@ -442,13 +468,14 @@ def main() -> None:
 
         w_min_val = model.cfg.reliability_weight_min
         w_max_val = model.cfg.reliability_weight_max
-        w_low_frac = float(np.mean(weights_np <= w_min_val + 1e-4))
-        w_high_frac = float(np.mean(weights_np >= w_max_val - 1e-4))
+        w_low_frac = float(np.mean(pred_weights_np <= w_min_val + 1e-4))
+        w_high_frac = float(np.mean(pred_weights_np >= w_max_val - 1e-4))
 
         row_log = {
             "epoch": epoch + 1,
             "lr_backbone": cur_lr_bb,
             "lr_main": cur_lr_main,
+            "solver_strength": solver_strength,
             "train_total": train_total,
             "train_count": train_count,
             "train_flat_dm16": train_flat_dm16,
@@ -459,10 +486,12 @@ def main() -> None:
             "region_dispersion_p10": float(np.percentile(disps_np, 10)),
             "region_dispersion_p50": float(np.percentile(disps_np, 50)),
             "region_dispersion_p90": float(np.percentile(disps_np, 90)),
-            "region_weight_mean": float(np.mean(weights_np)),
-            "region_weight_std": float(np.std(weights_np)),
-            "region_weight_min": float(np.min(weights_np)),
-            "region_weight_max": float(np.max(weights_np)),
+            "region_weight_mean": float(np.mean(pred_weights_np)),
+            "region_weight_std": float(np.std(pred_weights_np)),
+            "region_weight_min": float(np.min(pred_weights_np)),
+            "region_weight_max": float(np.max(pred_weights_np)),
+            "solver_weight_mean": float(np.mean(solver_weights_np)),
+            "solver_weight_std": float(np.std(solver_weights_np)),
             "weight_clip_low_fraction": w_low_frac,
             "weight_clip_high_fraction": w_high_frac,
             "solver_energy_before": e_b,
@@ -482,24 +511,25 @@ def main() -> None:
                 density_bins=density_bins,
             )
             row_log.update({
-                "val_mae": val_metrics.get("mae", 0.0),
-                "val_rmse": val_metrics.get("rmse", 0.0),
-                "val_nae": val_metrics.get("nae", 0.0),
-                "val_bias": val_metrics.get("bias", 0.0),
-                "val_game0": val_metrics.get("GAME0", 0.0),
-                "val_game1": val_metrics.get("GAME1", 0.0),
-                "val_game2": val_metrics.get("GAME2", 0.0),
-                "val_game3": val_metrics.get("GAME3", 0.0),
-                "val_mae_sparse": val_metrics.get("mae_sparse", 0.0),
-                "val_mae_moderate": val_metrics.get("mae_moderate", 0.0),
-                "val_mae_dense": val_metrics.get("mae_dense", 0.0),
-                "pearson_rate_var_error": val_metrics.get("pearson_rate_var_error", 0.0),
-                "spearman_rate_var_error": val_metrics.get("spearman_rate_var_error", 0.0),
-                "spearman_weight_error": val_metrics.get("spearman_weight_error", 0.0),
+                "val_mae": float(val_metrics["MAE"]),
+                "val_rmse": float(val_metrics["RMSE"]),
+                "val_nae": float(val_metrics["NAE"]),
+                "val_bias": float(val_metrics["Bias"]),
+                "val_game0": float(val_metrics["GAME0"]),
+                "val_game1": float(val_metrics["GAME1"]),
+                "val_game2": float(val_metrics["GAME2"]),
+                "val_game3": float(val_metrics["GAME3"]),
+                "val_mae_sparse": float(val_metrics.get("mae_sparse", 0.0)),
+                "val_mae_moderate": float(val_metrics.get("mae_moderate", 0.0)),
+                "val_mae_dense": float(val_metrics.get("mae_dense", 0.0)),
+                "pearson_rate_var_error": float(val_metrics.get("pearson_rate_var_error", 0.0)),
+                "spearman_rate_var_error": float(val_metrics.get("spearman_rate_var_error", 0.0)),
+                "spearman_weight_error": float(val_metrics.get("spearman_weight_error", 0.0)),
             })
 
-            cur_mae = val_metrics.get("mae", float("inf"))
-            is_best = cur_mae < best_mae
+            cur_mae = float(val_metrics["MAE"])
+            # Guard: only update best_mae after solver ramp has fully engaged (solver_strength >= 1.0)
+            is_best = (cur_mae < best_mae) and (solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs)
             if is_best:
                 best_mae = cur_mae
                 torch.save(
@@ -517,7 +547,9 @@ def main() -> None:
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
                 f"Loss: {train_total:.4f} [cnt: {train_count:.2f}, dm16: {train_flat_dm16:.3f}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}] | "
-                f"W: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | "
+                f"SolvStr: {solver_strength:.2f} | "
+                f"W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | "
+                f"W_solv: {row_log['solver_weight_mean']:.2f} | "
                 f"E_red: {e_red*100:.1f}% | "
                 f"VAL MAE: {cur_mae:.2f} (Best: {best_mae:.2f})",
                 flush=True,
@@ -526,8 +558,9 @@ def main() -> None:
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
                 f"Loss: {train_total:.4f} [cnt: {train_count:.2f}, dm16: {train_flat_dm16:.3f}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}] | "
+                f"SolvStr: {solver_strength:.2f} | "
                 f"Disp: {row_log['region_dispersion_p50']:.1f} | "
-                f"W: {row_log['region_weight_mean']:.2f}",
+                f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}",
                 flush=True,
             )
 

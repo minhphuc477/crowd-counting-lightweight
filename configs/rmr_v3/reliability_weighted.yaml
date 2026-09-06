@@ -1,4 +1,4 @@
-﻿seed: 42
+seed: 42
 
 output_dir: runs/sha_a/rmr_v3_rw_seed42
 
@@ -78,6 +78,9 @@ train:
 
   early_stopping: false
   patience: 0
+
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20
 
 eval:
   density_bins:
