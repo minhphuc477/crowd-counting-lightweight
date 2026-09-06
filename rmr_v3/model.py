@@ -1,512 +1,674 @@
-"""rmr_v3/model.py — RMR-v3: Reliability-Weighted Regional Measure Reconciliation.
+﻿from __future__ import annotations
 
-Architecture contract (frozen):
-  - Backbone: mobilenetv4_conv_small_050.e3000_r224_in1k, truncated at reduction 16
-  - FPN: AdditiveFPNNeck, width=32
-  - Fine head: FineMeasureHead (stride-4 positive measure Y0)
-  - Regional evidence head: ScaleMatchedRegionalEvidenceHead (shared MLP, regions 32/64/128px)
-  - Reliability head: NEW — additional Linear(48->1) on top of regional head hidden layer
-  - Solver: T=2 nonneg projected SIRT with reliability-weighted residual, omega=1.0 (fixed)
-  - Detach policy: detach_region_mean=True, detach_reliability=True (registered main variant)
-  - All regional algebra in FP32 (prefix sums, rectangle inclusion-exclusion, adjoint, coverage)
-
-Parameter budget: < 105k trainable. Expected ~101,763.
-"""
-from __future__ import annotations
-
+from dataclasses import dataclass
 import math
-from dataclasses import dataclass, field
-from typing import Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Import backbone, FPN, fine-head from frozen RMR-v2 (do NOT modify rmr_count)
 from rmr_count.model import (
     AdditiveFPNNeck,
     FineMeasureHead,
     MobileNetV4Backbone,
-    count_parameters,
 )
 from rmr_count.operators import (
     RegionSet,
     build_multiscale_regions,
-    prefix2d,
-    rectangle_sum_from_prefix,
+    region_average_features,
     regional_adjoint,
     regional_sum,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-_FINE_HEAD_BIAS_INIT: float = math.log(math.expm1(0.015763))  # matches RMR-v2 M0 prior
-_DISPERSION_INIT: float = 50.0
-_DISPERSION_MIN: float = 0.5
-_DISPERSION_MAX: float = 500.0
-_RATE_STD_FLOOR: float = 0.01
-_W_MIN: float = 0.25
-_W_MAX: float = 4.0
+
+def _softplus_inverse(y: float) -> float:
+    y = max(float(y), 1e-8)
+    return math.log(math.expm1(y))
 
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 @dataclass
 class RMRv3Config:
-    """Frozen specification for RMR-v3."""
-
-    # Backbone
-    backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
-    pretrained: bool = False          # set True to load ImageNet weights
-    backbone_lr_scale: float = 0.1
-
-    # FPN / head
+    # Fine grid / carrier
     output_stride: int = 4
     feature_width: int = 32
+    backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
+    pretrained: bool = True
+    backbone_lr_scale: float = 0.1
+    init_m0: float = 0.015763
 
-    # Regional geometry (no full-image)
+    # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
     region_overlap: float = 0.5
-    include_full_image: bool = False   # MUST remain False
-
-    # Regional head
-    regional_hidden: int = 48          # hidden dim of shared MLP
-
-    # Probabilistic reliability
-    dispersion_init: float = _DISPERSION_INIT
-    dispersion_min: float = _DISPERSION_MIN
-    dispersion_max: float = _DISPERSION_MAX
-    rate_std_floor: float = _RATE_STD_FLOOR
-
-    # Reliability weighting clamp
-    w_min: float = _W_MIN
-    w_max: float = _W_MAX
-
-    # Scale-neutral normalization (normalize weights within each scale family)
-    scale_neutral_normalize: bool = True
+    include_full_image: bool = False
 
     # Solver
     iterations: int = 2
-    sirt_omega: float = 1.0            # fixed, not learnable
+    omega: float = 1.0
+    residual_clip: float = 0.0
+    eps: float = 1e-6
 
-    # Detach policy (registered main variant)
+    # Negative-Binomial regional uncertainty
+    dispersion_init: float = 50.0
+    dispersion_min: float = 0.5
+    dispersion_max: float = 500.0
+
+    # Reliability
+    reliability_mode: str = "nb_rate_variance"
+    reliability_rate_std_floor: float = 0.01
+    reliability_weight_min: float = 0.25
+    reliability_weight_max: float = 4.0
+    normalize_reliability_within_scale: bool = True
+
+    # Registered clean-causal variant
     detach_region_mean_in_solver: bool = True
     detach_reliability_in_solver: bool = True
 
-    # V3-A control: uniform weights (ablation)
-    uniform_reliability: bool = False  # False = V3-B (main); True = V3-A (control)
 
-    # Count prior
-    init_m0: float = 0.015763
+class ProbabilisticRegionalEvidenceHead(nn.Module):
+    """Predict regional NB mean and dispersion.
 
-    eps: float = 1e-6
+    Mean:
+        rate_R = softplus(mean_raw)
+        mu_R   = area_R * rate_R
 
+    Dispersion:
+        log_r_R = bounded log-dispersion
+        r_R     = exp(log_r_R)
 
-# ---------------------------------------------------------------------------
-# Reliability-augmented regional evidence head
-# ---------------------------------------------------------------------------
-class ReliabilityRegionalHead(nn.Module):
-    """Regional head that outputs both rate (b_R) and reliability (w_R).
-
-    Architecture:
-        Shared MLP trunk (identical to RMR-v2 ScaleMatchedRegionalEvidenceHead):
-            Linear(33, 48) -> SiLU -> Linear(48, 48) -> SiLU
-        Two separate output heads (both Linear(48->1)):
-            rate_head:        rho_R = softplus(raw_rate)  -> b_R = |R| * rho_R
-            reliability_head: w_R via bounded sigmoid: w_min + (w_max - w_min) * sigmoid(raw_w)
-
-    The reliability_head is the ONLY new parameter over RMR-v2 (49 params: 48 weights + 1 bias).
-
-    Per-region variance estimate (probabilistic NB model):
-        var_R = rho_R + rho_R^2 / r         [r = dispersion parameter]
-        std_R = sqrt(var_R).clamp_min(rate_std_floor)
-        -> Used for diagnostics (Section 32) but NOT as the weight.
-          The learned weight w_R is the registered mechanism, not the analytic variance.
+    Reliability is not directly predicted.
+    It is derived from the NB predictive variance.
     """
 
     def __init__(
         self,
         feature_dim: int = 32,
         hidden: int = 48,
-        region_sizes_px: Sequence[int] = (32, 64, 128),
-        init_bias: float = _FINE_HEAD_BIAS_INIT,
-        dispersion_init: float = _DISPERSION_INIT,
-        dispersion_min: float = _DISPERSION_MIN,
-        dispersion_max: float = _DISPERSION_MAX,
-        rate_std_floor: float = _RATE_STD_FLOOR,
-        w_min: float = _W_MIN,
-        w_max: float = _W_MAX,
-    ):
+        init_rate: float = 0.015763,
+        region_sizes_px: tuple[int, ...] = (32, 64, 128),
+        dispersion_init: float = 50.0,
+        dispersion_min: float = 0.5,
+        dispersion_max: float = 500.0,
+    ) -> None:
         super().__init__()
-        self.region_sizes_px = tuple(int(s) for s in region_sizes_px)
-        self.rate_std_floor = rate_std_floor
-        self.w_min = w_min
-        self.w_max = w_max
 
-        # Shared trunk: Linear(33,48) -> SiLU -> Linear(48,48) -> SiLU
+        if dispersion_min <= 0:
+            raise ValueError("dispersion_min must be > 0")
+        if dispersion_max <= dispersion_min:
+            raise ValueError("dispersion_max must be > dispersion_min")
+        if not (dispersion_min <= dispersion_init <= dispersion_max):
+            raise ValueError("dispersion_init must lie inside [min,max]")
+
+        self.region_sizes_px = tuple(int(x) for x in region_sizes_px)
+        self.dispersion_min = float(dispersion_min)
+        self.dispersion_max = float(dispersion_max)
+
+        in_dim = feature_dim + 1
+
         self.trunk = nn.Sequential(
-            nn.Linear(feature_dim + 1, hidden),
+            nn.Linear(in_dim, hidden),
             nn.SiLU(inplace=True),
             nn.Linear(hidden, hidden),
             nn.SiLU(inplace=True),
         )
 
-        # Rate head: Linear(48,1)  [same as RMR-v2 final layer]
-        self.rate_head = nn.Linear(hidden, 1)
-        nn.init.normal_(self.rate_head.weight, std=0.01)
-        nn.init.constant_(self.rate_head.bias, init_bias)
+        self.mean_head = nn.Linear(hidden, 1)
+        self.log_dispersion_head = nn.Linear(hidden, 1)
 
-        # Reliability head: Linear(48,1)  [new in RMR-v3, +49 params]
-        self.reliability_head = nn.Linear(hidden, 1)
-        nn.init.zeros_(self.reliability_head.weight)
-        nn.init.zeros_(self.reliability_head.bias)   # sigmoid(0)=0.5 -> w ~ mid-range at init
+        # Mean initialization: same empirical rate prior as fine head.
+        nn.init.normal_(self.mean_head.weight, std=0.01)
+        nn.init.constant_(
+            self.mean_head.bias,
+            _softplus_inverse(init_rate),
+        )
 
-        # Dispersion parameter (per-region scalar NB model, non-negative)
-        log_r_init = math.log(float(dispersion_init))
-        self.log_dispersion = nn.Parameter(torch.tensor(log_r_init))
-        self._disp_min = float(dispersion_min)
-        self._disp_max = float(dispersion_max)
+        # Dispersion initialization.
+        nn.init.zeros_(self.log_dispersion_head.weight)
+        nn.init.constant_(
+            self.log_dispersion_head.bias,
+            math.log(float(dispersion_init)),
+        )
 
-    @property
-    def dispersion(self) -> torch.Tensor:
-        return self.log_dispersion.exp().clamp(self._disp_min, self._disp_max)
-
-    def _extract_features(
+    def _collect_region_features(
         self,
-        p4: torch.Tensor,
-        p8: torch.Tensor,
-        p16: torch.Tensor,
+        pyramid: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         regions: RegionSet,
     ) -> torch.Tensor:
-        """Extract region features aligned on P4 coordinate grid."""
-        from rmr_count.operators import region_average_features
+        p4, p8, p16 = pyramid
 
         b = p4.shape[0]
         device = p4.device
         dtype = p4.dtype
+
         size4 = p4.shape[-2:]
 
-        # Upsample all pyramid levels to P4 resolution
-        feat_p8_at_4 = (
-            p8 if p8.shape[-2:] == size4
-            else F.interpolate(p8, size=size4, mode="bilinear", align_corners=False)
-        )
-        feat_p16_at_4 = (
-            p16 if p16.shape[-2:] == size4
-            else F.interpolate(p16, size=size4, mode="bilinear", align_corners=False)
+        p8_at_4 = (
+            p8
+            if p8.shape[-2:] == size4
+            else F.interpolate(
+                p8,
+                size=size4,
+                mode="bilinear",
+                align_corners=False,
+            )
         )
 
-        m_total = regions.boxes.shape[0]
-        in_dim = self.trunk[0].in_features  # feature_dim + 1
-        feat_all = torch.zeros((b, m_total, in_dim), device=device, dtype=dtype)
+        p16_at_4 = (
+            p16
+            if p16.shape[-2:] == size4
+            else F.interpolate(
+                p16,
+                size=size4,
+                mode="bilinear",
+                align_corners=False,
+            )
+        )
+
+        m_total = int(regions.boxes.shape[0])
+        feature_dim = int(p4.shape[1])
+
+        out = torch.zeros(
+            (b, m_total, feature_dim + 1),
+            device=device,
+            dtype=dtype,
+        )
 
         for sid, size_px in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
-            if not mask.any():
+            if not bool(mask.any()):
                 continue
-            feat_s = p4 if size_px <= 48 else (feat_p8_at_4 if size_px <= 96 else feat_p16_at_4)
-            boxes_s = regions.boxes[mask]
-            u_s = region_average_features(feat_s, boxes_s)  # [B, M_s, C]
-            m_s = u_s.shape[1]
-            scale_feat = torch.full(
-                (1, m_s, 1),
-                math.log(float(size_px) / 32.0),
-                device=device, dtype=dtype,
-            ).expand(b, -1, -1)
-            feat_all[:, mask] = torch.cat([u_s, scale_feat], dim=-1)
 
-        return feat_all  # [B, M, 33]
+            if size_px <= 48:
+                source = p4
+            elif size_px <= 96:
+                source = p8_at_4
+            else:
+                source = p16_at_4
+
+            boxes_s = regions.boxes[mask]
+            pooled = region_average_features(
+                source,
+                boxes_s,
+            )  # [B,Ms,C]
+
+            ms = pooled.shape[1]
+
+            log_scale = torch.full(
+                (1, ms, 1),
+                math.log(float(size_px) / 32.0),
+                device=device,
+                dtype=dtype,
+            ).expand(b, -1, -1)
+
+            out[:, mask] = torch.cat(
+                [pooled, log_scale],
+                dim=-1,
+            )
+
+        # Main method disables full-image regions.
+        # Keep an explicit guard so a bad config cannot silently proceed.
+        if bool((regions.scale_id == -1).any()):
+            raise RuntimeError(
+                "RMR-v3 registered method does not support full-image regions"
+            )
+
+        return out
 
     def forward(
         self,
         pyramid: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         regions: RegionSet,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass returning (b_region, w_region, rate).
-
-        Returns:
-            b_region: [B, 1, M]  regional count prediction
-            w_region: [B, 1, M]  reliability weights in [w_min, w_max]
-            rate:     [B, 1, M]  rate rho_R (count/stride-4 cell), for diagnostics
-        """
-        p4, p8, p16 = pyramid
-        feat_all = self._extract_features(p4, p8, p16, regions)  # [B, M, 33]
-
-        hidden = self.trunk(feat_all)          # [B, M, 48]
-        raw_rate = self.rate_head(hidden)      # [B, M, 1]
-        raw_w = self.reliability_head(hidden)  # [B, M, 1]
-
-        rate = F.softplus(raw_rate).squeeze(-1)  # [B, M]  rho_R >= 0
-        area = regions.area.to(dtype=rate.dtype).view(1, -1)  # [1, M]
-        b_region = rate * area                   # [B, M]
-
-        # Reliability weight: bounded sigmoid
-        w_region = (
-            self.w_min + (self.w_max - self.w_min) * torch.sigmoid(raw_w.squeeze(-1))
-        )  # [B, M]
-
-        return (
-            b_region.unsqueeze(1),   # [B, 1, M]
-            w_region.unsqueeze(1),   # [B, 1, M]
-            rate.unsqueeze(1),       # [B, 1, M]
+    ) -> dict[str, torch.Tensor]:
+        x = self._collect_region_features(
+            pyramid,
+            regions,
         )
 
+        h = self.trunk(x)
 
-# ---------------------------------------------------------------------------
-# Scale-neutral normalization helper
-# ---------------------------------------------------------------------------
-def _scale_neutral_normalize(
-    w: torch.Tensor,
+        mean_raw = self.mean_head(h).squeeze(-1)
+
+        rate = F.softplus(mean_raw)
+
+        area = regions.area.to(
+            device=rate.device,
+            dtype=rate.dtype,
+        ).view(1, -1)
+
+        mu_count = rate * area
+
+        log_r = self.log_dispersion_head(h).squeeze(-1)
+        log_r = log_r.clamp(
+            min=math.log(self.dispersion_min),
+            max=math.log(self.dispersion_max),
+        )
+
+        dispersion = torch.exp(log_r)
+
+        return {
+            "mu_count": mu_count.unsqueeze(1),       # [B,1,M]
+            "rate": rate.unsqueeze(1),              # [B,1,M]
+            "dispersion": dispersion.unsqueeze(1),  # [B,1,M]
+            "log_dispersion": log_r.unsqueeze(1),   # [B,1,M]
+        }
+
+
+def reliability_from_nb(
+    mu_count: torch.Tensor,
+    dispersion: torch.Tensor,
     regions: RegionSet,
+    *,
+    rate_std_floor: float = 0.01,
+    weight_min: float = 0.25,
+    weight_max: float = 4.0,
+    normalize_within_scale: bool = True,
     eps: float = 1e-6,
-) -> torch.Tensor:
-    """Normalize reliability weights within each scale family to mean ~1.
+) -> dict[str, torch.Tensor]:
+    """Derive regional reliability from NB predictive rate variance.
 
-    For each scale s: w_normalized_R = w_R / (mean_{R in scale s} w_R)
+    NB count variance:
+        Var[N] = mu + mu^2 / r
 
-    Mathematical guarantee (Section 9):
-        If all regions have the same residual density delta, then r = delta * 1
-        regardless of w_R after normalization. This guarantees spatial uniformity
-        is preserved under uniform residual, independently of learned weights.
+    Rate variance:
+        Var[N / area] = Var[N] / area^2
 
-    Args:
-        w: [B, 1, M] raw reliability weights
-        regions: RegionSet with scale_id [M]
-    Returns:
-        w_norm: [B, 1, M] normalized weights, mean ~1 per scale per image
+    Precision:
+        q = 1 / (rate_var + floor^2)
+
+    Main method normalizes q to mean 1 inside each scale family.
     """
-    w_norm = w.clone()
-    for sid in torch.unique(regions.scale_id):
-        mask = regions.scale_id == sid   # [M]
-        if not mask.any():
-            continue
-        w_s = w[:, :, mask]              # [B, 1, M_s]
-        mean_s = w_s.mean(dim=-1, keepdim=True).clamp_min(eps)  # [B, 1, 1]
-        w_norm[:, :, mask] = w_s / mean_s
-    return w_norm
 
+    mu = mu_count.float().clamp_min(0.0)
+    r = dispersion.float().clamp_min(eps)
 
-# ---------------------------------------------------------------------------
-# Weighted adjoint operator (FP32 enforced)
-# ---------------------------------------------------------------------------
-def _weighted_adjoint(
-    residual: torch.Tensor,  # [B, 1, M]  r_R = (AY - b)_R
-    weights: torch.Tensor,   # [B, 1, M]  w_R in [w_min, w_max]
-    regions: RegionSet,
-    H: int,
-    W: int,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    """Compute reliability-weighted normalized adjoint field in FP32.
+    area = regions.area.float().view(1, 1, -1)
+    area = area.clamp_min(1.0)
 
-    Standard (unweighted) adjoint (RMR-v2 B5-P):
-        r_cell = D_c^{-1} A^T D_a^{-1} (AY - b)
+    count_var = mu + mu.square() / r
 
-    Reliability-weighted adjoint (RMR-v3):
-        r_cell = D_c(w)^{-1} A^T_w D_a^{-1} (AY - b)
+    floor_var = float(rate_std_floor) ** 2
 
-    where:
-        D_a: diagonal of region areas |R| (count -> rate conversion)
-        A^T_w: weighted adjoint — each region R contributes its rate residual
-               scaled by w_R before scatter to grid cells
-        D_c(w): weighted coverage — normalization by sum of w_R for each cell
+    rate_var = count_var / area.square()
+    rate_var = rate_var + floor_var
 
-    Uses regional_adjoint for O(M+HW) vectorized scatter in FP32.
+    precision = 1.0 / rate_var.clamp_min(eps)
 
-    Args:
-        residual: [B, 1, M] regional count residual (AY - b)
-        weights:  [B, 1, M] per-region reliability weights
-        regions:  RegionSet
-        H, W:     spatial dimensions (stride-4 grid)
-    Returns:
-        field: [B, 1, H, W] weighted adjoint field
-    """
-    boxes = regions.boxes  # [M, 4]
-    area = regions.area.to(device=residual.device, dtype=torch.float32).clamp_min(1.0)
-    # [M] -> [1, 1, M] for broadcasting with [B, 1, M]
-    area_bcast = area.view(1, 1, -1)
+    if normalize_within_scale:
+        weight = torch.empty_like(precision)
 
-    # Rate residual in FP32: [B, 1, M]
-    res_f32 = residual.to(dtype=torch.float32)
-    w_f32 = weights.to(dtype=torch.float32)
-    rate_res = res_f32 / area_bcast  # [B, 1, M]
+        for sid in torch.unique(regions.scale_id):
+            if int(sid.item()) < 0:
+                continue
 
-    # Weighted rate residual: w_R * (delta_R / |R|)
-    weighted_rate_res = w_f32 * rate_res  # [B, 1, M]
+            mask = regions.scale_id == sid
 
-    # Vectorized weighted scatter via regional_adjoint (O(M + HW) difference arrays)
-    # Result: sum_R w_R * rate_res_R for each cell p in R  -> [B, 1, H, W]
-    weighted_field = regional_adjoint(
-        weighted_rate_res, boxes, H, W, out_dtype=torch.float32
+            q = precision[..., mask]
+
+            q_mean = q.mean(
+                dim=-1,
+                keepdim=True,
+            ).clamp_min(eps)
+
+            weight[..., mask] = q / q_mean
+    else:
+        weight = precision / precision.mean(
+            dim=-1,
+            keepdim=True,
+        ).clamp_min(eps)
+
+    weight = weight.clamp(
+        min=float(weight_min),
+        max=float(weight_max),
     )
 
-    # Weighted coverage: sum_R w_R for each cell p in R  -> [B, 1, H, W]
-    coverage = regional_adjoint(
-        w_f32, boxes, H, W, out_dtype=torch.float32
+    return {
+        "weight": weight,
+        "precision": precision,
+        "rate_variance": rate_var,
+        "count_variance": count_var,
+    }
+
+
+def weighted_coverage(
+    weight: torch.Tensor,
+    regions: RegionSet,
+    height: int,
+    width: int,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Compute D_{c,w} diagonal field = A^T w."""
+
+    cov = regional_adjoint(
+        weight.float(),
+        regions.boxes,
+        height,
+        width,
+        out_dtype=torch.float32,
     )
 
-    # Normalize: D_c(w)^{-1} weighted adjoint
-    field_normalized = weighted_field / coverage.clamp_min(eps)  # [B, 1, H, W]
-    return field_normalized
+    return cov.clamp_min(float(eps))
 
 
-# ---------------------------------------------------------------------------
-# Main RMR-v3 model
-# ---------------------------------------------------------------------------
+def weighted_normalized_adjoint_field(
+    y: torch.Tensor,
+    b_region: torch.Tensor,
+    weight: torch.Tensor,
+    regions: RegionSet,
+    *,
+    weighted_cov: torch.Tensor | None = None,
+    residual_clip: float = 0.0,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Compute:
+
+        r = D_cw^-1 A^T W D_a^-1 (A y - b)
+
+    entirely in float32.
+    """
+
+    _, _, h, w = y.shape
+
+    y32 = y.float()
+    b32 = b_region.float()
+    weight32 = weight.float()
+
+    q = regional_sum(
+        y32,
+        regions.boxes,
+        out_dtype=torch.float32,
+    )
+
+    delta = q - b32
+
+    area = regions.area.float().view(1, 1, -1)
+    rate_residual = delta / area.clamp_min(1.0)
+
+    weighted_residual = weight32 * rate_residual
+
+    back = regional_adjoint(
+        weighted_residual,
+        regions.boxes,
+        h,
+        w,
+        out_dtype=torch.float32,
+    )
+
+    if weighted_cov is None:
+        weighted_cov = weighted_coverage(
+            weight32,
+            regions,
+            h,
+            w,
+            eps=eps,
+        )
+
+    field = back / weighted_cov.float().clamp_min(eps)
+
+    if residual_clip > 0:
+        field = field.clamp(
+            -float(residual_clip),
+            float(residual_clip),
+        )
+
+    return field
+
+
+def weighted_regional_energy(
+    y: torch.Tensor,
+    b_region: torch.Tensor,
+    weight: torch.Tensor,
+    regions: RegionSet,
+) -> torch.Tensor:
+    """Per-sample weighted regional energy.
+
+        E = 1/2 sum_R w_R * (Ay-b)^2 / area_R
+    """
+
+    q = regional_sum(
+        y.float(),
+        regions.boxes,
+        out_dtype=torch.float32,
+    )
+
+    delta = q - b_region.float()
+
+    area = regions.area.float().view(1, 1, -1)
+
+    energy = 0.5 * (
+        weight.float()
+        * delta.square()
+        / area.clamp_min(1.0)
+    ).sum(dim=(-2, -1))
+
+    return energy
+
+
 class RMRv3(nn.Module):
-    r"""RMR-v3: Reliability-Weighted Regional Measure Reconciliation.
+    """Reliability-Weighted Regional Measure Reconciliation."""
 
-    Forward pass:
-        1. Backbone (frozen pretrained) -> feature pyramid (P4, P8, P16)
-        2. FineMeasureHead -> Y0 (stride-4 positive count-per-cell map)
-        3. ReliabilityRegionalHead -> b_R, w_R (regional count + reliability)
-        4. T=2 nonnegative projected SIRT with weighted adjoint:
-               for t in range(T):
-                   AY = regional_sum(Y)           [B, 1, M]
-                   residual = AY - b_R            [B, 1, M]  (FP32)
-                   r = weighted_adjoint(residual, w_R, ...)  [B, 1, H, W]
-                   Y = max(0, Y - omega * r)      [B, 1, H, W]  (nonneg projection)
-        5. Return Y (final), Y0 (observer), b_region, w_region, iterates
-
-    Detach policy (registered main variant):
-        detach_region_mean_in_solver=True:  b_R detached in AY-b computation
-        detach_reliability_in_solver=True:  w_R detached in weighted adjoint
-        -> Regional head trained via region_head loss (not solver gradient)
-        -> Solver step has no gradient to regional parameters at inference time
-    """
-
-    def __init__(self, cfg: RMRv3Config = RMRv3Config()):
+    def __init__(
+        self,
+        cfg: RMRv3Config = RMRv3Config(),
+    ) -> None:
         super().__init__()
+
         if cfg.output_stride != 4:
-            raise ValueError(f"RMRv3 requires output_stride=4, got {cfg.output_stride}")
+            raise ValueError(
+                "RMR-v3 registered method requires output_stride=4"
+            )
+
         if cfg.include_full_image:
-            raise ValueError("RMRv3: include_full_image must be False (tiling consistency)")
+            raise ValueError(
+                "RMR-v3 registered method requires include_full_image=False"
+            )
+
+        if cfg.iterations < 1:
+            raise ValueError("iterations must be >= 1")
+
+        if cfg.omega <= 0:
+            raise ValueError("omega must be > 0")
+
         self.cfg = cfg
 
-        # Count prior init
-        init_bias = math.log(math.expm1(float(cfg.init_m0)))
-
-        # Submodules
-        self.backbone = MobileNetV4Backbone(
+        self.encoder = MobileNetV4Backbone(
             model_name=cfg.backbone_name,
             pretrained=cfg.pretrained,
+            target_reductions=(4, 8, 16),
         )
-        self.neck = AdditiveFPNNeck(
-            in_channels=self.backbone.out_channels,
+
+        self.fusion = AdditiveFPNNeck(
+            in_channels=self.encoder.out_channels,
             width=cfg.feature_width,
         )
+
+        init_bias = _softplus_inverse(cfg.init_m0)
+
         self.fine_head = FineMeasureHead(
             width=cfg.feature_width,
             init_bias=init_bias,
         )
-        self.region_head = ReliabilityRegionalHead(
+
+        self.region_head = ProbabilisticRegionalEvidenceHead(
             feature_dim=cfg.feature_width,
-            hidden=cfg.regional_hidden,
+            hidden=48,
+            init_rate=cfg.init_m0,
             region_sizes_px=cfg.region_sizes_px,
-            init_bias=init_bias,
             dispersion_init=cfg.dispersion_init,
             dispersion_min=cfg.dispersion_min,
             dispersion_max=cfg.dispersion_max,
-            rate_std_floor=cfg.rate_std_floor,
-            w_min=cfg.w_min,
-            w_max=cfg.w_max,
         )
 
-    def _build_regions(self, H: int, W: int, device: torch.device) -> RegionSet:
-        return build_multiscale_regions(
-            H, W,
-            output_stride=self.cfg.output_stride,
-            region_sizes_px=self.cfg.region_sizes_px,
-            overlap=self.cfg.region_overlap,
-            include_full_image=False,
-            device=device,
+        self._region_cache: dict[
+            tuple,
+            RegionSet,
+        ] = {}
+
+    def _regions(
+        self,
+        h: int,
+        w: int,
+        device: torch.device,
+    ) -> RegionSet:
+        key = (
+            h,
+            w,
+            self.cfg.output_stride,
+            self.cfg.region_sizes_px,
+            self.cfg.region_overlap,
+            device.type,
+            device.index if device.type == "cuda" else None,
         )
+
+        if key not in self._region_cache:
+            self._region_cache[key] = build_multiscale_regions(
+                height=h,
+                width=w,
+                output_stride=self.cfg.output_stride,
+                region_sizes_px=self.cfg.region_sizes_px,
+                overlap=self.cfg.region_overlap,
+                include_full_image=False,
+                device=device,
+            )
+
+        return self._region_cache[key]
 
     def forward(
         self,
         x: torch.Tensor,
-        regions: RegionSet | None = None,
+        *,
+        uniform_reliability: bool = False,
     ) -> dict:
-        cfg = self.cfg
-        B, C, H_img, W_img = x.shape
-        device = x.device
-        orig_dtype = x.dtype
+        c4, c8, c16 = self.encoder(x)
 
-        # 1. Feature extraction
-        c4, c8, c16 = self.backbone(x)       # (C4, C8, C16) tuple
-        p4, p8, p16 = self.neck(c4, c8, c16) # (P4, P8, P16) tuple
-        pyramid = (p4, p8, p16)
+        p4, p8, p16 = self.fusion(
+            c4,
+            c8,
+            c16,
+        )
 
-        H4, W4 = p4.shape[-2:]       # stride-4 grid
+        z0 = self.fine_head(p4)
+        y0 = F.softplus(z0)
 
-        # 2. Fine measure head
-        y0 = self.fine_head(p4)      # [B, 1, H4, W4]
+        h, w = y0.shape[-2:]
 
-        # 3. Build regions if not provided
-        if regions is None:
-            regions = self._build_regions(H4, W4, device)
+        regions = self._regions(
+            h,
+            w,
+            x.device,
+        )
 
-        # 4. Regional evidence + reliability
-        b_region, w_region, rate = self.region_head(pyramid, regions)
-        # b_region: [B, 1, M], w_region: [B, 1, M], rate: [B, 1, M]
+        regional = self.region_head(
+            (p4, p8, p16),
+            regions,
+        )
 
-        # 5. Scale-neutral normalization of weights
-        if cfg.scale_neutral_normalize and not cfg.uniform_reliability:
-            w_region = _scale_neutral_normalize(w_region, regions, eps=cfg.eps)
+        mu_count = regional["mu_count"]
+        dispersion = regional["dispersion"]
 
-        # Uniform reliability (V3-A control): override weights to 1.0
-        if cfg.uniform_reliability:
-            w_region = torch.ones_like(w_region)
+        reliability = reliability_from_nb(
+            mu_count,
+            dispersion,
+            regions,
+            rate_std_floor=self.cfg.reliability_rate_std_floor,
+            weight_min=self.cfg.reliability_weight_min,
+            weight_max=self.cfg.reliability_weight_max,
+            normalize_within_scale=(
+                self.cfg.normalize_reliability_within_scale
+            ),
+            eps=self.cfg.eps,
+        )
 
-        # 6. Nonnegative projected SIRT with weighted adjoint
+        weight = reliability["weight"]
+
+        # V3-A control: probabilistic head, uniform solver.
+        if uniform_reliability:
+            weight_solver = torch.ones_like(weight)
+        else:
+            weight_solver = weight
+
+        if self.cfg.detach_region_mean_in_solver:
+            b_solver = mu_count.detach()
+        else:
+            b_solver = mu_count
+
+        if self.cfg.detach_reliability_in_solver:
+            weight_solver = weight_solver.detach()
+
+        cov_w = weighted_coverage(
+            weight_solver,
+            regions,
+            h,
+            w,
+            eps=self.cfg.eps,
+        )
+
         y = y0
+
         iterates = [y0]
+        residual_fields = []
+        energy_trace = []
 
-        for _t in range(cfg.iterations):
-            # Regional sum in FP32 (prefix accumulation)
-            ay = regional_sum(y, regions.boxes)  # [B, 1, M] — channel dim preserved
-
-            # Detach policy
-            b_for_solver = b_region.detach() if cfg.detach_region_mean_in_solver else b_region
-            w_for_solver = w_region.detach() if cfg.detach_reliability_in_solver else w_region
-
-            residual = ay.to(dtype=torch.float32) - b_for_solver.to(dtype=torch.float32)
-            # [B, 1, M]
-
-            # Weighted adjoint field (FP32, then cast back)
-            r_field = _weighted_adjoint(
-                residual,
-                w_for_solver,
+        for _ in range(self.cfg.iterations):
+            energy_before = weighted_regional_energy(
+                y,
+                b_solver,
+                weight_solver,
                 regions,
-                H4, W4,
-                eps=cfg.eps,
-            )  # [B, 1, H4, W4] FP32
+            )
 
-            # Projected SIRT step: Y^{t+1} = max(0, Y^t - omega * r)
-            y_f32 = y.to(dtype=torch.float32)
-            y_new = (y_f32 - cfg.sirt_omega * r_field).clamp_min(0.0)
-            y = y_new.to(dtype=orig_dtype)
-            iterates.append(y)
+            field = weighted_normalized_adjoint_field(
+                y,
+                b_solver,
+                weight_solver,
+                regions,
+                weighted_cov=cov_w,
+                residual_clip=self.cfg.residual_clip,
+                eps=self.cfg.eps,
+            )
+
+            y_next = torch.clamp_min(
+                y.float()
+                - float(self.cfg.omega) * field,
+                0.0,
+            ).to(y.dtype)
+
+            energy_after = weighted_regional_energy(
+                y_next,
+                b_solver,
+                weight_solver,
+                regions,
+            )
+
+            energy_trace.append(
+                {
+                    "before": energy_before,
+                    "after": energy_after,
+                }
+            )
+
+            residual_fields.append(field)
+            iterates.append(y_next)
+            y = y_next
 
         return {
-            "y": y,                    # [B, 1, H4, W4] final refined measure
-            "y0": y0,                  # [B, 1, H4, W4] initial fine measure
-            "b_region": b_region,      # [B, 1, M] regional count prediction
-            "w_region": w_region,      # [B, 1, M] reliability weights (after normalization)
-            "rate": rate,              # [B, 1, M] rate rho_R (for diagnostics)
-            "iterates": iterates,      # list of T+1 tensors
-            "regions": regions,        # RegionSet
-            "dispersion": self.region_head.dispersion,  # scalar
-        }
+            "y": y,
+            "y0": y0,
+            "z0": z0,
 
-    def parameter_groups(self) -> list[dict]:
-        """Return parameter groups for optimizer with backbone LR scaling."""
-        backbone_params = list(self.backbone.parameters())
-        backbone_ids = {id(p) for p in backbone_params}
-        other_params = [p for p in self.parameters() if id(p) not in backbone_ids]
-        return [
-            {"params": backbone_params, "lr_scale": self.cfg.backbone_lr_scale},
-            {"params": other_params,    "lr_scale": 1.0},
-        ]
+            "regions": regions,
+
+            "b_region": mu_count,
+            "region_rate": regional["rate"],
+            "region_dispersion": dispersion,
+            "region_log_dispersion": regional["log_dispersion"],
+
+            "region_weight": weight,
+            "region_precision": reliability["precision"],
+            "region_rate_variance": reliability["rate_variance"],
+            "region_count_variance": reliability["count_variance"],
+
+            "iterates": iterates,
+            "residual_fields": residual_fields,
+            "energy_trace": energy_trace,
+
+            "uniform_reliability": uniform_reliability,
+        }
