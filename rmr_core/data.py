@@ -115,6 +115,26 @@ def train_transform(
     return image_t.clamp(0, 1), pts
 
 
+def _pad_to_crop(
+    image: torch.Tensor,
+    points: torch.Tensor,
+    crop_h: int,
+    crop_w: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pad image tensor with ImageNet/MobileNetV4 mean (0.5 in [0,1]) so padded pixels normalize to 0."""
+    _, h, w = image.shape
+    pad_h = max(0, crop_h - h)
+    pad_w = max(0, crop_w - w)
+    if pad_h or pad_w:
+        mean = image.new_tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
+        new_h = h + pad_h
+        new_w = w + pad_w
+        canvas = mean.expand(3, new_h, new_w).clone()
+        canvas[:, :h, :w] = image
+        image = canvas
+    return image, points
+
+
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
     mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
     std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)

@@ -606,8 +606,8 @@ Thay thế hàm năng lượng bình phương thông thường:
 $$\mathcal{E}(Y) = \frac{1}{2} (A Y - b)^\top D_a^{-1} (A Y - b)$$
 bằng hàm năng lượng có trọng số tin cậy:
 $$\boxed{\mathcal{E}_w(Y) = \frac{1}{2} (A Y - b)^\top W D_a^{-1} (A Y - b)}$$
-với ma trận trọng số đường chéo $W = \operatorname{diag}(w_R)$, trong đó:
-$$w_R = f(\sigma_R) = \frac{1}{\sigma_R^2 + \epsilon}$$
+với ma trận trọng số đường chéo $W = \operatorname{diag}(w_R)$, trong đó $w_R$ là độ tin cậy được chuẩn hóa theo thang đo từ nghịch đảo phương sai mật độ (rate precision):
+$$q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right)$$
 
 ---
 
@@ -655,10 +655,10 @@ Gia tăng tham số cực nhỏ (< 3k tham số).
 
 Giả định số lượng người trong vùng tuân theo phân bố Negative Binomial:
 $$N_R \sim \operatorname{NB}(\mu_R, r_R)$$
-Phương sai lý thuyết:
-$$\operatorname{Var}(N_R) = \mu_R + \frac{\mu_R^2}{r_R}$$
-Trọng số tin cậy được suy biến trực tiếp từ phương sai:
-$$w_R = \frac{1}{\operatorname{Var}(N_R) + \epsilon}$$
+Phương sai lý thuyết theo count và rate:
+$$\operatorname{Var}(N_R) = \mu_R + \frac{\mu_R^2}{r_R}, \quad V_R^{\text{rate}} = \frac{\operatorname{Var}(N_R)}{|R|^2} + \sigma_{\min}^2$$
+Độ tin cậy được suy biến từ nghịch đảo phương sai (precision), chuẩn hóa trung bình bằng 1 trong từng scale family và chặn giới hạn:
+$$q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right)$$
 
 ---
 

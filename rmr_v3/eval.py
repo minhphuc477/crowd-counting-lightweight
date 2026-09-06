@@ -12,7 +12,10 @@ from torch.utils.data import DataLoader
 from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
 from .diagnostics import (
+    compute_dispersion_saturation,
     compute_reliability_correlations,
+    compute_solver_trajectory_diagnostics,
+    compute_uncertainty_calibration_bins,
     regional_reliability_rows,
 )
 from .model import RMRv3, RMRv3Config
@@ -89,7 +92,8 @@ def main() -> None:
     ap.add_argument("--manifest", default=None, help="Path to eval manifest jsonl")
     ap.add_argument("--output-dir", default=None, help="Directory to save evaluation artifacts")
     ap.add_argument("--uniform-reliability", action="store_true", default=None, help="Override uniform reliability setting")
-    ap.add_argument("--no-tiling", action="store_true", default=True, help="Disable tiled prediction (default for V3 direct evaluation)")
+    ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
+    ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -108,6 +112,7 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
     diag_rows: list[dict] = []
+    traj_rows: list[dict] = []
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample["target_y"].to(device)
@@ -116,6 +121,10 @@ def main() -> None:
             r["sample_index"] = row["index"]
             r["sample_id"] = row["id"]
         diag_rows.extend(d_rows)
+
+        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
+        if t_diag:
+            traj_rows.append(t_diag)
         return {}
 
     print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
@@ -125,13 +134,32 @@ def main() -> None:
         loader=loader,
         device=device,
         output_stride=stride,
-        run_tiling=not args.no_tiling,
+        run_tiling=args.tiling,
         forward_kwargs={"uniform_reliability": uniform_reliability},
         extra_sample_callback=sample_callback,
     )
 
     corrs = compute_reliability_correlations(diag_rows)
     summary.update(corrs)
+
+    calib = compute_uncertainty_calibration_bins(diag_rows)
+    summary["calibration"] = calib
+
+    sat = compute_dispersion_saturation(diag_rows)
+    summary.update(sat)
+
+    if traj_rows:
+        traj_summary: dict[str, float] = {}
+        for k in traj_rows[0].keys():
+            vals = [tr[k] for tr in traj_rows if k in tr]
+            traj_summary[k] = float(np.mean(vals)) if vals else 0.0
+        summary["solver_trajectory"] = traj_summary
+        summary["solver_help_fraction"] = traj_summary.get("solver_help_fraction", 0.0)
+        summary["solver_harm_fraction"] = traj_summary.get("solver_harm_fraction", 0.0)
+        summary["energy_monotonic_fraction"] = traj_summary.get("energy_monotonic_fraction", 1.0)
+        for t in range(3):
+            if f"mae_reg_y{t}" in traj_summary:
+                summary[f"mae_reg_y{t}"] = traj_summary[f"mae_reg_y{t}"]
 
     # Weight distribution statistics
     weights = np.array([r["weight"] for r in diag_rows]) if diag_rows else np.array([1.0])

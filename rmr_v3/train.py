@@ -32,11 +32,14 @@ from rmr_core.data import (
     collate_train,
     compute_manifest_density,
 )
-from rmr_core.metrics import game_single, summarize_predictions
+from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import make_scheduler, seed_everything
 
 from .diagnostics import (
+    compute_dispersion_saturation,
     compute_reliability_correlations,
+    compute_solver_trajectory_diagnostics,
+    compute_uncertainty_calibration_bins,
     regional_reliability_rows,
     summarize_diagnostics,
 )
@@ -135,6 +138,8 @@ def evaluate_v3(
     model.eval()
     pred_rows = []
     all_diag_rows = []
+    traj_rows = []
+    output_stride = getattr(model.cfg, "output_stride", 4)
 
     for batch_list in loader:
         for sample in batch_list:
@@ -147,12 +152,28 @@ def evaluate_v3(
             gt = float(target.sum().item())
 
             row = {"gt": gt, "pred": pred}
-            for level in range(4):
-                row[f"GAME{level}"] = game_single(y, target, level)
+            if "points" in sample and "height" in sample and "width" in sample:
+                game_dict = game_physical_image(
+                    y,
+                    sample["points"],
+                    image_h=sample["height"],
+                    image_w=sample["width"],
+                    stride=output_stride,
+                    levels=(0, 1, 2, 3),
+                )
+                for level in range(4):
+                    row[f"GAME{level}"] = game_dict[level]
+            else:
+                for level in range(4):
+                    row[f"GAME{level}"] = game_single(y, target, level)
             pred_rows.append(row)
 
             d_rows = regional_reliability_rows(out, target.unsqueeze(0))
             all_diag_rows.extend(d_rows)
+
+            t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
+            if t_diag:
+                traj_rows.append(t_diag)
 
     summary = summarize_predictions(pred_rows)
 
@@ -164,6 +185,19 @@ def evaluate_v3(
 
     corrs = compute_reliability_correlations(all_diag_rows)
     summary.update(corrs)
+
+    calib = compute_uncertainty_calibration_bins(all_diag_rows)
+    summary["mean_std_residual"] = calib["mean_std_residual"]
+    summary["p50_std_residual"] = calib["p50_std_residual"]
+    summary["p90_std_residual"] = calib["p90_std_residual"]
+
+    sat = compute_dispersion_saturation(all_diag_rows)
+    summary.update(sat)
+
+    if traj_rows:
+        for k in traj_rows[0].keys():
+            vals = [tr[k] for tr in traj_rows if k in tr]
+            summary[k] = float(np.mean(vals)) if vals else 0.0
 
     # Density-stratified MAE
     gts = np.array([r["gt"] for r in pred_rows])
@@ -334,6 +368,12 @@ def main() -> None:
         "val_game0", "val_game1", "val_game2", "val_game3",
         "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
         "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
+        "spearman_pred_weight_error",
+        "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
+        "mean_std_residual",
+        "dispersion_sat_low_fraction", "dispersion_sat_high_fraction",
+        "solver_help_fraction", "solver_harm_fraction", "energy_monotonic_fraction",
+        "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
     ]
 
     start_epoch = 0
@@ -342,16 +382,20 @@ def main() -> None:
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model"])
-        optimizer.load_state_dict(ckpt["optimizer"])
-        scheduler.load_state_dict(ckpt["scheduler"])
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        if "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
         # Exactly resume at the next epoch index
-        start_epoch = int(ckpt["epoch"])
+        start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
 
     if not log_csv.exists() or start_epoch == 0:
         with open(log_csv, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
 
     for epoch in range(start_epoch, epochs):
@@ -512,6 +556,19 @@ def main() -> None:
                 "pearson_rate_var_error": float(val_metrics.get("pearson_rate_var_error", 0.0)),
                 "spearman_rate_var_error": float(val_metrics.get("spearman_rate_var_error", 0.0)),
                 "spearman_weight_error": float(val_metrics.get("spearman_weight_error", 0.0)),
+                "spearman_pred_weight_error": float(val_metrics.get("spearman_pred_weight_error", 0.0)),
+                "spearman_rate_var_error_32": float(val_metrics.get("spearman_rate_var_error_32", 0.0)),
+                "spearman_rate_var_error_64": float(val_metrics.get("spearman_rate_var_error_64", 0.0)),
+                "spearman_rate_var_error_128": float(val_metrics.get("spearman_rate_var_error_128", 0.0)),
+                "mean_std_residual": float(val_metrics.get("mean_std_residual", 0.0)),
+                "dispersion_sat_low_fraction": float(val_metrics.get("dispersion_sat_low_fraction", 0.0)),
+                "dispersion_sat_high_fraction": float(val_metrics.get("dispersion_sat_high_fraction", 0.0)),
+                "solver_help_fraction": float(val_metrics.get("solver_help_fraction", 0.0)),
+                "solver_harm_fraction": float(val_metrics.get("solver_harm_fraction", 0.0)),
+                "energy_monotonic_fraction": float(val_metrics.get("energy_monotonic_fraction", 1.0)),
+                "mae_reg_y0": float(val_metrics.get("mae_reg_y0", 0.0)),
+                "mae_reg_y1": float(val_metrics.get("mae_reg_y1", 0.0)),
+                "mae_reg_y2": float(val_metrics.get("mae_reg_y2", 0.0)),
             })
 
             cur_mae = float(val_metrics["MAE"])
@@ -523,6 +580,10 @@ def main() -> None:
                     {
                         "epoch": epoch + 1,
                         "model": model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "scaler": scaler.state_dict(),
+                        "solver_strength": solver_strength,
                         "config": cfg,
                         "best_mae": best_mae,
                     },
@@ -558,6 +619,8 @@ def main() -> None:
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
+                "scaler": scaler.state_dict(),
+                "solver_strength": solver_strength,
                 "config": cfg,
                 "best_mae": best_mae,
             },
@@ -565,7 +628,7 @@ def main() -> None:
         )
 
         with open(log_csv, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writerow(row_log)
 
 

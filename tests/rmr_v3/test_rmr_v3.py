@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rmr_count.operators import (
+from rmr_core.operators import (
     build_multiscale_regions,
     regional_adjoint,
     regional_sum,
@@ -287,7 +287,7 @@ def test_loss_function_and_shapes():
 # ---------------------------------------------------------------------------
 def test_parameter_budget():
     """Total trainable parameters must remain strictly < 105,000."""
-    from rmr_count.model import count_parameters
+    from rmr_v2.model import count_parameters
     cfg = RMRv3Config(pretrained=False)
     model = RMRv3(cfg)
     n = count_parameters(model)
@@ -336,6 +336,107 @@ def test_solver_region_weight():
 
     # In V3-B, solver_region_weight matches region_weight
     assert torch.allclose(out_v3b["solver_region_weight"], out_v3b["region_weight"])
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Strict config validation guards
+# ---------------------------------------------------------------------------
+def test_config_validation_guards():
+    """RMRv3 must strictly reject invalid configs."""
+    # Invalid reliability mode
+    with pytest.raises(ValueError, match="Unsupported reliability_mode"):
+        RMRv3(RMRv3Config(reliability_mode="invalid_mode", pretrained=False))
+
+    # Invalid region sizes
+    with pytest.raises(ValueError, match="region_sizes_px"):
+        RMRv3(RMRv3Config(region_sizes_px=(32, 64), pretrained=False))
+
+    # Invalid weight bounds
+    with pytest.raises(ValueError, match="reliability_weight_min"):
+        RMRv3(RMRv3Config(reliability_weight_min=5.0, reliability_weight_max=2.0, pretrained=False))
+
+    # Invalid rate std floor
+    with pytest.raises(ValueError, match="reliability_rate_std_floor"):
+        RMRv3(RMRv3Config(reliability_rate_std_floor=0.0, pretrained=False))
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Strict backbone reduction guard
+# ---------------------------------------------------------------------------
+def test_backbone_reduction_guard():
+    """MobileNetV4Backbone must strictly require target_reductions=(4, 8, 16)."""
+    from rmr_core.backbones import MobileNetV4Backbone
+
+    with pytest.raises(ValueError, match="target_reductions"):
+        MobileNetV4Backbone(target_reductions=(4, 8, 16, 32), pretrained=False)
+
+    with pytest.raises(ValueError, match="target_reductions"):
+        MobileNetV4Backbone(target_reductions=(4, 8), pretrained=False)
+
+
+# ---------------------------------------------------------------------------
+# Test 15: Expanded reliability calibration & solver trajectory diagnostics
+# ---------------------------------------------------------------------------
+def test_expanded_diagnostics():
+    """Verify all diagnostics: per-scale corrs, calibration bins, saturation, and trajectory."""
+    from rmr_v3.diagnostics import (
+        compute_dispersion_saturation,
+        compute_reliability_correlations,
+        compute_solver_trajectory_diagnostics,
+        compute_uncertainty_calibration_bins,
+        regional_reliability_rows,
+    )
+
+    torch.manual_seed(42)
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg).eval()
+
+    x = torch.rand(2, 3, 128, 128)
+    target = torch.rand(2, 1, 32, 32)
+    with torch.no_grad():
+        out = model(x, solver_strength=1.0)
+
+    # 1. Regional reliability rows
+    rows = regional_reliability_rows(out, target)
+    assert len(rows) > 0
+    assert "std_residual" in rows[0]
+    assert "count_variance" in rows[0]
+    assert "rate_variance" in rows[0]
+
+    # 2. Per-scale correlations
+    corrs = compute_reliability_correlations(rows)
+    for s in (32, 64, 128):
+        assert f"pearson_rate_var_error_{s}" in corrs
+        assert f"spearman_rate_var_error_{s}" in corrs
+        assert f"spearman_weight_error_{s}" in corrs
+        assert f"spearman_pred_weight_error_{s}" in corrs
+    assert "spearman_pred_weight_error" in corrs
+
+    # 3. Calibration bins
+    calib = compute_uncertainty_calibration_bins(rows, num_bins=4)
+    assert len(calib["bins"]) == 4
+    assert "mean_std_residual" in calib
+    assert "p50_std_residual" in calib
+    assert "p90_std_residual" in calib
+
+    # 4. Dispersion saturation
+    sat = compute_dispersion_saturation(rows)
+    assert 0.0 <= sat["dispersion_sat_low_fraction"] <= 1.0
+    assert 0.0 <= sat["dispersion_sat_high_fraction"] <= 1.0
+
+    # 5. Solver trajectory
+    traj = compute_solver_trajectory_diagnostics(out, target)
+    assert "mae_reg_y0" in traj
+    assert "mae_reg_y1" in traj
+    assert "mae_reg_y2" in traj
+    assert "mae_reg_32_y0" in traj
+    assert "reg_disagreement_y0" in traj
+    assert "energy_monotonic_fraction" in traj
+    assert "solver_help_fraction" in traj
+    assert "solver_harm_fraction" in traj
+    assert 0.0 <= traj["energy_monotonic_fraction"] <= 1.0
+    assert 0.0 <= traj["solver_help_fraction"] <= 1.0
+    assert 0.0 <= traj["solver_harm_fraction"] <= 1.0
 
 
 if __name__ == "__main__":

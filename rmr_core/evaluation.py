@@ -209,10 +209,26 @@ def evaluate_dataset(
     summary["n_moderate"] = int(np.sum(mod_mask))
     summary["n_dense"] = int(np.sum(dense_mask))
 
-    if run_tiling and "direct_tiled_practical_abs" in rows[0]:
+    if run_tiling and rows and "direct_tiled_practical_abs" in rows[0]:
         tiled_diffs = [r["direct_tiled_practical_abs"] for r in rows]
+        tiled_norms = [r["direct_tiled_practical_norm"] for r in rows]
+        tiled_h0_diffs = [r["direct_tiled_h0_abs"] for r in rows]
+        tiled_h0_norms = [r["direct_tiled_h0_norm"] for r in rows]
+
         summary["direct_tiled_discrepancy_mean"] = float(np.mean(tiled_diffs))
         summary["direct_tiled_discrepancy_max"] = float(np.max(tiled_diffs))
+        summary["direct_tiled_normalized_discrepancy_mean"] = float(np.mean(tiled_norms))
+        summary["direct_tiled_h0_discrepancy_mean"] = float(np.mean(tiled_h0_diffs))
+        summary["direct_tiled_h0_normalized_discrepancy_mean"] = float(np.mean(tiled_h0_norms))
+
+        disc_lo, disc_hi = bootstrap_ci(tiled_diffs, statistic=np.mean)
+        norm_lo, norm_hi = bootstrap_ci(tiled_norms, statistic=np.mean)
+        summary["direct_tiled_discrepancy_ci95"] = [disc_lo, disc_hi]
+        summary["direct_tiled_normalized_discrepancy_ci95"] = [norm_lo, norm_hi]
+
+        # Standard canonical aliases
+        summary["mean_abs_prediction_discrepancy"] = summary["direct_tiled_discrepancy_mean"]
+        summary["mean_normalized_prediction_discrepancy"] = summary["direct_tiled_normalized_discrepancy_mean"]
 
     return rows, summary
 

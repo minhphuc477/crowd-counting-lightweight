@@ -27,7 +27,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
-from rmr_core.metrics import game_single, summarize_predictions
+from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import make_scheduler, seed_everything
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
@@ -94,6 +94,7 @@ def make_loss_cfg(cfg: dict) -> LossConfig:
 def evaluate(model: RMRCount, loader: DataLoader, device: torch.device) -> dict[str, float]:
     model.eval()
     rows = []
+    output_stride = getattr(model.cfg, "output_stride", 4)
     for batch_list in loader:
         for sample in batch_list:
             image = sample["image"].unsqueeze(0).to(device)
@@ -103,8 +104,20 @@ def evaluate(model: RMRCount, loader: DataLoader, device: torch.device) -> dict[
             pred = float(y.sum().item())
             gt = float(target.sum().item())
             row = {"gt": gt, "pred": pred}
-            for level in range(4):
-                row[f"GAME{level}"] = game_single(y, target, level)
+            if "points" in sample and "height" in sample and "width" in sample:
+                game_dict = game_physical_image(
+                    y,
+                    sample["points"],
+                    image_h=sample["height"],
+                    image_w=sample["width"],
+                    stride=output_stride,
+                    levels=(0, 1, 2, 3),
+                )
+                for level in range(4):
+                    row[f"GAME{level}"] = game_dict[level]
+            else:
+                for level in range(4):
+                    row[f"GAME{level}"] = game_single(y, target, level)
             rows.append(row)
     return summarize_predictions(rows)
 

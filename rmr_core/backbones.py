@@ -22,7 +22,7 @@ class MobileNetV4Backbone(nn.Module):
         import timm
 
         target_reductions = tuple(int(r) for r in target_reductions)
-        if target_reductions not in {(4, 8, 16), (4, 8, 16, 32)}:
+        if target_reductions != (4, 8, 16):
             raise ValueError(
                 f"MobileNetV4Backbone requires target_reductions=(4, 8, 16), got {target_reductions}"
             )

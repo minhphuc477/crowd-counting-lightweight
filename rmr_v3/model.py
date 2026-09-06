@@ -465,6 +465,26 @@ class RMRv3(nn.Module):
         if cfg.omega <= 0:
             raise ValueError("omega must be > 0")
 
+        if cfg.reliability_mode != "nb_rate_variance":
+            raise ValueError(
+                f"Unsupported reliability_mode: {cfg.reliability_mode}. Only 'nb_rate_variance' is supported."
+            )
+
+        if tuple(cfg.region_sizes_px) != (32, 64, 128):
+            raise ValueError(
+                f"RMR-v3 registered canonical method requires region_sizes_px=(32, 64, 128), got {cfg.region_sizes_px}"
+            )
+
+        if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
+            raise ValueError(
+                f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"
+            )
+
+        if cfg.reliability_rate_std_floor <= 0:
+            raise ValueError(
+                f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0"
+            )
+
         self.cfg = cfg
 
         self.encoder = MobileNetV4Backbone(

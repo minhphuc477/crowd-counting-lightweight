@@ -52,7 +52,7 @@ Fixed relaxation $\omega = 1.0$, identity preconditioner $M = 1.0$, detached reg
 
 ### 2.4 Reliability-Weighted Reconciliation (RMR-v3 / RW-RMR)
 RMR-v3 extends the transfer operator with per-region uncertainty calibration derived from the Negative-Binomial rate variance:
-$$V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad w_R = \operatorname{clamp}\left(\frac{\bar{q}_s}{\sqrt{V_R^{\text{rate}}}}, \; 0.25, \; 4.0\right),$$
+$$V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right),$$
 $$Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_{c,w}^{-1} A^\top W D_a^{-1} (A Y^{(t)} - \mu) \right].$$
 Total trainable parameters: **101,763** (< 105,000 budget).
 
