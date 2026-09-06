@@ -9,9 +9,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from rmr_count.data import CrowdManifestDataset, collate_eval
-from rmr_count.metrics import game_single, summarize_predictions
-
+from rmr_core.data import CrowdManifestDataset, collate_eval
+from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
 from .diagnostics import (
     compute_reliability_correlations,
     regional_reliability_rows,
@@ -90,6 +89,7 @@ def main() -> None:
     ap.add_argument("--manifest", default=None, help="Path to eval manifest jsonl")
     ap.add_argument("--output-dir", default=None, help="Directory to save evaluation artifacts")
     ap.add_argument("--uniform-reliability", action="store_true", default=None, help="Override uniform reliability setting")
+    ap.add_argument("--no-tiling", action="store_true", default=True, help="Disable tiled prediction (default for V3 direct evaluation)")
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -99,71 +99,41 @@ def main() -> None:
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
     manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_val.jsonl")
-    out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / "eval_val"
+    manifest_path = Path(manifest)
+    out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / f"eval_{manifest_path.stem}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stride = int(cfg.get("model", {}).get("output_stride", 4))
-    dataset = CrowdManifestDataset(manifest, train=False, output_stride=stride)
+    dataset = CrowdManifestDataset(manifest_path, train=False, output_stride=stride)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
-    pred_rows = []
-    diag_rows = []
+    diag_rows: list[dict] = []
 
-    print(f"Evaluating {ckpt_path.name} on {manifest} ({len(dataset)} samples)...", flush=True)
+    def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
+        target = sample["target_y"].to(device)
+        d_rows = regional_reliability_rows(out, target.unsqueeze(0))
+        for r in d_rows:
+            r["sample_index"] = row["index"]
+            r["sample_id"] = row["id"]
+        diag_rows.extend(d_rows)
+        return {}
 
-    with torch.no_grad():
-        for i, batch_list in enumerate(loader):
-            for sample in batch_list:
-                image = sample["image"].unsqueeze(0).to(device)
-                target = sample["target_y"].to(device)
+    print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
 
-                out = model(image, uniform_reliability=uniform_reliability)
-                y = out["y"][0]
-                pred = float(y.sum().item())
-                gt = float(target.sum().item())
-
-                row = {
-                    "index": i,
-                    "gt": gt,
-                    "pred": pred,
-                    "abs_err": abs(pred - gt),
-                    "sq_err": (pred - gt) ** 2,
-                }
-                for level in range(4):
-                    row[f"GAME{level}"] = game_single(y, target, level)
-                pred_rows.append(row)
-
-                d_rows = regional_reliability_rows(out, target.unsqueeze(0))
-                for r in d_rows:
-                    r["sample_index"] = i
-                diag_rows.extend(d_rows)
-
-    summary = summarize_predictions(pred_rows)
-    summary["mae"] = summary["MAE"]
-    summary["rmse"] = summary["RMSE"]
-    summary["nae"] = summary["NAE"]
-    summary["bias"] = summary["Bias"]
+    rows, summary = evaluate_dataset(
+        model=model,
+        loader=loader,
+        device=device,
+        output_stride=stride,
+        run_tiling=not args.no_tiling,
+        forward_kwargs={"uniform_reliability": uniform_reliability},
+        extra_sample_callback=sample_callback,
+    )
 
     corrs = compute_reliability_correlations(diag_rows)
     summary.update(corrs)
 
-    # Density-stratified metrics with frozen thresholds [100, 500]
-    gts = np.array([r["gt"] for r in pred_rows])
-    aes = np.array([r["abs_err"] for r in pred_rows])
-
-    sparse_mask = gts <= 100.0
-    mod_mask = (gts > 100.0) & (gts <= 500.0)
-    dense_mask = gts > 500.0
-
-    summary["mae_sparse"] = float(np.mean(aes[sparse_mask])) if np.any(sparse_mask) else 0.0
-    summary["mae_moderate"] = float(np.mean(aes[mod_mask])) if np.any(mod_mask) else 0.0
-    summary["mae_dense"] = float(np.mean(aes[dense_mask])) if np.any(dense_mask) else 0.0
-
-    summary["n_sparse"] = int(np.sum(sparse_mask))
-    summary["n_moderate"] = int(np.sum(mod_mask))
-    summary["n_dense"] = int(np.sum(dense_mask))
-
-    # Weight distribution
+    # Weight distribution statistics
     weights = np.array([r["weight"] for r in diag_rows]) if diag_rows else np.array([1.0])
     solver_weights = np.array([r.get("solver_weight", r["weight"]) for r in diag_rows]) if diag_rows else np.array([1.0])
 
@@ -174,18 +144,11 @@ def main() -> None:
     summary["solver_weight_mean"] = float(np.mean(solver_weights))
     summary["solver_weight_std"] = float(np.std(solver_weights))
 
-    # Save summary.json
-    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-
-    # Save predictions.csv
-    with open(out_dir / "predictions.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(pred_rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(pred_rows)
+    save_evaluation_artifacts(out_dir, rows, summary)
 
     # Save reliability_diagnostics.csv
     if diag_rows:
-        with open(out_dir / "reliability_diagnostics.csv", "w", newline="") as f:
+        with open(out_dir / "reliability_diagnostics.csv", "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=list(diag_rows[0].keys()))
             writer.writeheader()
             writer.writerows(diag_rows)
@@ -196,9 +159,10 @@ def main() -> None:
     print(f"  Sparse MAE (<=100): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
     print(f"  Moderate MAE (101-500): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")
     print(f"  Dense MAE (>500): {summary['mae_dense']:.2f} (n={summary['n_dense']})")
-    print(f"  Pearson(var, err): {summary['pearson_rate_var_error']:.4f}")
-    print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")
-    print(f"  Spearman(weight, err): {summary['spearman_weight_error']:.4f}")
+    if "pearson_rate_var_error" in summary:
+        print(f"  Pearson(var, err): {summary['pearson_rate_var_error']:.4f}")
+        print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")
+        print(f"  Spearman(weight, err): {summary['spearman_weight_error']:.4f}")
     print(f"Saved artifacts to {out_dir}\n")
 
 

@@ -1,4 +1,4 @@
-﻿name: Test Suite & Model Verification
+name: Test Suite & Model Verification
 
 on:
   push:
@@ -27,10 +27,18 @@ jobs:
           pip install timm scipy numpy pyyaml pillow pytest
           pip install -e .
 
+      - name: Run Core Test Suite
+        run: |
+          pytest tests/core/ -v --tb=short
+
+      - name: Run RMR-v2 Test Suite
+        run: |
+          pytest tests/rmr_v2/ -v --tb=short
+
       - name: Run RMR-v3 Test Suite
         run: |
-          pytest tests/test_rmr_v3.py -v --tb=short
+          pytest tests/rmr_v3/ -v --tb=short
 
-      - name: Run RMR Test Suite
+      - name: Run RMR Regression Test Suite
         run: |
           pytest tests/rmr/ -v --tb=short

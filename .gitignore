@@ -13,7 +13,7 @@ env/
 venv/
 ENV/
 
-# Large Datasets & Model Caches
+# Large Datasets & Model Caches (only raw images/archives; jsonl manifests are tracked)
 data/*
 !data/*.jsonl
 .cache/
@@ -22,24 +22,11 @@ data/*
 *.mat
 *.npy
 
-# Training Checkpoints & Runs
-runs/*
-!runs/e0_v2/
-!runs/e0_v3/
-!runs/objective_audit/
-!runs/pilot_micf/
-runs/pilot_micf/**/last.pt
-runs/pilot_micf/**/per_region.csv
+# Smoke & Temporary test outputs
 analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
 profile*.json
-*.pt
-*.pth
-*.onnx
-*.ckpt
-!runs/pilot_micf/**/best.pt
-
 
 # IDE & System
 .vscode/

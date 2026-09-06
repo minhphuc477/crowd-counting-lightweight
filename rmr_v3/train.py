@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import csv
@@ -26,13 +26,14 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from rmr_count.data import (
+from rmr_core.data import (
     CrowdManifestDataset,
     collate_eval,
     collate_train,
     compute_manifest_density,
 )
-from rmr_count.metrics import game_single, summarize_predictions
+from rmr_core.metrics import game_single, summarize_predictions
+from rmr_core.training import make_scheduler, seed_everything
 
 from .diagnostics import (
     compute_reliability_correlations,
@@ -43,20 +44,6 @@ from .losses import RMRv3LossConfig, compute_rmr_v3_losses
 from .model import RMRv3, RMRv3Config
 
 
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def make_scheduler(optimizer: torch.optim.Optimizer, epochs: int, warmup: int):
-    def fn(epoch: int) -> float:
-        if epoch < warmup:
-            return max(1e-3, (epoch + 1) / max(1, warmup))
-        p = (epoch - warmup) / max(1, epochs - warmup)
-        return 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fn)
 
 
 def make_model(cfg: dict) -> tuple[RMRv3, bool]:

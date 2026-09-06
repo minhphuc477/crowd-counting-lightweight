@@ -1,18 +1,18 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 
 import torch
 
-from rmr_count.losses import (
+from rmr_core.operators import (
+    RegionSet,
+    regional_sum,
+)
+from rmr_v2.losses import (
     balanced_smooth_l1,
     count_magnitude_loss,
     flat_dm16_loss,
     negative_binomial_nll_mean_dispersion,
-)
-from rmr_count.operators import (
-    RegionSet,
-    regional_sum,
 )
 
 

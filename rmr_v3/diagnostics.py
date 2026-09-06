@@ -6,7 +6,7 @@ import numpy as np
 import scipy.stats
 import torch
 
-from rmr_count.operators import regional_sum
+from rmr_core.operators import regional_sum
 
 
 @torch.no_grad()

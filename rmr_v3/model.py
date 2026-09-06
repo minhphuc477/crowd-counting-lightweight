@@ -7,12 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from rmr_count.model import (
-    AdditiveFPNNeck,
-    FineMeasureHead,
-    MobileNetV4Backbone,
-)
-from rmr_count.operators import (
+from rmr_core.backbones import MobileNetV4Backbone
+from rmr_core.heads import FineMeasureHead
+from rmr_core.necks import AdditiveFPNNeck
+from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
     region_average_features,

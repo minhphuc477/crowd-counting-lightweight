@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+import json
+import math
+import random
+from pathlib import Path
+from typing import Callable
+
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision.transforms import functional as TF
+
+
+def rasterize_points(
+    points_xy: torch.Tensor,
+    image_h: int,
+    image_w: int,
+    stride: int = 4,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Exact stride-cell counts from point annotations.
+
+    Canonical assignment:
+        i = floor((y + 0.5) / stride)
+        j = floor((x + 0.5) / stride)
+    Points outside the actual image support are ignored, never clipped into a border cell.
+    """
+    gh = math.ceil(image_h / stride)
+    gw = math.ceil(image_w / stride)
+    out = torch.zeros((1, gh, gw), dtype=dtype)
+    if points_xy.numel() == 0:
+        return out
+
+    pts = points_xy.float()
+    x, y = pts[:, 0], pts[:, 1]
+    # Filter truly out-of-image points first (x < 0 or x >= image_w).
+    valid = (x >= 0) & (x < image_w) & (y >= 0) & (y < image_h)
+    if not valid.any():
+        return out
+    x, y = x[valid], y[valid]
+
+    j = torch.floor((x + 0.5) / stride).long().clamp(0, gw - 1)
+    i = torch.floor((y + 0.5) / stride).long().clamp(0, gh - 1)
+
+    flat = i * gw + j
+    out.view(-1).scatter_add_(0, flat, torch.ones_like(flat, dtype=dtype))
+    return out
+
+
+def train_transform(
+    image: Image.Image,
+    points_xy: torch.Tensor,
+    crop_size: int = 512,
+    scale_range: tuple[float, float] = (0.75, 1.25),
+    hflip_prob: float = 0.5,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Geometric augmentation that keeps point coordinates exact.
+
+    Memory-efficient: resize, pad, and crop performed directly in uint8 PIL space.
+    """
+    pts = points_xy.clone().float()
+    w0, h0 = image.size
+
+    scale = random.uniform(*scale_range)
+    w1 = max(32, int(round(w0 * scale)))
+    h1 = max(32, int(round(h0 * scale)))
+    if (w1, h1) != (w0, h0):
+        image = image.resize((w1, h1), Image.Resampling.BILINEAR)
+    if pts.numel():
+        pts[:, 0] *= w1 / w0
+        pts[:, 1] *= h1 / h0
+
+    pad_w = max(0, crop_size - w1)
+    pad_h = max(0, crop_size - h1)
+    if pad_w or pad_h:
+        # MobileNetV4 mean in uint8: round(0.5 * 255) = 128
+        new_w = w1 + pad_w
+        new_h = h1 + pad_h
+        canvas = Image.new("RGB", (new_w, new_h), (128, 128, 128))
+        canvas.paste(image, (0, 0))
+        image.close()
+        image = canvas
+
+    w, h = image.size
+    top = random.randint(0, h - crop_size)
+    left = random.randint(0, w - crop_size)
+    image_crop = image.crop((left, top, left + crop_size, top + crop_size))
+    image.close()
+    image = image_crop
+
+    if pts.numel():
+        pts[:, 0] -= left
+        pts[:, 1] -= top
+        keep = (
+            (pts[:, 0] >= 0) & (pts[:, 0] < crop_size) &
+            (pts[:, 1] >= 0) & (pts[:, 1] < crop_size)
+        )
+        pts = pts[keep]
+
+    if random.random() < hflip_prob:
+        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if pts.numel():
+            pts[:, 0] = (crop_size - 1) - pts[:, 0]
+
+    image_t = TF.to_tensor(image)
+    image.close()
+
+    # Lightweight photometric augmentation
+    if random.random() < 0.5:
+        image_t = TF.adjust_brightness(image_t, random.uniform(0.85, 1.15))
+    if random.random() < 0.5:
+        image_t = TF.adjust_contrast(image_t, random.uniform(0.85, 1.15))
+
+    return image_t.clamp(0, 1), pts
+
+
+def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
+    mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+    std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+    return (image_t - mean) / std
+
+
+class CrowdManifestDataset(Dataset):
+    """Dataset over a standardized JSONL manifest.
+
+    Each line:
+      {"image": "relative/or/absolute/path.jpg", "points": [[x,y], ...], "id": "optional"}
+    """
+
+    def __init__(
+        self,
+        manifest: str | Path,
+        train: bool,
+        output_stride: int = 4,
+        crop_size: int = 512,
+        scale_range: tuple[float, float] = (0.75, 1.25),
+    ):
+        self.manifest = Path(manifest)
+        self.root = self.manifest.parent
+        self.train = train
+        self.output_stride = int(output_stride)
+        self.crop_size = int(crop_size)
+        self.scale_range = scale_range
+        with self.manifest.open("r", encoding="utf-8") as f:
+            self.items = [json.loads(line) for line in f if line.strip()]
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict:
+        item = self.items[idx]
+        path = Path(item["image"])
+        if not path.is_absolute():
+            path = self.root / path
+        with Image.open(path) as img:
+            image = img.convert("RGB")
+        pts = torch.tensor(item.get("points", []), dtype=torch.float32).reshape(-1, 2)
+
+        if self.train:
+            image_t, pts = train_transform(
+                image, pts,
+                crop_size=self.crop_size,
+                scale_range=self.scale_range,
+            )
+        else:
+            image_t = TF.to_tensor(image)
+            image.close()
+
+        h, w = image_t.shape[-2:]
+        target_y = rasterize_points(pts, h, w, stride=self.output_stride)
+        image_t = normalize_image(image_t)
+        return {
+            "image": image_t,
+            "target_y": target_y,
+            "points": pts,
+            "id": item.get("id", path.stem),
+            "path": str(path),
+            "height": h,
+            "width": w,
+        }
+
+
+def collate_train(batch: list[dict]) -> dict:
+    return {
+        "image": torch.stack([b["image"] for b in batch], 0),
+        "target_y": torch.stack([b["target_y"] for b in batch], 0),
+        "id": [b["id"] for b in batch],
+    }
+
+
+def collate_eval(batch: list[dict]) -> list[dict]:
+    # Full-resolution images may differ in shape; evaluate sample-by-sample.
+    return batch
+
+
+def compute_manifest_density(
+    manifest: str | Path,
+    output_stride: int = 4,
+    default_m0: float = 0.015763,
+) -> float:
+    """Empirically compute the mean cell density m0 across training images in a manifest.
+
+    m0 = total_points / total_stride4_cells.
+    """
+    manifest_path = Path(manifest)
+    if not manifest_path.exists():
+        return default_m0
+    root = manifest_path.parent
+    total_pts = 0
+    total_cells = 0
+    try:
+        with manifest_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                pts_list = item.get("points", [])
+                n_pts = len(pts_list)
+                img_path = Path(item["image"])
+                if not img_path.is_absolute():
+                    img_path = root / img_path
+                with Image.open(img_path) as img:
+                    w, h = img.size
+                cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
+                total_pts += n_pts
+                total_cells += cells
+        if total_cells > 0:
+            return float(total_pts / total_cells)
+    except Exception:
+        pass
+    return default_m0
