@@ -492,6 +492,31 @@ def main() -> None:
                 torch.save(state, out_dir / "best_val_mae.pt")
                 is_new_best = True
 
+            status_tag = ""
+            if is_new_best:
+                status_tag = " >>> [NEW BEST CHECKPOINT SAVED] <<<"
+            elif not solver_fully_ramped:
+                status_tag = f" (Solver ramping: epoch {epoch+1}/25)"
+
+            print(
+                f"\n{'='*92}\n"
+                f"  EPOCH [{epoch+1:04d}/{epochs:04d}] PERIODIC EVALUATION (182 test samples)\n"
+                f"{'-'*92}\n"
+                f"  Train Loss    : {row['train_total']:.4f} [cnt: {row['train_count']:.4f}, flat: {row['train_flat_dm16']:.4f}, cell: {row['train_cell']:.4f}, reg: {row['train_region_head']:.4f}]\n"
+                f"  Solver Status : Strength: {solver_strength:.2f} | Step0 (omega): {solver_step0:.2f}\n"
+                f"  Val Metrics   : MAE: {metrics['MAE']:.2f} | RMSE: {metrics['RMSE']:.2f} | NAE: {metrics['NAE']:.3f} | Bias: {metrics['Bias']:+.2f}\n"
+                f"  Checkpoint    : Current Val MAE: {metrics['MAE']:.2f} | Best Val MAE: {best_mae:.2f}{status_tag}\n"
+                f"{'='*92}\n",
+                flush=True,
+            )
+        else:
+            print(
+                f"[{epoch+1:04d}/{epochs:04d}] "
+                f"Loss: {row['train_total']:.4f} [cnt: {row['train_count']:.4f}, flat: {row['train_flat_dm16']:.4f}, cell: {row['train_cell']:.4f}, reg: {row['train_region_head']:.4f}] | "
+                f"SolvStr: {solver_strength:.2f}",
+                flush=True,
+            )
+
         if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
             state["best_mae"] = best_mae
             torch.save(state, out_dir / "last.pt")
