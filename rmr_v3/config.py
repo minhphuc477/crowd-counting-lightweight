@@ -157,8 +157,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"dispersion_min must be strictly positive, got {d_min}")
         if "iterations" in m_cfg:
             iters = int(m_cfg["iterations"])
-            if iters < 0:
-                raise ValueError(f"iterations must be non-negative, got {iters}")
+            if iters < 1:
+                raise ValueError(f"iterations must be >= 1, got {iters}")
 
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {

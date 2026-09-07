@@ -474,14 +474,16 @@ def test_canonical_sha_a_manifests_sample_count():
 
 def test_canonical_sha_a_dataset_length_guard(tmp_path: Path):
     """CrowdManifestDataset must reject manifests claiming to be sha_a_train_all / sha_a_test if sample counts mismatch."""
-    img_path = tmp_path / "img.jpg"
-    Image.new("RGB", (32, 32)).save(img_path)
+    img1 = tmp_path / "img1.jpg"
+    img2 = tmp_path / "img2.jpg"
+    Image.new("RGB", (32, 32)).save(img1)
+    Image.new("RGB", (32, 32)).save(img2)
 
     # Incomplete train set (only 2 samples instead of 300)
     fake_train = tmp_path / "sha_a_train_all.jsonl"
     fake_train.write_text(
-        json.dumps({"image": str(img_path), "points": []}) + "\n" +
-        json.dumps({"image": str(img_path), "points": []}) + "\n",
+        json.dumps({"image": str(img1), "id": "t1", "points": []}) + "\n" +
+        json.dumps({"image": str(img2), "id": "t2", "points": []}) + "\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="must contain exactly 300 images"):
@@ -490,10 +492,70 @@ def test_canonical_sha_a_dataset_length_guard(tmp_path: Path):
     # Incomplete test set (only 1 sample instead of 182)
     fake_test = tmp_path / "sha_a_test.jsonl"
     fake_test.write_text(
-        json.dumps({"image": str(img_path), "points": []}) + "\n",
+        json.dumps({"image": str(img1), "id": "t1", "points": []}) + "\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="must contain exactly 182 images"):
         CrowdManifestDataset(fake_test, train=False)
+
+
+def test_sha_a_manifest_integrity_unique_and_disjoint():
+    """Verify ShanghaiTech Part A train and test manifests have unique IDs/images and are strictly disjoint."""
+    train_manifest = Path("data/sha_a_train_all.jsonl")
+    test_manifest = Path("data/sha_a_test.jsonl")
+
+    assert train_manifest.exists()
+    assert test_manifest.exists()
+
+    train_rows = [json.loads(line) for line in train_manifest.read_text(encoding="utf-8").splitlines() if line.strip()]
+    test_rows = [json.loads(line) for line in test_manifest.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert len(train_rows) == 300
+    assert len(test_rows) == 182
+
+    train_ids = [str(r.get("id", i)) for i, r in enumerate(train_rows)]
+    test_ids = [str(r.get("id", i)) for i, r in enumerate(test_rows)]
+
+    train_images = [str(r["image"]).replace("\\", "/") for r in train_rows]
+    test_images = [str(r["image"]).replace("\\", "/") for r in test_rows]
+
+    # Uniqueness within each partition
+    assert len(train_ids) == len(set(train_ids)) == 300, "Train IDs must be strictly unique"
+    assert len(test_ids) == len(set(test_ids)) == 182, "Test IDs must be strictly unique"
+    assert len(train_images) == len(set(train_images)) == 300, "Train image paths must be strictly unique"
+    assert len(test_images) == len(set(test_images)) == 182, "Test image paths must be strictly unique"
+
+    # Strict disjointness of image files between partitions (zero leakage)
+    overlap_images = set(train_images) & set(test_images)
+    assert not overlap_images, f"Train and test manifests must have disjoint images, found overlap: {overlap_images}"
+
+
+def test_dataset_duplicate_id_and_image_guard(tmp_path: Path):
+    """CrowdManifestDataset must reject duplicate sample IDs or duplicate image paths."""
+    img1 = tmp_path / "img1.jpg"
+    img2 = tmp_path / "img2.jpg"
+    Image.new("RGB", (32, 32)).save(img1)
+    Image.new("RGB", (32, 32)).save(img2)
+
+    # Duplicate ID
+    dup_id_manifest = tmp_path / "dup_id.jsonl"
+    dup_id_manifest.write_text(
+        json.dumps({"image": str(img1), "id": "same_id", "points": []}) + "\n" +
+        json.dumps({"image": str(img2), "id": "same_id", "points": []}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Duplicate sample ID 'same_id'"):
+        CrowdManifestDataset(dup_id_manifest, train=False)
+
+    # Duplicate Image Path
+    dup_img_manifest = tmp_path / "dup_img.jsonl"
+    dup_img_manifest.write_text(
+        json.dumps({"image": str(img1), "id": "id1", "points": []}) + "\n" +
+        json.dumps({"image": str(img1), "id": "id2", "points": []}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Duplicate image path"):
+        CrowdManifestDataset(dup_img_manifest, train=False)
+
 
 

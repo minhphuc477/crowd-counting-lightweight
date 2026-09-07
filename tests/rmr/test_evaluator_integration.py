@@ -198,6 +198,24 @@ def test_paired_prediction_comparison(tmp_path: Path):
     assert p_diff["p_value_paired_ttest"] is not None
 
 
+def test_compare_predictions_exact_id_mismatch(tmp_path: Path):
+    """Test that compare_predictions strictly rejects unmatched sample ID sets."""
+    p_a = tmp_path / "preds_a.csv"
+    p_b = tmp_path / "preds_b.csv"
+
+    rows_a = [{"id": f"img_{i}", "gt": 10.0, "pred": 10.0} for i in range(10)]
+    rows_b = [{"id": f"img_{i}", "gt": 10.0, "pred": 12.0} for i in range(9)]  # missing img_9
+
+    for path, r_list in [(p_a, rows_a), (p_b, rows_b)]:
+        with path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "gt", "pred"])
+            writer.writeheader()
+            writer.writerows(r_list)
+
+    with pytest.raises(ValueError, match="Sample ID mismatch for paired comparison"):
+        compare_predictions(p_a, p_b, name_a="MethodA", name_b="MethodB")
+
+
 def test_aggregate_multiple_summaries(tmp_path: Path):
     """Test summary aggregation across multiple seeds."""
     s1 = tmp_path / "s1.json"

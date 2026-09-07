@@ -132,3 +132,37 @@ def test_rmr_v3_cli_train_and_eval(tmp_path: Path) -> None:
     # Predictions and summary should exist in eval_out
     assert (eval_out / 'predictions.csv').exists(), f'predictions.csv was not generated in {eval_out}!'
     assert (eval_out / 'summary.json').exists(), f'summary.json was not generated in {eval_out}!'
+
+
+def test_rmr_v3_cli_profile(tmp_path: Path) -> None:
+    """Verify rmr_v3.profile runs via CLI and outputs structured profiling results."""
+    out_json = tmp_path / "profile_out.json"
+    cmd = [
+        sys.executable,
+        "-m",
+        "rmr_v3.profile",
+        "--iterations",
+        "2",
+        "--height",
+        "128",
+        "--width",
+        "128",
+        "--warmup",
+        "1",
+        "--iters",
+        "2",
+        "--device",
+        "cpu",
+        "--output",
+        str(out_json),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"Profile CLI failed with stderr:\n{res.stderr}\nstdout:\n{res.stdout}"
+    assert out_json.exists()
+
+    data = json.loads(out_json.read_text(encoding="utf-8"))
+    assert data["architecture"] == "RMR-v3"
+    assert data["trainable_parameters"] == 101763
+    assert data["input_shape"] == [1, 3, 128, 128]
+    assert "latency_ms_mean" in data["fp32"]
+

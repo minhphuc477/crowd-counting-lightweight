@@ -157,6 +157,25 @@ def evaluate_v3(
             pred = float(y.sum().item())
             gt = float(target.sum().item())
 
+            # GT consistency invariant: rasterized count sum must exactly match valid raw points
+            if "points" in sample and "height" in sample and "width" in sample:
+                pts = sample["points"]
+                h_img = sample["height"]
+                w_img = sample["width"]
+                if pts.numel() > 0:
+                    px = pts[:, 0]
+                    py = pts[:, 1]
+                    valid_mask = (px >= 0) & (px < w_img) & (py >= 0) & (py < h_img)
+                    n_valid = int(valid_mask.sum().item())
+                else:
+                    n_valid = 0
+                if abs(gt - float(n_valid)) > 1e-4:
+                    sample_id = sample.get("id", "unknown")
+                    raise ValueError(
+                        f"GT count mismatch on sample '{sample_id}': sum(target_y)={gt:.4f} vs "
+                        f"len(valid_points)={n_valid}. Rasterization and ground-truth count must match exactly."
+                    )
+
             row = {"gt": gt, "pred": pred}
             if "points" in sample and "height" in sample and "width" in sample:
                 game_dict = game_physical_image(

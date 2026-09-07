@@ -39,22 +39,29 @@ The concrete model architecture consists of:
   - Backbone learning rate is scaled by $0.1\times$ relative to heads.
 - **Additive FPN Neck (~7.3k params, width=32):**
   - $1 \times 1$ lateral projections of $C_4, C_8, C_{16}$ to 32 channels.
-  - Dilated depthwise-separable $3 \times 3$ convolutions with dilation factors $d \in \{1, 2, 3\}$ for $P_4, P_8, P_{16}$.
+  - Dilated depthwise-separable $3 \times 3$ convolutions with dilation factors $d \in \{1, 2, 3\}$ applied on $P_{16}$ level only, then top-down fused into $P_8$ and $P_4$.
   - Multi-scale representations for scale-matched feature routing.
 - **`FineMeasureHead` (~3.2k params, width=32):**
   - Depthwise-separable $3 \times 3$ conv + Conv $1 \times 1$ on $P_4$ (output stride $s=4$).
   - Data-driven prior bias init $\approx -4.1422$ yielding empirical mean density $m_0 \approx 0.015763$ count/cell.
-- **`ScaleMatchedRegionalEvidenceHead` (~4.0k params):**
+- **`ScaleMatchedRegionalEvidenceHead` (RMR-v1/v2, ~4.0k params):**
   - Multi-scale ROI-pooling with physical pixel scale routing:
     - $\le 48\text{px} \to P_4$
     - $48\text{px} < s \le 96\text{px} \to P_8$
     - $> 96\text{px} \to P_{16}$
   - Concatenates 4D geometry $[ \log h, \log w, \log |R|, \log(w/h) ]$.
   - Predicts regional count mass $b$.
+- **`ProbabilisticRegionalEvidenceHead` (RMR-v3, ~4.1k params):**
+  - 33D input representation: 32D visual feature average-pooled over fine cells (with $P_8$ and $P_{16}$ bilinearly upsampled to $P_4$ support) concatenated with 1D scale log-ratio $\log(K/32)$.
+  - 2-layer MLP ($33 \to 48 \to 48$ with SiLU), splitting into:
+    - `mean_head: Linear(48, 1)` for regional rate $\mu_R$.
+    - `log_dispersion_head: Linear(48, 1)` for dispersion parameter $\theta_R \in [0.5, 500.0]$.
+  - Reliability weights derived via variance of regional rate: $w_R \propto \frac{1}{\operatorname{Var}(\hat{r}_R)}$.
 - **Projected SIRT Reconciliation Layer (0 params):**
   - Measure-space nonnegative projection $\Pi_+ [Y_t - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y_t - b)]$.
+  - In RMR-v3: $\Pi_+ [Y_t - \omega \cdot D_{c,w}^{-1} A^\top D_a^{-1} W (A Y_t - b)]$, with diagonal preconditioner $D_{c,w} = A^\top D_a^{-1} W \mathbf{1}_M$.
   - Parameter-free with canonical $\omega = 1.0, T = 2$.
-  - Regional evidence $b$ is detached during unrolled steps to isolate causal reconciliation.
+  - Regional evidence $b$ and weights $W$ are detached during unrolled steps to isolate causal reconciliation.
 
 ### Verified Parameter Counts:
 Exact values returned by `count_parameters(model)`:
@@ -64,6 +71,7 @@ Exact values returned by `count_parameters(model)`:
 - **B3a (`local_refine`):** 100,692 (+3,011 params from local refinement conv)
 - **B3b (`learned_project`):** 104,756 (+3,042 params from measure-space $P_\theta$)
 - **B5-P (`rmr_p`, $T=2$):** 101,714 (0 extra parameters over B2)
+- **RMR-v3 (`uniform_control` & `rw`):** 101,763 (+49 params over B5-P from `log_dispersion_head`)
 
 ---
 

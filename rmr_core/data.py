@@ -194,6 +194,23 @@ class CrowdManifestDataset(Dataset):
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
+        seen_ids = set()
+        seen_images = set()
+        for idx, it in enumerate(self.items):
+            sid = str(it.get("id", idx))
+            if sid in seen_ids:
+                raise ValueError(
+                    f"Duplicate sample ID '{sid}' in manifest '{self.manifest}' at index {idx}."
+                )
+            seen_ids.add(sid)
+            img_p = str(it.get("image", "")).replace("\\", "/")
+            if img_p:
+                if img_p in seen_images:
+                    raise ValueError(
+                        f"Duplicate image path '{img_p}' in manifest '{self.manifest}' at index {idx}."
+                    )
+                seen_images.add(img_p)
+
         # Enforce canonical benchmark partitions for ShanghaiTech Part A
         if self.manifest.name == "sha_a_train_all.jsonl" and len(self.items) != 300:
             raise ValueError(

@@ -769,5 +769,22 @@ def test_model_eps_wiring():
     assert model.cfg.eps == 1e-4, f"make_model did not propagate eps: got {model.cfg.eps}"
 
 
+# ---------------------------------------------------------------------------
+# Test 21: Config iterations bound consistency
+# ---------------------------------------------------------------------------
+def test_validate_v3_config_iterations_bounds():
+    """validate_v3_config must reject iterations < 1 consistently with model."""
+    from rmr_v3.config import validate_v3_config
+
+    with pytest.raises(ValueError, match="iterations must be >= 1"):
+        validate_v3_config({"model": {"iterations": 0}})
+
+    with pytest.raises(ValueError, match="iterations must be >= 1"):
+        validate_v3_config({"model": {"iterations": -1}})
+
+    validate_v3_config({"model": {"iterations": 1}})
+    validate_v3_config({"model": {"iterations": 2}})
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

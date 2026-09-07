@@ -56,9 +56,18 @@ def compare_predictions(
     preds_a = read_predictions_csv(csv_a)
     preds_b = read_predictions_csv(csv_b)
 
-    common_ids = sorted(set(preds_a.keys()) & set(preds_b.keys()))
+    ids_a = set(preds_a.keys())
+    ids_b = set(preds_b.keys())
+    if ids_a != ids_b:
+        only_a = sorted(list(ids_a - ids_b))
+        only_b = sorted(list(ids_b - ids_a))
+        raise ValueError(
+            f"Sample ID mismatch for paired comparison: {len(ids_a)} in {name_a} vs {len(ids_b)} in {name_b}. "
+            f"Missing in {name_b}: {only_a[:5]}; Missing in {name_a}: {only_b[:5]}"
+        )
+    common_ids = sorted(ids_a)
     if not common_ids:
-        raise ValueError(f"No common image IDs found between {csv_a} and {csv_b}")
+        raise ValueError(f"No samples found in {csv_a} and {csv_b}")
 
     gts = []
     pa_list = []
