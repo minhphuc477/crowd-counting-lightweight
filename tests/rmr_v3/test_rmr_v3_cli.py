@@ -166,3 +166,55 @@ def test_rmr_v3_cli_profile(tmp_path: Path) -> None:
     assert data["input_shape"] == [1, 3, 128, 128]
     assert "latency_ms_mean" in data["fp32"]
 
+
+def test_rmr_v3_cli_profile_override(tmp_path: Path) -> None:
+    """Verify --weighted-reliability and --uniform-reliability correctly override config defaults."""
+    cfg_uniform = tmp_path / "uniform.yaml"
+    cfg_uniform.write_text(yaml.safe_dump({
+        "model": {
+            "iterations": 1,
+            "region_sizes_px": [32, 64, 128],
+            "uniform_reliability": True,
+            "pretrained": False,
+        }
+    }))
+
+    out_json = tmp_path / "prof_override.json"
+    cmd = [
+        sys.executable, "-m", "rmr_v3.profile",
+        "--config", str(cfg_uniform),
+        "--weighted-reliability",
+        "--height", "64", "--width", "64",
+        "--warmup", "1", "--iters", "1",
+        "--device", "cpu",
+        "--output", str(out_json),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"Profile failed: {res.stderr}"
+    data = json.loads(out_json.read_text(encoding="utf-8"))
+    assert data["reliability_mode"] == "weighted", f"Expected weighted override, got {data['reliability_mode']}"
+
+    # Now verify --uniform-reliability overrides a weighted config
+    cfg_weighted = tmp_path / "weighted.yaml"
+    cfg_weighted.write_text(yaml.safe_dump({
+        "model": {
+            "iterations": 1,
+            "region_sizes_px": [32, 64, 128],
+            "uniform_reliability": False,
+            "pretrained": False,
+        }
+    }))
+    cmd2 = [
+        sys.executable, "-m", "rmr_v3.profile",
+        "--config", str(cfg_weighted),
+        "--uniform-reliability",
+        "--height", "64", "--width", "64",
+        "--warmup", "1", "--iters", "1",
+        "--device", "cpu",
+        "--output", str(out_json),
+    ]
+    res2 = subprocess.run(cmd2, capture_output=True, text=True)
+    assert res2.returncode == 0, f"Profile failed: {res2.stderr}"
+    data2 = json.loads(out_json.read_text(encoding="utf-8"))
+    assert data2["reliability_mode"] == "uniform", f"Expected uniform override, got {data2['reliability_mode']}"
+

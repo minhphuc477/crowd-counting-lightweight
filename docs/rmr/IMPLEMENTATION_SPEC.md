@@ -44,24 +44,21 @@ The concrete model architecture consists of:
 - **`FineMeasureHead` (~3.2k params, width=32):**
   - Depthwise-separable $3 \times 3$ conv + Conv $1 \times 1$ on $P_4$ (output stride $s=4$).
   - Data-driven prior bias init $\approx -4.1422$ yielding empirical mean density $m_0 \approx 0.015763$ count/cell.
-- **`ScaleMatchedRegionalEvidenceHead` (RMR-v1/v2, ~4.0k params):**
-  - Multi-scale ROI-pooling with physical pixel scale routing:
-    - $\le 48\text{px} \to P_4$
-    - $48\text{px} < s \le 96\text{px} \to P_8$
-    - $> 96\text{px} \to P_{16}$
-  - Concatenates 4D geometry $[ \log h, \log w, \log |R|, \log(w/h) ]$.
-  - Predicts regional count mass $b$.
+- **`ScaleMatchedRegionalEvidenceHead` (RMR-v2, ~4.0k params):**
+  - 33D input representation: 32D visual feature average-pooled over fine cells concatenated with 1D scale log-ratio $\log(s_R/32)$.
+  - 2-layer MLP ($33 \to 48 \to 48$ with SiLU) with `Linear(48, 1)`.
+  - Predicts regional rate $\rho_R = \operatorname{softplus}(a_R)$, yielding regional count mass $b_R = |R| \rho_R$.
 - **`ProbabilisticRegionalEvidenceHead` (RMR-v3, ~4.1k params):**
-  - 33D input representation: 32D visual feature average-pooled over fine cells (with $P_8$ and $P_{16}$ bilinearly upsampled to $P_4$ support) concatenated with 1D scale log-ratio $\log(K/32)$.
+  - 33D input representation: 32D visual feature average-pooled over fine cells (with $P_8$ and $P_{16}$ bilinearly upsampled to $P_4$ support) concatenated with 1D scale log-ratio $\log(s_R/32)$.
   - 2-layer MLP ($33 \to 48 \to 48$ with SiLU), splitting into:
-    - `mean_head: Linear(48, 1)` for regional rate $\mu_R$.
+    - `mean_head: Linear(48, 1)` predicting regional rate $\rho_R = \operatorname{softplus}(a_R)$, yielding mean regional count $\mu_R = |R| \rho_R$.
     - `log_dispersion_head: Linear(48, 1)` for dispersion parameter $\theta_R \in [0.5, 500.0]$.
-  - Reliability weights derived via variance of regional rate: $w_R \propto \frac{1}{\operatorname{Var}(\hat{r}_R)}$.
+  - Reliability weights derived via variance of regional rate: $w_R \propto \frac{1}{\operatorname{Var}(\hat{\rho}_R)}$.
 - **Projected SIRT Reconciliation Layer (0 params):**
   - Measure-space nonnegative projection $\Pi_+ [Y_t - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y_t - b)]$.
   - In RMR-v3: $\Pi_+ [Y_t - \omega \cdot D_{c,w}^{-1} A^\top W D_a^{-1} (A Y_t - \mu)]$, with diagonal preconditioner $D_{c,w} = \operatorname{diag}(A^\top w)$, where $w = W \mathbf{1}_M$ is the regional weight vector without area scaling in coverage.
   - Parameter-free with canonical $\omega = 1.0, T = 2$.
-  - Regional evidence $b$ and weights $W$ are detached during unrolled steps to isolate causal reconciliation.
+  - Regional evidence $\mu$ and weights $W$ are detached during unrolled steps to isolate causal reconciliation.
 
 ### Verified Parameter Counts:
 Exact values returned by `count_parameters(model)`:
