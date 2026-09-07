@@ -15,7 +15,13 @@ from rmr_core.data import (
     train_transform,
 )
 from rmr_v2.losses import block_sum_2d, flat_dm16_loss
-from rmr_v3.config import compute_config_hash, validate_resume_compatibility
+from rmr_v3.config import (
+    compute_config_hash,
+    compute_file_sha256,
+    extract_trajectory_config,
+    validate_resume_compatibility,
+    validate_v3_config,
+)
 
 
 def test_pixel_center_continuous_point_scaling():
@@ -194,13 +200,13 @@ def test_config_hash_and_resume_locking():
 
 
 def test_config_hash_invariant_to_environment_paths():
-    """Config hash must be invariant to output_dir, data_root, workers, and filesystem prefixes."""
+    """Config hash must be invariant to output_dir, data_root, pin_memory, and filesystem prefixes."""
     cfg_local = {
         "seed": 42,
         "output_dir": "runs/sha_a/rmr_v3_rw_seed42",
         "model": {"backbone": "mobilenetv4_conv_small_050.e3000_r224_in1k", "init_m0": 0.01576340398, "omega": 1.0, "output_stride": 4},
         "loss": {"lambda_count": 1.0, "lambda_cell": 0.25},
-        "train": {"lr": 1e-4, "workers": 0, "pin_memory": False, "epochs": 1000},
+        "train": {"lr": 1e-4, "workers": 4, "pin_memory": False, "epochs": 1000},
         "data": {
             "data_root": "F:/data",
             "train_manifest": "data/sha_a_train_all.jsonl",
@@ -228,6 +234,103 @@ def test_config_hash_invariant_to_environment_paths():
     h_local = compute_config_hash(cfg_local)
     h_kaggle = compute_config_hash(cfg_kaggle)
     assert h_local == h_kaggle, f"Hashes must match across environments: {h_local} vs {h_kaggle}"
+
+
+def test_config_hash_sensitive_to_workers():
+    """Different workers setting (e.g. 0 vs 4) must alter trajectory hash due to RNG stream differences."""
+    base_cfg = {
+        "seed": 42,
+        "model": {"output_stride": 4, "omega": 1.0},
+        "loss": {"lambda_count": 1.0},
+        "train": {"lr": 1e-4, "epochs": 10, "workers": 0},
+        "data": {"crop_size": 512},
+    }
+    cfg_w4 = dict(base_cfg)
+    cfg_w4["train"] = dict(base_cfg["train"])
+    cfg_w4["train"]["workers"] = 4
+
+    h0 = compute_config_hash(base_cfg)
+    h4 = compute_config_hash(cfg_w4)
+    assert h0 != h4
+
+    with pytest.raises(ValueError, match="Resume config hash mismatch"):
+        validate_resume_compatibility(base_cfg, cfg_w4, ckpt_hash=h0, incoming_hash=h4)
+
+
+def test_config_hash_sensitive_to_eval_protocol_and_early_stopping():
+    """eval_every, early_stopping, and patience must alter trajectory hash."""
+    base_cfg = {
+        "seed": 42,
+        "model": {"output_stride": 4},
+        "loss": {"lambda_count": 1.0},
+        "train": {"lr": 1e-4, "epochs": 100, "eval_every": 10, "early_stopping": False, "patience": 0},
+    }
+    h_base = compute_config_hash(base_cfg)
+
+    # eval_every change
+    cfg_eval = dict(base_cfg, train=dict(base_cfg["train"], eval_every=5))
+    assert compute_config_hash(cfg_eval) != h_base
+
+    # early_stopping change
+    cfg_es = dict(base_cfg, train=dict(base_cfg["train"], early_stopping=True, patience=20))
+    assert compute_config_hash(cfg_es) != h_base
+
+
+def test_config_hash_sensitive_to_manifest_content(tmp_path: Path):
+    """Altering manifest file contents even by 1 byte must change the manifest SHA256 and config hash."""
+    manifest_file = tmp_path / "train.jsonl"
+    manifest_file.write_text('{"image": "img1.jpg", "points": [[10.0, 10.0]]}\n', encoding="utf-8")
+
+    cfg1 = {
+        "seed": 42,
+        "model": {"output_stride": 4},
+        "data": {"train_manifest": str(manifest_file), "crop_size": 512},
+    }
+    h1 = compute_config_hash(cfg1)
+    traj1 = extract_trajectory_config(cfg1)
+    sha1 = traj1["data"]["train_manifest_sha256"]
+    assert sha1 != "<virtual>"
+    assert len(sha1) == 64
+
+    # Alter 1 byte in manifest
+    manifest_file.write_text('{"image": "img1.jpg", "points": [[10.0, 10.1]]}\n', encoding="utf-8")
+    h2 = compute_config_hash(cfg1)
+    traj2 = extract_trajectory_config(cfg1)
+    sha2 = traj2["data"]["train_manifest_sha256"]
+
+    assert sha1 != sha2
+    assert h1 != h2
+    with pytest.raises(ValueError, match="Resume config hash mismatch"):
+        validate_resume_compatibility(cfg1, cfg1, ckpt_hash=h1, incoming_hash=h2)
+
+
+def test_validate_v3_config_alias_conflict():
+    """Declaring conflicting alias keys simultaneously must raise ValueError."""
+    # Conflicting backbone aliases
+    bad_cfg1 = {
+        "model": {
+            "backbone": "mobilenetv4_conv_small_050.e3000_r224_in1k",
+            "backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k",
+        }
+    }
+    with pytest.raises(ValueError, match="Conflicting alias keys.*backbone"):
+        validate_v3_config(bad_cfg1)
+
+    # Conflicting omega aliases
+    bad_cfg2 = {
+        "model": {
+            "omega": 1.0,
+            "sirt_omega": 1.0,
+        }
+    }
+    with pytest.raises(ValueError, match="Conflicting alias keys.*omega"):
+        validate_v3_config(bad_cfg2)
+
+    # Valid non-conflicting single alias passes
+    good_cfg1 = {"model": {"backbone": "mobilenetv4_conv_small_050.e3000_r224_in1k", "omega": 1.0}}
+    good_cfg2 = {"model": {"backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k", "sirt_omega": 1.0}}
+    validate_v3_config(good_cfg1)
+    validate_v3_config(good_cfg2)
 
 
 def test_resume_flow_with_derived_init_m0(tmp_path: Path):

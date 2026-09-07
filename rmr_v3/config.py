@@ -123,20 +123,29 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                         f"Unknown config key '{k}' in section '{section}'. Allowed keys: {sorted(allowed)}"
                     )
 
-    # Validate logical bounds if present
+    # Validate logical bounds and alias collisions
     m_cfg = cfg.get("model", {})
-    if "reliability_weight_min" in m_cfg:
-        w_min = float(m_cfg["reliability_weight_min"])
-        if w_min <= 0.0:
-            raise ValueError(f"reliability_weight_min must be strictly positive, got {w_min}")
-    if "dispersion_min" in m_cfg:
-        d_min = float(m_cfg["dispersion_min"])
-        if d_min <= 0.0:
-            raise ValueError(f"dispersion_min must be strictly positive, got {d_min}")
-    if "iterations" in m_cfg:
-        iters = int(m_cfg["iterations"])
-        if iters < 0:
-            raise ValueError(f"iterations must be non-negative, got {iters}")
+    if isinstance(m_cfg, dict):
+        if "backbone" in m_cfg and "backbone_name" in m_cfg:
+            raise ValueError(
+                "Conflicting alias keys in model config: cannot declare both 'backbone' and 'backbone_name'."
+            )
+        if "omega" in m_cfg and "sirt_omega" in m_cfg:
+            raise ValueError(
+                "Conflicting alias keys in model config: cannot declare both 'omega' and 'sirt_omega'."
+            )
+        if "reliability_weight_min" in m_cfg:
+            w_min = float(m_cfg["reliability_weight_min"])
+            if w_min <= 0.0:
+                raise ValueError(f"reliability_weight_min must be strictly positive, got {w_min}")
+        if "dispersion_min" in m_cfg:
+            d_min = float(m_cfg["dispersion_min"])
+            if d_min <= 0.0:
+                raise ValueError(f"dispersion_min must be strictly positive, got {d_min}")
+        if "iterations" in m_cfg:
+            iters = int(m_cfg["iterations"])
+            if iters < 0:
+                raise ValueError(f"iterations must be non-negative, got {iters}")
 
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
@@ -186,6 +195,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "deterministic",
         "solver_warmup_epochs",
         "solver_ramp_epochs",
+        "workers",
+        "eval_every",
+        "early_stopping",
+        "patience",
     ],
     "data": [
         "crop_size",
@@ -195,6 +208,56 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "contrast_jitter",
     ],
 }
+
+CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
+    "workers": 0,
+    "eval_every": 10,
+    "early_stopping": False,
+    "patience": 0,
+    "deterministic": False,
+    "amp": True,
+    "grad_clip": 500.0,
+    "solver_warmup_epochs": 5,
+    "solver_ramp_epochs": 20,
+    "warmup_epochs": 5,
+}
+
+
+def compute_file_sha256(path: Path | str) -> str:
+    """Compute deterministic SHA256 hex digest of a file in 64KB blocks."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"File not found for SHA256 computation: {p}")
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def resolve_manifest_path(manifest_val: str | Path, data_root: str | Path | None = None) -> Path | None:
+    """Resolve manifest file on local filesystem.
+
+    Tries in order:
+    1. Direct path (manifest_val)
+    2. Relative to data_root (if provided): data_root / manifest_val
+    3. data_root / manifest_val.name
+    4. Fallback to repo 'data/' directory (handles cross-environment simulation)
+    """
+    p = Path(manifest_val)
+    if p.is_file():
+        return p
+    if data_root is not None:
+        p_data = Path(data_root) / p
+        if p_data.is_file():
+            return p_data
+        p_name = Path(data_root) / p.name
+        if p_name.is_file():
+            return p_name
+    p_repo_data = Path("data") / p.name
+    if p_repo_data.is_file():
+        return p_repo_data
+    return None
 
 
 def _canonicalize_value(val: Any) -> Any:
@@ -215,13 +278,15 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """Extract only trajectory-critical configuration fields for reproducibility hashing.
 
     Excludes environment-specific paths and local execution settings:
-    `output_dir`, `data_root`, `workers`, `pin_memory`, `eval_every`, `patience`, etc.
+    `output_dir`, `data_root`, `pin_memory`, etc.
     Includes:
     - seed
     - model (canonicalized hyperparameters, including derived init_m0)
     - loss (all loss weights and parameters)
-    - train (learning rates, weight decay, epochs, warmup, solver warmup/ramp, amp, deterministic, grad_clip)
-    - data (crop_size, scale_range, hflip_prob, brightness_jitter, contrast_jitter, and manifest filename)
+    - train (learning rates, weight decay, epochs, warmup, solver warmup/ramp, amp, deterministic, grad_clip,
+             workers, eval_every, early_stopping, patience)
+    - data (crop_size, scale_range, hflip_prob, brightness_jitter, contrast_jitter,
+            train_manifest_name, train_manifest_sha256, val_manifest_name, val_manifest_sha256)
     """
     traj: dict[str, Any] = {}
     if "seed" in cfg:
@@ -249,7 +314,7 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
             if k in ALLOWED_LOSS_KEYS
         }
 
-    # Train hyperparameters (exclude environment runtime settings like workers, pin_memory)
+    # Train hyperparameters (workers, eval_every, early_stopping, patience are trajectory/outcome critical)
     train_cfg = cfg.get("train", {})
     if isinstance(train_cfg, dict):
         critical_train_keys = {
@@ -264,25 +329,36 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "amp",
             "solver_warmup_epochs",
             "solver_ramp_epochs",
+            "workers",
+            "eval_every",
+            "early_stopping",
+            "patience",
         }
-        traj["train"] = {
-            k: _canonicalize_value(v)
-            for k, v in sorted(train_cfg.items())
-            if k in critical_train_keys
-        }
+        t: dict[str, Any] = {}
+        for k in critical_train_keys:
+            if k in train_cfg:
+                t[k] = _canonicalize_value(train_cfg[k])
+            elif k in CRITICAL_TRAIN_DEFAULTS:
+                t[k] = _canonicalize_value(CRITICAL_TRAIN_DEFAULTS[k])
+        traj["train"] = {k: t[k] for k in sorted(t)}
 
-    # Data augmentations & manifest identity (exclude environment data_root)
+    # Data augmentations & manifest identity (manifest name & content SHA256)
     data_cfg = cfg.get("data", {})
     if isinstance(data_cfg, dict):
         d: dict[str, Any] = {}
         for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter"):
             if k in data_cfg:
                 d[k] = _canonicalize_value(data_cfg[k])
+        data_root = data_cfg.get("data_root")
         for k in ("train_manifest", "val_manifest"):
             if k in data_cfg and data_cfg[k]:
-                # Manifest identity is the basename (e.g. sha_a_train_all.jsonl),
-                # invariant to local filesystem prefix (e.g. /kaggle/input vs F:/)
-                d[k] = Path(str(data_cfg[k])).name
+                raw_path = str(data_cfg[k])
+                d[f"{k}_name"] = Path(raw_path).name
+                resolved = resolve_manifest_path(raw_path, data_root=data_root)
+                if resolved is not None:
+                    d[f"{k}_sha256"] = compute_file_sha256(resolved)
+                else:
+                    d[f"{k}_sha256"] = "<virtual>"
         traj["data"] = {k: d[k] for k in sorted(d)}
 
     return traj
@@ -348,8 +424,9 @@ def validate_resume_compatibility(
                 v_ckpt = ckpt_sec.get("omega", ckpt_sec.get("sirt_omega"))
                 v_inc = inc_sec.get("omega", inc_sec.get("sirt_omega"))
             else:
-                v_ckpt = ckpt_sec.get(field)
-                v_inc = inc_sec.get(field)
+                default_val = CRITICAL_TRAIN_DEFAULTS.get(field) if section == "train" else None
+                v_ckpt = ckpt_sec.get(field, default_val)
+                v_inc = inc_sec.get(field, default_val)
 
             if v_ckpt is not None and v_inc is not None:
                 if not _are_values_compatible(v_ckpt, v_inc):
