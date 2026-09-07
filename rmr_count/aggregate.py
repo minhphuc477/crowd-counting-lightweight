@@ -32,11 +32,14 @@ def read_predictions_csv(path: str | Path) -> dict[str, dict[str, float]]:
     data = {}
     with Path(path).open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row in reader:
+        for row_idx, row in enumerate(reader):
             sample_id = row.get("id") or row.get("image_id")
             if sample_id is None:
                 continue
-            data[str(sample_id)] = {
+            sid_str = str(sample_id)
+            if sid_str in data:
+                raise ValueError(f"Duplicate sample ID '{sid_str}' encountered in {path} at row {row_idx + 1}")
+            data[sid_str] = {
                 k: float(v) for k, v in row.items() if k not in ("id", "image_id") and v != ""
             }
     return data
@@ -66,7 +69,14 @@ def compare_predictions(
     for cid in common_ids:
         ra = preds_a[cid]
         rb = preds_b[cid]
-        gt = ra.get("gt", ra.get("gt_count", 0.0))
+        gt_a = ra.get("gt", ra.get("gt_count", 0.0))
+        gt_b = rb.get("gt", rb.get("gt_count", 0.0))
+        if abs(gt_a - gt_b) > 1e-4:
+            raise ValueError(
+                f"Ground truth discrepancy for common sample '{cid}': "
+                f"{name_a} GT={gt_a} vs {name_b} GT={gt_b}"
+            )
+        gt = gt_a
         pa = ra[pred_col]
         pb = rb[pred_col]
         ea = abs(pa - gt)

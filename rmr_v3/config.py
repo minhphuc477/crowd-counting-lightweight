@@ -170,12 +170,19 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "cell_beta",
     ],
     "train": [
+        "lr",
+        "backbone_lr_scale",
         "weight_decay",
+        "epochs",
+        "warmup_epochs",
+        "batch_size",
+        "deterministic",
         "solver_warmup_epochs",
         "solver_ramp_epochs",
     ],
     "data": [
         "crop_size",
+        "scale_range",
     ],
 }
 
@@ -196,6 +203,15 @@ def validate_resume_compatibility(ckpt_cfg: dict[str, Any], incoming_cfg: dict[s
     """Validate that incoming config matches checkpoint across all method-critical fields."""
     if not isinstance(ckpt_cfg, dict) or not isinstance(incoming_cfg, dict):
         return
+
+    # Check seed immutability
+    if "seed" in ckpt_cfg and "seed" in incoming_cfg:
+        if int(ckpt_cfg["seed"]) != int(incoming_cfg["seed"]):
+            raise ValueError(
+                f"Resume config mismatch for 'seed': "
+                f"checkpoint has {ckpt_cfg['seed']!r} but incoming config has {incoming_cfg['seed']!r}. "
+                f"Resuming requires identical seed for trajectory continuity."
+            )
 
     for section, fields in METHOD_CRITICAL_FIELDS.items():
         ckpt_sec = ckpt_cfg.get(section, {})

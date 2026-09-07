@@ -16,9 +16,18 @@ def main() -> None:
     args = ap.parse_args()
 
     lines = [x for x in args.manifest.read_text().splitlines() if x.strip()]
+    if args.val_count is not None:
+        if not (0 <= args.val_count <= len(lines)):
+            raise ValueError(f"val-count ({args.val_count}) must be between 0 and {len(lines)}")
+        n_val = args.val_count
+    else:
+        if not (0.0 <= args.val_fraction <= 1.0):
+            raise ValueError(f"val-fraction ({args.val_fraction}) must be between 0.0 and 1.0")
+        n_val = max(1, round(len(lines) * args.val_fraction)) if len(lines) > 0 else 0
+        n_val = min(n_val, len(lines))
+
     idx = list(range(len(lines)))
     random.Random(args.seed).shuffle(idx)
-    n_val = args.val_count if args.val_count is not None else max(1, round(len(lines) * args.val_fraction))
     val_idx = set(idx[:n_val])
     train = [line for i, line in enumerate(lines) if i not in val_idx]
     val = [line for i, line in enumerate(lines) if i in val_idx]

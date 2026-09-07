@@ -84,6 +84,9 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     rel_root = args.relative_to.resolve() if args.relative_to else args.out.parent.resolve()
 
+    seen_ids: set[str] = set()
+    seen_paths: set[str] = set()
+
     with args.out.open("w", encoding="utf-8") as f:
         for image in images:
             ann = annotation_for(image, args.annotations, args.dataset)
@@ -92,7 +95,16 @@ def main() -> None:
                 img_ref = str(image.resolve().relative_to(rel_root)).replace("\\", "/")
             except ValueError:
                 img_ref = str(image.resolve()).replace("\\", "/")
-            row = {"image": img_ref, "points": pts.tolist(), "id": image.stem}
+
+            sample_id = image.stem
+            if sample_id in seen_ids:
+                raise ValueError(f"Duplicate sample ID '{sample_id}' encountered for {image}")
+            if img_ref in seen_paths:
+                raise ValueError(f"Duplicate image path '{img_ref}' encountered for {image}")
+            seen_ids.add(sample_id)
+            seen_paths.add(img_ref)
+
+            row = {"image": img_ref, "points": pts.tolist(), "id": sample_id}
             f.write(json.dumps(row) + "\n")
     print(f"wrote {len(images)} samples -> {args.out}")
 

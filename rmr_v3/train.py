@@ -275,7 +275,10 @@ def main() -> None:
 
     resume_ckpt = None
     if args.resume:
-        resume_ckpt = torch.load(args.resume, map_location="cpu")
+        try:
+            resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        except TypeError:
+            resume_ckpt = torch.load(args.resume, map_location="cpu")
         validate_resume_compatibility(resume_ckpt.get("config", {}), cfg)
 
     seed = int(cfg.get("seed", 42))
@@ -422,7 +425,7 @@ def main() -> None:
         if "scaler" in ckpt:
             scaler.load_state_dict(ckpt["scaler"])
         if "rng_state" in ckpt:
-            load_rng_state(ckpt["rng_state"])
+            load_rng_state(ckpt["rng_state"], strict=deterministic)
             print("Restored exact RNG states (random, numpy, torch, cuda)")
         # Exactly resume at the next epoch index
         start_epoch = int(ckpt.get("epoch", 0))
@@ -628,6 +631,7 @@ def main() -> None:
             cur_mae = float(val_metrics["MAE"])
             solver_engaged = solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs
             # Guard: only update best_mae after solver ramp has fully engaged
+            is_best = (cur_mae < best_mae) and solver_engaged
             git_commit, git_dirty = get_git_info()
             if is_best:
                 best_mae = cur_mae

@@ -111,7 +111,7 @@ MobileNetV4-Conv-Small-0.5 Pretrained Carrier (~87k params)
        ▼
 Additive FPN Neck (~7.3k params, width=32)
   ├── 1x1 lateral projections of C4, C8, C16 to 32 ch
-  ├── Dilated depthwise-separable convs (d=1, 2, 3) at P4, P8, P16
+  ├── Dilated depthwise-separable context (d=1, 2, 3) on P16 prior to additive top-down fusion
   └── Multi-scale feature outputs (P4, P8, P16)
        │
        ├───────────────────────────────────────────────┐
@@ -121,8 +121,8 @@ Depthwise-sep Conv3x3 + Conv1x1                Physical scale routing:
 Input: P4 (stride 4)                           ├── 32px regions  -> P4
 Data-driven prior bias init:                   ├── 64px regions  -> P8
 b_0 ≈ -4.1422 (m0 ≈ 0.0158 count/cell)         └── 128px regions -> P16
-       │                                        4D Geometry [log h, log w, log A, log(w/h)]
-       ▼                                               │
+       │                                       33D Input: 32D visual feature + 1D log(s_R / 32)
+       ▼                                              │
 Initial Fine Measure Y_0                               ▼
        │                                        Regional Count Evidence b
        │                                               │

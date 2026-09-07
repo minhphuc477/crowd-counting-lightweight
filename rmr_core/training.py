@@ -42,37 +42,43 @@ def save_rng_state() -> dict[str, Any]:
     return state
 
 
-def load_rng_state(state: dict[str, Any] | None) -> None:
+def load_rng_state(state: dict[str, Any] | None, strict: bool = False) -> None:
     """Restore random, numpy, torch, and CUDA RNG states."""
     if not isinstance(state, dict):
+        if strict:
+            raise ValueError("RNG state must be a valid dictionary for exact resume.")
         return
     py_state = state.get("python", state.get("python_random"))
     if py_state is not None:
         try:
             random.setstate(py_state)
-        except Exception:
-            pass
+        except Exception as e:
+            if strict:
+                raise RuntimeError(f"Failed to restore Python RNG state: {e}") from e
 
     np_state = state.get("numpy")
     if np_state is not None:
         try:
             np.random.set_state(np_state)
-        except Exception:
-            pass
+        except Exception as e:
+            if strict:
+                raise RuntimeError(f"Failed to restore NumPy RNG state: {e}") from e
 
     torch_state = state.get("torch")
     if torch_state is not None and isinstance(torch_state, torch.Tensor):
         try:
             torch.set_rng_state(torch_state)
-        except Exception:
-            pass
+        except Exception as e:
+            if strict:
+                raise RuntimeError(f"Failed to restore Torch RNG state: {e}") from e
 
     cuda_state = state.get("cuda")
     if cuda_state is not None and torch.cuda.is_available() and isinstance(cuda_state, (list, tuple)):
         try:
             torch.cuda.set_rng_state_all(cuda_state)
-        except Exception:
-            pass
+        except Exception as e:
+            if strict:
+                raise RuntimeError(f"Failed to restore CUDA RNG state: {e}") from e
 
 
 def make_scheduler(

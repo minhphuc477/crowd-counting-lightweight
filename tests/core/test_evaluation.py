@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import tempfile
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -135,3 +136,30 @@ def test_evaluate_dataset_with_tiling():
     assert "direct_tiled_discrepancy_mean" in summary
     assert "direct_tiled_h0_discrepancy_mean" in summary
     assert "MAE" in summary
+
+
+def test_gt_consistency_invariant():
+    """Verify that enforce_gt_consistency raises ValueError on discrepancy between raster sum and raw points."""
+    device = torch.device("cpu")
+    model = LocalConvModel()
+
+    sample_batch = [
+        {
+            "image": torch.rand((3, 64, 64)),
+            "target_y": torch.ones((1, 16, 16)),  # sum = 256
+            "points": torch.tensor([[10.0, 10.0], [20.0, 20.0]]),  # 2 points
+            "id": "img_mismatch",
+            "height": 64,
+            "width": 64,
+        }
+    ]
+    loader = [sample_batch]
+
+    with pytest.raises(ValueError, match="GT consistency invariant violated"):
+        evaluate_dataset(
+            model=model,
+            loader=loader,
+            device=device,
+            enforce_gt_consistency=True,
+        )
+

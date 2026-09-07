@@ -272,7 +272,10 @@ def main() -> None:
     start_epoch = 0
     best_mae = float("inf")
     if args.resume:
-        ckpt = torch.load(args.resume, map_location="cpu")
+        try:
+            ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        except TypeError:
+            ckpt = torch.load(args.resume, map_location="cpu")
         state_dict = dict(ckpt["model"])
         if getattr(model, "eta_logits", None) is None and "eta_logits" in state_dict:
             state_dict.pop("eta_logits", None)

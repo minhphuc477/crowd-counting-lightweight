@@ -22,8 +22,11 @@ from .diagnostics import (
 from .model import RMRv3, RMRv3Config
 
 
-def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, bool, dict]:
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, bool, dict, dict]:
+    try:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        ckpt = torch.load(ckpt_path, map_location="cpu")
     cfg = ckpt.get("config", {})
     m_cfg = cfg.get("model", {})
 
@@ -174,6 +177,7 @@ def main() -> None:
         run_tiling=args.tiling,
         forward_kwargs={"uniform_reliability": uniform_reliability},
         extra_sample_callback=sample_callback,
+        enforce_gt_consistency=True,
     )
 
     corrs = compute_reliability_correlations(diag_rows)

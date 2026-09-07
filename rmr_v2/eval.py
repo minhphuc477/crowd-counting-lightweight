@@ -73,7 +73,10 @@ def main() -> None:
     ckpt_path = Path(args.checkpoint)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    try:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        ckpt = torch.load(ckpt_path, map_location="cpu")
     model = make_model_from_ckpt(ckpt, device)
 
     manifest_path = Path(args.manifest)

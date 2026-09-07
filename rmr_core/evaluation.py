@@ -87,6 +87,7 @@ def evaluate_dataset(
     practical_halo: int = 64,
     forward_kwargs: dict[str, Any] | None = None,
     extra_sample_callback: Callable[[dict, dict, torch.Tensor, dict], dict] | None = None,
+    enforce_gt_consistency: bool = False,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Canonical unified evaluation loop over a dataset loader.
 
@@ -100,6 +101,7 @@ def evaluate_dataset(
         practical_halo: Context halo size in pixels.
         forward_kwargs: Extra keyword arguments passed to model forward.
         extra_sample_callback: Optional hook (sample, out, y, row) -> dict to record extra sample metrics.
+        enforce_gt_consistency: Whether to enforce sum(target_y) == valid_raw_points.
 
     Returns:
         rows: List of per-sample prediction records.
@@ -123,6 +125,25 @@ def evaluate_dataset(
             pred = float(y.sum().item())
 
             sample_id = sample.get("id", str(sample_index))
+
+            # GT consistency invariant: rasterized count sum must exactly match valid raw points
+            if enforce_gt_consistency and "points" in sample and "height" in sample and "width" in sample:
+                pts = sample["points"]
+                h_img = sample["height"]
+                w_img = sample["width"]
+                if pts.numel() > 0:
+                    px = pts[:, 0]
+                    py = pts[:, 1]
+                    valid_mask = (px >= 0) & (px < w_img) & (py >= 0) & (py < h_img)
+                    n_valid = int(valid_mask.sum().item())
+                else:
+                    n_valid = 0
+                if abs(gt - n_valid) > 1e-4:
+                    raise ValueError(
+                        f"GT consistency invariant violated for sample '{sample_id}': "
+                        f"target_y.sum()={gt} != valid_points={n_valid} (image_size={w_img}x{h_img})"
+                    )
+
             row: dict[str, Any] = {
                 "id": sample_id,
                 "index": sample_index,
