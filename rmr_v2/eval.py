@@ -63,7 +63,7 @@ def make_model_from_ckpt(ckpt: dict, device: torch.device) -> RMRCount:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate RMR-v2 checkpoint")
     ap.add_argument("--checkpoint", required=True, help="Path to .pt checkpoint")
-    ap.add_argument("--manifest", default="data/sha_a_val.jsonl", help="Evaluation manifest jsonl")
+    ap.add_argument("--manifest", default="data/sha_a_test.jsonl", help="Evaluation manifest jsonl")
     ap.add_argument("--output-dir", default=None, help="Directory to save artifacts")
     ap.add_argument("--tile-size", type=int, default=512)
     ap.add_argument("--halo", type=int, default=64)

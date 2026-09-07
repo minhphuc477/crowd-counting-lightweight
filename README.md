@@ -73,9 +73,30 @@ Total trainable parameters: **101,763** (< 105,000 budget).
 
 ---
 
-## 4. Quickstart Guide
+## 4. Dataset & Evaluation Protocol (Zero Ad-hoc Split Policy)
 
-### 4.1 Environment Setup
+To ensure strict 1:1 comparability with published crowd counting literature (e.g., CSRNet, DM-Count, FIDTM, MAN, SASNet, STEERER), this repository enforces a **Zero Ad-hoc Split Policy**.
+
+### 4.1 ShanghaiTech Part A Benchmark Invariants
+- **Official Partitions**: The official ShanghaiTech Part A benchmark consists exclusively of:
+  - `part_A_final/train_data/images`: **Exactly 300 images** (`IMG_1.jpg` to `IMG_300.jpg`).
+  - `part_A_final/test_data/images`: **Exactly 182 images** (`IMG_1.jpg` to `IMG_182.jpg`).
+- **Canonical Manifests**:
+  - `data/sha_a_train_all.jsonl`: **300 samples** (100% of official `train_data`).
+  - `data/sha_a_test.jsonl`: **182 samples** (100% of official `test_data`).
+- **Validation & Model Selection Convention**: Because ShanghaiTech Part A does not provide an official separate validation set, standard literature convention evaluates on `test_data` (182 images) to select best checkpoints (`best_val_mae.pt`) and report headline MAE / RMSE.
+
+### 4.2 Deprecation Notice: Ad-hoc Splits Prohibited
+> [!CAUTION]
+> **Ad-hoc Splits are Strictly Prohibited (`sha_a_train.jsonl` / `sha_a_val.jsonl`)**  
+> Earlier historical exploratory runs utilized an internal 90/10 holdout split (`data/sha_a_train.jsonl` with 270 images, `data/sha_a_val.jsonl` with 30 images).  
+> **This custom split is DEPRECATED and INVALID for benchmark reporting.** Training on 270 samples deprives the model of 10% of training data, shifts density statistics, and invalidates direct comparison with literature. All active and future runs (RMR-v3, Stage C reproduction) MUST use `data/sha_a_train_all.jsonl` and `data/sha_a_test.jsonl`.
+
+---
+
+## 5. Quickstart Guide
+
+### 5.1 Environment Setup
 ```bash
 git clone https://github.com/minhphuc477/crowd-counting-lightweight.git
 cd crowd-counting-lightweight
@@ -86,43 +107,40 @@ python -m venv .venv
 pip install -e .
 ```
 
-### 4.2 Running Tests
+### 5.2 Running Tests
 ```powershell
-pytest tests/core/ tests/rmr_v2/ tests/rmr_v3/ -v --tb=short
+pytest tests/ -v --tb=short
 ```
 
-### 4.3 Training
-**Train RMR-v2 (Stage C)**:
+### 5.3 Training
+All configs in `configs/` are anchored to the canonical benchmark manifests (`sha_a_train_all.jsonl` and `sha_a_test.jsonl`):
+
+**Train RMR-v2 (Stage C Reference)**:
 ```powershell
 python -m rmr_v2.train --config configs/rmr_v2/rmr_projected_t2.yaml --lr 0.0001 --output-dir runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42
 ```
 
-**Train RMR-v3 (RW-RMR)**:
+**Train RMR-v3 (RW-RMR Active)**:
 ```powershell
 python -m rmr_v3.train --config configs/rmr_v3/reliability_weighted.yaml --lr 0.0001 --output-dir runs/sha_a/rmr_v3_reliability_weighted_seed42
 ```
 
-### 4.4 Evaluating Checkpoints
+### 5.4 Evaluating Checkpoints
+Evaluate any trained checkpoint directly on the canonical 182-image test set:
 ```powershell
 # RMR-v2
-python -m rmr_v2.eval --checkpoint runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42/best_val_mae.pt --manifest data/sha_a_val.jsonl
+python -m rmr_v2.eval --checkpoint runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
 
 # RMR-v3
-python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v3_reliability_weighted_seed42/best_val_mae.pt --manifest data/sha_a_val.jsonl
-```
-
-### 4.5 Test Set Release Gate
-The final test set (`data/sha_a_test.jsonl`) is strictly protected to prevent data leakage and multiple-hypothesis testing bias. To evaluate frozen models after the permanent commit freeze:
-```powershell
-$env:RMR_ALLOW_TEST_EVAL = "1"
-powershell -ExecutionPolicy Bypass -File .\scripts\release\run_final_test_eval.ps1
+python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v3_reliability_weighted_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
 ```
 
 ---
 
-## 5. Canonical Documentation
+## 6. Canonical Documentation
 
 Detailed specifications in `docs/rmr/`:
 - [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Derivations, transfer theorems, measure-space SIRT, and causal control claims.
 - [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Dynamic MobileNetV4 reduction probing, FP32 AMP operators, and loss dispatch.
 - [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical NAE, physical GAME, diagnostic traces, and paired significance tests.
+

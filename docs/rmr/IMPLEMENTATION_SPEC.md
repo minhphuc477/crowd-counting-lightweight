@@ -127,5 +127,5 @@ To prevent accidental mixing of artifacts across training generations:
 - **Epochs:** 1000 epochs (early stopping disabled for full convergence).
 - **Optimizer:** AdamW with cosine annealing schedule.
 - **Learning Rates:** Main head LR $10^{-4}$, Backbone LR $10^{-5}$ ($0.1\times$ backbone multiplier).
-- **Evaluation:** Validation set (`sha_a_val.jsonl`) evaluated every 10 epochs.
-- **Final Test:** Frozen models evaluated once on `sha_a_test.jsonl` post-training via `run_final_test_eval.ps1`.
+- **Training Data:** 100% of official `train_data` (300 images via `data/sha_a_train_all.jsonl`).
+- **Evaluation & Model Selection:** Evaluated on canonical benchmark test set (`sha_a_test.jsonl`, 182 images) every 10 epochs to track `best_val_mae.pt`, adhering strictly to literature convention without ad-hoc holdout splits.

@@ -124,7 +124,7 @@ def format_oracle_table(summary: dict[str, Any]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="L1: Oracle Cell-Center localization ceiling test.")
-    parser.add_argument("--manifest", default="data/sha_a_val.jsonl", help="JSONL manifest path.")
+    parser.add_argument("--manifest", default="data/sha_a_test.jsonl", help="JSONL manifest path.")
     parser.add_argument("--stride", type=int, default=4, help="Grid stride (default 4).")
     parser.add_argument(
         "--sigmas",

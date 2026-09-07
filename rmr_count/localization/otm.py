@@ -345,7 +345,7 @@ def format_otm_table(summary: dict[str, Any], title: str = "OT-M Results") -> st
 def main() -> None:
     parser = argparse.ArgumentParser(description="L2/L3: Optimal Transport Minimization (OT-M) evaluator.")
     parser.add_argument("--mode", choices=["oracle", "model"], default="oracle", help="Evaluation mode.")
-    parser.add_argument("--manifest", default="data/sha_a_val.jsonl", help="JSONL manifest path.")
+    parser.add_argument("--manifest", default="data/sha_a_test.jsonl", help="JSONL manifest path.")
     parser.add_argument("--checkpoint", default=None, help="Model checkpoint path (for mode=model).")
     parser.add_argument("--stride", type=int, default=4, help="Grid stride (default 4).")
     parser.add_argument("--sigmas", nargs="+", type=float, default=[2.0, 4.0, 6.0, 8.0, 10.0], help="Sigmas.")

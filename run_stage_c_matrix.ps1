@@ -41,13 +41,13 @@ foreach ($m in $models) {
         $ckptPath = "$($m.OutDir)/last.pt"
     }
 
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Val set with $ckptPath..."
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Evaluating $($m.Name) on Test set with $ckptPath..."
     .venv\Scripts\python -m rmr_count.eval `
         --checkpoint $ckptPath `
-        --manifest "data/sha_a_val.jsonl" `
-        --out-dir "$($m.OutDir)/eval_val"
+        --manifest "data/sha_a_test.jsonl" `
+        --out-dir "$($m.OutDir)/eval_test"
 
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed validation eval for: $($m.Name)"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Completed test eval for: $($m.Name)"
 }
 
 Write-Host "========================================================="

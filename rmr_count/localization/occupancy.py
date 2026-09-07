@@ -163,7 +163,7 @@ def main() -> None:
     parser.add_argument(
         "--manifests",
         nargs="+",
-        default=["data/sha_a_train.jsonl", "data/sha_a_val.jsonl", "data/sha_a_test.jsonl"],
+        default=["data/sha_a_train_all.jsonl", "data/sha_a_test.jsonl"],
         help="One or more JSONL manifest paths.",
     )
     parser.add_argument("--stride", type=int, default=4, help="Spatial stride in pixels (default 4).")

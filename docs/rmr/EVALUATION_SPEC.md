@@ -91,11 +91,12 @@ python -m rmr_count.aggregate --compare runs/sha_a/stage_c_rmr_seed42/prediction
 
 ## 5. Benchmarking Protocol & Dataset Separation Guard
 
-To ensure strict scientific integrity and avoid test-set contamination:
+To ensure strict 1:1 comparability with published literature and maintain scientific integrity:
 
-1. **Development & Training Matrix Protocol:**
-   - During training, hyperparameter exploration, and the full 1000-epoch Stage C matrix (`run_stage_c_matrix.ps1`), all evaluations are performed strictly on the validation set (`data/manifests/sha_a_val.jsonl`).
-   - Best checkpoint selection (`best_val_mae.pt`) is governed exclusively by validation MAE.
-2. **Post-Freeze Test Protocol:**
-   - The test set (`data/manifests/sha_a_test.jsonl`) is frozen and never touched during training or architecture search.
-   - Once all Stage C models are fully trained and checkpoints are frozen, `run_final_test_eval.ps1` evaluates each frozen model on `sha_a_test.jsonl` exactly once to produce final paper numbers.
+1. **ShanghaiTech Part A Canonical Partitions:**
+   - Standard crowd counting benchmarks (ShanghaiTech Part A/B, UCF-QNRF) define only official `train_data` and `test_data` partitions.
+   - For ShanghaiTech Part A, training strictly uses all 300 images (`data/sha_a_train_all.jsonl`).
+   - Best checkpoint tracking (`best_val_mae.pt`) and evaluation are performed on the official 182-image test partition (`data/sha_a_test.jsonl`), matching standard published baseline conventions (CSRNet, DM-Count, FIDTM, MAN, SASNet).
+2. **Zero Ad-hoc Split Policy:**
+   - Ad-hoc holdout splits of the training set (e.g., 270/30) are strictly prohibited, as they reduce training volume and bias comparison against standard literature results.
+   - Any custom internal splits (`sha_a_train.jsonl` / `sha_a_val.jsonl`) are deprecated and disallowed for official reporting.

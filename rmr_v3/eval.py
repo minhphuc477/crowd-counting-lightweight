@@ -139,7 +139,7 @@ def main() -> None:
     model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device)
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
-    manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_val.jsonl")
+    manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
     manifest_path = Path(manifest)
     mode_tag = "uniform" if uniform_reliability else "weighted"
     tiling_tag = "" if args.tiling else "_notiling"
