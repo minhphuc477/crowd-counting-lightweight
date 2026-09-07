@@ -3,8 +3,8 @@ seed: 42
 output_dir: runs/sha_a/rmr_v3_uniform_control_seed42
 
 data:
-  train_manifest: data/sha_a_train.jsonl
-  val_manifest: data/sha_a_val.jsonl
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
 
   crop_size: 512
 
