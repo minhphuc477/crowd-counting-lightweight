@@ -59,7 +59,7 @@ The concrete model architecture consists of:
   - Reliability weights derived via variance of regional rate: $w_R \propto \frac{1}{\operatorname{Var}(\hat{r}_R)}$.
 - **Projected SIRT Reconciliation Layer (0 params):**
   - Measure-space nonnegative projection $\Pi_+ [Y_t - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y_t - b)]$.
-  - In RMR-v3: $\Pi_+ [Y_t - \omega \cdot D_{c,w}^{-1} A^\top D_a^{-1} W (A Y_t - b)]$, with diagonal preconditioner $D_{c,w} = A^\top D_a^{-1} W \mathbf{1}_M$.
+  - In RMR-v3: $\Pi_+ [Y_t - \omega \cdot D_{c,w}^{-1} A^\top W D_a^{-1} (A Y_t - \mu)]$, with diagonal preconditioner $D_{c,w} = \operatorname{diag}(A^\top w)$, where $w = W \mathbf{1}_M$ is the regional weight vector without area scaling in coverage.
   - Parameter-free with canonical $\omega = 1.0, T = 2$.
   - Regional evidence $b$ and weights $W$ are detached during unrolled steps to isolate causal reconciliation.
 

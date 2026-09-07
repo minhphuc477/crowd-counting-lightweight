@@ -1,5 +1,5 @@
 seed: 42
-output_dir: runs/sha_a/rmr_projected_t2_seed42
+output_dir: runs/sha_a/b5p_canonical_seed42
 data:
   train_manifest: data/sha_a_train_all.jsonl
   val_manifest: data/sha_a_test.jsonl
