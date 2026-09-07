@@ -191,3 +191,84 @@ def test_config_hash_and_resume_locking():
     # Mismatched hash raises ValueError
     with pytest.raises(ValueError, match="Resume config hash mismatch"):
         validate_resume_compatibility(cfg1, cfg3, ckpt_hash=h1, incoming_hash=h3)
+
+
+def test_config_hash_invariant_to_environment_paths():
+    """Config hash must be invariant to output_dir, data_root, workers, and filesystem prefixes."""
+    cfg_local = {
+        "seed": 42,
+        "output_dir": "runs/sha_a/rmr_v3_rw_seed42",
+        "model": {"backbone": "mobilenetv4_conv_small_050.e3000_r224_in1k", "init_m0": 0.01576340398, "omega": 1.0, "output_stride": 4},
+        "loss": {"lambda_count": 1.0, "lambda_cell": 0.25},
+        "train": {"lr": 1e-4, "workers": 0, "pin_memory": False, "epochs": 1000},
+        "data": {
+            "data_root": "F:/data",
+            "train_manifest": "data/sha_a_train_all.jsonl",
+            "val_manifest": "data/sha_a_test.jsonl",
+            "crop_size": 512,
+            "scale_range": [0.75, 1.25],
+        },
+    }
+
+    cfg_kaggle = {
+        "seed": 42,
+        "output_dir": "/kaggle/working/experiment_output",
+        "model": {"backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k", "init_m0": 0.0157634, "sirt_omega": 1.0, "output_stride": 4},
+        "loss": {"lambda_count": 1.0, "lambda_cell": 0.25},
+        "train": {"lr": 1e-4, "workers": 4, "pin_memory": True, "epochs": 1000},
+        "data": {
+            "data_root": "/kaggle/input/shanghaitech/data",
+            "train_manifest": "/kaggle/input/shanghaitech/data/sha_a_train_all.jsonl",
+            "val_manifest": "/kaggle/input/shanghaitech/data/sha_a_test.jsonl",
+            "crop_size": 512,
+            "scale_range": [0.75, 1.25],
+        },
+    }
+
+    h_local = compute_config_hash(cfg_local)
+    h_kaggle = compute_config_hash(cfg_kaggle)
+    assert h_local == h_kaggle, f"Hashes must match across environments: {h_local} vs {h_kaggle}"
+
+
+def test_resume_flow_with_derived_init_m0(tmp_path: Path):
+    """Resume validation must succeed when init_m0 is derived from manifest in both runs."""
+    img_path = tmp_path / "img1.jpg"
+    img = Image.new("RGB", (100, 100), (128, 128, 128))
+    img.save(img_path)
+
+    manifest_file = tmp_path / "train.jsonl"
+    with manifest_file.open("w", encoding="utf-8") as f:
+        f.write(json.dumps({"image": str(img_path.name), "points": [[20.0, 30.0]], "id": "1"}) + "\n")
+
+    # 1. Base config loaded from YAML (does NOT contain init_m0)
+    raw_cfg = {
+        "seed": 42,
+        "model": {"output_stride": 4, "omega": 1.0},
+        "loss": {"lambda_count": 1.0},
+        "train": {"lr": 1e-4, "epochs": 10},
+        "data": {"train_manifest": str(manifest_file), "data_root": str(tmp_path), "crop_size": 64},
+    }
+
+    # 2. Fresh training run derives init_m0 before saving checkpoint
+    run_cfg = dict(raw_cfg)
+    run_cfg["model"] = dict(raw_cfg["model"])
+    run_cfg["model"]["init_m0"] = compute_manifest_density(
+        run_cfg["data"]["train_manifest"],
+        output_stride=run_cfg["model"]["output_stride"],
+        data_root=run_cfg["data"].get("data_root"),
+    )
+    saved_hash = compute_config_hash(run_cfg)
+
+    # 3. Resume run starts from raw YAML (no init_m0), derives init_m0, then validates
+    incoming_cfg = dict(raw_cfg)
+    incoming_cfg["model"] = dict(raw_cfg["model"])
+    incoming_cfg["model"]["init_m0"] = compute_manifest_density(
+        incoming_cfg["data"]["train_manifest"],
+        output_stride=incoming_cfg["model"]["output_stride"],
+        data_root=incoming_cfg["data"].get("data_root"),
+    )
+    incoming_hash = compute_config_hash(incoming_cfg)
+
+    assert saved_hash == incoming_hash
+    validate_resume_compatibility(run_cfg, incoming_cfg, ckpt_hash=saved_hash, incoming_hash=incoming_hash)
+

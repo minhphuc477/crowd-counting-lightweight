@@ -274,19 +274,6 @@ def main() -> None:
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)
 
-    resume_ckpt = None
-    if args.resume:
-        try:
-            resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
-        except TypeError:
-            resume_ckpt = torch.load(args.resume, map_location="cpu")
-        validate_resume_compatibility(
-            resume_ckpt.get("config", {}),
-            cfg,
-            ckpt_hash=resume_ckpt.get("config_hash"),
-            incoming_hash=compute_config_hash(cfg),
-        )
-
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
     cfg.setdefault("train", {})["deterministic"] = deterministic
@@ -298,6 +285,19 @@ def main() -> None:
             cfg["data"]["train_manifest"],
             output_stride=stride,
             data_root=cfg["data"].get("data_root"),
+        )
+
+    resume_ckpt = None
+    if args.resume:
+        try:
+            resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        except TypeError:
+            resume_ckpt = torch.load(args.resume, map_location="cpu")
+        validate_resume_compatibility(
+            resume_ckpt.get("config", {}),
+            cfg,
+            ckpt_hash=resume_ckpt.get("config_hash"),
+            incoming_hash=compute_config_hash(cfg),
         )
 
     out_dir = Path(cfg["output_dir"])

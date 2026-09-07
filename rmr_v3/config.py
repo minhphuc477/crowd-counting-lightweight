@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 ALLOWED_TOP_LEVEL = {
@@ -196,9 +197,101 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
 }
 
 
+def _canonicalize_value(val: Any) -> Any:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, float):
+        return round(val, 7)
+    if isinstance(val, int):
+        return int(val)
+    if isinstance(val, (list, tuple)):
+        return [_canonicalize_value(x) for x in val]
+    if isinstance(val, dict):
+        return {k: _canonicalize_value(v) for k, v in sorted(val.items())}
+    return str(val)
+
+
+def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Extract only trajectory-critical configuration fields for reproducibility hashing.
+
+    Excludes environment-specific paths and local execution settings:
+    `output_dir`, `data_root`, `workers`, `pin_memory`, `eval_every`, `patience`, etc.
+    Includes:
+    - seed
+    - model (canonicalized hyperparameters, including derived init_m0)
+    - loss (all loss weights and parameters)
+    - train (learning rates, weight decay, epochs, warmup, solver warmup/ramp, amp, deterministic, grad_clip)
+    - data (crop_size, scale_range, hflip_prob, brightness_jitter, contrast_jitter, and manifest filename)
+    """
+    traj: dict[str, Any] = {}
+    if "seed" in cfg:
+        traj["seed"] = int(cfg["seed"])
+
+    # Model fields
+    model_cfg = cfg.get("model", {})
+    if isinstance(model_cfg, dict):
+        m: dict[str, Any] = {}
+        for k, v in model_cfg.items():
+            if k not in ALLOWED_MODEL_KEYS:
+                continue
+            norm_k = "backbone" if k in ("backbone", "backbone_name") else (
+                "omega" if k in ("omega", "sirt_omega") else k
+            )
+            m[norm_k] = _canonicalize_value(v)
+        traj["model"] = {k: m[k] for k in sorted(m)}
+
+    # Loss fields
+    loss_cfg = cfg.get("loss", {})
+    if isinstance(loss_cfg, dict):
+        traj["loss"] = {
+            k: _canonicalize_value(v)
+            for k, v in sorted(loss_cfg.items())
+            if k in ALLOWED_LOSS_KEYS
+        }
+
+    # Train hyperparameters (exclude environment runtime settings like workers, pin_memory)
+    train_cfg = cfg.get("train", {})
+    if isinstance(train_cfg, dict):
+        critical_train_keys = {
+            "lr",
+            "backbone_lr_scale",
+            "weight_decay",
+            "epochs",
+            "warmup_epochs",
+            "batch_size",
+            "deterministic",
+            "grad_clip",
+            "amp",
+            "solver_warmup_epochs",
+            "solver_ramp_epochs",
+        }
+        traj["train"] = {
+            k: _canonicalize_value(v)
+            for k, v in sorted(train_cfg.items())
+            if k in critical_train_keys
+        }
+
+    # Data augmentations & manifest identity (exclude environment data_root)
+    data_cfg = cfg.get("data", {})
+    if isinstance(data_cfg, dict):
+        d: dict[str, Any] = {}
+        for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter"):
+            if k in data_cfg:
+                d[k] = _canonicalize_value(data_cfg[k])
+        for k in ("train_manifest", "val_manifest"):
+            if k in data_cfg and data_cfg[k]:
+                # Manifest identity is the basename (e.g. sha_a_train_all.jsonl),
+                # invariant to local filesystem prefix (e.g. /kaggle/input vs F:/)
+                d[k] = Path(str(data_cfg[k])).name
+        traj["data"] = {k: d[k] for k in sorted(d)}
+
+    return traj
+
+
 def compute_config_hash(cfg: dict[str, Any]) -> str:
-    """Compute a deterministic SHA256 digest of the configuration dictionary."""
-    normalized_json = json.dumps(cfg, sort_keys=True, default=str)
+    """Compute a deterministic SHA256 digest of the trajectory-critical configuration."""
+    traj = extract_trajectory_config(cfg)
+    normalized_json = json.dumps(traj, sort_keys=True, default=str)
     return hashlib.sha256(normalized_json.encode("utf-8")).hexdigest()
 
 

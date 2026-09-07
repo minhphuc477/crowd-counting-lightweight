@@ -5,7 +5,6 @@ import math
 import random
 import warnings
 from pathlib import Path
-from typing import Callable
 
 import torch
 from PIL import Image
@@ -61,7 +60,11 @@ def train_transform(
     """Geometric augmentation that keeps point coordinates exact.
 
     Memory-efficient: resize and crop performed directly in uint8 PIL space.
-    Scale is lower-bounded so min(w1, h1) >= crop_size, avoiding synthetic padding.
+    Scale protocol: random scale drawn from [scale_range[0], scale_range[1]], with the
+    lower bound increased when necessary to permit a real crop_size x crop_size crop
+    without synthetic padding:
+        scale_lo = max(scale_range[0], crop_size / min(w0, h0))
+        scale = uniform(scale_lo, max(scale_range[1], scale_lo))
     Points are transformed via continuous pixel-center scaling:
         x' = (x + 0.5) * (w1 / w0) - 0.5
         y' = (y + 0.5) * (h1 / h0) - 0.5
@@ -116,26 +119,6 @@ def train_transform(
         )
 
     return image_t.clamp(0, 1), pts
-
-
-def _pad_to_crop(
-    image: torch.Tensor,
-    points: torch.Tensor,
-    crop_h: int,
-    crop_w: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Pad image tensor with ImageNet/MobileNetV4 mean (0.5 in [0,1]) so padded pixels normalize to 0."""
-    _, h, w = image.shape
-    pad_h = max(0, crop_h - h)
-    pad_w = max(0, crop_w - w)
-    if pad_h or pad_w:
-        mean = image.new_tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
-        new_h = h + pad_h
-        new_w = w + pad_w
-        canvas = mean.expand(3, new_h, new_w).clone()
-        canvas[:, :h, :w] = image
-        image = canvas
-    return image, points
 
 
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
