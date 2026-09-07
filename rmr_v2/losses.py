@@ -86,15 +86,23 @@ def count_magnitude_loss(
 global_count_loss = count_magnitude_loss
 
 
-def block_sum_2d(x: torch.Tensor, k: int = 4) -> torch.Tensor:
-    """Sum non-overlapping k x k blocks via reshape."""
+def block_sum_2d(x: torch.Tensor, k: int = 4, strict: bool = True) -> torch.Tensor:
+    """Sum non-overlapping k x k blocks via reshape.
+
+    If strict=True, raises ValueError when height or width is not divisible by k.
+    If strict=False, trailing edge cells are trimmed.
+    """
     had_channel = x.ndim == 4
     if not had_channel:
         x = x.unsqueeze(1)
     b, c, h, w = x.shape
-    h_trim = (h // k) * k
-    w_trim = (w // k) * k
-    if h != h_trim or w != w_trim:
+    if h % k != 0 or w % k != 0:
+        if strict:
+            raise ValueError(
+                f"Input spatial dimensions ({h}, {w}) must be divisible by block size k={k}"
+            )
+        h_trim = (h // k) * k
+        w_trim = (w // k) * k
         x = x[:, :, :h_trim, :w_trim]
         h, w = h_trim, w_trim
     out = x.reshape(b, c, h // k, k, w // k, k).sum((3, 5))
@@ -134,8 +142,18 @@ def flat_dm16_loss(
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells)."""
     k = max(1, 16 // stride)
-    n16 = block_sum_2d(pred_map.float(), k).flatten(1)
-    y16 = block_sum_2d(target_map.float(), k).flatten(1)
+    if pred_map.shape[-2] % k != 0 or pred_map.shape[-1] % k != 0:
+        raise ValueError(
+            f"FlatDM16 requires grid dimensions divisible by block size k={k}, "
+            f"got pred_map shape {pred_map.shape[-2:]}"
+        )
+    if target_map.shape[-2] % k != 0 or target_map.shape[-1] % k != 0:
+        raise ValueError(
+            f"FlatDM16 requires grid dimensions divisible by block size k={k}, "
+            f"got target_map shape {target_map.shape[-2:]}"
+        )
+    n16 = block_sum_2d(pred_map.float(), k, strict=True).flatten(1)
+    y16 = block_sum_2d(target_map.float(), k, strict=True).flatten(1)
     pi = probs_from_positive_mass(n16, tiny=eps)
     alpha = float(kappa) * pi
     per_image_nll = dm_nll_none(y16, alpha, eps=eps)

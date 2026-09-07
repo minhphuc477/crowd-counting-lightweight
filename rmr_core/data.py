@@ -55,37 +55,35 @@ def train_transform(
     crop_size: int = 512,
     scale_range: tuple[float, float] = (0.75, 1.25),
     hflip_prob: float = 0.5,
+    brightness_jitter: float = 0.0,
+    contrast_jitter: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Geometric augmentation that keeps point coordinates exact.
 
-    Memory-efficient: resize, pad, and crop performed directly in uint8 PIL space.
+    Memory-efficient: resize and crop performed directly in uint8 PIL space.
+    Scale is lower-bounded so min(w1, h1) >= crop_size, avoiding synthetic padding.
+    Points are transformed via continuous pixel-center scaling:
+        x' = (x + 0.5) * (w1 / w0) - 0.5
+        y' = (y + 0.5) * (h1 / h0) - 0.5
     """
     pts = points_xy.clone().float()
     w0, h0 = image.size
 
-    scale = random.uniform(*scale_range)
-    w1 = max(32, int(round(w0 * scale)))
-    h1 = max(32, int(round(h0 * scale)))
+    min_dim = min(w0, h0)
+    min_scale = max(float(scale_range[0]), float(crop_size) / float(min_dim))
+    max_scale = max(float(scale_range[1]), min_scale)
+    scale = random.uniform(min_scale, max_scale)
+    w1 = max(crop_size, int(round(w0 * scale)))
+    h1 = max(crop_size, int(round(h0 * scale)))
+
     if (w1, h1) != (w0, h0):
         image = image.resize((w1, h1), Image.Resampling.BILINEAR)
-    if pts.numel():
-        pts[:, 0] *= w1 / w0
-        pts[:, 1] *= h1 / h0
+        if pts.numel():
+            pts[:, 0] = (pts[:, 0] + 0.5) * (w1 / w0) - 0.5
+            pts[:, 1] = (pts[:, 1] + 0.5) * (h1 / h0) - 0.5
 
-    pad_w = max(0, crop_size - w1)
-    pad_h = max(0, crop_size - h1)
-    if pad_w or pad_h:
-        # MobileNetV4 mean in uint8: round(0.5 * 255) = 128
-        new_w = w1 + pad_w
-        new_h = h1 + pad_h
-        canvas = Image.new("RGB", (new_w, new_h), (128, 128, 128))
-        canvas.paste(image, (0, 0))
-        image.close()
-        image = canvas
-
-    w, h = image.size
-    top = random.randint(0, h - crop_size)
-    left = random.randint(0, w - crop_size)
+    top = random.randint(0, h1 - crop_size)
+    left = random.randint(0, w1 - crop_size)
     image_crop = image.crop((left, top, left + crop_size, top + crop_size))
     image.close()
     image = image_crop
@@ -99,7 +97,7 @@ def train_transform(
         )
         pts = pts[keep]
 
-    if random.random() < hflip_prob:
+    if hflip_prob > 0.0 and random.random() < hflip_prob:
         image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if pts.numel():
             pts[:, 0] = (crop_size - 1) - pts[:, 0]
@@ -107,11 +105,15 @@ def train_transform(
     image_t = TF.to_tensor(image)
     image.close()
 
-    # Lightweight photometric augmentation
-    if random.random() < 0.5:
-        image_t = TF.adjust_brightness(image_t, random.uniform(0.85, 1.15))
-    if random.random() < 0.5:
-        image_t = TF.adjust_contrast(image_t, random.uniform(0.85, 1.15))
+    # Photometric augmentation (opt-in via config; default 0.0)
+    if brightness_jitter > 0.0 and random.random() < 0.5:
+        image_t = TF.adjust_brightness(
+            image_t, random.uniform(max(0.0, 1.0 - brightness_jitter), 1.0 + brightness_jitter)
+        )
+    if contrast_jitter > 0.0 and random.random() < 0.5:
+        image_t = TF.adjust_contrast(
+            image_t, random.uniform(max(0.0, 1.0 - contrast_jitter), 1.0 + contrast_jitter)
+        )
 
     return image_t.clamp(0, 1), pts
 
@@ -156,13 +158,20 @@ class CrowdManifestDataset(Dataset):
         output_stride: int = 4,
         crop_size: int = 512,
         scale_range: tuple[float, float] = (0.75, 1.25),
+        hflip_prob: float = 0.5,
+        brightness_jitter: float = 0.0,
+        contrast_jitter: float = 0.0,
+        data_root: str | Path | None = None,
     ):
         self.manifest = Path(manifest)
-        self.root = self.manifest.parent
+        self.root = Path(data_root) if data_root is not None else self.manifest.parent
         self.train = train
         self.output_stride = int(output_stride)
         self.crop_size = int(crop_size)
-        self.scale_range = scale_range
+        self.scale_range = tuple(scale_range)
+        self.hflip_prob = float(hflip_prob)
+        self.brightness_jitter = float(brightness_jitter)
+        self.contrast_jitter = float(contrast_jitter)
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -183,6 +192,9 @@ class CrowdManifestDataset(Dataset):
                 image, pts,
                 crop_size=self.crop_size,
                 scale_range=self.scale_range,
+                hflip_prob=self.hflip_prob,
+                brightness_jitter=self.brightness_jitter,
+                contrast_jitter=self.contrast_jitter,
             )
         else:
             image_t = TF.to_tensor(image)
@@ -219,10 +231,12 @@ def compute_manifest_density(
     manifest: str | Path,
     output_stride: int = 4,
     default_m0: float = 0.015763,
+    data_root: str | Path | None = None,
 ) -> float:
     """Empirically compute the mean cell density m0 across training images in a manifest.
 
-    m0 = total_points / total_stride4_cells.
+    m0 = total_valid_points / total_stride4_cells.
+    Points outside [0, w) x [0, h) are filtered identically to rasterize_points.
     """
     manifest_path = Path(manifest)
     if not manifest_path.exists():
@@ -232,7 +246,7 @@ def compute_manifest_density(
             stacklevel=2,
         )
         return default_m0
-    root = manifest_path.parent
+    root = Path(data_root) if data_root is not None else manifest_path.parent
     total_pts = 0
     total_cells = 0
     try:
@@ -243,13 +257,21 @@ def compute_manifest_density(
                     continue
                 item = json.loads(line)
                 pts_list = item.get("points", [])
-                n_pts = len(pts_list)
                 img_path = Path(item["image"])
                 if not img_path.is_absolute():
                     img_path = root / img_path
                 with Image.open(img_path) as img:
                     w, h = img.size
                 cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
+                if pts_list:
+                    pts_arr = torch.tensor(pts_list, dtype=torch.float32).reshape(-1, 2)
+                    valid = (
+                        (pts_arr[:, 0] >= 0) & (pts_arr[:, 0] < w) &
+                        (pts_arr[:, 1] >= 0) & (pts_arr[:, 1] < h)
+                    )
+                    n_pts = int(valid.sum().item())
+                else:
+                    n_pts = 0
                 total_pts += n_pts
                 total_cells += cells
         if total_cells > 0:

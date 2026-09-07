@@ -12,6 +12,10 @@ data:
     - 0.75
     - 1.25
 
+  hflip_prob: 0.5
+  brightness_jitter: 0.0
+  contrast_jitter: 0.0
+
 model:
   output_stride: 4
   feature_width: 32

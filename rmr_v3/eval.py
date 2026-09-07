@@ -148,7 +148,12 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stride = int(cfg.get("model", {}).get("output_stride", 4))
-    dataset = CrowdManifestDataset(manifest_path, train=False, output_stride=stride)
+    dataset = CrowdManifestDataset(
+        manifest_path,
+        train=False,
+        output_stride=stride,
+        data_root=cfg.get("data", {}).get("data_root"),
+    )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
     diag_rows: list[dict] = []

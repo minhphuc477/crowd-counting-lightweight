@@ -36,7 +36,7 @@ from rmr_core.data import (
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 
-from .config import validate_resume_compatibility, validate_v3_config
+from .config import compute_config_hash, validate_resume_compatibility, validate_v3_config
 
 from .diagnostics import (
     compute_dispersion_saturation,
@@ -270,8 +270,9 @@ def main() -> None:
     if args.disable_early_stopping:
         cfg.setdefault("train", {})["early_stopping"] = False
         cfg.setdefault("train", {})["patience"] = 0
+
     if args.output_dir is not None:
-        cfg["output_dir"] = args.output_dir
+        cfg["output_dir"] = str(args.output_dir)
 
     resume_ckpt = None
     if args.resume:
@@ -279,7 +280,12 @@ def main() -> None:
             resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         except TypeError:
             resume_ckpt = torch.load(args.resume, map_location="cpu")
-        validate_resume_compatibility(resume_ckpt.get("config", {}), cfg)
+        validate_resume_compatibility(
+            resume_ckpt.get("config", {}),
+            cfg,
+            ckpt_hash=resume_ckpt.get("config_hash"),
+            incoming_hash=compute_config_hash(cfg),
+        )
 
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
@@ -291,6 +297,7 @@ def main() -> None:
         cfg.setdefault("model", {})["init_m0"] = compute_manifest_density(
             cfg["data"]["train_manifest"],
             output_stride=stride,
+            data_root=cfg["data"].get("data_root"),
         )
 
     out_dir = Path(cfg["output_dir"])
@@ -313,12 +320,17 @@ def main() -> None:
         output_stride=cfg.get("model", {}).get("output_stride", 4),
         crop_size=cfg.get("data", {}).get("crop_size", 512),
         scale_range=tuple(cfg.get("data", {}).get("scale_range", [0.75, 1.25])),
+        hflip_prob=float(cfg.get("data", {}).get("hflip_prob", 0.5)),
+        brightness_jitter=float(cfg.get("data", {}).get("brightness_jitter", 0.0)),
+        contrast_jitter=float(cfg.get("data", {}).get("contrast_jitter", 0.0)),
+        data_root=cfg.get("data", {}).get("data_root"),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
         val_manifest,
         train=False,
         output_stride=cfg.get("model", {}).get("output_stride", 4),
+        data_root=cfg.get("data", {}).get("data_root"),
     )
 
     workers = int(cfg.get("train", {}).get("workers", 0))
@@ -646,6 +658,7 @@ def main() -> None:
                         "rng_state": save_rng_state(),
                         "solver_strength": solver_strength,
                         "config": cfg,
+                        "config_hash": compute_config_hash(cfg),
                         "best_mae": best_mae,
                         "epochs_without_improvement": epochs_without_improvement,
                         "git_commit": git_commit,
@@ -691,6 +704,7 @@ def main() -> None:
                 "rng_state": save_rng_state(),
                 "solver_strength": solver_strength,
                 "config": cfg,
+                "config_hash": compute_config_hash(cfg),
                 "best_mae": best_mae,
                 "epochs_without_improvement": epochs_without_improvement,
                 "git_commit": git_commit,

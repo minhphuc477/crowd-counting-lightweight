@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 ALLOWED_TOP_LEVEL = {
@@ -17,6 +19,10 @@ ALLOWED_DATA_KEYS = {
     "val_manifest",
     "crop_size",
     "scale_range",
+    "hflip_prob",
+    "brightness_jitter",
+    "contrast_jitter",
+    "data_root",
 }
 
 ALLOWED_MODEL_KEYS = {
@@ -183,8 +189,17 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
     "data": [
         "crop_size",
         "scale_range",
+        "hflip_prob",
+        "brightness_jitter",
+        "contrast_jitter",
     ],
 }
+
+
+def compute_config_hash(cfg: dict[str, Any]) -> str:
+    """Compute a deterministic SHA256 digest of the configuration dictionary."""
+    normalized_json = json.dumps(cfg, sort_keys=True, default=str)
+    return hashlib.sha256(normalized_json.encode("utf-8")).hexdigest()
 
 
 def _are_values_compatible(v1: Any, v2: Any) -> bool:
@@ -199,8 +214,20 @@ def _are_values_compatible(v1: Any, v2: Any) -> bool:
     return str(v1) == str(v2)
 
 
-def validate_resume_compatibility(ckpt_cfg: dict[str, Any], incoming_cfg: dict[str, Any]) -> None:
-    """Validate that incoming config matches checkpoint across all method-critical fields."""
+def validate_resume_compatibility(
+    ckpt_cfg: dict[str, Any],
+    incoming_cfg: dict[str, Any],
+    ckpt_hash: str | None = None,
+    incoming_hash: str | None = None,
+) -> None:
+    """Validate that incoming config matches checkpoint across all method-critical fields and hash."""
+    if ckpt_hash is not None and incoming_hash is not None:
+        if ckpt_hash != incoming_hash:
+            raise ValueError(
+                f"Resume config hash mismatch: checkpoint SHA256 {ckpt_hash} != incoming SHA256 {incoming_hash}. "
+                f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
+            )
+
     if not isinstance(ckpt_cfg, dict) or not isinstance(incoming_cfg, dict):
         return
 
