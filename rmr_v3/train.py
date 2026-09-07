@@ -287,6 +287,8 @@ def main() -> None:
             data_root=cfg["data"].get("data_root"),
         )
 
+    run_config_hash = compute_config_hash(cfg)
+
     resume_ckpt = None
     if args.resume:
         try:
@@ -297,7 +299,7 @@ def main() -> None:
             resume_ckpt.get("config", {}),
             cfg,
             ckpt_hash=resume_ckpt.get("config_hash"),
-            incoming_hash=compute_config_hash(cfg),
+            incoming_hash=run_config_hash,
         )
 
     out_dir = Path(cfg["output_dir"])
@@ -658,7 +660,7 @@ def main() -> None:
                         "rng_state": save_rng_state(),
                         "solver_strength": solver_strength,
                         "config": cfg,
-                        "config_hash": compute_config_hash(cfg),
+                        "config_hash": run_config_hash,
                         "best_mae": best_mae,
                         "epochs_without_improvement": epochs_without_improvement,
                         "git_commit": git_commit,
@@ -704,7 +706,7 @@ def main() -> None:
                 "rng_state": save_rng_state(),
                 "solver_strength": solver_strength,
                 "config": cfg,
-                "config_hash": compute_config_hash(cfg),
+                "config_hash": run_config_hash,
                 "best_mae": best_mae,
                 "epochs_without_improvement": epochs_without_improvement,
                 "git_commit": git_commit,

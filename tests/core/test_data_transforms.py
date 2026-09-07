@@ -12,6 +12,7 @@ from rmr_core.data import (
     CrowdManifestDataset,
     compute_manifest_density,
     rasterize_points,
+    resolve_manifest_path,
     train_transform,
 )
 from rmr_v2.losses import block_sum_2d, flat_dm16_loss
@@ -374,4 +375,47 @@ def test_resume_flow_with_derived_init_m0(tmp_path: Path):
 
     assert saved_hash == incoming_hash
     validate_resume_compatibility(run_cfg, incoming_cfg, ckpt_hash=saved_hash, incoming_hash=incoming_hash)
+
+
+def test_manifest_resolution_via_data_root(tmp_path: Path):
+    """Manifest path should resolve seamlessly whether absolute or relative to data_root across Dataset, density, and hash."""
+    data_dir = tmp_path / "dataset"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    img_path = data_dir / "sample.jpg"
+    img = Image.new("RGB", (64, 64), (128, 128, 128))
+    img.save(img_path)
+
+    manifest_file = data_dir / "train_relative.jsonl"
+    manifest_file.write_text(
+        json.dumps({"image": "sample.jpg", "points": [[10.0, 20.0]], "id": "s1"}) + "\n",
+        encoding="utf-8",
+    )
+
+    # 1. Direct resolution via resolve_manifest_path
+    resolved = resolve_manifest_path("train_relative.jsonl", data_root=data_dir)
+    assert resolved is not None
+    assert resolved.samefile(manifest_file)
+
+    # 2. CrowdManifestDataset instantiation with relative manifest + data_root
+    ds = CrowdManifestDataset("train_relative.jsonl", train=False, data_root=data_dir)
+    assert len(ds) == 1
+    sample = ds[0]
+    assert sample["image"].shape == (3, 64, 64)
+    assert sample["id"] == "s1"
+
+    # 3. compute_manifest_density with relative manifest + data_root
+    density = compute_manifest_density("train_relative.jsonl", output_stride=4, data_root=data_dir)
+    # Stride 4 on 64x64: 16*16 = 256 cells. 1 point -> 1/256
+    assert pytest.approx(density, rel=1e-5) == 1.0 / 256.0
+
+    # 4. Trajectory config hashing with relative manifest + data_root
+    cfg = {
+        "seed": 42,
+        "model": {"output_stride": 4},
+        "data": {"train_manifest": "train_relative.jsonl", "data_root": str(data_dir)},
+    }
+    traj = extract_trajectory_config(cfg)
+    assert traj["data"]["train_manifest_name"] == "train_relative.jsonl"
+    assert traj["data"]["train_manifest_sha256"] == compute_file_sha256(manifest_file)
 

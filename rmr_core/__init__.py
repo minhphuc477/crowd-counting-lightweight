@@ -8,6 +8,7 @@ from .data import (
     compute_manifest_density,
     normalize_image,
     rasterize_points,
+    resolve_manifest_path,
     train_transform,
 )
 from .evaluation import evaluate_dataset, predict_tiled, save_evaluation_artifacts
@@ -49,6 +50,7 @@ __all__ = [
     "compute_manifest_density",
     "normalize_image",
     "rasterize_points",
+    "resolve_manifest_path",
     "train_transform",
     "evaluate_dataset",
     "predict_tiled",

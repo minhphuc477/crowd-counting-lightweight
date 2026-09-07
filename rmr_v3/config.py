@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from rmr_core.data import resolve_manifest_path
+
 ALLOWED_TOP_LEVEL = {
     "seed",
     "output_dir",
@@ -233,31 +235,6 @@ def compute_file_sha256(path: Path | str) -> str:
         while chunk := f.read(65536):
             h.update(chunk)
     return h.hexdigest()
-
-
-def resolve_manifest_path(manifest_val: str | Path, data_root: str | Path | None = None) -> Path | None:
-    """Resolve manifest file on local filesystem.
-
-    Tries in order:
-    1. Direct path (manifest_val)
-    2. Relative to data_root (if provided): data_root / manifest_val
-    3. data_root / manifest_val.name
-    4. Fallback to repo 'data/' directory (handles cross-environment simulation)
-    """
-    p = Path(manifest_val)
-    if p.is_file():
-        return p
-    if data_root is not None:
-        p_data = Path(data_root) / p
-        if p_data.is_file():
-            return p_data
-        p_name = Path(data_root) / p.name
-        if p_name.is_file():
-            return p_name
-    p_repo_data = Path("data") / p.name
-    if p_repo_data.is_file():
-        return p_repo_data
-    return None
 
 
 def _canonicalize_value(val: Any) -> Any:
