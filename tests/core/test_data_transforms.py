@@ -419,3 +419,81 @@ def test_manifest_resolution_via_data_root(tmp_path: Path):
     assert traj["data"]["train_manifest_name"] == "train_relative.jsonl"
     assert traj["data"]["train_manifest_sha256"] == compute_file_sha256(manifest_file)
 
+
+def test_adhoc_split_manifest_rejected_by_dataset():
+    """CrowdManifestDataset must strictly reject ad-hoc split manifests."""
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        CrowdManifestDataset("data/sha_a_train.jsonl", train=True)
+
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        CrowdManifestDataset("data/sha_a_val.jsonl", train=False)
+
+
+def test_adhoc_split_manifest_rejected_by_config():
+    """validate_v3_config must strictly reject ad-hoc split manifests in data section."""
+    from rmr_v3.config import validate_v3_config
+
+    bad_train_cfg = {
+        "seed": 42,
+        "data": {"train_manifest": "data/sha_a_train.jsonl", "val_manifest": "data/sha_a_test.jsonl"},
+    }
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        validate_v3_config(bad_train_cfg)
+
+    bad_val_cfg = {
+        "seed": 42,
+        "data": {"train_manifest": "data/sha_a_train_all.jsonl", "val_manifest": "data/sha_a_val.jsonl"},
+    }
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        validate_v3_config(bad_val_cfg)
+
+
+def test_adhoc_split_manifest_rejected_by_density():
+    """compute_manifest_density must strictly reject ad-hoc split manifests."""
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        compute_manifest_density("data/sha_a_train.jsonl")
+
+    with pytest.raises(ValueError, match="Zero Ad-hoc Split Policy"):
+        compute_manifest_density("data/sha_a_val.jsonl")
+
+
+def test_canonical_sha_a_manifests_sample_count():
+    """ShanghaiTech Part A canonical manifests must contain exactly 300 (train) and 182 (test) samples."""
+    train_manifest = Path("data/sha_a_train_all.jsonl")
+    test_manifest = Path("data/sha_a_test.jsonl")
+
+    assert train_manifest.exists(), "data/sha_a_train_all.jsonl must exist"
+    assert test_manifest.exists(), "data/sha_a_test.jsonl must exist"
+
+    train_lines = [x for x in train_manifest.read_text(encoding="utf-8").splitlines() if x.strip()]
+    test_lines = [x for x in test_manifest.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    assert len(train_lines) == 300, f"sha_a_train_all.jsonl must have exactly 300 samples, got {len(train_lines)}"
+    assert len(test_lines) == 182, f"sha_a_test.jsonl must have exactly 182 samples, got {len(test_lines)}"
+
+
+def test_canonical_sha_a_dataset_length_guard(tmp_path: Path):
+    """CrowdManifestDataset must reject manifests claiming to be sha_a_train_all / sha_a_test if sample counts mismatch."""
+    img_path = tmp_path / "img.jpg"
+    Image.new("RGB", (32, 32)).save(img_path)
+
+    # Incomplete train set (only 2 samples instead of 300)
+    fake_train = tmp_path / "sha_a_train_all.jsonl"
+    fake_train.write_text(
+        json.dumps({"image": str(img_path), "points": []}) + "\n" +
+        json.dumps({"image": str(img_path), "points": []}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must contain exactly 300 images"):
+        CrowdManifestDataset(fake_train, train=True)
+
+    # Incomplete test set (only 1 sample instead of 182)
+    fake_test = tmp_path / "sha_a_test.jsonl"
+    fake_test.write_text(
+        json.dumps({"image": str(img_path), "points": []}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must contain exactly 182 images"):
+        CrowdManifestDataset(fake_test, train=False)
+
+

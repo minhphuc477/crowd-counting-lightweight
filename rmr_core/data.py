@@ -171,8 +171,18 @@ class CrowdManifestDataset(Dataset):
         contrast_jitter: float = 0.0,
         data_root: str | Path | None = None,
     ):
+        manifest_str = str(manifest).replace("\\", "/")
+        if manifest_str.endswith("sha_a_train.jsonl") or manifest_str.endswith("sha_a_val.jsonl"):
+            raise ValueError(
+                f"Ad-hoc split manifest '{manifest}' has been deleted and is strictly forbidden "
+                f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples) "
+                f"and 'data/sha_a_test.jsonl' (182 samples)."
+            )
+
         resolved_manifest = resolve_manifest_path(manifest, data_root=data_root)
         self.manifest = resolved_manifest if resolved_manifest is not None else Path(manifest)
+        if not self.manifest.exists():
+            raise FileNotFoundError(f"Manifest not found: {self.manifest} (requested '{manifest}')")
         self.root = Path(data_root) if data_root is not None else self.manifest.parent
         self.train = train
         self.output_stride = int(output_stride)
@@ -183,6 +193,16 @@ class CrowdManifestDataset(Dataset):
         self.contrast_jitter = float(contrast_jitter)
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
+
+        # Enforce canonical benchmark partitions for ShanghaiTech Part A
+        if self.manifest.name == "sha_a_train_all.jsonl" and len(self.items) != 300:
+            raise ValueError(
+                f"ShanghaiTech Part A train partition must contain exactly 300 images, got {len(self.items)}."
+            )
+        if self.manifest.name == "sha_a_test.jsonl" and len(self.items) != 182:
+            raise ValueError(
+                f"ShanghaiTech Part A test partition must contain exactly 182 images, got {len(self.items)}."
+            )
 
     def __len__(self) -> int:
         return len(self.items)
@@ -247,6 +267,13 @@ def compute_manifest_density(
     m0 = total_valid_points / total_stride4_cells.
     Points outside [0, w) x [0, h) are filtered identically to rasterize_points.
     """
+    manifest_str = str(manifest).replace("\\", "/")
+    if manifest_str.endswith("sha_a_train.jsonl") or manifest_str.endswith("sha_a_val.jsonl"):
+        raise ValueError(
+            f"Ad-hoc split manifest '{manifest}' has been deleted and is strictly forbidden "
+            f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples)."
+        )
+
     resolved_manifest = resolve_manifest_path(manifest, data_root=data_root)
     manifest_path = resolved_manifest if resolved_manifest is not None else Path(manifest)
     if not manifest_path.exists():

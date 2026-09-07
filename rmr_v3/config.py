@@ -125,6 +125,17 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                         f"Unknown config key '{k}' in section '{section}'. Allowed keys: {sorted(allowed)}"
                     )
 
+    # Validate data manifest invariants
+    d_cfg = cfg.get("data", {})
+    if isinstance(d_cfg, dict):
+        for mk in ("train_manifest", "val_manifest"):
+            m_val = str(d_cfg.get(mk, "")).replace("\\", "/")
+            if m_val.endswith("sha_a_train.jsonl") or m_val.endswith("sha_a_val.jsonl"):
+                raise ValueError(
+                    f"Ad-hoc split manifest '{m_val}' in data.{mk} is strictly forbidden under the Zero Ad-hoc Split Policy! "
+                    f"For ShanghaiTech Part A, use 'data/sha_a_train_all.jsonl' (300 samples) and 'data/sha_a_test.jsonl' (182 samples)."
+                )
+
     # Validate logical bounds and alias collisions
     m_cfg = cfg.get("model", {})
     if isinstance(m_cfg, dict):

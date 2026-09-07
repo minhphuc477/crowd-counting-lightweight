@@ -1,7 +1,0 @@
-model_id,variant,params,epochs,best_epoch,val_mae,val_rmse,val_nae,val_bias,val_median_ae,val_p90_ae,val_p95_ae,val_max_ae,status
-B0,direct,97682,1000,869,95.72,137.73,0.1966,15.88,70.66,209.79,326.43,403.93,COMPLETED
-B1,region_loss,97682,1000,529,87.82,121.19,0.1823,-9.52,53.70,210.19,257.82,326.10,COMPLETED
-B2,region_aux,101714,1000,509,87.74,121.13,0.1932,-21.15,62.27,209.69,229.09,409.63,COMPLETED
-B3a,local_refine,100690,1000,719,84.50,116.01,0.1820,-15.12,55.20,226.23,232.31,311.80,COMPLETED
-B5-P,rmr_projected_t2,101714,1000,589,79.38,106.17,0.1907,-1.36,68.25,156.23,226.31,285.71,COMPLETED
-B3b,learned_project,104756,62,49,127.66,230.65,0.2055,-79.75,,,,,RUNNING (Epoch 62)

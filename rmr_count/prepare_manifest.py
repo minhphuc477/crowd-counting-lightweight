@@ -80,6 +80,13 @@ def main() -> None:
     ap.add_argument("--relative-to", type=Path, default=None, help="Root dir to make image paths relative to")
     args = ap.parse_args()
 
+    out_name = args.out.name
+    if out_name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
+        raise ValueError(
+            f"Outputting ad-hoc split manifest '{out_name}' is strictly forbidden under the Zero Ad-hoc Split Policy! "
+            f"For ShanghaiTech Part A, use 'sha_a_train_all.jsonl' (300 samples) or 'sha_a_test.jsonl' (182 samples)."
+        )
+
     images = sorted([p for p in args.images.rglob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png"}])
     args.out.parent.mkdir(parents=True, exist_ok=True)
     rel_root = args.relative_to.resolve() if args.relative_to else args.out.parent.resolve()
