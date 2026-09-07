@@ -80,7 +80,7 @@ train:
   epochs: 1000
   warmup_epochs: 5
 
-  eval_every: 10
+  eval_every: 5
 
   grad_clip: 500.0
   amp: true
