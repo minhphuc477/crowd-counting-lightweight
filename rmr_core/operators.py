@@ -80,6 +80,51 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     return br - tr - bl + tl
 
 
+def continuous_prefix_eval(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """Evaluate padded prefix sum table at continuous coordinates via exact 2-D bilinear interpolation.
+
+    prefix: [B, C, H+1, W+1]
+    y, x: [M] float coordinates on the feature lattice [0, H] x [0, W]
+    returns: [B, C, M] interpolated prefix values
+    """
+    b, c, hp, wp = prefix.shape
+    h_max = float(hp - 1)
+    w_max = float(wp - 1)
+
+    y_clamped = y.clamp(0.0, h_max)
+    x_clamped = x.clamp(0.0, w_max)
+
+    r = torch.floor(y_clamped).long().clamp(0, hp - 2)
+    c_idx = torch.floor(x_clamped).long().clamp(0, wp - 2)
+
+    u = (y_clamped - r.float()).view(1, 1, -1)
+    v = (x_clamped - c_idx.float()).view(1, 1, -1)
+
+    p00 = _gather_prefix(prefix, r, c_idx)
+    p10 = _gather_prefix(prefix, r + 1, c_idx)
+    p01 = _gather_prefix(prefix, r, c_idx + 1)
+    p11 = _gather_prefix(prefix, r + 1, c_idx + 1)
+
+    return (1.0 - u) * (1.0 - v) * p00 + u * (1.0 - v) * p10 + (1.0 - u) * v * p01 + u * v * p11
+
+
+def fractional_box_sum(prefix: torch.Tensor, float_boxes: torch.Tensor) -> torch.Tensor:
+    """Exact continuous 2-D integral over continuous bounding boxes via continuous prefix evaluation.
+
+    prefix: [B, C, H+1, W+1]
+    float_boxes: [M, 4] with (y1, x1, y2, x2) in continuous feature coordinates
+    returns: [B, C, M] continuous area integral
+    """
+    if float_boxes.ndim != 2 or float_boxes.shape[-1] != 4:
+        raise ValueError("float_boxes must have shape [M, 4]")
+    y1, x1, y2, x2 = float_boxes.unbind(dim=-1)
+    br = continuous_prefix_eval(prefix, y2, x2)
+    tr = continuous_prefix_eval(prefix, y1, x2)
+    bl = continuous_prefix_eval(prefix, y2, x1)
+    tl = continuous_prefix_eval(prefix, y1, x1)
+    return br - tr - bl + tl
+
+
 def regional_sum(
     x: torch.Tensor,
     boxes: torch.Tensor,
@@ -243,10 +288,67 @@ def region_geometry(
 
 def region_average_features(features: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     """Average pooled region features: [B,C,H,W] -> [B,M,C]."""
-    sums = regional_sum(features, boxes)  # [B,C,M]
-    area = ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).to(features.dtype)
+    sums = regional_sum(features, boxes, out_dtype=torch.float32)  # [B,C,M]
+    area = ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).float()
     avg = sums / area.view(1, 1, -1).clamp_min(1.0)
-    return avg.transpose(1, 2).contiguous()
+    return avg.transpose(1, 2).contiguous().to(features.dtype)
+
+
+def region_mean_std_features(
+    feature: torch.Tensor,
+    boxes: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Extract both spatial mean and standard deviation over bounding boxes in FP32."""
+    f32 = feature.float()
+    mean = region_average_features(f32, boxes)
+    mean_sq = region_average_features(f32.square(), boxes)
+    var = (mean_sq - mean.square()).clamp_min(0.0)
+    std = torch.sqrt(var + eps)
+    return torch.cat([mean, std], dim=-1).to(feature.dtype)
+
+
+def fractional_region_average_features(
+    features: torch.Tensor,
+    float_boxes: torch.Tensor,
+) -> torch.Tensor:
+    """Average pooled region features using exact continuous fractional overlap.
+
+    features: [B, C, H, W]
+    float_boxes: [M, 4] with (y1, x1, y2, x2) in continuous coordinates on the features grid.
+    returns: [B, M, C] in features.dtype
+    """
+    if float_boxes.ndim != 2 or float_boxes.shape[-1] != 4:
+        raise ValueError("float_boxes must have shape [M, 4]")
+
+    h, w = features.shape[-2:]
+    y1, x1, y2, x2 = float_boxes.float().unbind(dim=-1)
+    y1_c = y1.clamp(0.0, float(h))
+    y2_c = y2.clamp(0.0, float(h))
+    x1_c = x1.clamp(0.0, float(w))
+    x2_c = x2.clamp(0.0, float(w))
+
+    clamped_boxes = torch.stack([y1_c, x1_c, y2_c, x2_c], dim=-1)
+    pref = prefix2d(features, preserve_fp32=True)
+    sums = fractional_box_sum(pref, clamped_boxes)  # [B, C, M] in fp32
+
+    area = ((y2_c - y1_c) * (x2_c - x1_c)).clamp_min(1e-6)  # [M]
+    avg = sums / area.view(1, 1, -1)
+    return avg.transpose(1, 2).contiguous().to(features.dtype)
+
+
+def fractional_region_mean_std_features(
+    feature: torch.Tensor,
+    float_boxes: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Extract both spatial mean and standard deviation over continuous boxes in FP32."""
+    f32 = feature.float()
+    mean = fractional_region_average_features(f32, float_boxes)
+    mean_sq = fractional_region_average_features(f32.square(), float_boxes)
+    var = (mean_sq - mean.square()).clamp_min(0.0)
+    std = torch.sqrt(var + eps)
+    return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 
 def center_scatter(

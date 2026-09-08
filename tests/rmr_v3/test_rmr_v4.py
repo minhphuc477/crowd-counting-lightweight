@@ -3,7 +3,13 @@ import pytest
 import torch
 import torch.nn as nn
 
-from rmr_core.operators import build_multiscale_regions
+from rmr_core.operators import (
+    build_multiscale_regions,
+    fractional_box_sum,
+    fractional_region_average_features,
+    fractional_region_mean_std_features,
+    prefix2d,
+)
 from rmr_v2.losses import flat_dm16_loss, flat_dm_block_loss, hierarchical_dm_loss
 from rmr_v3.config import validate_v3_config
 from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
@@ -399,3 +405,75 @@ def test_train_config_bounds_guards():
     # patience < 0
     with pytest.raises(ValueError, match="train.patience must be >= 0"):
         validate_v3_config({**base_cfg, "train": {"patience": -1}})
+
+
+def test_unaligned_boundary_box_fractional_overlap():
+    """Verify unaligned boundary box [143, 159]_{P4} maps to continuous exact coordinates.
+
+    On P8 (stride 8): coordinates are [71.5, 79.5], continuous length is exactly 8.0 cells.
+    Discrete enclosing box expansion would have covered 9 cells [71, 80].
+    Continuous fractional pooling integrates exactly:
+        0.5 * cell_71 + sum(cells 72..78) + 0.5 * cell_79
+    with area = 8.0 * 8.0 = 64.0.
+    """
+    torch.manual_seed(42)
+    # Create P8 feature map
+    feat_p8 = torch.randn(2, 16, 80, 80)
+    # P4 box [143, 143, 159, 159] mapped to P8 (stride 8): scale = 4/8 = 0.5
+    float_box_p8 = torch.tensor([[71.5, 71.5, 79.5, 79.5]])
+
+    # Fractional pooled result
+    pooled_p8 = fractional_region_average_features(feat_p8, float_box_p8)  # [2, 1, 16]
+
+    # Manual Riemann cell-by-cell weighted average
+    wy = torch.tensor([0.5] + [1.0] * 7 + [0.5])
+    wx = torch.tensor([0.5] + [1.0] * 7 + [0.5])
+    W = wy.unsqueeze(1) * wx.unsqueeze(0)  # [9, 9]
+    patch_p8 = feat_p8[:, :, 71:80, 71:80]  # [2, 16, 9, 9]
+    expected_p8 = (patch_p8 * W).sum(dim=(-2, -1), keepdim=True) / 64.0  # [2, 16, 1, 1]
+
+    torch.testing.assert_close(
+        pooled_p8.squeeze(1),
+        expected_p8.squeeze(-1).squeeze(-1),
+        atol=5e-5,
+        rtol=1e-5,
+    )
+
+    # On P16 (stride 16): coordinates are [35.75, 39.75], continuous length is exactly 4.0 cells.
+    # Discrete enclosing box expansion would have covered 5 cells [35, 40].
+    feat_p16 = torch.randn(2, 16, 40, 40)
+    float_box_p16 = torch.tensor([[35.75, 35.75, 39.75, 39.75]])
+    pooled_p16 = fractional_region_average_features(feat_p16, float_box_p16)
+
+    wy16 = torch.tensor([0.25, 1.0, 1.0, 1.0, 0.75])
+    wx16 = torch.tensor([0.25, 1.0, 1.0, 1.0, 0.75])
+    W16 = wy16.unsqueeze(1) * wx16.unsqueeze(0)
+    patch_p16 = feat_p16[:, :, 35:40, 35:40]
+    expected_p16 = (patch_p16 * W16).sum(dim=(-2, -1), keepdim=True) / 16.0
+
+    torch.testing.assert_close(
+        pooled_p16.squeeze(1),
+        expected_p16.squeeze(-1).squeeze(-1),
+        atol=5e-5,
+        rtol=1e-5,
+    )
+
+
+def test_fractional_mean_std_exactness_and_grads():
+    """Verify fractional mean_std handles constant fields and supports finite gradients."""
+    feat = torch.ones(2, 8, 30, 30) * 7.5
+    box = torch.tensor([[5.5, 5.5, 15.5, 15.5]])
+    out = fractional_region_mean_std_features(feat, box, eps=1e-8)
+
+    assert out.shape == (2, 1, 16)
+    mean = out[:, :, :8]
+    std = out[:, :, 8:]
+    torch.testing.assert_close(mean, torch.ones_like(mean) * 7.5)
+    assert (std < 1e-3).all()
+
+    # Gradient flow test
+    feat_grad = torch.randn(1, 8, 30, 30, requires_grad=True)
+    out_grad = fractional_region_mean_std_features(feat_grad, box)
+    loss = out_grad.sum()
+    loss.backward()
+    assert feat_grad.grad is not None and torch.isfinite(feat_grad.grad).all()

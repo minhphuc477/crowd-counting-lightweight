@@ -57,8 +57,20 @@ foreach ($run in $runs) {
     Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Yellow
 
     # Training step: check if already completed with valid artifacts
+    $artifactsValid = $false
     if ((Test-Path $summaryJson) -and (Test-Path $bestCkpt)) {
-        Write-Host "  [SKIP] Evaluation summary and checkpoint exist at $outDir. Skipping training." -ForegroundColor Green
+        try {
+            $sumContent = Get-Content $summaryJson -Raw | ConvertFrom-Json
+            if ($sumContent -and (Get-Item $bestCkpt).Length -gt 1000) {
+                $artifactsValid = $true
+            }
+        } catch {
+            $artifactsValid = $false
+        }
+    }
+
+    if ($artifactsValid) {
+        Write-Host "  [SKIP] Verified valid evaluation summary and checkpoint at $outDir. Skipping training." -ForegroundColor Green
     } else {
         $trainArgs = @("-m", $trainMod, "--config", $cfg)
         $lastCkpt = "$outDir/last.pt"
@@ -76,7 +88,16 @@ foreach ($run in $runs) {
     }
 
     # Evaluation step: evaluate best_val_mae.pt on test set
-    if (-not (Test-Path $summaryJson)) {
+    $evalValid = $false
+    if (Test-Path $summaryJson) {
+        try {
+            $sumContent = Get-Content $summaryJson -Raw | ConvertFrom-Json
+            if ($sumContent) { $evalValid = $true }
+        } catch {
+            $evalValid = $false
+        }
+    }
+    if (-not $evalValid) {
         if (-not (Test-Path $bestCkpt)) {
             Write-Error "Checkpoint not found: $bestCkpt"
             exit 1

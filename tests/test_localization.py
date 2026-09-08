@@ -113,13 +113,18 @@ def test_otm_cardinality_conservation():
 
 
 def test_occupancy_analysis(tmp_path: Path):
+    from PIL import Image
+
+    img_file = tmp_path / "dummy.jpg"
+    Image.new("RGB", (64, 64), color=(0, 0, 0)).save(img_file)
+
     manifest_file = tmp_path / "test_manifest.jsonl"
     # Create mock manifest with stride 4:
     # Cell 0,0: 3 points
     # Cell 1,1: 1 point
     data = [
         {
-            "image": "dummy.jpg",
+            "image": str(img_file),
             "points": [
                 [0.5, 0.5],
                 [1.0, 1.0],
@@ -144,7 +149,7 @@ def test_empty_gt_manifest(tmp_path: Path):
     from rmr_count.localization.oracle_cell import evaluate_oracle_cell_centers
     from rmr_count.localization.otm import evaluate_oracle_otm
 
-    # 1. Non-existent image must fail hard with FileNotFoundError
+    # 1. Non-existent image must fail hard with FileNotFoundError across all functions
     missing_manifest = tmp_path / "missing_img_manifest.jsonl"
     missing_manifest.write_text(
         json.dumps({"image": "nonexistent_empty.jpg", "points": [], "id": "0"}),
@@ -152,6 +157,10 @@ def test_empty_gt_manifest(tmp_path: Path):
     )
     with pytest.raises(FileNotFoundError, match="Image not found"):
         evaluate_oracle_cell_centers(missing_manifest, stride=4)
+    with pytest.raises(FileNotFoundError, match="Image not found"):
+        compute_manifest_occupancy(missing_manifest, stride=4)
+    with pytest.raises(FileNotFoundError, match="Image not found"):
+        evaluate_oracle_otm(missing_manifest, stride=4)
 
     # 2. When valid empty image exists
     img_file = tmp_path / "empty_real.jpg"

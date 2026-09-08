@@ -14,7 +14,10 @@ from rmr_core.necks import AdditiveFPNNeck
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
+    fractional_region_average_features,
+    fractional_region_mean_std_features,
     region_average_features,
+    region_mean_std_features,
     regional_adjoint,
     regional_sum,
 )
@@ -129,18 +132,6 @@ def _map_boxes_between_grids(
     return torch.stack([y1, x1, y2, x2], dim=-1).long()
 
 
-def region_mean_std_features(
-    feature: torch.Tensor,
-    boxes: torch.Tensor,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    """Extract both spatial mean and standard deviation over bounding boxes in FP32."""
-    f32 = feature.float()
-    mean = region_average_features(f32, boxes)
-    mean_sq = region_average_features(f32.square(), boxes)
-    var = (mean_sq - mean.square()).clamp_min(0.0)
-    std = torch.sqrt(var + eps)
-    return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 
 class ProbabilisticRegionalEvidenceHead(nn.Module):
@@ -258,12 +249,18 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
             if self.native_scale_pooling and feat.shape[-2:] != src_hw:
                 dst_stride = stride_by_sid.get(sid, 16)
-                boxes_level = _map_boxes_to_stride(
-                    boxes4,
-                    src_stride=4,
-                    dst_stride=dst_stride,
-                    dst_hw=feat.shape[-2:],
-                )
+                scale = 4.0 / float(dst_stride)
+                float_boxes = boxes4.float() * scale
+                if self.regional_feature_stats == "mean_std":
+                    pooled = fractional_region_mean_std_features(
+                        feat,
+                        float_boxes,
+                    )
+                else:
+                    pooled = fractional_region_average_features(
+                        feat,
+                        float_boxes,
+                    )
             else:
                 if feat.shape[-2:] != src_hw:
                     feat = F.interpolate(
@@ -274,16 +271,16 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                     )
                 boxes_level = boxes4
 
-            if self.regional_feature_stats == "mean_std":
-                pooled = region_mean_std_features(
-                    feat,
-                    boxes_level,
-                )
-            else:
-                pooled = region_average_features(
-                    feat,
-                    boxes_level,
-                )
+                if self.regional_feature_stats == "mean_std":
+                    pooled = region_mean_std_features(
+                        feat,
+                        boxes_level,
+                    )
+                else:
+                    pooled = region_average_features(
+                        feat,
+                        boxes_level,
+                    )
 
             ms = pooled.shape[1]
 

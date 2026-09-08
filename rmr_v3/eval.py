@@ -189,6 +189,8 @@ def main() -> None:
 
     print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
 
+    density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
+
     rows, summary = evaluate_dataset(
         model=model,
         loader=loader,
@@ -198,6 +200,7 @@ def main() -> None:
         forward_kwargs={"uniform_reliability": uniform_reliability},
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,
+        density_bins=density_bins,
     )
 
     corrs = compute_reliability_correlations(diag_rows)
