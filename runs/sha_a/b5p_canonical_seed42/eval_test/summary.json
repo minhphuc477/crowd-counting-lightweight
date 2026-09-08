@@ -1,0 +1,47 @@
+{
+  "MAE": 94.82921814132523,
+  "RMSE": 166.88058890718958,
+  "NAE": 0.23769201464669829,
+  "Bias": 11.590731316870386,
+  "MedianAE": 50.611724853515625,
+  "P90AE": 205.11428222656252,
+  "P95AE": 300.79552040100066,
+  "MaxAE": 1161.4051208496094,
+  "GAME0": 94.82921902315178,
+  "GAME1": 113.52154306780646,
+  "GAME2": 133.6922228898535,
+  "GAME3": 167.04397462475833,
+  "mae": 94.82921814132523,
+  "rmse": 166.88058890718958,
+  "nae": 0.23769201464669829,
+  "bias": 11.590731316870386,
+  "mae_ci95": [
+    76.41562232132797,
+    115.0936357361929
+  ],
+  "rmse_ci95": [
+    116.22623694486214,
+    215.7488604590839
+  ],
+  "mae_sparse": 14.257205418178014,
+  "mae_moderate": 69.75133863345597,
+  "mae_dense": 177.41727347995925,
+  "n_sparse": 7,
+  "n_moderate": 129,
+  "n_dense": 46,
+  "direct_tiled_discrepancy_mean": 14.696133875584865,
+  "direct_tiled_discrepancy_max": 132.88397216796875,
+  "direct_tiled_normalized_discrepancy_mean": 0.03829170743016085,
+  "direct_tiled_h0_discrepancy_mean": 21.94301274058583,
+  "direct_tiled_h0_normalized_discrepancy_mean": 0.05816827892953441,
+  "direct_tiled_discrepancy_ci95": [
+    12.263229137462574,
+    17.45692826260577
+  ],
+  "direct_tiled_normalized_discrepancy_ci95": [
+    0.0324964082589533,
+    0.044866547494593956
+  ],
+  "mean_abs_prediction_discrepancy": 14.696133875584865,
+  "mean_normalized_prediction_discrepancy": 0.03829170743016085
+}

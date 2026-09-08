@@ -1,0 +1,27 @@
+{
+  "comparison": "B5-P_Deterministic vs V3-B_RW",
+  "n_samples": 182,
+  "B5-P_Deterministic": {
+    "mae": 94.82921814132523,
+    "rmse": 166.88058890718958,
+    "wins": 74
+  },
+  "V3-B_RW": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 108
+  },
+  "ties": 0,
+  "delta_mae": 11.613743708683899,
+  "paired_difference": {
+    "definition": "|B5-P_Deterministic - GT| - |V3-B_RW - GT|",
+    "mean": 11.613743708683895,
+    "std": 107.62184979238235,
+    "bootstrap_95_ci": [
+      -3.4670105651184753,
+      28.023536734528594
+    ],
+    "p_value_paired_ttest": 0.14717488875516835,
+    "p_value_wilcoxon": 0.02608605274313666
+  }
+}

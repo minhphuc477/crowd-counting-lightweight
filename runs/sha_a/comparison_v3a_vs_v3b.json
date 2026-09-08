@@ -1,0 +1,27 @@
+{
+  "comparison": "V3-A_Uniform vs V3-B_RW",
+  "n_samples": 182,
+  "V3-A_Uniform": {
+    "mae": 96.35010457300878,
+    "rmse": 175.09254539669925,
+    "wins": 82
+  },
+  "V3-B_RW": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 100
+  },
+  "ties": 0,
+  "delta_mae": 13.134630140367449,
+  "paired_difference": {
+    "definition": "|V3-A_Uniform - GT| - |V3-B_RW - GT|",
+    "mean": 13.134630140367445,
+    "std": 68.29973541539687,
+    "bootstrap_95_ci": [
+      3.723982064802568,
+      23.23427097194796
+    ],
+    "p_value_paired_ttest": 0.010252263277256193,
+    "p_value_wilcoxon": 0.06957804290826179
+  }
+}

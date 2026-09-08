@@ -28,6 +28,10 @@ eval_smoke*.json
 stats_smoke*.json
 profile*.json
 
+# Large per-region diagnostic traces (>50MB)
+*reliability_diagnostics.csv
+*regional_trace.csv
+
 # IDE & System
 .vscode/
 .idea/

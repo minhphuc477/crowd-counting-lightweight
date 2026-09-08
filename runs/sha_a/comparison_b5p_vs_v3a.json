@@ -1,0 +1,27 @@
+{
+  "comparison": "B5-P_Deterministic vs V3-A_Uniform",
+  "n_samples": 182,
+  "B5-P_Deterministic": {
+    "mae": 94.82921814132523,
+    "rmse": 166.88058890718958,
+    "wins": 84
+  },
+  "V3-A_Uniform": {
+    "mae": 96.35010457300878,
+    "rmse": 175.09254539669925,
+    "wins": 98
+  },
+  "ties": 0,
+  "delta_mae": -1.5208864316835502,
+  "paired_difference": {
+    "definition": "|B5-P_Deterministic - GT| - |V3-A_Uniform - GT|",
+    "mean": -1.5208864316835509,
+    "std": 104.17199382390649,
+    "bootstrap_95_ci": [
+      -16.99356676353203,
+      13.740763763804997
+    ],
+    "p_value_paired_ttest": 0.8440786020681378,
+    "p_value_wilcoxon": 0.39489720590773136
+  }
+}
