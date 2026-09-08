@@ -64,8 +64,8 @@ loss:
   kappa_flat16: 20.0
   normalize_flat_dm16: true
 
-  # RMR-v4: Hierarchical Dirichlet-Multinomial allocation
-  use_hierarchical_dm: true
+  # RMR-v4: Multi-Scale Dirichlet-Multinomial allocation (formerly hierarchical DM)
+  use_multiscale_dm: true
   dm_block_sizes_px:
     - 16
     - 32

@@ -1,6 +1,6 @@
 seed: 42
 
-output_dir: runs/sha_a/rmr_v4_candidate_seed42
+output_dir: runs/sha_a/rmr_v4_multiscale_dm_seed42
 
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -49,9 +49,8 @@ model:
   detach_region_mean_in_solver: true
   detach_reliability_in_solver: true
 
-  # RMR-v4 Candidate: Native scale pooling + Mean/Std region stats
-  native_scale_pooling: true
-  regional_feature_stats: mean_std
+  native_scale_pooling: false
+  regional_feature_stats: mean
 
 loss:
   lambda_count: 1.0
@@ -65,7 +64,7 @@ loss:
   kappa_flat16: 20.0
   normalize_flat_dm16: true
 
-  # RMR-v4 Candidate: Multi-Scale Dirichlet-Multinomial allocation
+  # RMR-v4: Multi-Scale Dirichlet-Multinomial allocation across independent block partitions
   use_multiscale_dm: true
   dm_block_sizes_px:
     - 16

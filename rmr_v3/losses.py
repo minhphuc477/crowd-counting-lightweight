@@ -13,6 +13,7 @@ from rmr_v2.losses import (
     count_magnitude_loss,
     flat_dm16_loss,
     hierarchical_dm_loss,
+    multiscale_dm_loss,
     negative_binomial_nll_mean_dispersion,
 )
 
@@ -72,7 +73,8 @@ class RMRv3LossConfig:
     lambda_cell: float = 0.25
     lambda_region_nb: float = 0.20
 
-    use_hierarchical_dm: bool = False
+    use_multiscale_dm: bool = False
+    use_hierarchical_dm: bool = False  # backward compatibility alias
     dm_block_sizes_px: tuple[int, ...] = (16, 32, 64)
     dm_weights: tuple[float, ...] = (0.50, 0.30, 0.20)
     dm_kappas: tuple[float, ...] = (20.0, 20.0, 20.0)
@@ -84,6 +86,10 @@ class RMRv3LossConfig:
     normalize_flat_dm16: bool = True
 
     cell_beta: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.use_hierarchical_dm and not self.use_multiscale_dm:
+            self.use_multiscale_dm = True
 
 
 def compute_rmr_v3_losses(
@@ -118,8 +124,9 @@ def compute_rmr_v3_losses(
         dispersion=cfg.count_nb_dispersion,
     )
 
-    if cfg.use_hierarchical_dm:
-        loss_allocation = hierarchical_dm_loss(
+    dm_components: dict[int, torch.Tensor] = {}
+    if cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
+        loss_allocation, dm_components = multiscale_dm_loss(
             y0,
             target_float,
             block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
@@ -127,6 +134,7 @@ def compute_rmr_v3_losses(
             kappas=tuple(float(x) for x in cfg.dm_kappas),
             stride=4,
             normalize_by_count=cfg.normalize_flat_dm16,
+            return_components=True,
         )
     else:
         loss_allocation = flat_dm16_loss(
@@ -135,9 +143,12 @@ def compute_rmr_v3_losses(
             kappa=cfg.kappa_flat16,
             normalize_by_count=cfg.normalize_flat_dm16,
         )
+        dm_components[16] = loss_allocation
 
     losses["allocation"] = loss_allocation
     losses["flat_dm16"] = loss_allocation  # backward compatibility alias
+    for bs, val in dm_components.items():
+        losses[f"dm_{bs}"] = val
 
     losses["cell"] = balanced_smooth_l1(
         y,

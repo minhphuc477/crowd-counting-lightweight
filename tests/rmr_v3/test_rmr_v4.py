@@ -198,3 +198,142 @@ def test_v3b_exact_backward_compatibility():
     assert "y" in out and "y0" in out and "iterates" in out
     assert len(out["iterates"]) == 3
     assert out["y"].shape == (1, 1, 64, 64)
+
+
+def test_mean_std_fp32_numerical_precision_under_fp16():
+    """Verify that region_mean_std_features handles FP16 inputs without catastrophic cancellation."""
+    # Construct a high-mean, low-variance FP16 tensor
+    feat_f16 = (torch.randn(2, 32, 64, 64) * 0.01 + 100.0).half()
+    boxes = torch.tensor([[0, 0, 8, 8], [10, 10, 20, 20], [0, 0, 32, 32]])
+    out = region_mean_std_features(feat_f16, boxes, eps=1e-6)
+
+    assert out.dtype == torch.float16
+    assert torch.isfinite(out).all()
+    # Check that std values are strictly positive and plausible
+    std = out[:, :, 32:]
+    assert (std > 0).all()
+    assert (std < 1.0).all()  # Std of noise was ~0.01
+
+
+@pytest.mark.parametrize(
+    "src_hw, dst_hw",
+    [
+        ((158, 212), (40, 53)),  # Downsampled from 631x847 odd SHA-A image
+        ((129, 193), (33, 49)),  # Downsampled from 513x769
+        ((125, 126), (32, 32)),  # Downsampled from 499x501
+        ((64, 91), (16, 23)),    # P4 -> P16 odd stride mapping
+    ],
+)
+def test_native_box_mapping_odd_dimensions(src_hw, dst_hw):
+    """Test geometry preservation and lattice bounds for arbitrary non-divisible/odd feature shapes."""
+    src_h, src_w = src_hw
+    dst_h, dst_w = dst_hw
+
+    # Generate synthetic candidate boxes spanning corners, edges, small, and large extents
+    boxes = torch.tensor([
+        [0, 0, 8, 8],
+        [0, 0, 1, 1],
+        [src_h - 8, src_w - 8, src_h, src_w],
+        [src_h - 1, src_w - 1, src_h, src_w],
+        [0, 0, src_h, src_w],
+        [src_h // 4, src_w // 4, src_h // 2, src_w // 2],
+    ])
+
+    mapped = _map_boxes_between_grids(boxes, src_hw, dst_hw)
+
+    # 1. Non-empty bounding boxes
+    assert (mapped[:, 2] > mapped[:, 0]).all(), "All boxes must satisfy y2 > y1"
+    assert (mapped[:, 3] > mapped[:, 1]).all(), "All boxes must satisfy x2 > x1"
+
+    # 2. Strict lattice boundaries
+    assert (mapped[:, 0] >= 0).all() and (mapped[:, 1] >= 0).all()
+    assert (mapped[:, 2] <= dst_h).all() and (mapped[:, 3] <= dst_w).all()
+
+
+def test_native_pooling_full_image_odd_forward_pass():
+    """Verify end-to-end forward pass on an odd full-image dimension with native pooling and mean_std."""
+    cfg = RMRv3Config(
+        pretrained=False,
+        native_scale_pooling=True,
+        regional_feature_stats="mean_std",
+    )
+    model = RMRv3(cfg)
+    model.eval()
+
+    # 631x847 is an odd non-square image typical of SHA-A test set
+    x = torch.randn(1, 3, 631, 847)
+    with torch.no_grad():
+        out = model(x)
+
+    assert "y" in out and "y0" in out
+    assert torch.isfinite(out["y"]).all()
+    assert torch.isfinite(out["y0"]).all()
+    assert torch.isfinite(out["b_region"]).all()
+    assert torch.isfinite(out["region_dispersion"]).all()
+
+
+def test_multiscale_dm_components_and_alias():
+    """Verify multiscale_dm_loss returns correct granular components and hierarchical alias matches."""
+    from rmr_v2.losses import multiscale_dm_loss
+
+    pred = torch.rand(2, 64, 64) * 3.0
+    target = torch.randint(0, 4, (2, 64, 64)).float()
+
+    total, comps = multiscale_dm_loss(
+        pred,
+        target,
+        block_sizes_px=(16, 32, 64),
+        weights=(0.5, 0.3, 0.2),
+        kappas=(20.0, 20.0, 20.0),
+        stride=4,
+        return_components=True,
+    )
+
+    assert set(comps.keys()) == {16, 32, 64}
+    expected_total = 0.5 * comps[16] + 0.3 * comps[32] + 0.2 * comps[64]
+    torch.testing.assert_close(total, expected_total)
+
+    # Test alias produces exact same result
+    alias_total = hierarchical_dm_loss(
+        pred,
+        target,
+        block_sizes_px=(16, 32, 64),
+        weights=(0.5, 0.3, 0.2),
+        kappas=(20.0, 20.0, 20.0),
+        stride=4,
+    )
+    torch.testing.assert_close(total, alias_total)
+
+
+def test_strict_dm_config_guards():
+    """Verify validate_v3_config rejects invalid DM configurations."""
+    base_cfg = {
+        "seed": 42,
+        "model": {"output_stride": 4},
+        "loss": {"use_multiscale_dm": True},
+    }
+
+    # 1. Empty block sizes
+    cfg_empty = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": []}}
+    with pytest.raises(ValueError, match="cannot be empty"):
+        validate_v3_config(cfg_empty)
+
+    # 2. Block size non-positive
+    cfg_neg_b = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": [0, 32], "dm_weights": [0.5, 0.5], "dm_kappas": [20.0, 20.0]}}
+    with pytest.raises(ValueError, match="must be positive integers"):
+        validate_v3_config(cfg_neg_b)
+
+    # 3. Block size not divisible by output_stride (4)
+    cfg_indivisible = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": [18, 32], "dm_weights": [0.5, 0.5], "dm_kappas": [20.0, 20.0]}}
+    with pytest.raises(ValueError, match="must be divisible by model output_stride"):
+        validate_v3_config(cfg_indivisible)
+
+    # 4. Kappa non-positive
+    cfg_neg_k = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": [16, 32], "dm_weights": [0.5, 0.5], "dm_kappas": [0.0, 20.0]}}
+    with pytest.raises(ValueError, match="must be > 0"):
+        validate_v3_config(cfg_neg_k)
+
+    # 5. Weight sum <= 0
+    cfg_zero_w = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": [16, 32], "dm_weights": [0.0, 0.0], "dm_kappas": [20.0, 20.0]}}
+    with pytest.raises(ValueError, match="must sum to > 0"):
+        validate_v3_config(cfg_zero_w)

@@ -99,27 +99,13 @@ def region_mean_std_features(
     boxes: torch.Tensor,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Extract both spatial mean and standard deviation over bounding boxes."""
-    mean = region_average_features(
-        feature,
-        boxes,
-    ).float()
-
-    mean_sq = region_average_features(
-        feature.float().square(),
-        boxes,
-    )
-
-    var = (
-        mean_sq - mean.square()
-    ).clamp_min(0.0)
-
+    """Extract both spatial mean and standard deviation over bounding boxes in FP32."""
+    f32 = feature.float()
+    mean = region_average_features(f32, boxes)
+    mean_sq = region_average_features(f32.square(), boxes)
+    var = (mean_sq - mean.square()).clamp_min(0.0)
     std = torch.sqrt(var + eps)
-
-    return torch.cat(
-        [mean, std],
-        dim=-1,
-    ).to(feature.dtype)
+    return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 
 class ProbabilisticRegionalEvidenceHead(nn.Module):

@@ -70,6 +70,7 @@ ALLOWED_LOSS_KEYS = {
     "normalize_flat_dm16",
     "cell_beta",
     "use_hierarchical_dm",
+    "use_multiscale_dm",
     "dm_block_sizes_px",
     "dm_weights",
     "dm_kappas",
@@ -170,20 +171,42 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             if stats not in ("mean", "mean_std"):
                 raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{stats}'")
 
-    # Validate hierarchical DM loss configuration
+    # Validate Multi-Scale / Hierarchical DM loss configuration
     l_cfg = cfg.get("loss", {})
     if isinstance(l_cfg, dict):
-        if bool(l_cfg.get("use_hierarchical_dm", False)):
+        if bool(l_cfg.get("use_multiscale_dm", False)) or bool(l_cfg.get("use_hierarchical_dm", False)):
             b_sizes = l_cfg.get("dm_block_sizes_px", (16, 32, 64))
             weights = l_cfg.get("dm_weights", (0.50, 0.30, 0.20))
             kappas = l_cfg.get("dm_kappas", (20.0, 20.0, 20.0))
+
+            if not b_sizes:
+                raise ValueError("dm_block_sizes_px cannot be empty when Multi-Scale DM is enabled")
+
             if not (len(b_sizes) == len(weights) == len(kappas)):
                 raise ValueError(
-                    f"Hierarchical DM length mismatch: dm_block_sizes_px ({len(b_sizes)}), "
+                    f"Multi-Scale DM length mismatch: dm_block_sizes_px ({len(b_sizes)}), "
                     f"dm_weights ({len(weights)}), dm_kappas ({len(kappas)})"
                 )
-            if any(float(w) < 0 for w in weights) or sum(float(w) for w in weights) <= 0:
-                raise ValueError("dm_weights must be non-negative and sum to > 0")
+
+            stride = int(cfg.get("model", {}).get("output_stride", 4)) if isinstance(cfg.get("model"), dict) else 4
+            for b in b_sizes:
+                if not isinstance(b, int) or b <= 0:
+                    raise ValueError(f"dm_block_sizes_px elements must be positive integers, got {b}")
+                if b % stride != 0:
+                    raise ValueError(
+                        f"dm_block_sizes_px element {b} must be divisible by model output_stride ({stride})"
+                    )
+
+            for k in kappas:
+                if float(k) <= 0:
+                    raise ValueError(f"dm_kappas elements must be > 0, got {k}")
+
+            for w in weights:
+                if float(w) < 0:
+                    raise ValueError(f"dm_weights elements must be non-negative, got {w}")
+
+            if sum(float(w) for w in weights) <= 0:
+                raise ValueError("dm_weights must sum to > 0")
 
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
@@ -225,6 +248,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "normalize_flat_dm16",
         "cell_beta",
         "use_hierarchical_dm",
+        "use_multiscale_dm",
         "dm_block_sizes_px",
         "dm_weights",
         "dm_kappas",

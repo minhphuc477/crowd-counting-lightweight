@@ -169,7 +169,7 @@ def flat_dm_block_loss(
     return per_image.mean()
 
 
-def hierarchical_dm_loss(
+def multiscale_dm_loss(
     pred_map: torch.Tensor,
     target_map: torch.Tensor,
     block_sizes_px: tuple[int, ...] = (16, 32, 64),
@@ -178,8 +178,14 @@ def hierarchical_dm_loss(
     stride: int = 4,
     eps: float = 1e-8,
     normalize_by_count: bool = True,
-) -> torch.Tensor:
-    """Hierarchical Dirichlet-Multinomial loss across multiple block sizes."""
+    return_components: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[int, torch.Tensor]]:
+    """Multi-Scale Dirichlet-Multinomial allocation loss across independent block granularities.
+
+    Computes a weighted sum of Flat Dirichlet-Multinomial partition losses across multiple
+    block scales (e.g. 16px, 32px, 64px), capturing local-to-regional count allocation
+    without imposing a strict conditional tree-factored probability structure.
+    """
     if not (len(block_sizes_px) == len(weights) == len(kappas)):
         raise ValueError(
             f"length mismatch: block_sizes_px={len(block_sizes_px)}, weights={len(weights)}, kappas={len(kappas)}"
@@ -193,6 +199,7 @@ def hierarchical_dm_loss(
         raise ValueError("sum(weights) must be > 0")
 
     terms = []
+    components: dict[int, torch.Tensor] = {}
     for block_px, w, kappa in zip(block_sizes_px, weights, kappas):
         if w == 0:
             continue
@@ -205,9 +212,17 @@ def hierarchical_dm_loss(
             eps=eps,
             normalize_by_count=normalize_by_count,
         )
+        components[int(block_px)] = li
         terms.append((float(w) / wsum) * li)
 
-    return torch.stack(terms).sum()
+    total = torch.stack(terms).sum()
+    if return_components:
+        return total, components
+    return total
+
+
+# Backward compatibility alias
+hierarchical_dm_loss = multiscale_dm_loss
 
 
 def flat_dm16_loss(
