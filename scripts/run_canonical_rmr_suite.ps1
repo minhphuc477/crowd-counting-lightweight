@@ -56,13 +56,13 @@ foreach ($run in $runs) {
     Write-Host "  Config: $cfg | OutDir: $outDir" -ForegroundColor Yellow
     Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Yellow
 
-    # Training step: check if already completed
-    if (Test-Path $summaryJson) {
-        Write-Host "  [SKIP] Evaluation summary already exists at $summaryJson. Skipping training." -ForegroundColor Green
+    # Training step: check if already completed with valid artifacts
+    if ((Test-Path $summaryJson) -and (Test-Path $bestCkpt)) {
+        Write-Host "  [SKIP] Evaluation summary and checkpoint exist at $outDir. Skipping training." -ForegroundColor Green
     } else {
         $trainArgs = @("-m", $trainMod, "--config", $cfg)
         $lastCkpt = "$outDir/last.pt"
-        if ((Test-Path $lastCkpt) -and (-not (Test-Path $bestCkpt))) {
+        if (Test-Path $lastCkpt) {
             Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, resuming..." -ForegroundColor Magenta
             $trainArgs += @("--resume", $lastCkpt)
         }

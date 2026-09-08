@@ -283,7 +283,6 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
-    validate_v3_config(cfg)
     if args.seed is not None:
         cfg["seed"] = args.seed
     if args.lr is not None:
@@ -300,6 +299,8 @@ def main() -> None:
 
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)
+
+    validate_v3_config(cfg)
 
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))

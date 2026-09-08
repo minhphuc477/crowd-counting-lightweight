@@ -67,12 +67,47 @@ class RMRv3Config:
     regional_feature_stats: str = "mean"
 
 
+def _map_boxes_to_stride(
+    boxes: torch.Tensor,
+    src_stride: int,
+    dst_stride: int,
+    dst_hw: tuple[int, int],
+) -> torch.Tensor:
+    """Accurately project bounding boxes across pyramid levels using physical stride support.
+
+    [y1, y2]_{src} -> [y1 * src_stride, y2 * src_stride]_{pixel}
+                   -> [floor(y1 * src_stride / dst_stride), ceil(y2 * src_stride / dst_stride)]_{dst}
+
+    This guarantees that a 64px region maps to exactly 8 cells on P8 (stride 8) and a 128px region
+    maps to exactly 8 cells on P16 (stride 16), preserving physical scale invariance without
+    lattice rounding jitter on odd image dimensions.
+    """
+    dst_h, dst_w = dst_hw
+    b = boxes.float()
+
+    scale = float(src_stride) / float(dst_stride)
+    y1 = torch.floor(b[:, 0] * scale)
+    x1 = torch.floor(b[:, 1] * scale)
+    y2 = torch.ceil(b[:, 2] * scale)
+    x2 = torch.ceil(b[:, 3] * scale)
+
+    y1 = y1.clamp(0, max(dst_h - 1, 0))
+    x1 = x1.clamp(0, max(dst_w - 1, 0))
+    y2 = y2.clamp(1, dst_h)
+    x2 = x2.clamp(1, dst_w)
+
+    y2 = torch.maximum(y2, y1 + 1)
+    x2 = torch.maximum(x2, x1 + 1)
+
+    return torch.stack([y1, x1, y2, x2], dim=-1).long()
+
+
 def _map_boxes_between_grids(
     boxes: torch.Tensor,
     src_hw: tuple[int, int],
     dst_hw: tuple[int, int],
 ) -> torch.Tensor:
-    """Accurately project bounding boxes from source lattice to destination lattice."""
+    """Legacy/fallback ratio-based projection between feature maps."""
     src_h, src_w = src_hw
     dst_h, dst_w = dst_hw
 
@@ -207,6 +242,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             2: p16,
         }
 
+        stride_by_sid = {
+            0: 4,
+            1: 8,
+            2: 16,
+        }
+
         for sid, size_px in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
             if not bool(mask.any()):
@@ -216,10 +257,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             boxes4 = regions.boxes[mask]
 
             if self.native_scale_pooling and feat.shape[-2:] != src_hw:
-                boxes_level = _map_boxes_between_grids(
+                dst_stride = stride_by_sid.get(sid, 16)
+                boxes_level = _map_boxes_to_stride(
                     boxes4,
-                    src_hw,
-                    feat.shape[-2:],
+                    src_stride=4,
+                    dst_stride=dst_stride,
+                    dst_hw=feat.shape[-2:],
                 )
             else:
                 if feat.shape[-2:] != src_hw:

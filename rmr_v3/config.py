@@ -208,6 +208,58 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             if sum(float(w) for w in weights) <= 0:
                 raise ValueError("dm_weights must sum to > 0")
 
+    # Validate train parameter bounds
+    t_cfg = cfg.get("train", {})
+    if isinstance(t_cfg, dict):
+        if "lr" in t_cfg:
+            lr = float(t_cfg["lr"])
+            if lr <= 0:
+                raise ValueError(f"train.lr must be strictly positive, got {lr}")
+        if "epochs" in t_cfg:
+            epochs = int(t_cfg["epochs"])
+            if epochs < 1:
+                raise ValueError(f"train.epochs must be >= 1, got {epochs}")
+        if "eval_every" in t_cfg:
+            eval_every = int(t_cfg["eval_every"])
+            if eval_every < 1:
+                raise ValueError(f"train.eval_every must be >= 1, got {eval_every}")
+        if "batch_size" in t_cfg:
+            bs = int(t_cfg["batch_size"])
+            if bs < 1:
+                raise ValueError(f"train.batch_size must be >= 1, got {bs}")
+        if "workers" in t_cfg:
+            workers = int(t_cfg["workers"])
+            if workers < 0:
+                raise ValueError(f"train.workers must be >= 0, got {workers}")
+        if "grad_clip" in t_cfg:
+            gc = float(t_cfg["grad_clip"])
+            if gc <= 0:
+                raise ValueError(f"train.grad_clip must be strictly positive, got {gc}")
+        if "backbone_lr_scale" in t_cfg:
+            scale = float(t_cfg["backbone_lr_scale"])
+            if scale <= 0:
+                raise ValueError(f"train.backbone_lr_scale must be strictly positive, got {scale}")
+        if "weight_decay" in t_cfg:
+            wd = float(t_cfg["weight_decay"])
+            if wd < 0:
+                raise ValueError(f"train.weight_decay must be non-negative, got {wd}")
+        if "patience" in t_cfg:
+            patience = int(t_cfg["patience"])
+            if patience < 0:
+                raise ValueError(f"train.patience must be >= 0, got {patience}")
+        if "warmup_epochs" in t_cfg:
+            warmup = int(t_cfg["warmup_epochs"])
+            if warmup < 0:
+                raise ValueError(f"train.warmup_epochs must be >= 0, got {warmup}")
+        if "solver_warmup_epochs" in t_cfg:
+            sw = int(t_cfg["solver_warmup_epochs"])
+            if sw < 0:
+                raise ValueError(f"train.solver_warmup_epochs must be >= 0, got {sw}")
+        if "solver_ramp_epochs" in t_cfg:
+            sr = int(t_cfg["solver_ramp_epochs"])
+            if sr < 0:
+                raise ValueError(f"train.solver_ramp_epochs must be >= 0, got {sr}")
+
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
     "model": [

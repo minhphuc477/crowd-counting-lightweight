@@ -12,6 +12,7 @@ from rmr_v3.model import (
     RMRv3,
     RMRv3Config,
     _map_boxes_between_grids,
+    _map_boxes_to_stride,
     region_mean_std_features,
 )
 
@@ -337,3 +338,64 @@ def test_strict_dm_config_guards():
     cfg_zero_w = {**base_cfg, "loss": {"use_multiscale_dm": True, "dm_block_sizes_px": [16, 32], "dm_weights": [0.0, 0.0], "dm_kappas": [20.0, 20.0]}}
     with pytest.raises(ValueError, match="must sum to > 0"):
         validate_v3_config(cfg_zero_w)
+
+
+def test_physical_stride_mapping_stability():
+    """Verify physical stride mapping preserves constant cell extent across odd image grids.
+
+    A 64px region (16 cells on P4, stride 4) mapped to P8 (stride 8) must span exactly 8 cells.
+    A 128px region (32 cells on P4, stride 4) mapped to P16 (stride 16) must span exactly 8 cells.
+    """
+    # Case 1: 64px region on P4 (stride 4) -> 16 cells in width and height
+    boxes_64 = torch.tensor([
+        [0, 0, 16, 16],
+        [8, 8, 24, 24],
+        [16, 32, 32, 48],
+    ])
+    mapped_p8 = _map_boxes_to_stride(boxes_64, src_stride=4, dst_stride=8, dst_hw=(79, 106))
+    h_span_p8 = mapped_p8[:, 2] - mapped_p8[:, 0]
+    w_span_p8 = mapped_p8[:, 3] - mapped_p8[:, 1]
+    assert (h_span_p8 == 8).all(), f"Expected 8 cells on P8 for 64px region, got {h_span_p8}"
+    assert (w_span_p8 == 8).all(), f"Expected 8 cells on P8 for 64px region, got {w_span_p8}"
+
+    # Case 2: 128px region on P4 (stride 4) -> 32 cells in width and height
+    boxes_128 = torch.tensor([
+        [0, 0, 32, 32],
+        [16, 16, 48, 48],
+    ])
+    mapped_p16 = _map_boxes_to_stride(boxes_128, src_stride=4, dst_stride=16, dst_hw=(40, 53))
+    h_span_p16 = mapped_p16[:, 2] - mapped_p16[:, 0]
+    w_span_p16 = mapped_p16[:, 3] - mapped_p16[:, 1]
+    assert (h_span_p16 == 8).all(), f"Expected 8 cells on P16 for 128px region, got {h_span_p16}"
+    assert (w_span_p16 == 8).all(), f"Expected 8 cells on P16 for 128px region, got {w_span_p16}"
+
+
+def test_train_config_bounds_guards():
+    """Verify validate_v3_config rejects invalid train parameter bounds."""
+    base_cfg = {"seed": 42, "model": {"output_stride": 4}}
+
+    # lr <= 0
+    with pytest.raises(ValueError, match="train.lr must be strictly positive"):
+        validate_v3_config({**base_cfg, "train": {"lr": 0.0}})
+    with pytest.raises(ValueError, match="train.lr must be strictly positive"):
+        validate_v3_config({**base_cfg, "train": {"lr": -0.001}})
+
+    # epochs < 1
+    with pytest.raises(ValueError, match="train.epochs must be >= 1"):
+        validate_v3_config({**base_cfg, "train": {"epochs": 0}})
+
+    # eval_every < 1
+    with pytest.raises(ValueError, match="train.eval_every must be >= 1"):
+        validate_v3_config({**base_cfg, "train": {"eval_every": 0}})
+
+    # batch_size < 1
+    with pytest.raises(ValueError, match="train.batch_size must be >= 1"):
+        validate_v3_config({**base_cfg, "train": {"batch_size": 0}})
+
+    # grad_clip <= 0
+    with pytest.raises(ValueError, match="train.grad_clip must be strictly positive"):
+        validate_v3_config({**base_cfg, "train": {"grad_clip": 0.0}})
+
+    # patience < 0
+    with pytest.raises(ValueError, match="train.patience must be >= 0"):
+        validate_v3_config({**base_cfg, "train": {"patience": -1}})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
@@ -389,10 +390,10 @@ class RMRCount(nn.Module):
             self.register_parameter("log_sirt_omega", None)
 
         self.solver_strength: float = 1.0
-        self._cache: dict[
+        self._cache: OrderedDict[
             tuple,
             tuple[RegionSet, torch.Tensor]
-        ] = {}
+        ] = OrderedDict()
 
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))
@@ -407,19 +408,25 @@ class RMRCount(nn.Module):
             device.type,
             device.index if device.type == "cuda" else None,
         )
-        if key not in self._cache:
-            regions = build_multiscale_regions(
-                height=h,
-                width=w,
-                output_stride=self.cfg.output_stride,
-                region_sizes_px=self.cfg.region_sizes_px,
-                overlap=self.cfg.region_overlap,
-                include_full_image=self.cfg.include_full_image,
-                device=device,
-            )
-            ones_m = torch.ones((1, 1, regions.boxes.shape[0]), device=device, dtype=torch.float32)
-            cov = regional_adjoint(ones_m, regions.boxes, h, w).clamp_min(1.0)
-            self._cache[key] = (regions, cov)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+        if len(self._cache) >= 32:
+            self._cache.popitem(last=False)
+
+        regions = build_multiscale_regions(
+            height=h,
+            width=w,
+            output_stride=self.cfg.output_stride,
+            region_sizes_px=self.cfg.region_sizes_px,
+            overlap=self.cfg.region_overlap,
+            include_full_image=self.cfg.include_full_image,
+            device=device,
+        )
+        ones_m = torch.ones((1, 1, regions.boxes.shape[0]), device=device, dtype=torch.float32)
+        cov = regional_adjoint(ones_m, regions.boxes, h, w).clamp_min(1.0)
+        self._cache[key] = (regions, cov)
         return self._cache[key]
 
     def _regions(self, h: int, w: int, device: torch.device) -> RegionSet:

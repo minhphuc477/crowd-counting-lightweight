@@ -291,49 +291,51 @@ def compute_manifest_density(
             f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples)."
         )
 
+    if manifest is None:
+        return default_m0
+
     resolved_manifest = resolve_manifest_path(manifest, data_root=data_root)
     manifest_path = resolved_manifest if resolved_manifest is not None else Path(manifest)
     if not manifest_path.exists():
-        warnings.warn(
-            f"Manifest '{manifest_path}' does not exist; falling back to default_m0={default_m0}",
-            UserWarning,
-            stacklevel=2,
+        raise FileNotFoundError(
+            f"Manifest '{manifest_path}' does not exist. Cannot compute manifest density."
         )
-        return default_m0
+
     root = Path(data_root) if data_root is not None else manifest_path.parent
     total_pts = 0
     total_cells = 0
-    try:
-        with manifest_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                pts_list = item.get("points", [])
-                img_path = Path(item["image"])
-                if not img_path.is_absolute():
-                    img_path = root / img_path
-                with Image.open(img_path) as img:
-                    w, h = img.size
-                cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
-                if pts_list:
-                    pts_arr = torch.tensor(pts_list, dtype=torch.float32).reshape(-1, 2)
-                    valid = (
-                        (pts_arr[:, 0] >= 0) & (pts_arr[:, 0] < w) &
-                        (pts_arr[:, 1] >= 0) & (pts_arr[:, 1] < h)
-                    )
-                    n_pts = int(valid.sum().item())
-                else:
-                    n_pts = 0
-                total_pts += n_pts
-                total_cells += cells
-        if total_cells > 0:
-            return float(total_pts / total_cells)
-    except Exception as e:
-        warnings.warn(
-            f"Failed to compute manifest density from '{manifest_path}': {e}; falling back to default_m0={default_m0}",
-            UserWarning,
-            stacklevel=2,
-        )
-    return default_m0
+
+    with manifest_path.open("r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            pts_list = item.get("points", [])
+            img_path = Path(item["image"])
+            if not img_path.is_absolute():
+                img_path = root / img_path
+            if not img_path.exists():
+                raise FileNotFoundError(
+                    f"Image '{img_path}' referenced at line {line_num} in manifest '{manifest_path}' does not exist."
+                )
+            with Image.open(img_path) as img:
+                w, h = img.size
+            cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
+            if pts_list:
+                pts_arr = torch.tensor(pts_list, dtype=torch.float32).reshape(-1, 2)
+                valid = (
+                    (pts_arr[:, 0] >= 0) & (pts_arr[:, 0] < w) &
+                    (pts_arr[:, 1] >= 0) & (pts_arr[:, 1] < h)
+                )
+                n_pts = int(valid.sum().item())
+            else:
+                n_pts = 0
+            total_pts += n_pts
+            total_cells += cells
+
+    if total_cells <= 0:
+        raise ValueError(f"Manifest '{manifest_path}' contains no valid images or cells.")
+
+    return float(total_pts / total_cells)
+

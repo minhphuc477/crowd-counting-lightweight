@@ -42,3 +42,7 @@ jobs:
       - name: Run RMR Regression Test Suite
         run: |
           pytest tests/rmr/ -v --tb=short
+
+      - name: Run Full Test Suite
+        run: |
+          pytest tests/ -v --tb=short

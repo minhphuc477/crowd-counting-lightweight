@@ -140,12 +140,26 @@ def test_occupancy_analysis(tmp_path: Path):
 
 
 def test_empty_gt_manifest(tmp_path: Path):
+    from PIL import Image
     from rmr_count.localization.oracle_cell import evaluate_oracle_cell_centers
     from rmr_count.localization.otm import evaluate_oracle_otm
 
+    # 1. Non-existent image must fail hard with FileNotFoundError
+    missing_manifest = tmp_path / "missing_img_manifest.jsonl"
+    missing_manifest.write_text(
+        json.dumps({"image": "nonexistent_empty.jpg", "points": [], "id": "0"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match="Image not found"):
+        evaluate_oracle_cell_centers(missing_manifest, stride=4)
+
+    # 2. When valid empty image exists
+    img_file = tmp_path / "empty_real.jpg"
+    Image.new("RGB", (64, 64), color=(0, 0, 0)).save(img_file)
+
     manifest_file = tmp_path / "empty_manifest.jsonl"
     data = [
-        {"image": "nonexistent_empty.jpg", "points": [], "id": "0"},
+        {"image": str(img_file), "points": [], "id": "0"},
     ]
     manifest_file.write_text("\n".join(json.dumps(d) for d in data), encoding="utf-8")
 

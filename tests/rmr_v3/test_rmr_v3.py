@@ -505,19 +505,18 @@ def test_rng_state_exact_reproducibility():
 
 
 # ---------------------------------------------------------------------------
-# Test 13: Manifest density fallback warning
+# Test 13: Manifest density fail-hard on missing manifest
 # ---------------------------------------------------------------------------
-def test_manifest_density_warning():
-    """compute_manifest_density must warn on missing or unparseable manifest."""
-    import warnings
+def test_manifest_density_fail_hard():
+    """compute_manifest_density must fail hard with FileNotFoundError on missing manifest."""
+    import pytest
     from rmr_core.data import compute_manifest_density
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        val = compute_manifest_density("nonexistent_manifest_file_12345.jsonl", default_m0=0.042)
-        assert abs(val - 0.042) < 1e-6
-        assert len(w) >= 1
-        assert "does not exist" in str(w[0].message)
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        compute_manifest_density("nonexistent_manifest_file_12345.jsonl", default_m0=0.042)
+
+    # When manifest is None, it should return default_m0 safely
+    assert compute_manifest_density(None, default_m0=0.042) == 0.042
 
 
 # ---------------------------------------------------------------------------

@@ -59,15 +59,10 @@ def evaluate_oracle_cell_centers(
                 points = points.reshape(-1, 2)
 
             # Retrieve image dimensions
-            if img_path.exists():
-                with Image.open(img_path) as img:
-                    w, h = img.size
-            else:
-                if len(points) > 0:
-                    w = int(math.ceil(np.max(points[:, 0]) + 1))
-                    h = int(math.ceil(np.max(points[:, 1]) + 1))
-                else:
-                    w, h = 1024, 768
+            if not img_path.exists():
+                raise FileNotFoundError(f"Image not found for sample '{item.get('id', 'unknown')}': {img_path}")
+            with Image.open(img_path) as img:
+                w, h = img.size
 
             gw = int(math.ceil(w / stride))
             gh = int(math.ceil(h / stride))

@@ -88,6 +88,7 @@ def evaluate_dataset(
     forward_kwargs: dict[str, Any] | None = None,
     extra_sample_callback: Callable[[dict, dict, torch.Tensor, dict], dict] | None = None,
     enforce_gt_consistency: bool = False,
+    density_bins: tuple[float, float] = (100.0, 500.0),
 ) -> tuple[list[dict], dict[str, Any]]:
     """Canonical unified evaluation loop over a dataset loader.
 
@@ -102,6 +103,7 @@ def evaluate_dataset(
         forward_kwargs: Extra keyword arguments passed to model forward.
         extra_sample_callback: Optional hook (sample, out, y, row) -> dict to record extra sample metrics.
         enforce_gt_consistency: Whether to enforce sum(target_y) == valid_raw_points.
+        density_bins: Tuple of (sparse_threshold, dense_threshold) for density stratification.
 
     Returns:
         rows: List of per-sample prediction records.
@@ -214,13 +216,14 @@ def evaluate_dataset(
     summary["mae_ci95"] = [mae_lo, mae_hi]
     summary["rmse_ci95"] = [rmse_lo, rmse_hi]
 
-    # Density stratification with standard bins [100, 500]
+    # Density stratification with parameterized bins
     gts = np.array([r["gt"] for r in rows])
     aes_arr = np.array(aes)
 
-    sparse_mask = gts <= 100.0
-    mod_mask = (gts > 100.0) & (gts <= 500.0)
-    dense_mask = gts > 500.0
+    lo, hi = density_bins
+    sparse_mask = gts <= lo
+    mod_mask = (gts > lo) & (gts <= hi)
+    dense_mask = gts > hi
 
     summary["mae_sparse"] = float(np.mean(aes_arr[sparse_mask])) if np.any(sparse_mask) else 0.0
     summary["mae_moderate"] = float(np.mean(aes_arr[mod_mask])) if np.any(mod_mask) else 0.0
