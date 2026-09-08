@@ -1,0 +1,96 @@
+seed: 42
+
+output_dir: runs/sha_a/rmr_v4_native_meanstd_seed42
+
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
+
+  crop_size: 512
+
+  scale_range:
+    - 0.75
+    - 1.25
+
+  hflip_prob: 0.5
+  brightness_jitter: 0.0
+  contrast_jitter: 0.0
+
+model:
+  output_stride: 4
+  feature_width: 32
+
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+
+  region_sizes_px:
+    - 32
+    - 64
+    - 128
+
+  region_overlap: 0.5
+  include_full_image: false
+
+  iterations: 2
+  omega: 1.0
+  residual_clip: 0.0
+
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+
+  reliability_mode: nb_rate_variance
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+
+  # RMR-v4: Native scale pooling + Mean/Std region stats
+  native_scale_pooling: true
+  regional_feature_stats: mean_std
+
+loss:
+  lambda_count: 1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell: 0.25
+  lambda_region_nb: 0.20
+
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+
+  kappa_flat16: 20.0
+  normalize_flat_dm16: true
+
+  cell_beta: 1.0
+
+train:
+  batch_size: 8
+  workers: 0
+
+  lr: 0.0001
+  backbone_lr_scale: 0.1
+
+  weight_decay: 0.0001
+
+  epochs: 1000
+  warmup_epochs: 5
+
+  eval_every: 5
+
+  grad_clip: 500.0
+  amp: true
+
+  early_stopping: false
+  patience: 0
+
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20
+
+eval:
+  density_bins:
+    - 100.0
+    - 500.0

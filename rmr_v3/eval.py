@@ -83,6 +83,8 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         detach_region_mean_in_solver=detach_region_mean_in_solver,
         detach_reliability_in_solver=detach_reliability_in_solver,
         eps=eps,
+        native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
+        regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
     )
 
     model = RMRv3(config)
@@ -170,7 +172,20 @@ def main() -> None:
         t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
         if t_diag:
             traj_rows.append(t_diag)
-        return {}
+
+        extra = {}
+        if "iterates" in out and len(out["iterates"]) >= 3:
+            gt = float(row["gt"])
+            pred_y0 = float(out["iterates"][0].sum().item())
+            pred_y1 = float(out["iterates"][1].sum().item())
+            pred_y2 = float(out["iterates"][2].sum().item())
+            extra["pred_y0"] = pred_y0
+            extra["pred_y1"] = pred_y1
+            extra["pred_y2"] = pred_y2
+            extra["ae_y0"] = abs(pred_y0 - gt)
+            extra["ae_y1"] = abs(pred_y1 - gt)
+            extra["ae_y2"] = abs(pred_y2 - gt)
+        return extra
 
     print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
 
@@ -212,6 +227,11 @@ def main() -> None:
         for t in range(3):
             if f"mae_reg_y{t}" in traj_summary:
                 summary[f"mae_reg_y{t}"] = traj_summary[f"mae_reg_y{t}"]
+
+    if rows and "ae_y0" in rows[0]:
+        summary["mae_y0"] = float(np.mean([r["ae_y0"] for r in rows]))
+        summary["mae_y1"] = float(np.mean([r["ae_y1"] for r in rows]))
+        summary["mae_y2"] = float(np.mean([r["ae_y2"] for r in rows]))
 
     # Weight distribution statistics
     weights = np.array([r["weight"] for r in diag_rows]) if diag_rows else np.array([1.0])
@@ -259,6 +279,8 @@ def main() -> None:
 
     print(f"\nEvaluation Results:")
     print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}")
+    if "mae_y0" in summary:
+        print(f"  Iterates Full-Image MAE: Y0={summary['mae_y0']:.2f} -> Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}")
     print(f"  GAME0: {summary['GAME0']:.2f} | GAME1: {summary['GAME1']:.2f} | GAME2: {summary['GAME2']:.2f} | GAME3: {summary['GAME3']:.2f}")
     print(f"  Sparse MAE (<=100): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
     print(f"  Moderate MAE (101-500): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")

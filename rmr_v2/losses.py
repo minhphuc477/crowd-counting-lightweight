@@ -132,6 +132,84 @@ def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8) -> torc
     return torch.where(n == 0, torch.zeros_like(n), -log_prob)
 
 
+def flat_dm_block_loss(
+    pred_map: torch.Tensor,
+    target_map: torch.Tensor,
+    block_px: int = 16,
+    kappa: float = 20.0,
+    stride: int = 4,
+    eps: float = 1e-8,
+    normalize_by_count: bool = True,
+) -> torch.Tensor:
+    """Flat Dirichlet-Multinomial allocation loss on arbitrary block_px sizes."""
+    if block_px % stride != 0:
+        raise ValueError(f"block_px ({block_px}) must be divisible by stride ({stride})")
+
+    k = block_px // stride
+    if pred_map.shape[-2] % k != 0 or pred_map.shape[-1] % k != 0:
+        raise ValueError(
+            f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {pred_map.shape[-2:]}"
+        )
+    if target_map.shape[-2] % k != 0 or target_map.shape[-1] % k != 0:
+        raise ValueError(
+            f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {target_map.shape[-2:]}"
+        )
+
+    pred_block = block_sum_2d(pred_map.float(), k=k, strict=True).flatten(1)
+    target_block = block_sum_2d(target_map.float(), k=k, strict=True).flatten(1)
+
+    pi = probs_from_positive_mass(pred_block, tiny=eps)
+    alpha = float(kappa) * pi
+
+    per_image = dm_nll_none(target_block, alpha, eps=eps)
+    if normalize_by_count:
+        count = target_block.sum(-1).clamp_min(1.0)
+        per_image = per_image / count
+
+    return per_image.mean()
+
+
+def hierarchical_dm_loss(
+    pred_map: torch.Tensor,
+    target_map: torch.Tensor,
+    block_sizes_px: tuple[int, ...] = (16, 32, 64),
+    weights: tuple[float, ...] = (0.50, 0.30, 0.20),
+    kappas: tuple[float, ...] = (20.0, 20.0, 20.0),
+    stride: int = 4,
+    eps: float = 1e-8,
+    normalize_by_count: bool = True,
+) -> torch.Tensor:
+    """Hierarchical Dirichlet-Multinomial loss across multiple block sizes."""
+    if not (len(block_sizes_px) == len(weights) == len(kappas)):
+        raise ValueError(
+            f"length mismatch: block_sizes_px={len(block_sizes_px)}, weights={len(weights)}, kappas={len(kappas)}"
+        )
+
+    if any(w < 0 for w in weights):
+        raise ValueError("weights must be non-negative")
+
+    wsum = float(sum(weights))
+    if wsum <= 0:
+        raise ValueError("sum(weights) must be > 0")
+
+    terms = []
+    for block_px, w, kappa in zip(block_sizes_px, weights, kappas):
+        if w == 0:
+            continue
+        li = flat_dm_block_loss(
+            pred_map,
+            target_map,
+            block_px=int(block_px),
+            kappa=float(kappa),
+            stride=stride,
+            eps=eps,
+            normalize_by_count=normalize_by_count,
+        )
+        terms.append((float(w) / wsum) * li)
+
+    return torch.stack(terms).sum()
+
+
 def flat_dm16_loss(
     pred_map: torch.Tensor,
     target_map: torch.Tensor,
@@ -140,27 +218,16 @@ def flat_dm16_loss(
     eps: float = 1e-8,
     normalize_by_count: bool = True,
 ) -> torch.Tensor:
-    """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (4x4 stride-4 cells)."""
-    k = max(1, 16 // stride)
-    if pred_map.shape[-2] % k != 0 or pred_map.shape[-1] % k != 0:
-        raise ValueError(
-            f"FlatDM16 requires grid dimensions divisible by block size k={k}, "
-            f"got pred_map shape {pred_map.shape[-2:]}"
-        )
-    if target_map.shape[-2] % k != 0 or target_map.shape[-1] % k != 0:
-        raise ValueError(
-            f"FlatDM16 requires grid dimensions divisible by block size k={k}, "
-            f"got target_map shape {target_map.shape[-2:]}"
-        )
-    n16 = block_sum_2d(pred_map.float(), k, strict=True).flatten(1)
-    y16 = block_sum_2d(target_map.float(), k, strict=True).flatten(1)
-    pi = probs_from_positive_mass(n16, tiny=eps)
-    alpha = float(kappa) * pi
-    per_image_nll = dm_nll_none(y16, alpha, eps=eps)
-    if normalize_by_count:
-        counts = y16.sum(dim=-1).clamp_min(1.0)
-        per_image_nll = per_image_nll / counts
-    return per_image_nll.mean()
+    """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (backward compatible)."""
+    return flat_dm_block_loss(
+        pred_map,
+        target_map,
+        block_px=16,
+        kappa=kappa,
+        stride=stride,
+        eps=eps,
+        normalize_by_count=normalize_by_count,
+    )
 
 
 def scale_balanced_region_rate_loss(

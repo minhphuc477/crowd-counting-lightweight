@@ -112,6 +112,8 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
         detach_region_mean_in_solver=detach_region_mean_in_solver,
         detach_reliability_in_solver=detach_reliability_in_solver,
         eps=eps,
+        native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
+        regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
     )
 
     model = RMRv3(config)
@@ -125,6 +127,10 @@ def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
         lambda_flat_dm16=float(l_cfg.get("lambda_flat_dm16", 1.0)),
         lambda_cell=float(l_cfg.get("lambda_cell", 0.25)),
         lambda_region_nb=float(l_cfg.get("lambda_region_nb", 0.20)),
+        use_hierarchical_dm=bool(l_cfg.get("use_hierarchical_dm", False)),
+        dm_block_sizes_px=tuple(int(x) for x in l_cfg.get("dm_block_sizes_px", (16, 32, 64))),
+        dm_weights=tuple(float(x) for x in l_cfg.get("dm_weights", (0.50, 0.30, 0.20))),
+        dm_kappas=tuple(float(x) for x in l_cfg.get("dm_kappas", (20.0, 20.0, 20.0))),
         count_loss_mode=str(l_cfg.get("count_loss_mode", "nb")),
         count_nb_dispersion=float(l_cfg.get("count_nb_dispersion", 50.0)),
         kappa_flat16=float(l_cfg.get("kappa_flat16", 20.0)),

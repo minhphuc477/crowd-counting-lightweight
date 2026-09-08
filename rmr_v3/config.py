@@ -55,6 +55,8 @@ ALLOWED_MODEL_KEYS = {
     "detach_reliability_in_solver",
     "uniform_reliability",
     "eps",
+    "native_scale_pooling",
+    "regional_feature_stats",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -67,6 +69,10 @@ ALLOWED_LOSS_KEYS = {
     "kappa_flat16",
     "normalize_flat_dm16",
     "cell_beta",
+    "use_hierarchical_dm",
+    "dm_block_sizes_px",
+    "dm_weights",
+    "dm_kappas",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -159,6 +165,25 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             iters = int(m_cfg["iterations"])
             if iters < 1:
                 raise ValueError(f"iterations must be >= 1, got {iters}")
+        if "regional_feature_stats" in m_cfg:
+            stats = str(m_cfg["regional_feature_stats"])
+            if stats not in ("mean", "mean_std"):
+                raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{stats}'")
+
+    # Validate hierarchical DM loss configuration
+    l_cfg = cfg.get("loss", {})
+    if isinstance(l_cfg, dict):
+        if bool(l_cfg.get("use_hierarchical_dm", False)):
+            b_sizes = l_cfg.get("dm_block_sizes_px", (16, 32, 64))
+            weights = l_cfg.get("dm_weights", (0.50, 0.30, 0.20))
+            kappas = l_cfg.get("dm_kappas", (20.0, 20.0, 20.0))
+            if not (len(b_sizes) == len(weights) == len(kappas)):
+                raise ValueError(
+                    f"Hierarchical DM length mismatch: dm_block_sizes_px ({len(b_sizes)}), "
+                    f"dm_weights ({len(weights)}), dm_kappas ({len(kappas)})"
+                )
+            if any(float(w) < 0 for w in weights) or sum(float(w) for w in weights) <= 0:
+                raise ValueError("dm_weights must be non-negative and sum to > 0")
 
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
@@ -186,6 +211,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "detach_reliability_in_solver",
         "uniform_reliability",
         "eps",
+        "native_scale_pooling",
+        "regional_feature_stats",
     ],
     "loss": [
         "lambda_count",
@@ -197,6 +224,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "kappa_flat16",
         "normalize_flat_dm16",
         "cell_beta",
+        "use_hierarchical_dm",
+        "dm_block_sizes_px",
+        "dm_weights",
+        "dm_kappas",
     ],
     "train": [
         "lr",

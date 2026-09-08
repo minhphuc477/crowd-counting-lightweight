@@ -12,6 +12,7 @@ from rmr_v2.losses import (
     balanced_smooth_l1,
     count_magnitude_loss,
     flat_dm16_loss,
+    hierarchical_dm_loss,
     negative_binomial_nll_mean_dispersion,
 )
 
@@ -71,6 +72,11 @@ class RMRv3LossConfig:
     lambda_cell: float = 0.25
     lambda_region_nb: float = 0.20
 
+    use_hierarchical_dm: bool = False
+    dm_block_sizes_px: tuple[int, ...] = (16, 32, 64)
+    dm_weights: tuple[float, ...] = (0.50, 0.30, 0.20)
+    dm_kappas: tuple[float, ...] = (20.0, 20.0, 20.0)
+
     count_loss_mode: str = "nb"
     count_nb_dispersion: float = 50.0
 
@@ -112,12 +118,26 @@ def compute_rmr_v3_losses(
         dispersion=cfg.count_nb_dispersion,
     )
 
-    losses["flat_dm16"] = flat_dm16_loss(
-        y0,
-        target_float,
-        kappa=cfg.kappa_flat16,
-        normalize_by_count=cfg.normalize_flat_dm16,
-    )
+    if cfg.use_hierarchical_dm:
+        loss_allocation = hierarchical_dm_loss(
+            y0,
+            target_float,
+            block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
+            weights=tuple(float(x) for x in cfg.dm_weights),
+            kappas=tuple(float(x) for x in cfg.dm_kappas),
+            stride=4,
+            normalize_by_count=cfg.normalize_flat_dm16,
+        )
+    else:
+        loss_allocation = flat_dm16_loss(
+            y0,
+            target_float,
+            kappa=cfg.kappa_flat16,
+            normalize_by_count=cfg.normalize_flat_dm16,
+        )
+
+    losses["allocation"] = loss_allocation
+    losses["flat_dm16"] = loss_allocation  # backward compatibility alias
 
     losses["cell"] = balanced_smooth_l1(
         y,
@@ -134,7 +154,7 @@ def compute_rmr_v3_losses(
 
     losses["total"] = (
         cfg.lambda_count * losses["count"]
-        + cfg.lambda_flat_dm16 * losses["flat_dm16"]
+        + cfg.lambda_flat_dm16 * loss_allocation
         + cfg.lambda_cell * losses["cell"]
         + cfg.lambda_region_nb * losses["region_nb"]
     )

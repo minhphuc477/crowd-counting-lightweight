@@ -62,6 +62,65 @@ class RMRv3Config:
     detach_region_mean_in_solver: bool = True
     detach_reliability_in_solver: bool = True
 
+    # V4 candidate switches
+    native_scale_pooling: bool = False
+    regional_feature_stats: str = "mean"
+
+
+def _map_boxes_between_grids(
+    boxes: torch.Tensor,
+    src_hw: tuple[int, int],
+    dst_hw: tuple[int, int],
+) -> torch.Tensor:
+    """Accurately project bounding boxes from source lattice to destination lattice."""
+    src_h, src_w = src_hw
+    dst_h, dst_w = dst_hw
+
+    b = boxes.float()
+
+    y1 = torch.floor(b[:, 0] * (dst_h / src_h))
+    x1 = torch.floor(b[:, 1] * (dst_w / src_w))
+    y2 = torch.ceil(b[:, 2] * (dst_h / src_h))
+    x2 = torch.ceil(b[:, 3] * (dst_w / src_w))
+
+    y1 = y1.clamp(0, max(dst_h - 1, 0))
+    x1 = x1.clamp(0, max(dst_w - 1, 0))
+    y2 = y2.clamp(1, dst_h)
+    x2 = x2.clamp(1, dst_w)
+
+    y2 = torch.maximum(y2, y1 + 1)
+    x2 = torch.maximum(x2, x1 + 1)
+
+    return torch.stack([y1, x1, y2, x2], dim=-1).long()
+
+
+def region_mean_std_features(
+    feature: torch.Tensor,
+    boxes: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Extract both spatial mean and standard deviation over bounding boxes."""
+    mean = region_average_features(
+        feature,
+        boxes,
+    ).float()
+
+    mean_sq = region_average_features(
+        feature.float().square(),
+        boxes,
+    )
+
+    var = (
+        mean_sq - mean.square()
+    ).clamp_min(0.0)
+
+    std = torch.sqrt(var + eps)
+
+    return torch.cat(
+        [mean, std],
+        dim=-1,
+    ).to(feature.dtype)
+
 
 class ProbabilisticRegionalEvidenceHead(nn.Module):
     """Predict regional NB mean and dispersion.
@@ -87,6 +146,8 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         dispersion_init: float = 50.0,
         dispersion_min: float = 0.5,
         dispersion_max: float = 500.0,
+        native_scale_pooling: bool = False,
+        regional_feature_stats: str = "mean",
     ) -> None:
         super().__init__()
 
@@ -96,12 +157,16 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             raise ValueError("dispersion_max must be > dispersion_min")
         if not (dispersion_min <= dispersion_init <= dispersion_max):
             raise ValueError("dispersion_init must lie inside [min,max]")
+        if regional_feature_stats not in ("mean", "mean_std"):
+            raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{regional_feature_stats}'")
 
         self.region_sizes_px = tuple(int(x) for x in region_sizes_px)
         self.dispersion_min = float(dispersion_min)
         self.dispersion_max = float(dispersion_max)
+        self.native_scale_pooling = bool(native_scale_pooling)
+        self.regional_feature_stats = str(regional_feature_stats)
 
-        in_dim = feature_dim + 1
+        in_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
         self.trunk = nn.Sequential(
             nn.Linear(in_dim, hidden),
@@ -138,56 +203,58 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         device = p4.device
         dtype = p4.dtype
 
-        size4 = p4.shape[-2:]
-
-        p8_at_4 = (
-            p8
-            if p8.shape[-2:] == size4
-            else F.interpolate(
-                p8,
-                size=size4,
-                mode="bilinear",
-                align_corners=False,
-            )
-        )
-
-        p16_at_4 = (
-            p16
-            if p16.shape[-2:] == size4
-            else F.interpolate(
-                p16,
-                size=size4,
-                mode="bilinear",
-                align_corners=False,
-            )
-        )
+        src_hw = p4.shape[-2:]
 
         m_total = int(regions.boxes.shape[0])
         feature_dim = int(p4.shape[1])
+        out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
         out = torch.zeros(
-            (b, m_total, feature_dim + 1),
+            (b, m_total, out_dim),
             device=device,
             dtype=dtype,
         )
+
+        level_by_sid = {
+            0: p4,
+            1: p8,
+            2: p16,
+        }
 
         for sid, size_px in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
             if not bool(mask.any()):
                 continue
 
-            if size_px <= 48:
-                source = p4
-            elif size_px <= 96:
-                source = p8_at_4
-            else:
-                source = p16_at_4
+            feat = level_by_sid.get(sid, p16)
+            boxes4 = regions.boxes[mask]
 
-            boxes_s = regions.boxes[mask]
-            pooled = region_average_features(
-                source,
-                boxes_s,
-            )  # [B,Ms,C]
+            if self.native_scale_pooling and feat.shape[-2:] != src_hw:
+                boxes_level = _map_boxes_between_grids(
+                    boxes4,
+                    src_hw,
+                    feat.shape[-2:],
+                )
+            else:
+                if feat.shape[-2:] != src_hw:
+                    feat = F.interpolate(
+                        feat,
+                        size=src_hw,
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                boxes_level = boxes4
+
+            if self.regional_feature_stats == "mean_std":
+                pooled = region_mean_std_features(
+                    feat,
+                    boxes_level,
+                )
+            else:
+                pooled = region_average_features(
+                    feat,
+                    boxes_level,
+                )
 
             ms = pooled.shape[1]
 
@@ -522,6 +589,8 @@ class RMRv3(nn.Module):
             dispersion_init=cfg.dispersion_init,
             dispersion_min=cfg.dispersion_min,
             dispersion_max=cfg.dispersion_max,
+            native_scale_pooling=cfg.native_scale_pooling,
+            regional_feature_stats=cfg.regional_feature_stats,
         )
 
         self.solver_strength: float = 1.0
