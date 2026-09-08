@@ -27,6 +27,7 @@ analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
 profile*.json
+runs/test_smoke*
 
 # Large per-region diagnostic traces (>50MB)
 *reliability_diagnostics.csv
