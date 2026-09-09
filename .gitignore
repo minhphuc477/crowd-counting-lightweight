@@ -46,3 +46,6 @@ runs/sha_a/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Agent skills & local assistant configuration
+.agents/
