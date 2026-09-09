@@ -3,7 +3,6 @@
 [![CI](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml/badge.svg)](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml)
 [![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
 [![Parameters](https://img.shields.io/badge/carrier-101.7k%20params-orange.svg)]()
-[![Target](https://img.shields.io/badge/venue-CVPR%202026-purple.svg)]()
 
 > **Core Research Question:** In ultra-lightweight crowd counting (< 105k parameters), maintaining both fine spatial cell fidelity and long-range spatial consistency is challenging under strict mobile computation budgets. Because learning dense global self-attention or deep multi-scale dilated receptive fields is parameter-prohibitive, we explore:  
 >  
@@ -227,12 +226,3 @@ python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v3_reliability_weighted_seed42
 # Evaluate RMR-v4 Candidate checkpoint
 python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v4_candidate_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
 ```
-
----
-
-## 6. Canonical Documentation
-
-Detailed specifications in `docs/rmr/`:
-- [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Derivations, transfer theorems, measure-space SIRT, and causal control claims.
-- [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Dynamic MobileNetV4 reduction probing, FP32 AMP operators, and loss dispatch.
-- [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical NAE, physical GAME, diagnostic traces, and paired significance tests.
