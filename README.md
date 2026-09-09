@@ -6,7 +6,8 @@
 [![Target](https://img.shields.io/badge/venue-CVPR%202026-purple.svg)]()
 
 > **Core Research Question:** In ultra-lightweight crowd counting (< 105k parameters), maintaining both fine spatial cell fidelity and long-range spatial consistency is challenging under strict mobile computation budgets. Because learning dense global self-attention or deep multi-scale dilated receptive fields is parameter-prohibitive, we explore:  
-> $$\boxed{\textbf{Can known discrete regional-count operators replace part of learned contextual reasoning in ultra-lightweight models?}}$$  
+>  
+> **"Can known discrete regional-count operators replace part of learned contextual reasoning in ultra-lightweight models?"**  
 >  
 > **Scope:** Explicit counting and spatial density estimation models. Point localization, detection bounding boxes, and Hungarian matching are outside the primary causal contribution.
 
@@ -17,7 +18,7 @@
 The repository is organized into a modular, clean hierarchy:
 
 - **`rmr_core/`**: Shared canonical primitives:
-  - `backbones.py`: Dynamic MobileNetV4 backbone with reductions $\{4, 8, 16\}$ discovery.
+  - `backbones.py`: Dynamic MobileNetV4 backbone with reductions {4, 8, 16} discovery.
   - `necks.py`: Additive FPN neck and inverted residual building blocks.
   - `heads.py`: Fine measure density head with empirical prior initialization.
   - `operators.py`: Discrete rectangular projection matrix $A$, exact adjoint $A^\top$, and LRU-cached multi-scale region geometry.
@@ -35,25 +36,45 @@ The repository is organized into a modular, clean hierarchy:
 ## 2. Key Mathematical Foundations
 
 ### 2.1 Discrete Regional Operators
+
 Let $Y \in \mathbb{R}_+^G$ be the discrete cell count measure on spatial lattice $G$ (stride $s=4$). The canonical ground truth per cell is:
-$$Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\min\left(G_h - 1, \; \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor\right) = i, \; \min\left(G_w - 1, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor\right) = j\right).$$
+
+$$
+Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\min\left(G_h - 1, \; \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor\right) = i, \; \min\left(G_w - 1, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor\right) = j\right).
+$$
 
 - **Forward Regional Projection** $A \in \{0, 1\}^{M \times G}$: $(AY)_m = \sum_{g \in R_m} Y_g = q_m$.
 - **Adjoint Back-Projection** $A^\top \in \{0, 1\}^{G \times M}$: $(A^\top r)_g = \sum_{m: g \in R_m} r_m$.
 
-### 2.2 The Adjoint Transfer Theorem ($H \mathbf{1} = \mathbf{1}$)
+### 2.2 The Adjoint Transfer Theorem
+
 Let $D_a = \operatorname{diag}(A \mathbf{1}_G) \in \mathbb{R}^{M \times M}$ be regional areas, and $D_c = \operatorname{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{G \times G}$ be cell coverage counts.  
-The normalized regional transfer operator is defined as:
-$$H = D_c^{-1} A^\top D_a^{-1} A \implies \boxed{H \mathbf{1}_G = \mathbf{1}_G \quad \forall \; \mathcal{R} \text{ covering } G.}$$
+The normalized regional transfer operator satisfies:
+
+$$
+H = D_c^{-1} A^\top D_a^{-1} A \implies H \mathbf{1}_G = \mathbf{1}_G \quad (\forall \mathcal{R} \text{ covering } G).
+$$
 
 ### 2.3 Measure-Space Nonnegative Projected SIRT (RMR-v2 / B5-P)
-$$Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y^{(t)} - b) \right] = \max\left(0, \; Y^{(t)} - \omega \cdot r^{(t)}\right).$$
+
+$$
+Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_c^{-1} A^\top D_a^{-1} (A Y^{(t)} - b) \right] = \max\left(0, \; Y^{(t)} - \omega \cdot r^{(t)}\right).
+$$
+
 Fixed relaxation $\omega = 1.0$, identity preconditioner $M = 1.0$, detached regional evidence $b$ (`detach_region_evidence: true`), and exact parameter parity with B2 (101,714 params).
 
 ### 2.4 Reliability-Weighted Reconciliation (RMR-v3 / RW-RMR)
+
 RMR-v3 extends the transfer operator with per-region uncertainty calibration derived from the Negative-Binomial rate variance:
-$$V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right),$$
-$$Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_{c,w}^{-1} A^\top W D_a^{-1} (A Y^{(t)} - \mu) \right].$$
+
+$$
+V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right)
+$$
+
+$$
+Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega \cdot D_{c,w}^{-1} A^\top W D_a^{-1} (A Y^{(t)} - \mu) \right].
+$$
+
 Total trainable parameters: **101,763** (< 105,000 budget).
 
 ---
@@ -63,43 +84,45 @@ Total trainable parameters: **101,763** (< 105,000 budget).
 | ID | Variant Name | Parameter Count | Regional Head | Measure Space Solver | Operator / Allocator | Causal Hypothesis Tested |
 |:---|:---|:---:|:---:|:---:|:---:|:---|
 | **B0** | Direct Baseline | 97,681 | ✗ | ✗ | None | Baseline observer without regional head or solver |
-| **B1** | Region Loss | 97,681 | ✗ | ✗ | None | Auxiliary regional rate loss on $AY$ without dual head |
+| **B1** | Region Loss | 97,681 | ✗ | ✗ | None | Auxiliary regional rate loss on AY without dual head |
 | **B2** | Region Aux | 101,714 | ✓ | ✗ | None | Multi-task dual head without runtime reconciliation |
 | **B3a** | Local Refine | 100,642 | ✗ | Local Conv ($T=2$) | Local 3x3 DWConv | Local neural refinement without regional constraints |
-| **B3b** | Learned Projector | 104,851 | ✓ | Measure ($\Pi_+$, $T=2$) | Learned $P_\theta$ | Learned neural allocator vs exact adjoint $A^\top$ |
-| **B5-P**| **RMR-P (Stage C Reference)**| **101,714** | ✓ | Measure ($\Pi_+$, $T=2$) | Exact $D_c^{-1} A^\top D_a^{-1}$ | Exact mathematical adjoint reconciliation (parity with B2) |
-| **V3-A**| **Probabilistic Uniform** | **101,763** | ✓ (NB Mean+Disp) | Measure ($\Pi_+$, $T=2$) | Uniform $W=I$ | Probabilistic head under uniform reconciliation |
-| **V3-B**| **RW-RMR (Active)** | **101,763** | ✓ (NB Mean+Disp) | Measure ($\Pi_+$, $T=2$) | Weighted $A^\top W$ | Reliability-weighted reconciliation |
+| **B3b** | Learned Projector | 104,851 | ✓ | Measure (Π₊, T=2) | Learned P_θ | Learned neural allocator vs exact adjoint Aᵀ |
+| **B5-P**| **RMR-P (Stage C Reference)**| **101,714** | ✓ | Measure (Π₊, T=2) | Exact D_c⁻¹ Aᵀ D_a⁻¹ | Exact mathematical adjoint reconciliation (parity with B2) |
+| **V3-A**| **Probabilistic Uniform** | **101,763** | ✓ (NB Mean+Disp) | Measure (Π₊, T=2) | Uniform W = I | Probabilistic head under uniform reconciliation |
+| **V3-B**| **RW-RMR (Active)** | **101,763** | ✓ (NB Mean+Disp) | Measure (Π₊, T=2) | Weighted Aᵀ W | Reliability-weighted reconciliation |
 
 ### 3.1 Canonical Benchmark Results (ShanghaiTech Part A)
 
 > [!NOTE]
-> **Historical Reference Run Archive Notice**: The baseline results below (B5-P: 94.83, V3-A: 96.35, V3-B: 83.22) represent initial reference runs from commit `91c0b841` archived in [`runs/sha_a/historical_commit_91c0b841/`](runs/sha_a/historical_commit_91c0b841/). Clean HEAD benchmark runs under hardened provenance tracking are executed via `scripts/run_canonical_rmr_suite.ps1`.
+> **Historical Reference Run Archive Notice**: The baseline results below (B5-P: 94.83, V3-A: 96.35, V3-B: 83.22) represent initial reference runs from commit `91c0b841` archived in [`runs/sha_a/historical_commit_91c0b841/`](runs/sha_a/historical_commit_91c0b841/). Clean HEAD benchmark runs under hardened provenance tracking are executed via `scripts/run_canonical_rmr_suite.sh` (Linux/Ubuntu) or `scripts/run_canonical_rmr_suite.ps1` (Windows).
 
 Official 300-train / 182-test partition evaluation (direct full-image inference, 1000 epochs, seed 42):
 
 | Model | Variant Type | Params | Best Val Epoch | **Test MAE** | **Test RMSE** | **NAE** | **Bias** | Causal Outcome |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 | **B5-P** | Deterministic Baseline | 101,714 | 779 | 94.83 | 166.88 | 0.2377 | +11.59 | Predecessor RMR baseline |
-| **V3-A** | Probabilistic Uniform Control | 101,763 | 695 | 96.35 | 175.09 | 0.2090 | -11.87 | Uniform solver ($W=I$) control |
+| **V3-A** | Probabilistic Uniform Control | 101,763 | 695 | 96.35 | 175.09 | 0.2090 | -11.87 | Uniform solver (W = I) control |
 | **V3-B** | **Reliability-Weighted (Proposed)** | **101,763** | 695 | **83.22** | **141.14** | **0.1964** | **-2.97** | **-13.13 MAE ($p=0.01025$)** |
 
 **Statistical Significance & Causal Proof:**
-- **V3-A $\to$ V3-B (Causal Test of Reliability Weighting):** $\Delta\text{MAE} = \mathbf{13.13}$ drop, paired t-test $\mathbf{p = 0.01025}$, Wilcoxon $p = 0.06958$, Bootstrap 95% CI on error difference: $[\mathbf{+3.72}, \mathbf{+23.23}]$, wins: 100 vs 82.
-- **B5-P $\to$ V3-B (Proposed vs Predecessor Baseline):** $\Delta\text{MAE} = \mathbf{11.61}$ drop, Wilcoxon signed-rank $\mathbf{p = 0.02609}$, wins: 108 vs 74.
-- **B5-P $\to$ V3-A (Deterministic vs Probabilistic Uniform):** $\Delta\text{MAE} = -1.52$ ($p = 0.844$, non-significant), proving that switching to probabilistic loss alone without reliability weighting does not yield gains. The gain is causally driven by the reliability-weighted solver $W=\operatorname{diag}(w_R)$.
+- **V3-A → V3-B (Causal Test of Reliability Weighting):** **ΔMAE = 13.13** drop, paired t-test **p = 0.01025**, Wilcoxon *p* = 0.06958, Bootstrap 95% CI on error difference: **[+3.72, +23.23]**, wins: 100 vs 82.
+- **B5-P → V3-B (Proposed vs Predecessor Baseline):** **ΔMAE = 11.61** drop, Wilcoxon signed-rank **p = 0.02609**, wins: 108 vs 74.
+- **B5-P → V3-A (Deterministic vs Probabilistic Uniform):** **ΔMAE = -1.52** (*p* = 0.844, non-significant), proving that switching to probabilistic loss alone without reliability weighting does not yield gains. The gain is causally driven by the reliability-weighted solver $W = \operatorname{diag}(w_R)$.
 
 ---
-
 
 ## 4. Dataset & Evaluation Protocol (Zero Ad-hoc Split Policy)
 
 To ensure strict 1:1 comparability with published crowd counting literature (e.g., CSRNet, DM-Count, FIDTM, MAN, SASNet, STEERER), this repository enforces a **Zero Ad-hoc Split Policy**.
 
+> [!NOTE]
+> **Datasets Bundled In Repository**: The official ShanghaiTech Part A and Part B images and ground truth annotations are fully tracked under [`data/part_A_final/`](data/part_A_final/) and [`data/part_B_final/`](data/part_B_final/). After cloning, no external dataset downloads are required.
+
 ### 4.1 ShanghaiTech Part A Benchmark Invariants
 - **Official Partitions**: The official ShanghaiTech Part A benchmark consists exclusively of:
-  - `part_A_final/train_data/images`: **Exactly 300 images** (`IMG_1.jpg` to `IMG_300.jpg`).
-  - `part_A_final/test_data/images`: **Exactly 182 images** (`IMG_1.jpg` to `IMG_182.jpg`).
+  - `data/part_A_final/train_data/images`: **Exactly 300 images** (`IMG_1.jpg` to `IMG_300.jpg`).
+  - `data/part_A_final/test_data/images`: **Exactly 182 images** (`IMG_1.jpg` to `IMG_182.jpg`).
 - **Canonical Manifests**:
   - `data/sha_a_train_all.jsonl`: **300 samples** (100% of official `train_data`).
   - `data/sha_a_test.jsonl`: **182 samples** (100% of official `test_data`).
@@ -116,42 +139,90 @@ To ensure strict 1:1 comparability with published crowd counting literature (e.g
 ## 5. Quickstart Guide
 
 ### 5.1 Environment Setup
+
+Clone repository and prepare the Python environment:
+
 ```bash
 git clone https://github.com/minhphuc477/crowd-counting-lightweight.git
 cd crowd-counting-lightweight
 git checkout RMR
 
-python -m venv .venv
-.venv\Scripts\activate
+# Create virtual environment (Python 3.10+)
+python3 -m venv .venv
+
+# Activate environment:
+# On Linux / Ubuntu / macOS:
+source .venv/bin/activate
+# On Windows PowerShell:
+# .venv\Scripts\Activate.ps1
+
+# Optional: Install PyTorch with CUDA for GPU acceleration (e.g., CUDA 12.4 on Ubuntu):
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# Install dependencies and local package in editable mode
+pip install -r requirements.txt
 pip install -e .
 ```
 
 ### 5.2 Running Tests
-```powershell
-pytest tests/ -v --tb=short
+
+Verify the complete test suite (220+ tests):
+
+```bash
+python -m pytest tests/ -v --tb=short
 ```
 
-### 5.3 Training
+### 5.3 One-Click Automated Experiment Runners
+
+Run full reproducible training, test evaluation, and statistical comparisons:
+
+**On Linux / Ubuntu**:
+```bash
+chmod +x scripts/*.sh *.sh
+
+# 1. Run RMR-v4 Candidate experiment:
+bash scripts/run_rmr_v4_candidate.sh
+
+# 2. Run Canonical 3-model benchmark suite (V3-A -> V3-B -> B5-P):
+bash scripts/run_canonical_rmr_suite.sh
+```
+
+**On Windows (PowerShell)**:
+```powershell
+# 1. Run RMR-v4 Candidate experiment:
+.\scripts\run_rmr_v4_candidate.ps1
+
+# 2. Run Canonical 3-model benchmark suite (V3-A -> V3-B -> B5-P):
+.\scripts\run_canonical_rmr_suite.ps1
+```
+
+### 5.4 Manual Training Commands
+
 All configs in `configs/` are anchored to the canonical benchmark manifests (`sha_a_train_all.jsonl` and `sha_a_test.jsonl`):
 
 **Train RMR-v2 (Stage C Reference)**:
-```powershell
+```bash
 python -m rmr_v2.train --config configs/rmr_v2/rmr_projected_t2.yaml --lr 0.0001 --output-dir runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42
 ```
 
 **Train RMR-v3 (RW-RMR Active)**:
-```powershell
+```bash
 python -m rmr_v3.train --config configs/rmr_v3/reliability_weighted.yaml --lr 0.0001 --output-dir runs/sha_a/rmr_v3_reliability_weighted_seed42
 ```
 
-### 5.4 Evaluating Checkpoints
+### 5.5 Evaluating Checkpoints
+
 Evaluate any trained checkpoint directly on the canonical 182-image test set:
-```powershell
-# RMR-v2
+
+```bash
+# Evaluate RMR-v2 checkpoint
 python -m rmr_v2.eval --checkpoint runs/sha_a/stage_c_b5_p_rmr_projected_t2_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
 
-# RMR-v3
+# Evaluate RMR-v3 checkpoint
 python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v3_reliability_weighted_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
+
+# Evaluate RMR-v4 Candidate checkpoint
+python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v4_candidate_seed42/best_val_mae.pt --manifest data/sha_a_test.jsonl
 ```
 
 ---
@@ -162,4 +233,3 @@ Detailed specifications in `docs/rmr/`:
 - [**Paper Specification (CVPR 2026)**](docs/rmr/PAPER_SPEC.md): Derivations, transfer theorems, measure-space SIRT, and causal control claims.
 - [**Implementation Specification**](docs/rmr/IMPLEMENTATION_SPEC.md): Dynamic MobileNetV4 reduction probing, FP32 AMP operators, and loss dispatch.
 - [**Evaluation Specification**](docs/rmr/EVALUATION_SPEC.md): Canonical NAE, physical GAME, diagnostic traces, and paired significance tests.
-
