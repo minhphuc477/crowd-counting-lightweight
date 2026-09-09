@@ -110,7 +110,12 @@ def main() -> None:
     cfg = ckpt.get("config", {})
 
     manifest_path = Path(args.manifest)
-    dataset = CrowdManifestDataset(manifest_path, train=False, output_stride=model.cfg.output_stride)
+    dataset = CrowdManifestDataset(
+        manifest_path,
+        train=False,
+        output_stride=model.cfg.output_stride,
+        data_root=cfg.get("data", {}).get("data_root"),
+    )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
     out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / f"eval_{manifest_path.stem}"

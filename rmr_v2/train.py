@@ -208,18 +208,24 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
+    d_cfg = cfg.get("data", {})
     train_ds = CrowdManifestDataset(
-        cfg["data"]["train_manifest"],
+        d_cfg["train_manifest"],
         train=True,
-        output_stride=cfg["model"].get("output_stride", 4),
-        crop_size=cfg["data"].get("crop_size", 512),
-        scale_range=tuple(cfg["data"].get("scale_range", [0.75, 1.25])),
+        output_stride=int(cfg.get("model", {}).get("output_stride", 4)),
+        crop_size=int(d_cfg.get("crop_size", 512)),
+        scale_range=tuple(d_cfg.get("scale_range", [0.75, 1.25])),
+        hflip_prob=float(d_cfg.get("hflip_prob", 0.5)),
+        brightness_jitter=float(d_cfg.get("brightness_jitter", 0.0)),
+        contrast_jitter=float(d_cfg.get("contrast_jitter", 0.0)),
+        data_root=d_cfg.get("data_root"),
     )
-    val_manifest = cfg["data"].get("val_manifest")
+    val_manifest = d_cfg.get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
         val_manifest,
         train=False,
-        output_stride=cfg["model"].get("output_stride", 4),
+        output_stride=int(cfg.get("model", {}).get("output_stride", 4)),
+        data_root=d_cfg.get("data_root"),
     )
     workers = int(cfg["train"].get("workers", 0))
     pin_mem = bool(cfg["train"].get("pin_memory", False))

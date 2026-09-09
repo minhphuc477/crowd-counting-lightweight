@@ -540,7 +540,13 @@ def main() -> None:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     ckpt = torch.load(args.checkpoint, map_location="cpu")
     model = make_model_from_ckpt(ckpt, device)
-    ds = CrowdManifestDataset(args.manifest, train=False, output_stride=model.cfg.output_stride)
+    cfg = ckpt.get("config", {})
+    ds = CrowdManifestDataset(
+        args.manifest,
+        train=False,
+        output_stride=model.cfg.output_stride,
+        data_root=cfg.get("data", {}).get("data_root"),
+    )
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
     rows, summary, regional_trace, solver_trace = evaluate(
