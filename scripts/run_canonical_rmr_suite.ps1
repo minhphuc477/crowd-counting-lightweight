@@ -20,7 +20,8 @@ if (-not (Test-Path $pythonExe)) {
 }
 
 $currentCommit = (git rev-parse HEAD).Trim()
-$gitStatus = (git status --porcelain).Trim()
+$gitStatusRaw = git status --porcelain
+$gitStatus = if ($null -ne $gitStatusRaw) { ("$gitStatusRaw").Trim() } else { "" }
 $isDirty = [bool]$gitStatus
 
 $runs = @(
