@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 import subprocess
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
-from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
+from rmr_core.training import load_rng_state, make_scheduler, safe_torch_save, save_rng_state, seed_everything
 from .config import compute_v2_config_hash, validate_v2_config, validate_v2_resume_compatibility
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
@@ -536,7 +536,7 @@ def main() -> None:
             if metrics["MAE"] < best_mae and solver_fully_ramped:
                 best_mae = metrics["MAE"]
                 state["best_mae"] = best_mae
-                torch.save(state, out_dir / "best_val_mae.pt")
+                safe_torch_save(state, out_dir / "best_val_mae.pt")
                 is_new_best = True
 
             status_tag = ""
@@ -566,7 +566,7 @@ def main() -> None:
 
         if (epoch + 1) % eval_every == 0 or epoch == epochs - 1:
             state["best_mae"] = best_mae
-            torch.save(state, out_dir / "last.pt")
+            safe_torch_save(state, out_dir / "last.pt")
 
         with log_path.open("a", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore").writerow(row)

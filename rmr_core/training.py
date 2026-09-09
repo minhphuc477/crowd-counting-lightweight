@@ -94,3 +94,50 @@ def make_scheduler(
         return 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fn)
+
+
+def safe_torch_save(
+    state: dict[str, Any],
+    path: str | os.PathLike,
+    retries: int = 5,
+    delay: float = 0.5,
+) -> None:
+    """Windows-safe atomic checkpoint saving with retry logic to avoid file lock collisions."""
+    import time
+    from pathlib import Path
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_name(f"{target.stem}_{os.getpid()}_{time.time_ns()}.tmp")
+
+    try:
+        torch.save(state, tmp_path)
+    except Exception:
+        # Fallback to direct save with retry if temp file creation fails
+        for attempt in range(retries):
+            try:
+                torch.save(state, target)
+                return
+            except Exception:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(delay)
+        return
+
+    # Atomic or retry replacement on Windows
+    for attempt in range(retries):
+        try:
+            os.replace(tmp_path, target)
+            return
+        except OSError:
+            if attempt == retries - 1:
+                try:
+                    target.unlink(missing_ok=True)
+                    os.replace(tmp_path, target)
+                    return
+                except Exception:
+                    torch.save(state, target)
+                    tmp_path.unlink(missing_ok=True)
+                    return
+            time.sleep(delay)
+

@@ -34,7 +34,7 @@ from rmr_core.data import (
     compute_manifest_density,
 )
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
-from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
+from rmr_core.training import load_rng_state, make_scheduler, safe_torch_save, save_rng_state, seed_everything
 
 from .config import compute_config_hash, validate_resume_compatibility, validate_v3_config
 
@@ -722,7 +722,7 @@ def main() -> None:
             if is_best:
                 best_mae = cur_mae
                 epochs_without_improvement = 0
-                torch.save(
+                safe_torch_save(
                     {
                         "epoch": epoch + 1,
                         "model": model.state_dict(),
@@ -796,7 +796,7 @@ def main() -> None:
 
         # Save last checkpoint
         git_commit, git_dirty = get_git_info()
-        torch.save(
+        safe_torch_save(
             {
                 "epoch": epoch + 1,
                 "model": model.state_dict(),

@@ -45,7 +45,7 @@ from .operators import (
     regional_adjoint,
     regional_sum,
 )
-from .training import make_scheduler, seed_everything
+from .training import make_scheduler, safe_torch_save, seed_everything
 
 __all__ = [
     "MobileNetV4Backbone",
@@ -88,5 +88,6 @@ __all__ = [
     "regional_adjoint",
     "regional_sum",
     "make_scheduler",
+    "safe_torch_save",
     "seed_everything",
 ]

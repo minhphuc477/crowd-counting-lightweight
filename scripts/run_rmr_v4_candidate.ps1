@@ -38,7 +38,13 @@ Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Starting Training: Full 
 Write-Host "  Config: $cfg | OutDir: $outDir" -ForegroundColor Yellow
 Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Yellow
 
-$trainArgs = @("-m", "rmr_v3.train", "--config", $cfg, "--overwrite")
+$lastCkpt = "$outDir/last.pt"
+if (-not $Fresh -and (Test-Path $lastCkpt)) {
+    Write-Host "  [RESUME] Found valid resume checkpoint at $lastCkpt. Resuming training from last epoch..." -ForegroundColor Green
+    $trainArgs = @("-m", "rmr_v3.train", "--config", $cfg, "--resume", $lastCkpt, "--allow-cross-commit-resume")
+} else {
+    $trainArgs = @("-m", "rmr_v3.train", "--config", $cfg, "--overwrite")
+}
 Write-Host "  [TRAIN] Executing: $pythonExe $($trainArgs -join ' ')"
 & $pythonExe $trainArgs
 if ($LASTEXITCODE -ne 0) {
