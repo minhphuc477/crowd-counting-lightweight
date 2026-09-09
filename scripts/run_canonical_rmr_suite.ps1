@@ -1,7 +1,8 @@
 param (
     [switch]$Fresh = $false,
     [switch]$AllowCrossCommitResume = $false,
-    [switch]$ArchiveStale = $true
+    [switch]$ArchiveStale = $true,
+    [switch]$AllowDirty = $false
 )
 
 # Canonical RMR & RMR-v3 Benchmark Suite Runner
@@ -23,6 +24,11 @@ $currentCommit = (git rev-parse HEAD).Trim()
 $gitStatusRaw = git status --porcelain
 $gitStatus = if ($null -ne $gitStatusRaw) { ("$gitStatusRaw").Trim() } else { "" }
 $isDirty = [bool]$gitStatus
+
+if ($isDirty -and (-not $AllowDirty)) {
+    Write-Error "Working tree is dirty at git commit $currentCommit. Canonical publication benchmark runs require a clean git tree to ensure strict provenance tracking across all checkpoints and summaries. Please commit or stash your changes, or pass -AllowDirty to override."
+    exit 1
+}
 
 $runs = @(
     @{
@@ -196,14 +202,26 @@ $predB5P = "runs/sha_a/b5p_canonical_seed42/eval_test/predictions.csv"
 # Comparison 1: V3-A vs V3-B (Causal test of reliability weighting W = I vs W = diag(w_R))
 Write-Host "--- Comparison 1: V3-A (Uniform) vs V3-B (Reliability Weighted) [MAIN HYPOTHESIS] ---" -ForegroundColor Yellow
 & $pythonExe -m rmr_count.aggregate --compare $predV3A $predV3B --name-a "V3-A_Uniform" --name-b "V3-B_RW" --pred-col pred --output "runs/sha_a/comparison_v3a_vs_v3b.json"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Comparison 1 (V3-A vs V3-B) failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
+}
 
 # Comparison 2: B5-P vs V3-A (Causal test of Probabilistic NB Regional Formulation)
 Write-Host "`n--- Comparison 2: B5-P (Deterministic) vs V3-A (Probabilistic Uniform) ---" -ForegroundColor Yellow
 & $pythonExe -m rmr_count.aggregate --compare $predB5P $predV3A --name-a "B5-P_Deterministic" --name-b "V3-A_Uniform" --pred-col pred --output "runs/sha_a/comparison_b5p_vs_v3a.json"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Comparison 2 (B5-P vs V3-A) failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
+}
 
 # Comparison 3: B5-P vs V3-B (Overall improvement from Baseline to Proposed)
 Write-Host "`n--- Comparison 3: B5-P (Deterministic) vs V3-B (Reliability Weighted) ---" -ForegroundColor Yellow
 & $pythonExe -m rmr_count.aggregate --compare $predB5P $predV3B --name-a "B5-P_Deterministic" --name-b "V3-B_RW" --pred-col pred --output "runs/sha_a/comparison_b5p_vs_v3b.json"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Comparison 3 (B5-P vs V3-B) failed with exit code $LASTEXITCODE"
+    exit $LASTEXITCODE
+}
 
 Write-Host "`n================================================================================" -ForegroundColor Green
 Write-Host "  CANONICAL SUITE EXECUTION AND COMPARISONS COMPLETED SUCCESSFULLY!" -ForegroundColor Green

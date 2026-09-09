@@ -30,7 +30,7 @@ import subprocess
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
-from rmr_v3.config import compute_config_hash, validate_resume_compatibility
+from .config import compute_v2_config_hash, validate_v2_config, validate_v2_resume_compatibility
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
 
@@ -174,6 +174,9 @@ def main() -> None:
         cfg.setdefault("train", {})["patience"] = 0
     if args.output_dir is not None:
         cfg["output_dir"] = args.output_dir
+
+    validate_v2_config(cfg)
+
     seed = int(cfg.get("seed", 42))
     deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
     seed_everything(seed, deterministic=deterministic)
@@ -185,7 +188,7 @@ def main() -> None:
             output_stride=stride,
         )
 
-    run_config_hash = compute_config_hash(cfg)
+    run_config_hash = compute_v2_config_hash(cfg)
 
     out_dir = Path(cfg["output_dir"])
     if out_dir.exists() and not args.resume:
@@ -301,7 +304,7 @@ def main() -> None:
             ckpt = torch.load(args.resume, map_location="cpu")
         current_commit, _ = get_git_info()
         ckpt_commit = str(ckpt.get("git_commit", ckpt.get("provenance", {}).get("git_commit", "unknown")))
-        validate_resume_compatibility(
+        validate_v2_resume_compatibility(
             ckpt.get("config", {}),
             cfg,
             ckpt_hash=ckpt.get("config_hash"),
