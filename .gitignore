@@ -13,13 +13,16 @@ env/
 venv/
 ENV/
 
-# Large Datasets & Model Caches (only raw images/archives; jsonl manifests are tracked)
+# Datasets & Model Caches (datasets and jsonl manifests are tracked)
 data/*
 !data/*.jsonl
+!data/part_A_final/
+!data/part_A_final/**
+!data/part_B_final/
+!data/part_B_final/**
 .cache/
 *.tar.gz
 *.zip
-*.mat
 *.npy
 
 # Smoke & Temporary test outputs
@@ -27,11 +30,12 @@ analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
 profile*.json
-# Experiment and test run outputs (historical runs tracked explicitly)
+# Experiment and test run outputs (historical runs and candidate runs tracked explicitly)
 runs/*
 !runs/sha_a/
 runs/sha_a/*
 !runs/sha_a/historical_commit_91c0b841/
+!runs/sha_a/rmr_v4_candidate_seed42/
 
 # Large per-region diagnostic traces (>50MB)
 *reliability_diagnostics.csv
