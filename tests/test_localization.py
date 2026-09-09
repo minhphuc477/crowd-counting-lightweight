@@ -187,3 +187,51 @@ def test_otm_deterministic_seed():
     pts1 = otm_density_to_points(density, stride=4, seed=42, device="cpu")
     pts2 = otm_density_to_points(density, stride=4, seed=42, device="cpu")
     assert np.allclose(pts1, pts2)
+
+
+def test_evaluate_model_otm_v3_checkpoint(tmp_path: Path):
+    from PIL import Image
+    from rmr_count.localization.otm import evaluate_model_otm
+    from rmr_v3.model import RMRv3, RMRv3Config
+
+    # 1. Create a synthetic image and manifest
+    img_file = tmp_path / "test_img.jpg"
+    Image.new("RGB", (64, 64), color=(128, 128, 128)).save(img_file)
+    manifest_file = tmp_path / "test_manifest.jsonl"
+    manifest_file.write_text(
+        json.dumps({"image": str(img_file), "points": [[20.0, 20.0], [40.0, 40.0]], "id": "sample_0"}) + "\n",
+        encoding="utf-8",
+    )
+
+    # 2. Instantiate and save a miniature RMR-v3 model checkpoint
+    cfg_model = RMRv3Config(feature_width=16, pretrained=False, iterations=1, region_sizes_px=(32, 64, 128))
+    model = RMRv3(cfg_model)
+    ckpt_path = tmp_path / "model_v3.pt"
+    torch.save({
+        "model": model.state_dict(),
+        "config": {
+            "model": {
+                "output_stride": 4,
+                "feature_width": 16,
+                "iterations": 1,
+                "region_sizes_px": [32, 64, 128],
+                "pretrained": False,
+            }
+        },
+        "git_commit": "testcommit",
+        "git_dirty": False,
+    }, ckpt_path)
+
+    # 3. Evaluate OT-M with V3 checkpoint
+    summary = evaluate_model_otm(
+        checkpoint_path=ckpt_path,
+        manifest_path=manifest_file,
+        device="cpu",
+        stride=4,
+    )
+
+    assert "thresholds" in summary
+    assert "total_predictions" in summary
+    assert "total_ground_truth" in summary
+    assert summary["total_ground_truth"] == 2
+

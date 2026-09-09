@@ -73,6 +73,9 @@ Total trainable parameters: **101,763** (< 105,000 budget).
 
 ### 3.1 Canonical Benchmark Results (ShanghaiTech Part A)
 
+> [!NOTE]
+> **Historical Reference Run Archive Notice**: The baseline results below (B5-P: 94.83, V3-A: 96.35, V3-B: 83.22) represent initial reference runs from commit `91c0b841` archived in [`runs/sha_a/historical_commit_91c0b841/`](runs/sha_a/historical_commit_91c0b841/). Clean HEAD benchmark runs under hardened provenance tracking are executed via `scripts/run_canonical_rmr_suite.ps1`.
+
 Official 300-train / 182-test partition evaluation (direct full-image inference, 1000 epochs, seed 42):
 
 | Model | Variant Type | Params | Best Val Epoch | **Test MAE** | **Test RMSE** | **NAE** | **Bias** | Causal Outcome |

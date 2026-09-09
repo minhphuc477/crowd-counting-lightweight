@@ -262,7 +262,8 @@ def evaluate_model_otm(
         ckpt = torch.load(ckpt_path, map_location=device_t)
 
     cfg = ckpt.get("config", {})
-    if "model" in cfg and ("backbone" in cfg["model"] or "backbone_name" in cfg["model"]) and "variant" not in cfg["model"]:
+    is_v3 = ("model" in cfg and "variant" not in cfg["model"]) or any(k.startswith("region_nb_head.") for k in ckpt.get("model", {}))
+    if is_v3:
         from rmr_v3.eval import load_model_from_ckpt
         model, uniform_rel, _, _ = load_model_from_ckpt(ckpt_path, device=device_t)
         predict_fn = lambda img_t: core_predict_tiled(

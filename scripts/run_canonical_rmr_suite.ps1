@@ -80,7 +80,16 @@ foreach ($run in $runs) {
                 $trainDirty = [bool]$p.training_git_dirty
                 # Strict check: commit must match current HEAD, must be clean, and checkpoint must be valid
                 if ($trainCommit -eq $currentCommit -and (-not $trainDirty) -and (Get-Item $bestCkpt).Length -gt 1000) {
-                    $artifactsValid = $true
+                    if ($p.checkpoint_sha256) {
+                        $actualHash = (Get-FileHash -Path $bestCkpt -Algorithm SHA256).Hash.ToLower()
+                        if ($actualHash -eq $p.checkpoint_sha256.ToLower()) {
+                            $artifactsValid = $true
+                        } else {
+                            Write-Host "  [STALE] Checkpoint SHA256 mismatch ($actualHash vs $($p.checkpoint_sha256))." -ForegroundColor DarkYellow
+                        }
+                    } else {
+                        $artifactsValid = $true
+                    }
                 } else {
                     Write-Host "  [STALE] Existing artifacts in $outDir are from commit $trainCommit (dirty=$trainDirty), but current HEAD is $currentCommit (dirty=$isDirty)." -ForegroundColor DarkYellow
                 }
@@ -93,29 +102,41 @@ foreach ($run in $runs) {
     if ($artifactsValid) {
         Write-Host "  [SKIP] Verified matching clean HEAD artifacts at $outDir (Commit: $currentCommit). Skipping training." -ForegroundColor Green
     } else {
-        # Check if stale directory exists and needs archiving
-        if ((Test-Path $outDir) -and (Get-ChildItem $outDir).Count -gt 0) {
-            if ($ArchiveStale) {
-                $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
-                $cleanDirName = ($outDir -split "/")[-1]
-                $archiveDir = "runs/sha_a/archive_${cleanDirName}_$timestamp"
-                Write-Host "  [ARCHIVE] Archiving stale artifacts from $outDir to $archiveDir..." -ForegroundColor Magenta
-                Move-Item -Path $outDir -Destination $archiveDir -Force
+        # Check if last.pt exists and can be safely resumed BEFORE archiving
+        $canResume = $false
+        $lastCkpt = "$outDir/last.pt"
+        if (-not $Fresh -and (Test-Path $lastCkpt)) {
+            try {
+                $inspectCmd = "import torch; ckpt=torch.load(r'$lastCkpt', map_location='cpu', weights_only=False); print(str(ckpt.get('git_commit', ckpt.get('provenance', {}).get('git_commit', 'unknown'))))"
+                $ckptCommit = (& $pythonExe -c $inspectCmd 2>$null).Trim()
+                if ($ckptCommit -eq $currentCommit -or $AllowCrossCommitResume) {
+                    $canResume = $true
+                } else {
+                    Write-Host "  [INCOMPATIBLE] Found last.pt from commit $ckptCommit, but current HEAD is $currentCommit. Cannot resume without -AllowCrossCommitResume." -ForegroundColor DarkYellow
+                }
+            } catch {
+                $canResume = $false
             }
         }
 
-        $trainArgs = @("-m", $trainMod, "--config", $cfg)
-        $lastCkpt = "$outDir/last.pt"
-        if (Test-Path $lastCkpt) {
+        if ($canResume) {
+            Write-Host "  [RESUME] Found valid resume checkpoint at $lastCkpt (Commit: $ckptCommit). Resuming without archiving..." -ForegroundColor Green
+            $trainArgs = @("-m", $trainMod, "--config", $cfg, "--resume", $lastCkpt)
             if ($AllowCrossCommitResume) {
-                Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, resuming with --allow-cross-commit-resume..." -ForegroundColor Magenta
-                $trainArgs += @("--resume", $lastCkpt, "--allow-cross-commit-resume")
-            } else {
-                Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, verifying commit match for resume..." -ForegroundColor Magenta
-                $trainArgs += @("--resume", $lastCkpt)
+                $trainArgs += @("--allow-cross-commit-resume")
             }
         } else {
-            $trainArgs += @("--overwrite")
+            # Stale or fresh run: archive existing directory if non-empty
+            if ((Test-Path $outDir) -and (Get-ChildItem $outDir).Count -gt 0) {
+                if ($ArchiveStale) {
+                    $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
+                    $cleanDirName = ($outDir -split "/")[-1]
+                    $archiveDir = "runs/sha_a/archive_${cleanDirName}_$timestamp"
+                    Write-Host "  [ARCHIVE] Archiving stale artifacts from $outDir to $archiveDir..." -ForegroundColor Magenta
+                    Move-Item -Path $outDir -Destination $archiveDir -Force
+                }
+            }
+            $trainArgs = @("-m", $trainMod, "--config", $cfg, "--overwrite")
         }
 
         Write-Host "  [TRAIN] Executing: $pythonExe $($trainArgs -join ' ')"
@@ -134,7 +155,14 @@ foreach ($run in $runs) {
             if ($sumContent -and $sumContent.provenance) {
                 $p = $sumContent.provenance
                 if ($p.evaluation_commit -eq $currentCommit -and (-not [bool]$p.git_dirty)) {
-                    $evalValid = $true
+                    if ($p.checkpoint_sha256 -and (Test-Path $bestCkpt)) {
+                        $actualHash = (Get-FileHash -Path $bestCkpt -Algorithm SHA256).Hash.ToLower()
+                        if ($actualHash -eq $p.checkpoint_sha256.ToLower()) {
+                            $evalValid = $true
+                        }
+                    } else {
+                        $evalValid = $true
+                    }
                 }
             }
         } catch {

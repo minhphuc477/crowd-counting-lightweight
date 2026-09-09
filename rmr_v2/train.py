@@ -30,6 +30,7 @@ import subprocess
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
+from rmr_v3.config import compute_config_hash, validate_resume_compatibility
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
 
@@ -149,6 +150,12 @@ def main() -> None:
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
     ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
+    ap.add_argument(
+        "--allow-cross-commit-resume",
+        action="store_true",
+        default=False,
+        help="Allow resuming checkpoint created from different git commit",
+    )
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -177,6 +184,8 @@ def main() -> None:
             cfg["data"]["train_manifest"],
             output_stride=stride,
         )
+
+    run_config_hash = compute_config_hash(cfg)
 
     out_dir = Path(cfg["output_dir"])
     if out_dir.exists() and not args.resume:
@@ -290,6 +299,17 @@ def main() -> None:
             ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         except TypeError:
             ckpt = torch.load(args.resume, map_location="cpu")
+        current_commit, _ = get_git_info()
+        ckpt_commit = str(ckpt.get("git_commit", ckpt.get("provenance", {}).get("git_commit", "unknown")))
+        validate_resume_compatibility(
+            ckpt.get("config", {}),
+            cfg,
+            ckpt_hash=ckpt.get("config_hash"),
+            incoming_hash=run_config_hash,
+            ckpt_commit=ckpt_commit,
+            current_commit=current_commit,
+            allow_cross_commit=bool(args.allow_cross_commit_resume),
+        )
         state_dict = dict(ckpt["model"])
         if getattr(model, "eta_logits", None) is None and "eta_logits" in state_dict:
             state_dict.pop("eta_logits", None)
@@ -488,6 +508,7 @@ def main() -> None:
             "solver_strength": solver_strength,
             "best_mae": best_mae,
             "config": cfg,
+            "config_hash": run_config_hash,
             "git_commit": git_commit,
             "git_dirty": git_dirty,
         }

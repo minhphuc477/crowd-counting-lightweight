@@ -260,6 +260,21 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             if sr < 0:
                 raise ValueError(f"train.solver_ramp_epochs must be >= 0, got {sr}")
 
+    # Validate eval configuration
+    e_cfg = cfg.get("eval", {})
+    if isinstance(e_cfg, dict) and "density_bins" in e_cfg:
+        bins = e_cfg["density_bins"]
+        if not isinstance(bins, (list, tuple)) or len(bins) != 2:
+            raise ValueError(f"eval.density_bins must be a list or tuple of exactly 2 thresholds [low, high], got {bins!r}")
+        try:
+            b0, b1 = float(bins[0]), float(bins[1])
+        except (ValueError, TypeError) as err:
+            raise ValueError(f"eval.density_bins thresholds must be numeric, got {bins!r}") from err
+        if b0 <= 0 or b1 <= 0:
+            raise ValueError(f"eval.density_bins thresholds must be positive numbers, got [{b0}, {b1}]")
+        if b0 >= b1:
+            raise ValueError(f"eval.density_bins thresholds must satisfy low < high, got [{b0}, {b1}]")
+
 
 METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
     "model": [

@@ -34,9 +34,9 @@ def read_predictions_csv(path: str | Path) -> dict[str, dict[str, float]]:
         reader = csv.DictReader(f)
         for row_idx, row in enumerate(reader):
             sample_id = row.get("id") or row.get("image_id")
-            if sample_id is None:
-                continue
-            sid_str = str(sample_id)
+            if sample_id is None or not str(sample_id).strip():
+                raise ValueError(f"Malformed row {row_idx + 1} in {path}: missing 'id' or 'image_id' column")
+            sid_str = str(sample_id).strip()
             if sid_str in data:
                 raise ValueError(f"Duplicate sample ID '{sid_str}' encountered in {path} at row {row_idx + 1}")
             data[sid_str] = {
@@ -78,14 +78,22 @@ def compare_predictions(
     for cid in common_ids:
         ra = preds_a[cid]
         rb = preds_b[cid]
-        gt_a = ra.get("gt", ra.get("gt_count", 0.0))
-        gt_b = rb.get("gt", rb.get("gt_count", 0.0))
+        if "gt" not in ra and "gt_count" not in ra:
+            raise ValueError(f"Sample '{cid}' in {csv_a} is missing ground truth column ('gt' or 'gt_count')")
+        if "gt" not in rb and "gt_count" not in rb:
+            raise ValueError(f"Sample '{cid}' in {csv_b} is missing ground truth column ('gt' or 'gt_count')")
+        gt_a = float(ra.get("gt", ra.get("gt_count")))
+        gt_b = float(rb.get("gt", rb.get("gt_count")))
         if abs(gt_a - gt_b) > 1e-4:
             raise ValueError(
                 f"Ground truth discrepancy for common sample '{cid}': "
                 f"{name_a} GT={gt_a} vs {name_b} GT={gt_b}"
             )
         gt = gt_a
+        if pred_col not in ra:
+            raise KeyError(f"Sample '{cid}' in {csv_a} is missing prediction column '{pred_col}'")
+        if pred_col not in rb:
+            raise KeyError(f"Sample '{cid}' in {csv_b} is missing prediction column '{pred_col}'")
         pa = ra[pred_col]
         pb = rb[pred_col]
         ea = abs(pa - gt)

@@ -1,3 +1,5 @@
+# [DEPRECATED] Historical Stage C runner.
+# The active canonical benchmark runner is scripts/run_canonical_rmr_suite.ps1.
 $ErrorActionPreference = "Stop"
 
 $models = @(

@@ -594,6 +594,18 @@ def test_strict_yaml_validation():
     with pytest.raises(ValueError, match="Unknown config key 'misspelled_feature_width' in section 'model'"):
         validate_v3_config(bad_model_cfg)
 
+    # Bad eval.density_bins: length != 2
+    with pytest.raises(ValueError, match="eval.density_bins must be a list or tuple of exactly 2 thresholds"):
+        validate_v3_config({**valid_cfg, "eval": {"density_bins": [100.0]}})
+
+    # Bad eval.density_bins: low >= high
+    with pytest.raises(ValueError, match="eval.density_bins thresholds must satisfy low < high"):
+        validate_v3_config({**valid_cfg, "eval": {"density_bins": [500.0, 100.0]}})
+
+    # Bad eval.density_bins: non-positive
+    with pytest.raises(ValueError, match="eval.density_bins thresholds must be positive numbers"):
+        validate_v3_config({**valid_cfg, "eval": {"density_bins": [-5.0, 100.0]}})
+
 
 # ---------------------------------------------------------------------------
 # Test 17: AMP loss numerical precision
