@@ -43,12 +43,15 @@ $$
 Y_{ij}^* = \sum_{n \in \mathcal{P}_{\text{valid}}} \mathbf{1}\left(\min\left(G_h - 1, \; \left\lfloor \frac{y_n + 0.5}{s} \right\rfloor\right) = i, \; \min\left(G_w - 1, \; \left\lfloor \frac{x_n + 0.5}{s} \right\rfloor\right) = j\right).
 $$
 
-- **Forward Regional Projection** $A \in \{0, 1\}^{M \times G}$: $(AY)_m = \sum_{g \in R_m} Y_g = q_m$.
-- **Adjoint Back-Projection** $A^\top \in \{0, 1\}^{G \times M}$: $(A^\top r)_g = \sum_{m: g \in R_m} r_m$.
+The forward regional projection $A \in \{0, 1\}^{M \times G}$ and exact adjoint back-projection $A^\top \in \{0, 1\}^{G \times M}$ are defined as:
+
+$$
+(AY)_m = \sum_{g \in R_m} Y_g = q_m, \qquad (A^\top r)_g = \sum_{m: g \in R_m} r_m.
+$$
 
 ### 2.2 The Adjoint Transfer Theorem
 
-Let $D_a = \operatorname{diag}(A \mathbf{1}_G) \in \mathbb{R}^{M \times M}$ be regional areas, and $D_c = \operatorname{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{G \times G}$ be cell coverage counts.  
+Let $D_a = \mathrm{diag}(A \mathbf{1}_G) \in \mathbb{R}^{M \times M}$ denote regional areas, and $D_c = \mathrm{diag}(A^\top \mathbf{1}_M) \in \mathbb{R}^{G \times G}$ denote cell coverage counts.  
 The normalized regional transfer operator satisfies:
 
 $$
@@ -68,7 +71,7 @@ Fixed relaxation $\omega = 1.0$, identity preconditioner $M = 1.0$, detached reg
 RMR-v3 extends the transfer operator with per-region uncertainty calibration derived from the Negative-Binomial rate variance:
 
 $$
-V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \operatorname{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right)
+V_R^{\text{rate}} = \frac{\mu_R + \mu_R^2 / r_R}{|R|^2} + \sigma_{\min}^2, \quad q_R = \frac{1}{V_R^{\text{rate}}}, \quad \bar{q}_s = \frac{1}{|S_s|} \sum_{R' \in S_s} q_{R'}, \quad w_R = \mathrm{clamp}\left(\frac{q_R}{\bar{q}_s}, \; 0.25, \; 4.0\right)
 $$
 
 $$
@@ -108,7 +111,7 @@ Official 300-train / 182-test partition evaluation (direct full-image inference,
 **Statistical Significance & Causal Proof:**
 - **V3-A → V3-B (Causal Test of Reliability Weighting):** **ΔMAE = 13.13** drop, paired t-test **p = 0.01025**, Wilcoxon *p* = 0.06958, Bootstrap 95% CI on error difference: **[+3.72, +23.23]**, wins: 100 vs 82.
 - **B5-P → V3-B (Proposed vs Predecessor Baseline):** **ΔMAE = 11.61** drop, Wilcoxon signed-rank **p = 0.02609**, wins: 108 vs 74.
-- **B5-P → V3-A (Deterministic vs Probabilistic Uniform):** **ΔMAE = -1.52** (*p* = 0.844, non-significant), proving that switching to probabilistic loss alone without reliability weighting does not yield gains. The gain is causally driven by the reliability-weighted solver $W = \operatorname{diag}(w_R)$.
+- **B5-P → V3-A (Deterministic vs Probabilistic Uniform):** **ΔMAE = -1.52** (*p* = 0.844, non-significant), proving that switching to probabilistic loss alone without reliability weighting does not yield gains. The gain is causally driven by the reliability-weighted solver $W = \mathrm{diag}(w_R)$.
 
 ---
 
