@@ -26,11 +26,25 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
+import subprocess
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, save_rng_state, seed_everything
 from .losses import LossConfig, compute_losses
 from .model import RMRConfig, RMRCount, count_parameters
+
+
+def get_git_info() -> tuple[str, bool]:
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+    except Exception:
+        commit = "unknown"
+    try:
+        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        dirty = bool(status)
+    except Exception:
+        dirty = False
+    return commit, dirty
 
 
 def make_model(cfg: dict) -> RMRCount:
@@ -463,6 +477,7 @@ def main() -> None:
         }
 
         do_eval = val_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == epochs - 1)
+        git_commit, git_dirty = get_git_info()
         state = {
             "epoch": epoch,
             "model": model.state_dict(),
@@ -473,6 +488,8 @@ def main() -> None:
             "solver_strength": solver_strength,
             "best_mae": best_mae,
             "config": cfg,
+            "git_commit": git_commit,
+            "git_dirty": git_dirty,
         }
         if do_eval:
             metrics = evaluate(model, val_loader, device)

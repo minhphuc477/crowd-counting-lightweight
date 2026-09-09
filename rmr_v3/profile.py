@@ -212,8 +212,15 @@ def main() -> None:
 
     total_params = count_trainable_parameters(model)
 
+    is_v4 = bool(
+        getattr(model.cfg, "native_scale_pooling", False)
+        or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std"
+        or (args.config and "rmr_v4" in str(args.config).lower())
+    )
+    arch_name = "RMR-v4" if is_v4 else "RMR-v3"
+
     result = {
-        "architecture": "RMR-v3",
+        "architecture": arch_name,
         "reliability_mode": mode_str,
         "iterations": iterations,
         "trainable_parameters": total_params,

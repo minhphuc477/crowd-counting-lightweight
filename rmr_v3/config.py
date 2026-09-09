@@ -483,8 +483,20 @@ def validate_resume_compatibility(
     incoming_cfg: dict[str, Any],
     ckpt_hash: str | None = None,
     incoming_hash: str | None = None,
+    ckpt_commit: str | None = None,
+    current_commit: str | None = None,
+    allow_cross_commit: bool = False,
 ) -> None:
-    """Validate that incoming config matches checkpoint across all method-critical fields and hash."""
+    """Validate that incoming config matches checkpoint across all method-critical fields, hash, and git commit."""
+    if not allow_cross_commit and ckpt_commit and current_commit:
+        if ckpt_commit != "unknown" and current_commit != "unknown" and ckpt_commit != current_commit:
+            raise ValueError(
+                f"Resume cross-commit mismatch: checkpoint was created on git commit {ckpt_commit!r}, "
+                f"but current environment is at commit {current_commit!r}. "
+                f"Resuming across different git commits is disallowed to prevent hybrid code trajectories. "
+                f"To override this check intentionally, pass --allow-cross-commit-resume."
+            )
+
     if ckpt_hash is not None and incoming_hash is not None:
         if ckpt_hash != incoming_hash:
             raise ValueError(

@@ -17,30 +17,22 @@ from rmr_v3.model import (
     ProbabilisticRegionalEvidenceHead,
     RMRv3,
     RMRv3Config,
-    _map_boxes_between_grids,
-    _map_boxes_to_stride,
     region_mean_std_features,
 )
 
 
-def test_native_box_mapping_nonempty():
-    src_hw = (128, 128)
-    dst_hw = (32, 32)
-    # Boxes in stride-4 space: [y1, x1, y2, x2]
+def test_fractional_pooling_nonempty():
+    feat = torch.randn(2, 32, 32, 32)
+    # Continuous boxes: [y1, x1, y2, x2]
     boxes = torch.tensor([
-        [0, 0, 8, 8],
-        [0, 0, 1, 1],
-        [127, 127, 128, 128],
-        [10, 20, 50, 70],
+        [0.0, 0.0, 8.0, 8.0],
+        [0.5, 0.5, 1.5, 1.5],
+        [31.0, 31.0, 32.0, 32.0],
+        [2.5, 5.0, 12.5, 17.5],
     ])
-    mapped = _map_boxes_between_grids(boxes, src_hw, dst_hw)
-    assert mapped.shape == boxes.shape
-    # All boxes must be valid and non-empty (y2 > y1, x2 > x1)
-    assert (mapped[:, 2] > mapped[:, 0]).all()
-    assert (mapped[:, 3] > mapped[:, 1]).all()
-    # Bounds must stay within [0, dst_h] and [0, dst_w]
-    assert (mapped[:, 0] >= 0).all() and (mapped[:, 1] >= 0).all()
-    assert (mapped[:, 2] <= dst_hw[0]).all() and (mapped[:, 3] <= dst_hw[1]).all()
+    pooled = fractional_region_average_features(feat, boxes)
+    assert pooled.shape == (2, 4, 32)
+    assert torch.isfinite(pooled).all()
 
 
 def test_native_pooling_output_shape():
@@ -223,38 +215,27 @@ def test_mean_std_fp32_numerical_precision_under_fp16():
 
 
 @pytest.mark.parametrize(
-    "src_hw, dst_hw",
+    "feat_hw",
     [
-        ((158, 212), (40, 53)),  # Downsampled from 631x847 odd SHA-A image
-        ((129, 193), (33, 49)),  # Downsampled from 513x769
-        ((125, 126), (32, 32)),  # Downsampled from 499x501
-        ((64, 91), (16, 23)),    # P4 -> P16 odd stride mapping
+        (40, 53),  # Downsampled from 631x847 odd SHA-A image
+        (33, 49),  # Downsampled from 513x769
+        (32, 32),  # Downsampled from 499x501
+        (16, 23),  # P16 odd stride mapping
     ],
 )
-def test_native_box_mapping_odd_dimensions(src_hw, dst_hw):
-    """Test geometry preservation and lattice bounds for arbitrary non-divisible/odd feature shapes."""
-    src_h, src_w = src_hw
-    dst_h, dst_w = dst_hw
-
-    # Generate synthetic candidate boxes spanning corners, edges, small, and large extents
+def test_fractional_pooling_odd_dimensions(feat_hw):
+    """Test exact continuous pooling for arbitrary non-divisible/odd feature shapes."""
+    h, w = feat_hw
+    feat = torch.randn(1, 16, h, w)
     boxes = torch.tensor([
-        [0, 0, 8, 8],
-        [0, 0, 1, 1],
-        [src_h - 8, src_w - 8, src_h, src_w],
-        [src_h - 1, src_w - 1, src_h, src_w],
-        [0, 0, src_h, src_w],
-        [src_h // 4, src_w // 4, src_h // 2, src_w // 2],
+        [0.0, 0.0, min(8.0, float(h)), min(8.0, float(w))],
+        [0.0, 0.0, 1.0, 1.0],
+        [float(h - 8), float(w - 8), float(h), float(w)],
+        [float(h // 4), float(w // 4), float(h // 2), float(w // 2)],
     ])
-
-    mapped = _map_boxes_between_grids(boxes, src_hw, dst_hw)
-
-    # 1. Non-empty bounding boxes
-    assert (mapped[:, 2] > mapped[:, 0]).all(), "All boxes must satisfy y2 > y1"
-    assert (mapped[:, 3] > mapped[:, 1]).all(), "All boxes must satisfy x2 > x1"
-
-    # 2. Strict lattice boundaries
-    assert (mapped[:, 0] >= 0).all() and (mapped[:, 1] >= 0).all()
-    assert (mapped[:, 2] <= dst_h).all() and (mapped[:, 3] <= dst_w).all()
+    pooled = fractional_region_average_features(feat, boxes)
+    assert pooled.shape == (1, 4, 16)
+    assert torch.isfinite(pooled).all()
 
 
 def test_native_pooling_full_image_odd_forward_pass():
@@ -345,35 +326,6 @@ def test_strict_dm_config_guards():
     with pytest.raises(ValueError, match="must sum to > 0"):
         validate_v3_config(cfg_zero_w)
 
-
-def test_physical_stride_mapping_stability():
-    """Verify physical stride mapping preserves constant cell extent across odd image grids.
-
-    A 64px region (16 cells on P4, stride 4) mapped to P8 (stride 8) must span exactly 8 cells.
-    A 128px region (32 cells on P4, stride 4) mapped to P16 (stride 16) must span exactly 8 cells.
-    """
-    # Case 1: 64px region on P4 (stride 4) -> 16 cells in width and height
-    boxes_64 = torch.tensor([
-        [0, 0, 16, 16],
-        [8, 8, 24, 24],
-        [16, 32, 32, 48],
-    ])
-    mapped_p8 = _map_boxes_to_stride(boxes_64, src_stride=4, dst_stride=8, dst_hw=(79, 106))
-    h_span_p8 = mapped_p8[:, 2] - mapped_p8[:, 0]
-    w_span_p8 = mapped_p8[:, 3] - mapped_p8[:, 1]
-    assert (h_span_p8 == 8).all(), f"Expected 8 cells on P8 for 64px region, got {h_span_p8}"
-    assert (w_span_p8 == 8).all(), f"Expected 8 cells on P8 for 64px region, got {w_span_p8}"
-
-    # Case 2: 128px region on P4 (stride 4) -> 32 cells in width and height
-    boxes_128 = torch.tensor([
-        [0, 0, 32, 32],
-        [16, 16, 48, 48],
-    ])
-    mapped_p16 = _map_boxes_to_stride(boxes_128, src_stride=4, dst_stride=16, dst_hw=(40, 53))
-    h_span_p16 = mapped_p16[:, 2] - mapped_p16[:, 0]
-    w_span_p16 = mapped_p16[:, 3] - mapped_p16[:, 1]
-    assert (h_span_p16 == 8).all(), f"Expected 8 cells on P16 for 128px region, got {h_span_p16}"
-    assert (w_span_p16 == 8).all(), f"Expected 8 cells on P16 for 128px region, got {w_span_p16}"
 
 
 def test_train_config_bounds_guards():

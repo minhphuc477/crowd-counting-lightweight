@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import hashlib
+import json
 from pathlib import Path
+import subprocess
+import sys
 
 import torch
 from torch.utils.data import DataLoader
@@ -9,6 +14,30 @@ from torch.utils.data import DataLoader
 from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
 from .model import RMRConfig, RMRCount
+
+
+def compute_file_sha256(path: Path | str) -> str:
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return "not_found"
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def get_git_info() -> tuple[str, bool]:
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+    except Exception:
+        commit = "unknown"
+    try:
+        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        dirty = bool(status)
+    except Exception:
+        dirty = False
+    return commit, dirty
 
 
 def make_model_from_ckpt(ckpt: dict, device: torch.device) -> RMRCount:
@@ -78,6 +107,7 @@ def main() -> None:
     except TypeError:
         ckpt = torch.load(ckpt_path, map_location="cpu")
     model = make_model_from_ckpt(ckpt, device)
+    cfg = ckpt.get("config", {})
 
     manifest_path = Path(args.manifest)
     dataset = CrowdManifestDataset(manifest_path, train=False, output_stride=model.cfg.output_stride)
@@ -87,6 +117,8 @@ def main() -> None:
 
     print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
 
+    density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
+
     rows, summary = evaluate_dataset(
         model=model,
         loader=loader,
@@ -95,11 +127,45 @@ def main() -> None:
         run_tiling=not args.no_tiling,
         tile_size=args.tile_size,
         practical_halo=args.halo,
+        enforce_gt_consistency=True,
+        density_bins=density_bins,
     )
 
+    eval_commit, eval_dirty = get_git_info()
+    resolved_cfg_file = ckpt_path.parent / "resolved_config.yaml"
+    if resolved_cfg_file.exists():
+        cfg_sha = compute_file_sha256(resolved_cfg_file)
+    else:
+        cfg_sha = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode("utf-8")).hexdigest()
+
+    model_cfg = cfg.get("model", {})
+    summary["provenance"] = {
+        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "evaluation_commit": eval_commit,
+        "git_dirty": eval_dirty,
+        "training_commit": str(ckpt.get("git_commit", ckpt.get("provenance", {}).get("git_commit", "unknown"))),
+        "training_git_dirty": ckpt.get("git_dirty", ckpt.get("provenance", {}).get("git_dirty")),
+        "checkpoint_path": str(ckpt_path),
+        "checkpoint_sha256": compute_file_sha256(ckpt_path),
+        "manifest_path": str(dataset.manifest),
+        "manifest_sha256": compute_file_sha256(dataset.manifest),
+        "resolved_config_sha256": cfg_sha,
+        "python_version": sys.version,
+        "torch_version": torch.__version__,
+        "parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "variant": model_cfg.get("variant", "b5_projected"),
+        "tiling": not args.no_tiling,
+    }
+
     save_evaluation_artifacts(out_dir, rows, summary)
-    print(f"Evaluation complete. MAE: {summary['MAE']:.2f}, RMSE: {summary['RMSE']:.2f}, NAE: {summary['NAE']:.4f}")
-    print(f"Artifacts saved to {out_dir}")
+    lo, hi = density_bins
+    print(f"\nEvaluation complete:")
+    print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.4f} | Bias: {summary['Bias']:+.2f}")
+    print(f"  GAME0: {summary['GAME0']:.2f} | GAME1: {summary['GAME1']:.2f} | GAME2: {summary['GAME2']:.2f} | GAME3: {summary['GAME3']:.2f}")
+    print(f"  Sparse MAE (<={lo:g}): {summary.get('mae_sparse', 0.0):.2f} (n={summary.get('n_sparse', 0)})")
+    print(f"  Moderate MAE ({lo:g}-{hi:g}): {summary.get('mae_moderate', 0.0):.2f} (n={summary.get('n_moderate', 0)})")
+    print(f"  Dense MAE (>{hi:g}): {summary.get('mae_dense', 0.0):.2f} (n={summary.get('n_dense', 0)})")
+    print(f"Artifacts saved to {out_dir}\n")
 
 
 if __name__ == "__main__":

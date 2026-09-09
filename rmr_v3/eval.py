@@ -284,10 +284,10 @@ def main() -> None:
     print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}")
     if "mae_y0" in summary:
         print(f"  Iterates Full-Image MAE: Y0={summary['mae_y0']:.2f} -> Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}")
-    print(f"  GAME0: {summary['GAME0']:.2f} | GAME1: {summary['GAME1']:.2f} | GAME2: {summary['GAME2']:.2f} | GAME3: {summary['GAME3']:.2f}")
-    print(f"  Sparse MAE (<=100): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
-    print(f"  Moderate MAE (101-500): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")
-    print(f"  Dense MAE (>500): {summary['mae_dense']:.2f} (n={summary['n_dense']})")
+    lo, hi = density_bins
+    print(f"  Sparse MAE (<={lo:g}): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
+    print(f"  Moderate MAE ({lo:g}-{hi:g}): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")
+    print(f"  Dense MAE (>{hi:g}): {summary['mae_dense']:.2f} (n={summary['n_dense']})")
     if "pearson_rate_var_error" in summary:
         print(f"  Pearson(var, err): {summary['pearson_rate_var_error']:.4f}")
         print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")

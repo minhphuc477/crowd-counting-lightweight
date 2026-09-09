@@ -247,7 +247,8 @@ def evaluate_model_otm(
 ) -> dict[str, Any]:
     """Runs L3 Predicted Model OT-M evaluation on a dataset manifest using trained weights."""
     from rmr_count.data import normalize_image
-    from rmr_count.eval import make_model_from_ckpt, predict_tiled
+    from rmr_count.eval import make_model_from_ckpt
+    from rmr_core.evaluation import predict_tiled as core_predict_tiled
     from torchvision import transforms
 
     ckpt_path = Path(checkpoint_path)
@@ -255,10 +256,29 @@ def evaluate_model_otm(
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
     device_t = torch.device(device if (torch.cuda.is_available() or device != "cuda") else "cpu")
-    ckpt = torch.load(ckpt_path, map_location=device_t)
-    model = make_model_from_ckpt(ckpt, device=device_t)
-    model.to(device_t)
-    model.eval()
+    try:
+        ckpt = torch.load(ckpt_path, map_location=device_t, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(ckpt_path, map_location=device_t)
+
+    cfg = ckpt.get("config", {})
+    if "model" in cfg and ("backbone" in cfg["model"] or "backbone_name" in cfg["model"]) and "variant" not in cfg["model"]:
+        from rmr_v3.eval import load_model_from_ckpt
+        model, uniform_rel, _, _ = load_model_from_ckpt(ckpt_path, device=device_t)
+        predict_fn = lambda img_t: core_predict_tiled(
+            model,
+            img_t,
+            output_stride=stride,
+            tile_size=512,
+            halo=0,
+            forward_kwargs={"uniform_reliability": uniform_rel},
+        )
+    else:
+        from rmr_count.eval import predict_tiled as count_predict_tiled
+        model = make_model_from_ckpt(ckpt, device=device_t)
+        model.to(device_t)
+        model.eval()
+        predict_fn = lambda img_t: count_predict_tiled(model, img_t, tile_size=512, halo=0)
 
     # Canonical RMR normalization: mean=0.5, std=0.5
     tf = transforms.Compose([
@@ -303,7 +323,7 @@ def evaluate_model_otm(
                 valid_gts = points[valid]
 
             with torch.inference_mode():
-                y_canvas = predict_tiled(model, tensor, tile_size=512, halo=0)
+                y_canvas = predict_fn(tensor)
                 y_pred = y_canvas[0].cpu().numpy()
 
             otm_pts = otm_density_to_points(y_pred, stride=stride, device=device_t, seed=42)

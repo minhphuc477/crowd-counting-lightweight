@@ -1,9 +1,16 @@
+param (
+    [switch]$Fresh = $false,
+    [switch]$AllowCrossCommitResume = $false,
+    [switch]$ArchiveStale = $true
+)
+
 # Canonical RMR & RMR-v3 Benchmark Suite Runner
 # Strictly adheres to:
 # 1. Zero ad-hoc splits (300 train_all, 182 test).
 # 2. Sequential execution for maximum CUDA throughput and thermal stability.
 # 3. Direct full-image MAE/RMSE headline metrics.
 # 4. Rigorous paired comparison (t-test, Wilcoxon, bootstrap 95% CI).
+# 5. Publication-grade provenance verification (matching clean git HEAD).
 
 $ErrorActionPreference = "Stop"
 
@@ -11,6 +18,10 @@ $pythonExe = ".venv\Scripts\python.exe"
 if (-not (Test-Path $pythonExe)) {
     $pythonExe = "python"
 }
+
+$currentCommit = (git rev-parse HEAD).Trim()
+$gitStatus = (git status --porcelain).Trim()
+$isDirty = [bool]$gitStatus
 
 $runs = @(
     @{
@@ -39,6 +50,7 @@ $runs = @(
 Write-Host "`n================================================================================" -ForegroundColor Cyan
 Write-Host "  CANONICAL RMR / RMR-V3 BENCHMARK SUITE" -ForegroundColor Cyan
 Write-Host "  Order: V3-A -> V3-B -> B5-P (Sequential execution on GPU)" -ForegroundColor Cyan
+Write-Host "  Git HEAD: $currentCommit (Dirty: $isDirty) | Fresh: $Fresh" -ForegroundColor Cyan
 Write-Host "================================================================================`n" -ForegroundColor Cyan
 
 foreach ($run in $runs) {
@@ -56,13 +68,21 @@ foreach ($run in $runs) {
     Write-Host "  Config: $cfg | OutDir: $outDir" -ForegroundColor Yellow
     Write-Host "--------------------------------------------------------------------------------" -ForegroundColor Yellow
 
-    # Training step: check if already completed with valid artifacts
+    # Training step: check if already completed with valid artifacts matching clean current HEAD
     $artifactsValid = $false
-    if ((Test-Path $summaryJson) -and (Test-Path $bestCkpt)) {
+    if (-not $Fresh -and (Test-Path $summaryJson) -and (Test-Path $bestCkpt)) {
         try {
             $sumContent = Get-Content $summaryJson -Raw | ConvertFrom-Json
-            if ($sumContent -and (Get-Item $bestCkpt).Length -gt 1000) {
-                $artifactsValid = $true
+            if ($sumContent -and $sumContent.provenance) {
+                $p = $sumContent.provenance
+                $trainCommit = $p.training_commit
+                $trainDirty = [bool]$p.training_git_dirty
+                # Strict check: commit must match current HEAD, must be clean, and checkpoint must be valid
+                if ($trainCommit -eq $currentCommit -and (-not $trainDirty) -and (Get-Item $bestCkpt).Length -gt 1000) {
+                    $artifactsValid = $true
+                } else {
+                    Write-Host "  [STALE] Existing artifacts in $outDir are from commit $trainCommit (dirty=$trainDirty), but current HEAD is $currentCommit (dirty=$isDirty)." -ForegroundColor DarkYellow
+                }
             }
         } catch {
             $artifactsValid = $false
@@ -70,13 +90,31 @@ foreach ($run in $runs) {
     }
 
     if ($artifactsValid) {
-        Write-Host "  [SKIP] Verified valid evaluation summary and checkpoint at $outDir. Skipping training." -ForegroundColor Green
+        Write-Host "  [SKIP] Verified matching clean HEAD artifacts at $outDir (Commit: $currentCommit). Skipping training." -ForegroundColor Green
     } else {
+        # Check if stale directory exists and needs archiving
+        if ((Test-Path $outDir) -and (Get-ChildItem $outDir).Count -gt 0) {
+            if ($ArchiveStale) {
+                $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
+                $cleanDirName = ($outDir -split "/")[-1]
+                $archiveDir = "runs/sha_a/archive_${cleanDirName}_$timestamp"
+                Write-Host "  [ARCHIVE] Archiving stale artifacts from $outDir to $archiveDir..." -ForegroundColor Magenta
+                Move-Item -Path $outDir -Destination $archiveDir -Force
+            }
+        }
+
         $trainArgs = @("-m", $trainMod, "--config", $cfg)
         $lastCkpt = "$outDir/last.pt"
         if (Test-Path $lastCkpt) {
-            Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, resuming..." -ForegroundColor Magenta
-            $trainArgs += @("--resume", $lastCkpt)
+            if ($AllowCrossCommitResume) {
+                Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, resuming with --allow-cross-commit-resume..." -ForegroundColor Magenta
+                $trainArgs += @("--resume", $lastCkpt, "--allow-cross-commit-resume")
+            } else {
+                Write-Host "  [RESUME] Found existing last.pt at $lastCkpt, verifying commit match for resume..." -ForegroundColor Magenta
+                $trainArgs += @("--resume", $lastCkpt)
+            }
+        } else {
+            $trainArgs += @("--overwrite")
         }
 
         Write-Host "  [TRAIN] Executing: $pythonExe $($trainArgs -join ' ')"
@@ -89,10 +127,15 @@ foreach ($run in $runs) {
 
     # Evaluation step: evaluate best_val_mae.pt on test set
     $evalValid = $false
-    if (Test-Path $summaryJson) {
+    if (-not $Fresh -and (Test-Path $summaryJson)) {
         try {
             $sumContent = Get-Content $summaryJson -Raw | ConvertFrom-Json
-            if ($sumContent) { $evalValid = $true }
+            if ($sumContent -and $sumContent.provenance) {
+                $p = $sumContent.provenance
+                if ($p.evaluation_commit -eq $currentCommit -and (-not [bool]$p.git_dirty)) {
+                    $evalValid = $true
+                }
+            }
         } catch {
             $evalValid = $false
         }

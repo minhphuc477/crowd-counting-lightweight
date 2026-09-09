@@ -280,6 +280,7 @@ def main() -> None:
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
     ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
+    ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -323,11 +324,16 @@ def main() -> None:
             resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         except TypeError:
             resume_ckpt = torch.load(args.resume, map_location="cpu")
+        current_commit, _ = get_git_info()
+        ckpt_commit = str(resume_ckpt.get("git_commit", resume_ckpt.get("provenance", {}).get("git_commit", "unknown")))
         validate_resume_compatibility(
             resume_ckpt.get("config", {}),
             cfg,
             ckpt_hash=resume_ckpt.get("config_hash"),
             incoming_hash=run_config_hash,
+            ckpt_commit=ckpt_commit,
+            current_commit=current_commit,
+            allow_cross_commit=bool(args.allow_cross_commit_resume),
         )
 
     out_dir = Path(cfg["output_dir"])
@@ -392,10 +398,30 @@ def main() -> None:
     bs = int(cfg.get("train", {}).get("batch_size", 8))
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    variant_name = "V3-A (Probabilistic Uniform)" if uniform_reliability else "V3-B (Reliability Weighted)"
+    is_v4 = bool(
+        getattr(model.cfg, "native_scale_pooling", False)
+        or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std"
+        or cfg.get("loss", {}).get("use_multiscale_dm", False)
+        or "rmr_v4" in str(args.config).lower()
+    )
+    if is_v4:
+        sub_tags = []
+        if getattr(model.cfg, "native_scale_pooling", False):
+            sub_tags.append("NativePool")
+        if getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std":
+            sub_tags.append("MeanStd")
+        if cfg.get("loss", {}).get("use_multiscale_dm", False):
+            sub_tags.append("MultiScaleDM")
+        sub_str = "+".join(sub_tags) if sub_tags else "Candidate"
+        variant_name = f"RMR-v4 ({sub_str})"
+        banner_title = "RMR-v4 Training Initialized"
+    else:
+        variant_name = "V3-A (Probabilistic Uniform)" if uniform_reliability else "V3-B (Reliability Weighted)"
+        banner_title = "RMR-v3 Training Initialized"
+
     print(
         f"\n{'=' * 80}\n"
-        f"  RMR-v3 Training Initialized\n"
+        f"  {banner_title}\n"
         f"  Variant: {variant_name} | Parameters: {n_params:,} | Device: {device}\n"
         f"  Epochs: {epochs} | Batch Size: {bs} | Initial LR: {lr_init:.2e}\n"
         f"  Output Directory: {out_dir}\n"
