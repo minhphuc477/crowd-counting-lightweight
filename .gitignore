@@ -30,11 +30,7 @@ analysis_smoke/
 eval_smoke*.json
 stats_smoke*.json
 profile*.json
-# Experiment and test run outputs (historical runs tracked explicitly)
-runs/*
-!runs/sha_a/
-runs/sha_a/*
-!runs/sha_a/historical_commit_91c0b841/
+# Experiment runs and checkpoints are tracked (large CSV traces >50MB excluded below)
 
 # Large per-region diagnostic traces (>50MB)
 *reliability_diagnostics.csv
