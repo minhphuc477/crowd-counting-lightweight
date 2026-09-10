@@ -24,9 +24,11 @@ from .metrics import (
 from .necks import (
     AdditiveFPNNeck,
     AdditiveFusion,
+    ASPPLiteFPNNeck,
     ConvGNAct,
     DepthwiseDilated,
     DSResidual,
+    RepWeightedFPNNeck,
     TinyIR,
 )
 from .operators import (
@@ -69,9 +71,11 @@ __all__ = [
     "summarize_predictions",
     "AdditiveFPNNeck",
     "AdditiveFusion",
+    "ASPPLiteFPNNeck",
     "ConvGNAct",
     "DepthwiseDilated",
     "DSResidual",
+    "RepWeightedFPNNeck",
     "TinyIR",
     "RegionSet",
     "build_multiscale_regions",

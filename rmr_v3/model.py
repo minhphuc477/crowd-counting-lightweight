@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
-from rmr_core.necks import AdditiveFPNNeck, RepWeightedFPNNeck
+from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, RepWeightedFPNNeck
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
@@ -39,8 +39,10 @@ class RMRv3Config:
     init_m0: float = 0.015763
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "rep_weighted"
-    context_dilations: tuple[int, ...] = (1, 2, 3)  # dilations for RepWeightedFPNNeck context blocks
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "rep_weighted"
+    context_dilations: tuple[int, ...] = (1, 2, 3)  # dilations for AdditiveFPNNeck / RepWeightedFPNNeck
+    use_aspp_gap: bool = False  # if True AND neck_type=="aspp_lite", enable GAP branch in ASPP-lite
+    aspp_dilations: tuple[int, ...] = (1, 3, 6)  # dilations for ASPPLiteFPNNeck branches
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
@@ -73,6 +75,9 @@ class RMRv3Config:
     # V4 candidate switches
     native_scale_pooling: bool = False
     regional_feature_stats: str = "mean"
+
+    # Region head MLP hidden dim (default 48 preserves all prior checkpoints)
+    region_head_hidden: int = 48
 
 
 
@@ -541,6 +546,12 @@ class RMRv3(nn.Module):
                 width=cfg.feature_width,
                 context_dilations=cfg.context_dilations,
             )
+        elif cfg.neck_type == "aspp_lite":
+            self.fusion = ASPPLiteFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+                aspp_dilations=cfg.aspp_dilations,
+            )
         elif cfg.neck_type == "additive":
             self.fusion = AdditiveFPNNeck(
                 in_channels=self.encoder.out_channels,
@@ -548,7 +559,7 @@ class RMRv3(nn.Module):
             )
         else:
             raise ValueError(
-                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive' or 'rep_weighted'."
+                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', or 'rep_weighted'."
             )
 
         init_bias = _softplus_inverse(cfg.init_m0)
@@ -560,7 +571,7 @@ class RMRv3(nn.Module):
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
             feature_dim=cfg.feature_width,
-            hidden=48,
+            hidden=cfg.region_head_hidden,
             init_rate=cfg.init_m0,
             region_sizes_px=cfg.region_sizes_px,
             dispersion_init=cfg.dispersion_init,

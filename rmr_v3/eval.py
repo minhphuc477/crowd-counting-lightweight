@@ -87,6 +87,9 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
         neck_type=str(m_cfg.get("neck_type", "additive")),
         context_dilations=tuple(int(x) for x in m_cfg.get("context_dilations", (1, 2, 3))),
+        use_aspp_gap=bool(m_cfg.get("use_aspp_gap", False)),
+        aspp_dilations=tuple(int(x) for x in m_cfg.get("aspp_dilations", (1, 3, 6))),
+        region_head_hidden=int(m_cfg.get("region_head_hidden", 48)),
         enable_solver=bool(m_cfg.get("enable_solver", True)),
     )
 

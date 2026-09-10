@@ -60,6 +60,9 @@ ALLOWED_MODEL_KEYS = {
     "native_scale_pooling",
     "regional_feature_stats",
     "context_dilations",
+    "use_aspp_gap",
+    "aspp_dilations",
+    "region_head_hidden",
 }
 
 ALLOWED_LOSS_KEYS = {

@@ -293,3 +293,98 @@ class RepWeightedFPNNeck(nn.Module):
         self.ref8.switch_to_deploy()
         self.ref4.switch_to_deploy()
 
+
+class ASPPLiteFPNNeck(nn.Module):
+    """Static Additive FPN neck with a true ASPP-lite module on the P16 feature map.
+
+    Architecture:
+        - Lateral projections: C4/C8/C16 → width channels via 1×1 Conv+GN+SiLU.
+        - ASPP-lite on L16 (four parallel branches, all static):
+            • Branch 0: DW 3×3, dilation=1  (local context)
+            • Branch 1: DW 3×3, dilation=3  (medium context)
+            • Branch 2: DW 3×3, dilation=6  (wide context, RF=13 cells × stride16 = 208 px)
+            • Branch 3: Global Average Pooling → Linear (width→width) → broadcast
+          All four branches are summed (no learnable fusion weights) then projected by
+          a 1×1 Conv+GN back to ``width`` channels before the DSResidual refinement.
+        - Top-down FPN (static additive):
+            P16 → upsample + L8 lateral → DSResidual → P8
+            P8  → upsample + L4 lateral → DSResidual → P4
+        - Returns (P4, P8, P16) matching the AdditiveFPNNeck interface exactly.
+
+    Constraint:
+        NO dynamic weights, NO softmax, NO attention. Fusion is strictly 1:1 addition.
+        This avoids the "double non-stationarity" that collapsed RMR-v5 (MAE 104.24).
+    """
+
+    def __init__(
+        self,
+        in_channels: tuple[int, int, int] = (16, 32, 48),
+        width: int = 32,
+        aspp_dilations: tuple[int, ...] = (1, 3, 6),
+    ):
+        super().__init__()
+        c4, c8, c16 = in_channels
+        self.width = width
+
+        # Lateral 1×1 projections
+        self.lat4 = ConvGNAct(c4, width, 1)
+        self.lat8 = ConvGNAct(c8, width, 1)
+        self.lat16 = ConvGNAct(c16, width, 1)
+
+        # ASPP-lite on L16
+        # Dilated depthwise branches (output: width channels each)
+        self.aspp_dw = nn.ModuleList([
+            DepthwiseDilated(width, dilation=d) for d in aspp_dilations
+        ])
+        # Global Average Pooling branch: pool → Linear → broadcast
+        # Uses a small bottleneck (width → width) to keep params low.
+        self.aspp_gap = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),           # (B, width, 1, 1)
+            nn.Flatten(1),                      # (B, width)
+            nn.Linear(width, width, bias=True), # global context vector
+            nn.SiLU(inplace=False),
+        )
+        # After summing all (len(aspp_dilations) + 1) branches, project back to width.
+        # num_branches = len(aspp_dilations) + 1 (GAP) — but since every branch already
+        # outputs `width` channels and we sum (not concat), no projection is needed
+        # for channel count. We add a 1×1 PW conv purely as a mixing layer.
+        self.aspp_proj = ConvGNAct(width, width, k=1)
+
+        # Top-down FPN refinement blocks (Static DSResidual)
+        self.ref16 = DSResidual(width)
+        self.ref8 = DSResidual(width)
+        self.ref4 = DSResidual(width)
+
+    def forward(
+        self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        l4 = self.lat4(c4)
+        l8 = self.lat8(c8)
+        l16 = self.lat16(c16)
+
+        # --- ASPP-lite on L16 ---
+        # Dilated depthwise branches
+        aspp_out = sum(branch(l16) for branch in self.aspp_dw)  # (B, width, H16, W16)
+
+        # GAP branch: project global vector and broadcast back to spatial dims
+        gap_vec = self.aspp_gap(l16)                            # (B, width)
+        gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)     # (B, width, 1, 1)
+        aspp_out = aspp_out + gap_broadcast                     # broadcast add
+
+        # Mix: add residual from l16 then project
+        p16_pre = self.aspp_proj(l16 + aspp_out)
+        p16 = self.ref16(p16_pre)
+
+        # --- Top-down FPN ---
+        up16_to_8 = F.interpolate(
+            p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
+        )
+        p8 = self.ref8(l8 + up16_to_8)
+
+        up8_to_4 = F.interpolate(
+            p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
+        )
+        p4 = self.ref4(l4 + up8_to_4)
+
+        return p4, p8, p16
+
