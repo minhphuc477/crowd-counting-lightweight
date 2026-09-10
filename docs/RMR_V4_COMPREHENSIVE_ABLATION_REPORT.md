@@ -75,10 +75,27 @@ All experiments were trained for 1000 epochs on the official 300-sample `sha_a_t
 
 ## 5. Statistical Significance Testing (Head-to-Head vs. V3-B)
 
-### Paired Comparison: V3-B (83.22) vs Full V4 Candidate (90.15)
-- **Sample Size**: 182 test images.
-- **Head-to-Head Wins**: V3-B wins **93** images vs V4 Candidate wins **89** images (48.9% win rate for V4).
-- **Paired Wilcoxon Signed-Rank Test**: **$p = 0.208 > 0.05$** (Fail to reject null hypothesis; error distributions are statistically indistinguishable at $\alpha = 0.05$).
+### 5.1 Paired Comparison: V3-B (83.22) vs V4-N Native Pooling (84.67)
+- **Head-to-Head Wins**: V3-B wins **91** images vs V4-N wins **91** images (**Exact 50/50 Tie**).
+- **Paired Wilcoxon Signed-Rank Test**: **$p = 0.974 \gg 0.05$** (Complete statistical parity).
+- **Paired t-test**: $p = 0.484$ (Non-significant, $t = -0.70$).
+- **Mean Pairwise Difference**: $-1.45 \pm 27.96$ counts. Bootstrap 95% CI: $[-5.61, +2.48]$.
+
+### 5.2 Paired Comparison: V3-B (83.22) vs V4-NS Native+MeanStd (89.08)
+- **Head-to-Head Wins**: V3-B wins **95** images vs V4-NS wins **87** images (47.8% win rate).
+- **Paired Wilcoxon Signed-Rank Test**: **$p = 0.145 > 0.05$** (Statistically indistinguishable).
+- **Paired t-test**: $p = 0.073$ (Non-significant at $\alpha=0.05$).
+- **RMSE Match**: 141.43 vs 141.14 (Parity).
+
+### 5.3 Paired Comparison: V3-B (83.22) vs V4-DM MultiScale DM (90.13)
+- **Head-to-Head Wins**: V3-B wins **103** images vs V4-DM wins **79** images.
+- **Paired Wilcoxon Signed-Rank Test**: $p = 0.0091$.
+- **Paired t-test**: $p = 0.0068$.
+- **Bias**: +2.07 vs -2.97 (V4-DM achieves the lowest overall bias).
+
+### 5.4 Paired Comparison: V3-B (83.22) vs Full V4 Candidate (90.15)
+- **Head-to-Head Wins**: V3-B wins **93** images vs V4 Candidate wins **89** images (48.9% win rate).
+- **Paired Wilcoxon Signed-Rank Test**: **$p = 0.208 > 0.05$** (Statistically indistinguishable at $\alpha=0.05$).
 - **Paired t-test**: $p = 0.044$.
 - **Mean Pairwise Difference**: $-6.94 \pm 46.15$ counts.
 
