@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 
 from rmr_core.operators import (
     RegionSet,
@@ -16,6 +17,76 @@ from rmr_v2.losses import (
     multiscale_dm_loss,
     negative_binomial_nll_mean_dispersion,
 )
+
+
+def hurdle_focal_bce_loss(
+    pi_logit: torch.Tensor,
+    target_region: torch.Tensor,
+    gamma: float = 2.0,
+) -> torch.Tensor:
+    """Focal BCE loss for Hurdle head occupancy prediction.
+
+    Trains π_R = P(region is occupied) from binary labels derived from GT counts.
+    Focal weighting down-weights easy background regions (typical imbalanced setting).
+
+    Args:
+        pi_logit:      [B,1,M] raw occupancy logit z_π from hurdle_head_layer.
+        target_region: [B,1,M] GT regional count sums (from regional_sum on target_y).
+        gamma:         Focal exponent (default 2.0).
+
+    Returns:
+        Scalar focal BCE loss.
+    """
+    # Binary occupancy label: 1 if any count in region, 0 if empty background.
+    y_bin = (target_region > 0.5).float()
+
+    # Standard BCE with logits
+    bce = F.binary_cross_entropy_with_logits(
+        pi_logit.float(),
+        y_bin,
+        reduction="none",
+    )
+
+    # Focal weight: (1 - p_t)^gamma
+    with torch.no_grad():
+        p_t = torch.where(y_bin > 0.5, torch.sigmoid(pi_logit.float()), 1.0 - torch.sigmoid(pi_logit.float()))
+        focal_weight = (1.0 - p_t.clamp(min=1e-6)).pow(float(gamma))
+
+    return (focal_weight * bce).mean()
+
+
+def truncated_nb_nll_loss(
+    mu_count: torch.Tensor,
+    dispersion: torch.Tensor,
+    target_region: torch.Tensor,
+) -> torch.Tensor:
+    """Truncated NB NLL computed only on occupied regions (target >= 1).
+
+    In the Hurdle model, the NB component only models the count distribution
+    conditional on the region being occupied (y >= 1). Computing NLL only on
+    occupied regions avoids gradient conflict from zero-inflation.
+
+    Args:
+        mu_count:      [B,1,M] predicted NB mean count.
+        dispersion:    [B,1,M] predicted NB dispersion (r).
+        target_region: [B,1,M] GT regional count sums.
+
+    Returns:
+        Scalar truncated NB NLL, averaged over occupied regions.
+        Returns 0.0 if no occupied region exists in batch.
+    """
+    occ_mask = (target_region > 0.5)  # [B,1,M]
+    if not occ_mask.any():
+        return torch.tensor(0.0, device=mu_count.device, dtype=mu_count.dtype)
+
+    per_region_nll = negative_binomial_nll_mean_dispersion(
+        target_region,
+        mu_count,
+        dispersion=dispersion,
+        reduction="none",
+    )
+    # Average only over occupied regions
+    return per_region_nll[occ_mask].mean()
 
 
 def scale_balanced_regional_nb_nll(
@@ -206,6 +277,10 @@ class RMRv3LossConfig:
     lambda_cell: float = 0.25
     lambda_region_nb: float = 0.20
 
+    # RMR-v7 Hurdle head loss weights
+    lambda_hurdle: float = 0.0   # weight for Focal BCE occupancy loss (0 = disabled)
+    lambda_trunc_nb: float = 0.0  # weight for Truncated NB NLL on occupied regions (0 = disabled)
+
     allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn"
     bayesian_sigma: float = 8.0
     bayesian_background_ratio: float = 0.1
@@ -326,4 +401,27 @@ def compute_rmr_v3_losses(
         + cfg.lambda_region_nb * losses["region_nb"]
     )
 
+    # ── RMR-v7 Hurdle losses (opt-in; skipped when lambda=0 or logit absent) ──
+    hurdle_logit = outputs.get("hurdle_logit", None)
+    if hurdle_logit is not None:
+        if cfg.lambda_hurdle > 0.0:
+            losses["hurdle_bce"] = hurdle_focal_bce_loss(
+                hurdle_logit.float(),
+                target_region,
+            )
+            losses["total"] = losses["total"] + cfg.lambda_hurdle * losses["hurdle_bce"]
+        else:
+            losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
+
+        if cfg.lambda_trunc_nb > 0.0:
+            losses["trunc_nb"] = truncated_nb_nll_loss(
+                mean_region,
+                dispersion_region,
+                target_region,
+            )
+            losses["total"] = losses["total"] + cfg.lambda_trunc_nb * losses["trunc_nb"]
+        else:
+            losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
+
     return losses
+

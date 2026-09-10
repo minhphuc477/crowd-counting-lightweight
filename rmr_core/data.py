@@ -56,8 +56,10 @@ def train_transform(
     hflip_prob: float = 0.5,
     brightness_jitter: float = 0.0,
     contrast_jitter: float = 0.0,
+    gamma_jitter: tuple[float, float] = (1.0, 1.0),
+    random_invert_prob: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Geometric augmentation that keeps point coordinates exact.
+    """Geometric + photometric augmentation that keeps point coordinates exact.
 
     Memory-efficient: resize and crop performed directly in uint8 PIL space.
     Scale protocol: random scale drawn from [scale_range[0], scale_range[1]], with the
@@ -68,6 +70,12 @@ def train_transform(
     Points are transformed via continuous pixel-center scaling:
         x' = (x + 0.5) * (w1 / w0) - 0.5
         y' = (y + 0.5) * (h1 / h0) - 0.5
+
+    Photometric augmentation (all opt-in, inactive by default):
+        brightness_jitter: ±factor uniform, applied with prob 0.5
+        contrast_jitter:   ±factor uniform, applied with prob 0.5
+        gamma_jitter:      (lo, hi) log-uniform gamma exponent, applied with prob 0.5
+        random_invert_prob: probability of pixel-inversion (1.0 - x), models dark/negative images
     """
     pts = points_xy.clone().float()
     w0, h0 = image.size
@@ -108,7 +116,7 @@ def train_transform(
     image_t = TF.to_tensor(image)
     image.close()
 
-    # Photometric augmentation (opt-in via config; default 0.0)
+    # Photometric augmentation (opt-in via config; default disabled)
     if brightness_jitter > 0.0 and random.random() < 0.5:
         image_t = TF.adjust_brightness(
             image_t, random.uniform(max(0.0, 1.0 - brightness_jitter), 1.0 + brightness_jitter)
@@ -117,8 +125,20 @@ def train_transform(
         image_t = TF.adjust_contrast(
             image_t, random.uniform(max(0.0, 1.0 - contrast_jitter), 1.0 + contrast_jitter)
         )
+    # Gamma correction: simulates exposure variation and low-light conditions.
+    # gamma_jitter = (lo, hi); gamma drawn log-uniformly from [lo, hi].
+    # gamma < 1 brightens; gamma > 1 darkens (low-light simulation).
+    gamma_lo, gamma_hi = float(gamma_jitter[0]), float(gamma_jitter[1])
+    if gamma_lo < gamma_hi and random.random() < 0.5:
+        log_gamma = random.uniform(math.log(gamma_lo), math.log(gamma_hi))
+        gamma_val = math.exp(log_gamma)
+        image_t = TF.adjust_gamma(image_t, gamma=gamma_val)
+    # Random invert: simulates negative film / strong contrast reversal.
+    if random_invert_prob > 0.0 and random.random() < random_invert_prob:
+        image_t = 1.0 - image_t
 
     return image_t.clamp(0, 1), pts
+
 
 
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
@@ -169,6 +189,8 @@ class CrowdManifestDataset(Dataset):
         hflip_prob: float = 0.5,
         brightness_jitter: float = 0.0,
         contrast_jitter: float = 0.0,
+        gamma_jitter: tuple[float, float] = (1.0, 1.0),
+        random_invert_prob: float = 0.0,
         data_root: str | Path | None = None,
     ):
         manifest_str = str(manifest).replace("\\", "/")
@@ -191,6 +213,8 @@ class CrowdManifestDataset(Dataset):
         self.hflip_prob = float(hflip_prob)
         self.brightness_jitter = float(brightness_jitter)
         self.contrast_jitter = float(contrast_jitter)
+        self.gamma_jitter = (float(gamma_jitter[0]), float(gamma_jitter[1]))
+        self.random_invert_prob = float(random_invert_prob)
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -241,6 +265,8 @@ class CrowdManifestDataset(Dataset):
                 hflip_prob=self.hflip_prob,
                 brightness_jitter=self.brightness_jitter,
                 contrast_jitter=self.contrast_jitter,
+                gamma_jitter=self.gamma_jitter,
+                random_invert_prob=self.random_invert_prob,
             )
         else:
             image_t = TF.to_tensor(image)

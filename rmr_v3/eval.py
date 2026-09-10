@@ -91,14 +91,35 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         aspp_dilations=tuple(int(x) for x in m_cfg.get("aspp_dilations", (1, 3, 6))),
         region_head_hidden=int(m_cfg.get("region_head_hidden", 48)),
         enable_solver=bool(m_cfg.get("enable_solver", True)),
+        # RMR-v7 fields
+        hurdle_head=bool(m_cfg.get("hurdle_head", False)),
+        tv_lambda=float(m_cfg.get("tv_lambda", 0.0)),
+        temp_softplus=bool(m_cfg.get("temp_softplus", False)),
+        # ema_decay not needed at eval time (no training)
     )
 
     model = RMRv3(config)
-    model.load_state_dict(ckpt["model"])
+
+    # Prefer EMA weights if saved (higher quality than live weights)
+    if "ema_model" in ckpt:
+        # EMA state is float32; cast to model dtype (may be fp16 on GPU)
+        ema_sd = ckpt["ema_model"]
+        live_sd = model.state_dict()
+        cast_sd = {k: ema_sd[k].to(dtype=live_sd[k].dtype) for k in live_sd if k in ema_sd}
+        # Fill any missing keys from live checkpoint (shouldn't happen)
+        for k in live_sd:
+            if k not in cast_sd:
+                cast_sd[k] = ckpt["model"][k]
+        model.load_state_dict(cast_sd)
+        print(f"Loaded EMA weights from checkpoint (ema_model key found).")
+    else:
+        model.load_state_dict(ckpt["model"])
+
     model.switch_to_deploy()
     model.set_solver_strength(1.0)
     model.to(device).eval()
     return model, uniform_reliability, cfg, ckpt
+
 
 
 import datetime

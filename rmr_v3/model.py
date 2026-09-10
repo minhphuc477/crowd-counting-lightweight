@@ -79,12 +79,33 @@ class RMRv3Config:
     # Region head MLP hidden dim (default 48 preserves all prior checkpoints)
     region_head_hidden: int = 48
 
+    # ── RMR-v7 additions ──────────────────────────────────────────────────────
+    # Hurdle NB head: predicts region occupancy probability π_R.
+    # When enabled, the solver target for background regions is zeroed:
+    #     b_solver_R = (1 - sigmoid(z_π_R)).detach() * mu_count_R.detach()
+    # This eliminates systematic under-counting from ASPP wide receptive field.
+    hurdle_head: bool = False
+
+    # Total-variation Laplacian smoothing coefficient inside the SIRT loop.
+    # Applied after each SIRT update: y ← y - tv_lambda * Δy  (Δ = Laplacian)
+    # 0.0 disables smoothing (default, backward compatible).
+    tv_lambda: float = 0.0
+
+    # EMA weight tracking decay (0.0 = disabled, typical 0.999).
+    # When > 0, train.py maintains an EMA shadow copy and saves it as best checkpoint.
+    # Decouples best-epoch tracking from weight drift observed after epoch 445 in v6.
+    ema_decay: float = 0.0
+
+    # Learnable Temperature Softplus for FineMeasureHead.
+    # When True, FineMeasureHead uses τ * softplus(z/τ) instead of softplus(z).
+    # Fixes negative bias saturation at high density (Bias=-14.72 in v6 → near 0 target).
+    temp_softplus: bool = False
 
 
 
 
 class ProbabilisticRegionalEvidenceHead(nn.Module):
-    """Predict regional NB mean and dispersion.
+    """Predict regional NB mean and dispersion, and optionally occupancy (Hurdle).
 
     Mean:
         rate_R = softplus(mean_raw)
@@ -93,6 +114,11 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
     Dispersion:
         log_r_R = bounded log-dispersion
         r_R     = exp(log_r_R)
+
+    Hurdle (RMR-v7+, opt-in via hurdle_head=True):
+        z_π_R  = hurdle_head_layer(h)   -- occupancy logit
+        π_R    = sigmoid(z_π_R)         -- P(region is occupied)
+        Used in solver: b_solver_R = π_R * mu_count_R  (background regions zeroed)
 
     Reliability is not directly predicted.
     It is derived from the NB predictive variance.
@@ -109,6 +135,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         dispersion_max: float = 500.0,
         native_scale_pooling: bool = False,
         regional_feature_stats: str = "mean",
+        hurdle_head: bool = False,
     ) -> None:
         super().__init__()
 
@@ -126,6 +153,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         self.dispersion_max = float(dispersion_max)
         self.native_scale_pooling = bool(native_scale_pooling)
         self.regional_feature_stats = str(regional_feature_stats)
+        self.has_hurdle_head = bool(hurdle_head)
 
         in_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
@@ -138,6 +166,13 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
         self.mean_head = nn.Linear(hidden, 1)
         self.log_dispersion_head = nn.Linear(hidden, 1)
+
+        # Optional hurdle head: predicts occupancy logit z_π_R
+        if self.has_hurdle_head:
+            self.hurdle_head_layer = nn.Linear(hidden, 1)
+            # Initialize near p=0.5 (logit=0) so early training is neutral
+            nn.init.zeros_(self.hurdle_head_layer.weight)
+            nn.init.zeros_(self.hurdle_head_layer.bias)
 
         # Mean initialization: same empirical rate prior as fine head.
         nn.init.normal_(self.mean_head.weight, std=0.01)
@@ -152,6 +187,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             self.log_dispersion_head.bias,
             math.log(float(dispersion_init)),
         )
+
 
     def _collect_region_features(
         self,
@@ -281,12 +317,19 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
         dispersion = torch.exp(log_r)
 
-        return {
-            "mu_count": mu_count.unsqueeze(1),       # [B,1,M]
+        result: dict[str, torch.Tensor] = {
+            "mu_count": mu_count.unsqueeze(1),      # [B,1,M]
             "rate": rate.unsqueeze(1),              # [B,1,M]
             "dispersion": dispersion.unsqueeze(1),  # [B,1,M]
-            "log_dispersion": log_r.unsqueeze(1),   # [B,1,M]
+            "log_dispersion": log_r.unsqueeze(1),  # [B,1,M]
         }
+
+        # Hurdle head: occupancy logit z_π_R (RMR-v7+)
+        if self.has_hurdle_head:
+            z_pi = self.hurdle_head_layer(h).squeeze(-1)  # [B,M]
+            result["hurdle_logit"] = z_pi.unsqueeze(1)    # [B,1,M]
+
+        return result
 
 
 def reliability_from_nb(
@@ -567,6 +610,7 @@ class RMRv3(nn.Module):
         self.fine_head = FineMeasureHead(
             width=cfg.feature_width,
             init_bias=init_bias,
+            temp_softplus=cfg.temp_softplus,
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -579,6 +623,7 @@ class RMRv3(nn.Module):
             dispersion_max=cfg.dispersion_max,
             native_scale_pooling=cfg.native_scale_pooling,
             regional_feature_stats=cfg.regional_feature_stats,
+            hurdle_head=cfg.hurdle_head,
         )
 
         self.solver_strength: float = 1.0
@@ -641,11 +686,11 @@ class RMRv3(nn.Module):
             c16,
         )
 
-        z0 = self.fine_head(p4)
-        y0 = F.softplus(z0)
+        # FineMeasureHead now applies the activation internally (softplus or
+        # temp-softplus). y0 is already non-negative density counts.
+        y0 = self.fine_head(p4)
 
         h, w = y0.shape[-2:]
-
         regions = self._regions(
             h,
             w,
@@ -681,22 +726,32 @@ class RMRv3(nn.Module):
         else:
             weight_solver = weight
 
-        if self.cfg.detach_region_mean_in_solver:
-            b_solver = mu_count.detach()
+        # ── Hurdle head: modulate solver target by occupancy probability ──────
+        # b_solver_raw is the raw regional NB mean (before hurdle masking).
+        b_solver_raw = mu_count.detach() if self.cfg.detach_region_mean_in_solver else mu_count
+
+        if self.cfg.hurdle_head and "hurdle_logit" in regional:
+            # π_R = sigmoid(z_π_R): probability region is occupied.
+            # b_solver = π_R * mu_count  — background regions approach 0 count target.
+            pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
+            b_solver = pi_r * b_solver_raw
         else:
-            b_solver = mu_count
+            b_solver = b_solver_raw
 
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
+        # Collect hurdle logit for loss computation (not detached)
+        hurdle_logit = regional.get("hurdle_logit", None)  # [B,1,M] or None
+
         # Bypass solver loop if solver is disabled (direct baseline mode)
         if not self.cfg.enable_solver:
-            return {
+            out = {
                 "y": y0,
                 "y0": y0,
-                "z0": z0,
                 "regions": regions,
                 "b_region": mu_count,
+                "b_solver": b_solver,
                 "region_rate": regional["rate"],
                 "region_dispersion": dispersion,
                 "region_log_dispersion": regional["log_dispersion"],
@@ -711,6 +766,9 @@ class RMRv3(nn.Module):
                 "uniform_reliability": uniform_reliability,
                 "solver_strength": 0.0,
             }
+            if hurdle_logit is not None:
+                out["hurdle_logit"] = hurdle_logit
+            return out
 
         cov_w = weighted_coverage(
             weight_solver,
@@ -726,6 +784,15 @@ class RMRv3(nn.Module):
             else min(max(solver_strength, 0.0), 1.0)
         )
         effective_omega = float(self.cfg.omega) * strength
+
+        # Optional TV Laplacian kernel (pre-allocated on device, cached as buffer-like)
+        tv_lambda = float(self.cfg.tv_lambda)
+        if tv_lambda > 0.0:
+            _laplace = torch.tensor(
+                [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
+                dtype=torch.float32,
+                device=x.device,
+            ).view(1, 1, 3, 3)
 
         y = y0
 
@@ -752,10 +819,17 @@ class RMRv3(nn.Module):
             )
 
             y_next = torch.clamp_min(
-                y.float()
-                - effective_omega * field,
+                y.float() - effective_omega * field,
                 0.0,
-            ).to(y.dtype)
+            )
+
+            # TV Laplacian smoothing: suppresses high-frequency noise accumulated
+            # by SIRT backprojection in dense crowd regions.
+            if tv_lambda > 0.0:
+                lap = F.conv2d(y_next, _laplace, padding=1)
+                y_next = torch.clamp_min(y_next - tv_lambda * lap, 0.0)
+
+            y_next = y_next.to(y.dtype)
 
             energy_after = weighted_regional_energy(
                 y_next,
@@ -775,14 +849,14 @@ class RMRv3(nn.Module):
             iterates.append(y_next)
             y = y_next
 
-        return {
+        out = {
             "y": y,
             "y0": y0,
-            "z0": z0,
 
             "regions": regions,
 
             "b_region": mu_count,
+            "b_solver": b_solver,
             "region_rate": regional["rate"],
             "region_dispersion": dispersion,
             "region_log_dispersion": regional["log_dispersion"],
@@ -800,9 +874,13 @@ class RMRv3(nn.Module):
             "uniform_reliability": uniform_reliability,
             "solver_strength": strength,
         }
+        if hurdle_logit is not None:
+            out["hurdle_logit"] = hurdle_logit
+        return out
 
     def switch_to_deploy(self) -> None:
         """Switch internal modules (e.g. RepWeightedFPNNeck) to fused deployment mode."""
         if hasattr(self.fusion, "switch_to_deploy"):
             self.fusion.switch_to_deploy()
+
 

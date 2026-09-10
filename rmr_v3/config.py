@@ -25,6 +25,8 @@ ALLOWED_DATA_KEYS = {
     "hflip_prob",
     "brightness_jitter",
     "contrast_jitter",
+    "gamma_jitter",
+    "random_invert_prob",
     "data_root",
 }
 
@@ -63,6 +65,11 @@ ALLOWED_MODEL_KEYS = {
     "use_aspp_gap",
     "aspp_dilations",
     "region_head_hidden",
+    # RMR-v7
+    "hurdle_head",
+    "tv_lambda",
+    "ema_decay",
+    "temp_softplus",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -70,6 +77,8 @@ ALLOWED_LOSS_KEYS = {
     "lambda_flat_dm16",
     "lambda_cell",
     "lambda_region_nb",
+    "lambda_hurdle",
+    "lambda_trunc_nb",
     "allocation_loss_type",
     "bayesian_sigma",
     "bayesian_background_ratio",
@@ -314,6 +323,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "eps",
         "native_scale_pooling",
         "regional_feature_stats",
+        "region_head_hidden",
+        # RMR-v7 critical fields (changing these invalidates checkpoint weights)
+        "hurdle_head",
+        "temp_softplus",
     ],
     "loss": [
         "lambda_count",
@@ -467,7 +480,8 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
     data_cfg = cfg.get("data", {})
     if isinstance(data_cfg, dict):
         d: dict[str, Any] = {}
-        for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter"):
+        for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter",
+                  "gamma_jitter", "random_invert_prob"):
             if k in data_cfg:
                 d[k] = _canonicalize_value(data_cfg[k])
         data_root = data_cfg.get("data_root")

@@ -120,6 +120,11 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
         eps=eps,
         native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
         regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
+        # RMR-v7 fields
+        hurdle_head=bool(m_cfg.get("hurdle_head", False)),
+        tv_lambda=float(m_cfg.get("tv_lambda", 0.0)),
+        ema_decay=float(m_cfg.get("ema_decay", 0.0)),
+        temp_softplus=bool(m_cfg.get("temp_softplus", False)),
     )
 
     model = RMRv3(config)
@@ -134,6 +139,8 @@ def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
         lambda_flat_dm16=float(l_cfg.get("lambda_flat_dm16", 1.0)),
         lambda_cell=float(l_cfg.get("lambda_cell", 0.25)),
         lambda_region_nb=float(l_cfg.get("lambda_region_nb", 0.20)),
+        lambda_hurdle=float(l_cfg.get("lambda_hurdle", 0.0)),
+        lambda_trunc_nb=float(l_cfg.get("lambda_trunc_nb", 0.0)),
         allocation_loss_type=str(l_cfg.get("allocation_loss_type", "flat_dm16")),
         bayesian_sigma=float(l_cfg.get("bayesian_sigma", 8.0)),
         bayesian_background_ratio=float(l_cfg.get("bayesian_background_ratio", 0.1)),
@@ -373,6 +380,8 @@ def main() -> None:
         hflip_prob=float(cfg.get("data", {}).get("hflip_prob", 0.5)),
         brightness_jitter=float(cfg.get("data", {}).get("brightness_jitter", 0.0)),
         contrast_jitter=float(cfg.get("data", {}).get("contrast_jitter", 0.0)),
+        gamma_jitter=tuple(cfg.get("data", {}).get("gamma_jitter", [1.0, 1.0])),
+        random_invert_prob=float(cfg.get("data", {}).get("random_invert_prob", 0.0)),
         data_root=cfg.get("data", {}).get("data_root"),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
@@ -406,6 +415,18 @@ def main() -> None:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model, uniform_reliability = make_model(cfg)
     model.to(device)
+
+    # EMA shadow model (RMR-v7+): maintains a smoothed copy of weights to avoid
+    # best-epoch overfitting caused by training noise late in training.
+    ema_decay = float(cfg.get("model", {}).get("ema_decay", 0.0))
+    ema_state: dict | None = None
+    if ema_decay > 0.0:
+        import copy
+        ema_state = copy.deepcopy(model.state_dict())
+        # Convert to float32 for stable accumulation
+        for k in ema_state:
+            ema_state[k] = ema_state[k].float()
+        print(f"EMA enabled: decay={ema_decay:.4f}")
 
     epochs = int(cfg.get("train", {}).get("epochs", 1000))
     lr_init = float(cfg.get("train", {}).get("lr", 1e-4))
@@ -587,6 +608,18 @@ def main() -> None:
             scaler.step(optimizer)
             scaler.update()
 
+            # EMA weight update (RMR-v7+): runs on CPU-side float32 shadow state.
+            if ema_state is not None:
+                with torch.no_grad():
+                    for name, param in model.named_parameters():
+                        if name in ema_state:
+                            ema_state[name].mul_(ema_decay).add_(
+                                param.detach().float().cpu(), alpha=1.0 - ema_decay
+                            )
+                    for name, buf in model.named_buffers():
+                        if name in ema_state:
+                            ema_state[name].copy_(buf.float().cpu())
+
             total_loss_accum += float(loss.item())
             count_loss_accum += float(losses["count"].item())
             alloc_loss_accum += float(losses["allocation"].item())
@@ -740,26 +773,30 @@ def main() -> None:
             if is_best:
                 best_mae = cur_mae
                 epochs_without_improvement = 0
-                safe_torch_save(
-                    {
-                        "epoch": epoch + 1,
-                        "model": model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "scheduler": scheduler.state_dict(),
-                        "scaler": scaler.state_dict(),
-                        "rng_state": save_rng_state(),
-                        "solver_strength": solver_strength,
-                        "config": cfg,
-                        "config_hash": run_config_hash,
-                        "best_mae": best_mae,
-                        "epochs_without_improvement": epochs_without_improvement,
-                        "git_commit": git_commit,
-                        "git_dirty": git_dirty,
-                    },
-                    out_dir / "best_val_mae.pt",
-                )
+
+                # Build checkpoint: store both live weights and EMA weights
+                ckpt_data: dict = {
+                    "epoch": epoch + 1,
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "scaler": scaler.state_dict(),
+                    "rng_state": save_rng_state(),
+                    "solver_strength": solver_strength,
+                    "config": cfg,
+                    "config_hash": run_config_hash,
+                    "best_mae": best_mae,
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "git_commit": git_commit,
+                    "git_dirty": git_dirty,
+                }
+                if ema_state is not None:
+                    ckpt_data["ema_model"] = {k: v.clone() for k, v in ema_state.items()}
+
+                safe_torch_save(ckpt_data, out_dir / "best_val_mae.pt")
                 (out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
                 (out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
+
             else:
                 if solver_engaged:
                     epochs_without_improvement += eval_every
