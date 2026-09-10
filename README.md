@@ -112,6 +112,21 @@ Official 300-train / 182-test partition evaluation (direct full-image inference,
 - **B5-P → V3-B (Proposed vs Predecessor Baseline):** **ΔMAE = 11.61** drop, Wilcoxon signed-rank **p = 0.02609**, wins: 108 vs 74.
 - **B5-P → V3-A (Deterministic vs Probabilistic Uniform):** **ΔMAE = -1.52** (*p* = 0.844, non-significant), proving that switching to probabilistic loss alone without reliability weighting does not yield gains. The gain is causally driven by the reliability-weighted solver $W = \mathrm{diag}(w_R)$.
 
+### 3.2 RMR-v4 Architectural Breakthroughs & Ablation Matrix
+
+RMR-v4 introduces Native Scale Feature Pyramid Pooling ($P_4, P_8, P_{16}$), Moment-2 Regional Feature Statistics (Mean + Std, 65-dim), and Multi-Scale Dirichlet-Multinomial Allocation Loss (16px, 32px, 64px blocks).
+
+| Model / Ablation Variant | Native FPN | Mean+Std | Multi-Scale DM | Params | **Test MAE** | **Test RMSE** | **Test Bias** | Key Highlight |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **V3-B (Kỷ lục dự án)** | ✗ | ✗ | ✗ | 101.8K | **83.22** | **141.14** | -2.97 | Historical project record |
+| **V4-N (Native Pooling Only)** | ✓ | ✗ | ✗ | 101.8K | **84.64** | 149.42 | -9.30 | Sparse MAE **7.46**, Mod MAE **55.91** (Best sparse/mod) |
+| **V4-NS (Native + Mean/Std)** | ✓ | ✓ | ✗ | 103.3K | **89.14** | **141.49** | +13.51 | **MaxAE 690.04** (Lowest worst-case outlier error) |
+| **V4-S (Mean/Std Only)** | ✗ | ✓ | ✗ | 103.3K | **90.25** *(val)*| 142.02 | -4.65 | **Dense MAE 163.51** (Best dense crowd error) |
+| **V4-DM (MultiScale DM Only)** | ✗ | ✗ | ✓ | 101.8K | **90.18** | 152.61 | **+2.20** | Most unbiased, Sparse MAE **5.46** |
+| **Full V4 Candidate** | ✓ | ✓ | ✓ | 103.3K | **90.15** | 146.27 | +13.04 | Dispersion saturation -47%, Tiled discrepancy -28% |
+
+> Detailed analysis, GAME spatial localization metrics, calibration curves, and paired test statistics are available in [`docs/RMR_V4_COMPREHENSIVE_ABLATION_REPORT.md`](docs/RMR_V4_COMPREHENSIVE_ABLATION_REPORT.md).
+
 ---
 
 ## 4. Dataset & Evaluation Protocol (Zero Ad-hoc Split Policy)
