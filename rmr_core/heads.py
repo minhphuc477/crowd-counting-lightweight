@@ -58,4 +58,5 @@ class FineMeasureHead(nn.Module):
         if self.temp_softplus:
             tau = self.tau.clamp_min(0.1)
             return tau * F.softplus(z / tau)
-        return F.softplus(z)
+        return z
+

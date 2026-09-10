@@ -113,7 +113,9 @@ ALLOWED_TRAIN_KEYS = {
     "solver_warmup_epochs",
     "solver_ramp_epochs",
     "deterministic",
+    "ema_decay",
 }
+
 
 ALLOWED_EVAL_KEYS = {
     "density_bins",
@@ -365,7 +367,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "hflip_prob",
         "brightness_jitter",
         "contrast_jitter",
+        "gamma_jitter",
+        "random_invert_prob",
     ],
+
 }
 
 CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {

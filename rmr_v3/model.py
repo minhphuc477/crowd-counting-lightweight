@@ -686,11 +686,14 @@ class RMRv3(nn.Module):
             c16,
         )
 
-        # FineMeasureHead now applies the activation internally (softplus or
-        # temp-softplus). y0 is already non-negative density counts.
-        y0 = self.fine_head(p4)
+        z0 = self.fine_head(p4)
+        if getattr(self.fine_head, "temp_softplus", False):
+            y0 = z0
+        else:
+            y0 = F.softplus(z0)
 
         h, w = y0.shape[-2:]
+
         regions = self._regions(
             h,
             w,
@@ -749,6 +752,7 @@ class RMRv3(nn.Module):
             out = {
                 "y": y0,
                 "y0": y0,
+                "z0": z0,
                 "regions": regions,
                 "b_region": mu_count,
                 "b_solver": b_solver,
@@ -825,9 +829,10 @@ class RMRv3(nn.Module):
 
             # TV Laplacian smoothing: suppresses high-frequency noise accumulated
             # by SIRT backprojection in dense crowd regions.
+            # Forward heat equation: y_{t+1} = y_t + \lambda \Delta y
             if tv_lambda > 0.0:
                 lap = F.conv2d(y_next, _laplace, padding=1)
-                y_next = torch.clamp_min(y_next - tv_lambda * lap, 0.0)
+                y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
 
             y_next = y_next.to(y.dtype)
 
@@ -852,6 +857,7 @@ class RMRv3(nn.Module):
         out = {
             "y": y,
             "y0": y0,
+            "z0": z0,
 
             "regions": regions,
 
@@ -874,6 +880,7 @@ class RMRv3(nn.Module):
             "uniform_reliability": uniform_reliability,
             "solver_strength": strength,
         }
+
         if hurdle_logit is not None:
             out["hurdle_logit"] = hurdle_logit
         return out

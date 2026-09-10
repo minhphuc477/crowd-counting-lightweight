@@ -418,12 +418,12 @@ def main() -> None:
 
     # EMA shadow model (RMR-v7+): maintains a smoothed copy of weights to avoid
     # best-epoch overfitting caused by training noise late in training.
-    ema_decay = float(cfg.get("model", {}).get("ema_decay", 0.0))
+    ema_decay = float(cfg.get("model", {}).get("ema_decay", cfg.get("train", {}).get("ema_decay", 0.0)))
     ema_state: dict | None = None
     if ema_decay > 0.0:
         import copy
         ema_state = copy.deepcopy(model.state_dict())
-        # Convert to float32 for stable accumulation
+        # Convert to float32 on the active device for stable accumulation
         for k in ema_state:
             ema_state[k] = ema_state[k].float()
         print(f"EMA enabled: decay={ema_decay:.4f}")
@@ -494,7 +494,7 @@ def main() -> None:
         "epoch", "lr_backbone", "lr_main", "solver_strength",
         "train_total", "train_count", "train_flat_dm16", "train_allocation",
         "train_dm16", "train_dm32", "train_dm64",
-        "train_cell", "train_region_nb",
+        "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
         "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
         "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
         "solver_weight_mean", "solver_weight_std",
@@ -574,6 +574,8 @@ def main() -> None:
         dm64_loss_accum = 0.0
         cell_loss_accum = 0.0
         reg_nb_loss_accum = 0.0
+        hurdle_loss_accum = 0.0
+        trunc_nb_loss_accum = 0.0
 
         mu_means = []
         disp_means = []
@@ -608,17 +610,18 @@ def main() -> None:
             scaler.step(optimizer)
             scaler.update()
 
-            # EMA weight update (RMR-v7+): runs on CPU-side float32 shadow state.
+            # EMA weight update (RMR-v7+): runs entirely on device in float32.
+            # Avoids CPU-host sync overhead and fixes device-mismatch crash on CUDA.
             if ema_state is not None:
                 with torch.no_grad():
                     for name, param in model.named_parameters():
                         if name in ema_state:
                             ema_state[name].mul_(ema_decay).add_(
-                                param.detach().float().cpu(), alpha=1.0 - ema_decay
+                                param.detach().float(), alpha=1.0 - ema_decay
                             )
                     for name, buf in model.named_buffers():
                         if name in ema_state:
-                            ema_state[name].copy_(buf.float().cpu())
+                            ema_state[name].copy_(buf.float())
 
             total_loss_accum += float(loss.item())
             count_loss_accum += float(losses["count"].item())
@@ -634,6 +637,11 @@ def main() -> None:
                 dm64_loss_accum += float(losses["dm_64"].item())
             cell_loss_accum += float(losses["cell"].item())
             reg_nb_loss_accum += float(losses["region_nb"].item())
+            if "hurdle_bce" in losses:
+                hurdle_loss_accum += float(losses["hurdle_bce"].item())
+            if "trunc_nb" in losses:
+                trunc_nb_loss_accum += float(losses["trunc_nb"].item())
+
 
             # Log tensors
             with torch.no_grad():
@@ -699,6 +707,8 @@ def main() -> None:
             "train_dm64": train_dm64,
             "train_cell": train_cell,
             "train_region_nb": train_region_nb,
+            "train_hurdle_bce": hurdle_loss_accum / num_batches if hurdle_loss_accum > 0 else 0.0,
+            "train_trunc_nb": trunc_nb_loss_accum / num_batches if trunc_nb_loss_accum > 0 else 0.0,
             "region_mu_mean": float(np.mean(mu_means)) if mu_means else 0.0,
             "region_dispersion_mean": float(np.mean(disp_means)) if disp_means else 50.0,
             "region_dispersion_p10": float(np.percentile(disps_np, 10)),
@@ -723,11 +733,22 @@ def main() -> None:
         # Periodic evaluation
         is_eval_epoch = (epoch + 1) % eval_every == 0 or (epoch + 1) == epochs
         if is_eval_epoch and val_loader is not None:
-            val_metrics = evaluate_v3(
-                model, val_loader, device,
-                uniform_reliability=uniform_reliability,
-                density_bins=density_bins,
-            )
+            # If EMA is active, temporarily evaluate with EMA weights (what eval.py will use)
+            if ema_state is not None:
+                live_backup = {k: v.clone() for k, v in model.state_dict().items()}
+                model.load_state_dict({k: ema_state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in ema_state})
+                val_metrics = evaluate_v3(
+                    model, val_loader, device,
+                    uniform_reliability=uniform_reliability,
+                    density_bins=density_bins,
+                )
+                model.load_state_dict(live_backup)
+            else:
+                val_metrics = evaluate_v3(
+                    model, val_loader, device,
+                    uniform_reliability=uniform_reliability,
+                    density_bins=density_bins,
+                )
             row_log.update({
                 "val_mae": float(val_metrics["MAE"]),
                 "val_rmse": float(val_metrics["RMSE"]),
@@ -791,7 +812,7 @@ def main() -> None:
                     "git_dirty": git_dirty,
                 }
                 if ema_state is not None:
-                    ckpt_data["ema_model"] = {k: v.clone() for k, v in ema_state.items()}
+                    ckpt_data["ema_model"] = {k: v.detach().float().cpu() for k, v in ema_state.items()}
 
                 safe_torch_save(ckpt_data, out_dir / "best_val_mae.pt")
                 (out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
@@ -816,6 +837,8 @@ def main() -> None:
             cov_80 = f"{val_metrics.get('coverage_80', 0.0)*100:.1f}%" if "coverage_80" in val_metrics else "N/A"
             cov_95 = f"{val_metrics.get('coverage_95', 0.0)*100:.1f}%" if "coverage_95" in val_metrics else "N/A"
 
+            hurdle_str = f" | h_bce: {hurdle_loss_accum / num_batches:.4f}" if hurdle_loss_accum > 0 else ""
+
             if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
                 alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{train_dm32:.3f}, 64:{train_dm64:.3f})"
             else:
@@ -825,7 +848,7 @@ def main() -> None:
                 f"\n{'='*92}\n"
                 f"  EPOCH [{epoch+1:04d}/{epochs:04d}] PERIODIC EVALUATION (182 test samples)\n"
                 f"{'-'*92}\n"
-                f"  Train Loss    : {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}]\n"
+                f"  Train Loss    : {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}{hurdle_str}]\n"
                 f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {e_red*100:.1f}% | W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | W_solv: {row_log['solver_weight_mean']:.2f}\n"
                 f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
                 f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
@@ -840,9 +863,11 @@ def main() -> None:
             else:
                 alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
+            hurdle_str = f" | h_bce: {hurdle_loss_accum / num_batches:.4f}" if hurdle_loss_accum > 0 else ""
+
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
-                f"Loss: {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}] | "
+                f"Loss: {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}{hurdle_str}] | "
                 f"SolvStr: {solver_strength:.2f} | "
                 f"Disp: {row_log['region_dispersion_p50']:.1f} | "
                 f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}",
@@ -851,24 +876,25 @@ def main() -> None:
 
         # Save last checkpoint
         git_commit, git_dirty = get_git_info()
-        safe_torch_save(
-            {
-                "epoch": epoch + 1,
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "scaler": scaler.state_dict(),
-                "rng_state": save_rng_state(),
-                "solver_strength": solver_strength,
-                "config": cfg,
-                "config_hash": run_config_hash,
-                "best_mae": best_mae,
-                "epochs_without_improvement": epochs_without_improvement,
-                "git_commit": git_commit,
-                "git_dirty": git_dirty,
-            },
-            out_dir / "last.pt",
-        )
+        last_ckpt = {
+            "epoch": epoch + 1,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "rng_state": save_rng_state(),
+            "solver_strength": solver_strength,
+            "config": cfg,
+            "config_hash": run_config_hash,
+            "best_mae": best_mae,
+            "epochs_without_improvement": epochs_without_improvement,
+            "git_commit": git_commit,
+            "git_dirty": git_dirty,
+        }
+        if ema_state is not None:
+            last_ckpt["ema_model"] = {k: v.detach().float().cpu() for k, v in ema_state.items()}
+        safe_torch_save(last_ckpt, out_dir / "last.pt")
+
 
         with open(log_csv, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")

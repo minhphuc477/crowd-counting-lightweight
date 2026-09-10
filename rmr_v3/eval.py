@@ -22,7 +22,9 @@ from .diagnostics import (
 from .model import RMRv3, RMRv3Config
 
 
-def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, bool, dict, dict]:
+def load_model_from_ckpt(
+    ckpt_path: Path, device: torch.device, use_ema: bool = True
+) -> tuple[RMRv3, bool, dict, dict]:
     try:
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     except TypeError:
@@ -101,7 +103,7 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
     model = RMRv3(config)
 
     # Prefer EMA weights if saved (higher quality than live weights)
-    if "ema_model" in ckpt:
+    if use_ema and "ema_model" in ckpt:
         # EMA state is float32; cast to model dtype (may be fp16 on GPU)
         ema_sd = ckpt["ema_model"]
         live_sd = model.state_dict()
@@ -114,6 +116,8 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         print(f"Loaded EMA weights from checkpoint (ema_model key found).")
     else:
         model.load_state_dict(ckpt["model"])
+        if not use_ema and "ema_model" in ckpt:
+            print(f"Loaded live weights from checkpoint (--use-live-weights specified).")
 
     model.switch_to_deploy()
     model.set_solver_strength(1.0)
@@ -161,12 +165,13 @@ def main() -> None:
     ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Force weighted reliability (W=diag(w_R))")
     ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
+    ap.add_argument("--use-live-weights", dest="use_ema", action="store_false", default=True, help="Evaluate live checkpoint weights instead of EMA weights")
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device)
+    model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device, use_ema=args.use_ema)
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
     manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
