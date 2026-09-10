@@ -95,9 +95,12 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
         pretrained=pretrained,
         backbone_lr_scale=backbone_lr_scale,
         init_m0=init_m0,
+        neck_type=str(m_cfg.get("neck_type", "additive")),
+        context_dilations=tuple(int(x) for x in m_cfg.get("context_dilations", (1, 2, 3))),
         region_sizes_px=region_sizes_px,
         region_overlap=region_overlap,
         include_full_image=include_full_image,
+        enable_solver=bool(m_cfg.get("enable_solver", True)),
         iterations=iterations,
         omega=omega,
         residual_clip=residual_clip,
@@ -128,6 +131,11 @@ def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
         lambda_flat_dm16=float(l_cfg.get("lambda_flat_dm16", 1.0)),
         lambda_cell=float(l_cfg.get("lambda_cell", 0.25)),
         lambda_region_nb=float(l_cfg.get("lambda_region_nb", 0.20)),
+        allocation_loss_type=str(l_cfg.get("allocation_loss_type", "flat_dm16")),
+        bayesian_sigma=float(l_cfg.get("bayesian_sigma", 8.0)),
+        bayesian_background_ratio=float(l_cfg.get("bayesian_background_ratio", 0.1)),
+        ot_reg=float(l_cfg.get("ot_reg", 10.0)),
+        ot_num_iters=int(l_cfg.get("ot_num_iters", 20)),
         use_multiscale_dm=use_multi,
         use_hierarchical_dm=use_multi,
         dm_block_sizes_px=tuple(int(x) for x in l_cfg.get("dm_block_sizes_px", (16, 32, 64))),
@@ -564,7 +572,7 @@ def main() -> None:
 
             with torch.amp.autocast("cuda", enabled=amp):
                 outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
-                losses = compute_rmr_v3_losses(outputs, targets, loss_cfg)
+                losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
                 loss = losses["total"]
 
             scaler.scale(loss).backward()
@@ -578,6 +586,9 @@ def main() -> None:
             alloc_loss_accum += float(losses["allocation"].item())
             if "dm_16" in losses:
                 dm16_loss_accum += float(losses["dm_16"].item())
+            elif "dm_32" not in losses and "dm_64" not in losses:
+                # flat_dm16 alias: allocation == dm16 for this path
+                dm16_loss_accum += float(losses["allocation"].item())
             if "dm_32" in losses:
                 dm32_loss_accum += float(losses["dm_32"].item())
             if "dm_64" in losses:
@@ -715,8 +726,9 @@ def main() -> None:
             })
 
             cur_mae = float(val_metrics["MAE"])
-            solver_engaged = solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs
-            # Guard: only update best_mae after solver ramp has fully engaged
+            solver_enabled = getattr(model.cfg, "enable_solver", True)
+            solver_engaged = (not solver_enabled) or (solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs)
+            # Guard: only update best_mae after solver ramp has fully engaged (or always if solver is disabled)
             is_best = (cur_mae < best_mae) and solver_engaged
             git_commit, git_dirty = get_git_info()
             if is_best:

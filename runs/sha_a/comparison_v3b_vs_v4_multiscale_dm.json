@@ -1,0 +1,27 @@
+{
+  "comparison": "V3-B_RW vs V4_MultiScaleDM",
+  "n_samples": 182,
+  "V3-B_RW": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 103
+  },
+  "V4_MultiScaleDM": {
+    "mae": 90.13219208769746,
+    "rmse": 152.53961082280313,
+    "wins": 79
+  },
+  "ties": 0,
+  "delta_mae": -6.916717655056132,
+  "paired_difference": {
+    "definition": "|V3-B_RW - GT| - |V4_MultiScaleDM - GT|",
+    "mean": -6.916717655056125,
+    "std": 34.075488361905165,
+    "bootstrap_95_ci": [
+      -11.895108221913432,
+      -2.1713453774923814
+    ],
+    "p_value_paired_ttest": 0.006791311033508379,
+    "p_value_wilcoxon": 0.0090564072104425
+  }
+}

@@ -127,6 +127,17 @@ RMR-v4 introduces Native Scale Feature Pyramid Pooling ($P_4, P_8, P_{16}$), Mom
 
 > Detailed analysis, GAME spatial localization metrics, calibration curves, and paired test statistics are available in [`docs/RMR_V4_COMPREHENSIVE_ABLATION_REPORT.md`](docs/RMR_V4_COMPREHENSIVE_ABLATION_REPORT.md).
 
+### 3.3 Observer-Solver Decoupling Factorial Matrix (C0–C3)
+
+To test whether the RW-SIRT inverse solver is an orthogonal, universally decoupled module or merely compensates for a weak observer, a 2x2 factorial matrix is registered:
+
+| Run ID | Neck | Spatial Allocation Loss | Region Scales | Solver (RW-SIRT) | Deploy Params | Scientific Hypothesis |
+| :---: | :--- | :--- | :--- | :---: | :---: | :--- |
+| **C0** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | TẮT ($Y \equiv Y_0$) | 101,763 | Legacy Observer control ($= B0$ baseline, $\sim 95.72$) |
+| **C1** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 101,763 | Legacy Observer + Solver ($= B5\text{-P}$, $83.22$) $\implies \Delta_{\text{old}} \approx +12.5$ |
+| **C2** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | TẮT ($Y \equiv Y_0$) | 102,249 | Modernized Observer direct ($Y_0$). Intrinsic power measurement. |
+| **C3** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 102,249 | Core Decoupling Test: Does Solver yield $\Delta_{\text{new}} = \text{MAE}(C2) - \text{MAE}(C3) > 0$? |
+
 ---
 
 ## 4. Dataset & Evaluation Protocol (Zero Ad-hoc Split Policy)

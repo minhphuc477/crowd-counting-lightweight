@@ -85,10 +85,14 @@ def load_model_from_ckpt(ckpt_path: Path, device: torch.device) -> tuple[RMRv3, 
         eps=eps,
         native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
         regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
+        neck_type=str(m_cfg.get("neck_type", "additive")),
+        context_dilations=tuple(int(x) for x in m_cfg.get("context_dilations", (1, 2, 3))),
+        enable_solver=bool(m_cfg.get("enable_solver", True)),
     )
 
     model = RMRv3(config)
     model.load_state_dict(ckpt["model"])
+    model.switch_to_deploy()
     model.set_solver_strength(1.0)
     model.to(device).eval()
     return model, uniform_reliability, cfg, ckpt

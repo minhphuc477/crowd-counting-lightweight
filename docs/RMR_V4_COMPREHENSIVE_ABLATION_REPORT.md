@@ -110,3 +110,24 @@ All checkpoints and configurations are stored with verified provenance:
 - **V4-NS (Native Mean/Std)**: `runs/sha_a/rmr_v4_native_meanstd_seed42/best_val_mae.pt`
 - **V4-DM (MultiScale DM)**: `runs/sha_a/rmr_v4_multiscale_dm_seed42/best_val_mae.pt`
 - **V4-S (Mean/Std)**: `runs/sha_a/rmr_v4_mean_std_seed42/best_val_mae.pt`
+
+---
+
+## 7. Observer-Solver Decoupling 2x2 Factorial Matrix (C0–C3)
+
+To rigorously answer the foundational question: *"Does RW-SIRT improve counting accuracy because the Observer is weak, or is it an orthogonal, universally beneficial inverse solver?"*, a 2x2 factorial experiment matrix is defined:
+
+$$\Delta = \text{MAE}(\text{Observer Direct } Y_0) - \text{MAE}(\text{Observer + RW-SIRT } Y)$$
+
+| Run ID | Neck Architecture | Spatial Allocation Loss | Region Scales | Solver (RW-SIRT) | Deploy Params | Scientific Hypothesis / Role |
+| :---: | :--- | :--- | :--- | :---: | :---: | :--- |
+| **C0** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | TẮT ($Y \equiv Y_0$) | **101,763** | Legacy Observer control ($= B0$ baseline, expected $\sim 95.72$) |
+| **C1** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | BẬT ($T=2, \omega=1.0$) | **101,763** | Legacy Observer + Solver ($= B5\text{-P}$, verified $83.22$ / $79.38$ val). Establishes $\Delta_{\text{old}} \approx +12.5$ MAE. |
+| **C2** | RepWeightedFPNNeck | Bayesian Loss ($\sigma=8.0$) | (16, 32, 64, 128) | TẮT ($Y \equiv Y_0$) | **102,249** | Modernized Observer direct ($Y_0$). Measures intrinsic performance ceiling without solver assistance. |
+| **C3** | RepWeightedFPNNeck | Bayesian Loss ($\sigma=8.0$) | (16, 32, 64, 128) | BẬT ($T=2, \omega=1.0$) | **102,249** | Core Decoupling Test: Does Solver yield $\Delta_{\text{new}} = \text{MAE}(C2) - \text{MAE}(C3) > 0$? |
+
+### Mathematical Validation & Parameter Budgets
+- **RepDWBlock7x7 Equivalence**: Multi-branch training fused to single depthwise $7 \times 7$ kernel with algebraic reconstruction error $\Delta_{\max} < 10^{-6}$.
+- **Deploy Parameters**: $102,249$ parameters (within $< 105\text{K}$ project budget; headroom of 2,751 parameters).
+- **Execution Script**: `scripts/run_c0_c3_matrix.ps1 -Run [C0|C1|C2|C3|all]`.
+

@@ -1,0 +1,27 @@
+{
+  "comparison": "V3-B_RW vs V4_NativePooling",
+  "n_samples": 182,
+  "V3-B_RW": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 91
+  },
+  "V4_NativePooling": {
+    "mae": 84.66776296594641,
+    "rmse": 149.5667579037673,
+    "wins": 91
+  },
+  "ties": 0,
+  "delta_mae": -1.4522885333050795,
+  "paired_difference": {
+    "definition": "|V3-B_RW - GT| - |V4_NativePooling - GT|",
+    "mean": -1.452288533305074,
+    "std": 27.957291900892482,
+    "bootstrap_95_ci": [
+      -5.614223968589698,
+      2.4765337933550824
+    ],
+    "p_value_paired_ttest": 0.4843283573518822,
+    "p_value_wilcoxon": 0.9736593211526505
+  }
+}

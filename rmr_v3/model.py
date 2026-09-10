@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
-from rmr_core.necks import AdditiveFPNNeck
+from rmr_core.necks import AdditiveFPNNeck, RepWeightedFPNNeck
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
@@ -38,12 +38,17 @@ class RMRv3Config:
     backbone_lr_scale: float = 0.1
     init_m0: float = 0.015763
 
+    # Neck
+    neck_type: str = "additive"  # "additive" | "rep_weighted"
+    context_dilations: tuple[int, ...] = (1, 2, 3)  # dilations for RepWeightedFPNNeck context blocks
+
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
     region_overlap: float = 0.5
     include_full_image: bool = False
 
     # Solver
+    enable_solver: bool = True
     iterations: int = 2
     omega: float = 1.0
     residual_clip: float = 0.0
@@ -166,28 +171,24 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             dtype=dtype,
         )
 
-        level_by_sid = {
-            0: p4,
-            1: p8,
-            2: p16,
-        }
-
-        stride_by_sid = {
-            0: 4,
-            1: 8,
-            2: 16,
-        }
-
         for sid, size_px in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
             if not bool(mask.any()):
                 continue
 
-            feat = level_by_sid.get(sid, p16)
+            if size_px <= 32:
+                feat = p4
+                dst_stride = 4
+            elif size_px <= 64:
+                feat = p8
+                dst_stride = 8
+            else:
+                feat = p16
+                dst_stride = 16
+
             boxes4 = regions.boxes[mask]
 
             if self.native_scale_pooling and feat.shape[-2:] != src_hw:
-                dst_stride = stride_by_sid.get(sid, 16)
                 scale = 4.0 / float(dst_stride)
                 float_boxes = boxes4.float() * scale
                 if self.regional_feature_stats == "mean_std":
@@ -506,9 +507,9 @@ class RMRv3(nn.Module):
                 f"Unsupported reliability_mode: {cfg.reliability_mode}. Only 'nb_rate_variance' is supported."
             )
 
-        if tuple(cfg.region_sizes_px) != (32, 64, 128):
+        if tuple(cfg.region_sizes_px) not in {(32, 64, 128), (16, 32, 64, 128)}:
             raise ValueError(
-                f"RMR-v3 registered canonical method requires region_sizes_px=(32, 64, 128), got {cfg.region_sizes_px}"
+                f"RMR-v3 requires region_sizes_px in [(32, 64, 128), (16, 32, 64, 128)], got {cfg.region_sizes_px}"
             )
 
         if cfg.reliability_weight_min <= 0:
@@ -534,10 +535,21 @@ class RMRv3(nn.Module):
             target_reductions=(4, 8, 16),
         )
 
-        self.fusion = AdditiveFPNNeck(
-            in_channels=self.encoder.out_channels,
-            width=cfg.feature_width,
-        )
+        if cfg.neck_type == "rep_weighted":
+            self.fusion = RepWeightedFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+                context_dilations=cfg.context_dilations,
+            )
+        elif cfg.neck_type == "additive":
+            self.fusion = AdditiveFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive' or 'rep_weighted'."
+            )
 
         init_bias = _softplus_inverse(cfg.init_m0)
 
@@ -666,6 +678,29 @@ class RMRv3(nn.Module):
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
+        # Bypass solver loop if solver is disabled (direct baseline mode)
+        if not self.cfg.enable_solver:
+            return {
+                "y": y0,
+                "y0": y0,
+                "z0": z0,
+                "regions": regions,
+                "b_region": mu_count,
+                "region_rate": regional["rate"],
+                "region_dispersion": dispersion,
+                "region_log_dispersion": regional["log_dispersion"],
+                "region_weight": weight,
+                "solver_region_weight": weight_solver,
+                "region_precision": reliability["precision"],
+                "region_rate_variance": reliability["rate_variance"],
+                "region_count_variance": reliability["count_variance"],
+                "iterates": [y0],
+                "residual_fields": [],
+                "energy_trace": [],
+                "uniform_reliability": uniform_reliability,
+                "solver_strength": 0.0,
+            }
+
         cov_w = weighted_coverage(
             weight_solver,
             regions,
@@ -754,3 +789,9 @@ class RMRv3(nn.Module):
             "uniform_reliability": uniform_reliability,
             "solver_strength": strength,
         }
+
+    def switch_to_deploy(self) -> None:
+        """Switch internal modules (e.g. RepWeightedFPNNeck) to fused deployment mode."""
+        if hasattr(self.fusion, "switch_to_deploy"):
+            self.fusion.switch_to_deploy()
+

@@ -264,6 +264,7 @@ def collate_train(batch: list[dict]) -> dict:
     return {
         "image": torch.stack([b["image"] for b in batch], 0),
         "target_y": torch.stack([b["target_y"] for b in batch], 0),
+        "points": [b["points"] for b in batch],
         "id": [b["id"] for b in batch],
     }
 

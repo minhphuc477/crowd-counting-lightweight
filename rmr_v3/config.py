@@ -36,9 +36,11 @@ ALLOWED_MODEL_KEYS = {
     "pretrained",
     "backbone_lr_scale",
     "init_m0",
+    "neck_type",
     "region_sizes_px",
     "region_overlap",
     "include_full_image",
+    "enable_solver",
     "iterations",
     "omega",
     "sirt_omega",
@@ -57,6 +59,7 @@ ALLOWED_MODEL_KEYS = {
     "eps",
     "native_scale_pooling",
     "regional_feature_stats",
+    "context_dilations",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -64,6 +67,11 @@ ALLOWED_LOSS_KEYS = {
     "lambda_flat_dm16",
     "lambda_cell",
     "lambda_region_nb",
+    "allocation_loss_type",
+    "bayesian_sigma",
+    "bayesian_background_ratio",
+    "ot_reg",
+    "ot_num_iters",
     "count_loss_mode",
     "count_nb_dispersion",
     "kappa_flat16",
