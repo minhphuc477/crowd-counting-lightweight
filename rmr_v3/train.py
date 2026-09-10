@@ -285,6 +285,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--output-dir", default=None)
+    ap.add_argument("--run-id", default=None, help="Run identifier (sets output_dir to runs/sha_a/<run_id>)")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
@@ -311,6 +312,8 @@ def main() -> None:
 
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)
+    elif args.run_id is not None:
+        cfg["output_dir"] = f"runs/sha_a/{args.run_id}"
 
     validate_v3_config(cfg)
 
