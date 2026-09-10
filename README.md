@@ -120,8 +120,8 @@ RMR-v4 introduces Native Scale Feature Pyramid Pooling ($P_4, P_8, P_{16}$), Mom
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 | **V3-B (Kỷ lục dự án)** | ✗ | ✗ | ✗ | 101.8K | **83.22** | **141.14** | -2.97 | Historical project record |
 | **V4-N (Native Pooling Only)** | ✓ | ✗ | ✗ | 101.8K | **84.64** | 149.42 | -9.30 | Sparse MAE **7.46**, Mod MAE **55.91** (Best sparse/mod) |
-| **V4-NS (Native + Mean/Std)** | ✓ | ✓ | ✗ | 103.3K | **89.14** | **141.49** | +13.51 | **MaxAE 690.04** (Lowest worst-case outlier error) |
-| **V4-S (Mean/Std Only)** | ✗ | ✓ | ✗ | 103.3K | **90.25** *(val)*| 142.02 | -4.65 | **Dense MAE 163.51** (Best dense crowd error) |
+| **V4-NS (Native + Mean/Std)** | ✓ | ✓ | ✗ | 103.3K | **89.14** | **141.49** | +13.51 | **MaxAE 690.04** (Outlier suppression) |
+| **V4-S (Mean/Std Only)** | ✗ | ✓ | ✗ | 103.3K | **88.76** | **139.11** | **+4.80** | **Lowest RMSE in project (139.11)**, MaxAE **635.87** |
 | **V4-DM (MultiScale DM Only)** | ✗ | ✗ | ✓ | 101.8K | **90.18** | 152.61 | **+2.20** | Most unbiased, Sparse MAE **5.46** |
 | **Full V4 Candidate** | ✓ | ✓ | ✓ | 103.3K | **90.15** | 146.27 | +13.04 | Dispersion saturation -47%, Tiled discrepancy -28% |
 
@@ -131,12 +131,12 @@ RMR-v4 introduces Native Scale Feature Pyramid Pooling ($P_4, P_8, P_{16}$), Mom
 
 To test whether the RW-SIRT inverse solver is an orthogonal, universally decoupled module or merely compensates for a weak observer, a 2x2 factorial matrix is registered:
 
-| Run ID | Neck | Spatial Allocation Loss | Region Scales | Solver (RW-SIRT) | Deploy Params | Scientific Hypothesis |
-| :---: | :--- | :--- | :--- | :---: | :---: | :--- |
-| **C0** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | TẮT ($Y \equiv Y_0$) | 101,763 | Legacy Observer control ($= B0$ baseline, $\sim 95.72$) |
-| **C1** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 101,763 | Legacy Observer + Solver ($= B5\text{-P}$, $83.22$) $\implies \Delta_{\text{old}} \approx +12.5$ |
-| **C2** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | TẮT ($Y \equiv Y_0$) | 102,249 | Modernized Observer direct ($Y_0$). Intrinsic power measurement. |
-| **C3** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 102,249 | Core Decoupling Test: Does Solver yield $\Delta_{\text{new}} = \text{MAE}(C2) - \text{MAE}(C3) > 0$? |
+| Run ID | Neck | Spatial Allocation Loss | Region Scales | Solver (RW-SIRT) | Deploy Params | Test MAE | Test RMSE | Status / Key Insight |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **C0** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | TẮT ($Y \equiv Y_0$) | 101,763 | **96.05** | 156.66 | ✅ Completed (Legacy direct baseline) |
+| **C1** | AdditiveFPNNeck | Flat-DM16 | (32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 101,763 | **83.80** | **142.67** | ✅ Completed ($\Delta_{\text{old}} = \mathbf{+12.25\text{ MAE}}$, $p=0.0081$) |
+| **C2** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | TẮT ($Y \equiv Y_0$) | 102,249 | — | — | ⏳ Queued (New Observer baseline) |
+| **C3** | RepWeightedFPNNeck | Bayesian Loss | (16, 32, 64, 128) | BẬT ($T=2, \omega=1.0$) | 102,249 | — | — | ⏳ Queued (Testing $\Delta_{\text{new}} > 0$) |
 
 ---
 

@@ -1,0 +1,27 @@
+{
+  "comparison": "V3B_Record vs C1_RWSIRT",
+  "n_samples": 182,
+  "V3B_Record": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 97
+  },
+  "C1_RWSIRT": {
+    "mae": 83.79878876235459,
+    "rmse": 142.6719785647234,
+    "wins": 85
+  },
+  "ties": 0,
+  "delta_mae": -0.5833143297132608,
+  "paired_difference": {
+    "definition": "|V3B_Record - GT| - |C1_RWSIRT - GT|",
+    "mean": -0.5833143297132555,
+    "std": 19.309612239192337,
+    "bootstrap_95_ci": [
+      -3.4079940827338246,
+      2.2101445617256577
+    ],
+    "p_value_paired_ttest": 0.6840967795150004,
+    "p_value_wilcoxon": 0.5480615302074758
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "comparison": "V3-B_RW vs V4_MeanStd",
+  "n_samples": 182,
+  "V3-B_RW": {
+    "mae": 83.21547443264133,
+    "rmse": 141.13640390520578,
+    "wins": 104
+  },
+  "V4_MeanStd": {
+    "mae": 88.7625464973869,
+    "rmse": 139.1088113101699,
+    "wins": 78
+  },
+  "ties": 0,
+  "delta_mae": -5.547072064745564,
+  "paired_difference": {
+    "definition": "|V3-B_RW - GT| - |V4_MeanStd - GT|",
+    "mean": -5.547072064745557,
+    "std": 45.006981351123535,
+    "bootstrap_95_ci": [
+      -12.169051988832242,
+      0.9369184797936734
+    ],
+    "p_value_paired_ttest": 0.09809880999657909,
+    "p_value_wilcoxon": 0.04671483259212903
+  }
+}

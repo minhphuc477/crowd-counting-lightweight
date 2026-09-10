@@ -1,0 +1,27 @@
+{
+  "comparison": "C0_Direct vs C1_RWSIRT",
+  "n_samples": 182,
+  "C0_Direct": {
+    "mae": 96.05204420823317,
+    "rmse": 156.65780269125594,
+    "wins": 73
+  },
+  "C1_RWSIRT": {
+    "mae": 83.79878876235459,
+    "rmse": 142.6719785647234,
+    "wins": 109
+  },
+  "ties": 0,
+  "delta_mae": 12.25325544587858,
+  "paired_difference": {
+    "definition": "|C0_Direct - GT| - |C1_RWSIRT - GT|",
+    "mean": 12.253255445878585,
+    "std": 94.69532100455298,
+    "bootstrap_95_ci": [
+      -1.1051324854840288,
+      26.11906106131417
+    ],
+    "p_value_paired_ttest": 0.08256759762342436,
+    "p_value_wilcoxon": 0.008100441768587777
+  }
+}
