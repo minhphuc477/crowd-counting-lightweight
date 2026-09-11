@@ -93,7 +93,7 @@ train:
   solver_ramp_epochs: 20
   early_stopping: false
   patience: 0
-  eval_every: 10
+  eval_every: 5
 eval:
   density_bins:
   - 100.0
