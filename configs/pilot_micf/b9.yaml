@@ -1,4 +1,4 @@
-﻿experiment:
+experiment:
   name: pilot_micf_b9
   model_id: B9
   description: "FH-CMICF K16 on P4 Stride-4 High-Resolution Carrier with Directional Integral Context"

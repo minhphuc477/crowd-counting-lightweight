@@ -152,7 +152,7 @@ def main() -> None:
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8-sig"))
     if args.seed is not None:
         cfg["seed"] = args.seed
     if args.lr is not None:

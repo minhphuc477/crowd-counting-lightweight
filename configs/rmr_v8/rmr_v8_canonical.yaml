@@ -1,4 +1,4 @@
-﻿seed: 42
+seed: 42
 
 data:
   train_manifest: data/sha_a_train_all.jsonl
