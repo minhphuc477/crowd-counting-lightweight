@@ -169,24 +169,46 @@ def test_ema_state_restored_on_resume():
 
 
 def test_v7_canonical_parameter_budget():
-    """RMR-v7 canonical config (hurdle_head + temp_softplus) must stay strictly under 105,000 params.
+    """RMR-v7 canonical architecture must strictly stay under 105,000 parameters.
 
-    Base model:    101,763 params (no v7 features)
-    + hurdle_head:  +45 params (Linear(44, 1) in ProbabilisticRegionalEvidenceHead)
-    + temp_softplus: +1 param (learnable τ in FineMeasureHead)
-    V7 canonical:  101,813 params total
+    Architecture breakdown:
+    - Backbone: MobileNetV4-Conv-Small-050
+    - Neck: ASPPLiteFPNNeck (dilations [1, 3, 6], use_aspp_gap=True)
+    - Regional Stats: mean_std (pooling both mean and std)
+    - Region head hidden: 44
+    - Hurdle NB head: +45 params (Linear(44, 1) in ProbabilisticRegionalEvidenceHead)
+    - Learnable temperature: +1 param (tau parameter in FineMeasureHead)
+    Total parameters: exactly 104,845 (leaving 155 headroom under the 105,000 budget).
     """
-    cfg = RMRv3Config(
+    import yaml
+    from pathlib import Path
+    from rmr_v3.train import make_model
+
+    # 1. Verify directly from canonical config YAML
+    yaml_path = Path("configs/rmr_v7/rmr_v7_canonical.yaml")
+    assert yaml_path.exists(), "configs/rmr_v7/rmr_v7_canonical.yaml must exist"
+    cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    cfg["model"]["pretrained"] = False
+    model_from_yaml, _ = make_model(cfg)
+    n_yaml = sum(p.numel() for p in model_from_yaml.parameters() if p.requires_grad)
+
+    assert n_yaml < 105_000, f"OVER BUDGET: {n_yaml:,} >= 105,000"
+    assert n_yaml == 104_845, f"Expected exactly 104,845 parameters from canonical YAML, got {n_yaml:,}"
+
+    # 2. Verify via direct RMRv3Config instantiation
+    cfg_dataclass = RMRv3Config(
         pretrained=False,
+        neck_type="aspp_lite",
+        aspp_dilations=(1, 3, 6),
+        use_aspp_gap=True,
+        regional_feature_stats="mean_std",
+        region_head_hidden=44,
         hurdle_head=True,
         temp_softplus=True,
-        region_head_hidden=44,
     )
-    model = RMRv3(cfg)
-    n = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model_from_dataclass = RMRv3(cfg_dataclass)
+    n_dataclass = sum(p.numel() for p in model_from_dataclass.parameters() if p.requires_grad)
 
-    assert n < 105_000, f"OVER BUDGET: {n:,} >= 105,000"
-    assert n == 101_813, (
-        f"V7 canonical expected exactly 101,813 parameters, got {n:,}. "
-        f"If the architecture changed, update this test and document the delta."
-    )
+    assert n_dataclass < 105_000, f"OVER BUDGET: {n_dataclass:,} >= 105,000"
+    assert n_dataclass == 104_845, f"Expected exactly 104,845 parameters from dataclass, got {n_dataclass:,}"
+
