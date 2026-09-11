@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Hard, Comprehensive, and Adversarial Tests for RMR-v8 (Stage 2 + Stage 3).
 
@@ -448,3 +448,119 @@ def test_bfloat16_numerical_stability():
     for name, p in model.named_parameters():
         if p.requires_grad and p.grad is not None:
             assert torch.isfinite(p.grad).all(), f"NaN gradient in parameter '{name}'"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced Edge Cases & Mathematical Invariants
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_kd_loss_empty_teacher_no_spatial_distortion():
+    """Empty teacher image (count=0) must produce 0 spatial KL, preventing uniform distortion."""
+    kd_loss = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.5)
+
+    # Empty teacher
+    y_teacher_empty = torch.zeros(1, 1, 16, 16)
+    # Student incorrectly predicting positive crowd
+    y_student = torch.ones(1, 1, 16, 16, requires_grad=True)
+
+    res = kd_loss(y_student, y_teacher_empty)
+
+    # Spatial KL MUST be 0.0 — no crowd distribution to distill
+    assert res["spatial_kl"].item() == 0.0
+    # Count KD MUST be positive — student predicted 256 instead of 0
+    assert res["count_kd"].item() > 0.0
+
+
+def test_operator_adjoint_dot_product_identity():
+    """Verify Hilbert adjoint identity: <Ax, y> == <x, A^T y> to float32 precision."""
+    from rmr_core.operators import regional_adjoint, regional_sum
+
+    h, w = 32, 32
+    boxes = torch.tensor([
+        [0, 0, 16, 16],
+        [8, 8, 24, 24],
+        [0, 0, 32, 32],
+        [16, 0, 32, 16],
+    ], dtype=torch.long)
+    m = boxes.shape[0]
+
+    torch.manual_seed(123)
+    x = torch.randn(2, 1, h, w, dtype=torch.float32)
+    y = torch.randn(2, 1, m, dtype=torch.float32)
+
+    # Ax = regional_sum(x)
+    ax = regional_sum(x, boxes, out_dtype=torch.float32)
+    # A^T y = regional_adjoint(y)
+    aty = regional_adjoint(y, boxes, h, w, out_dtype=torch.float32)
+
+    inner_ax_y = (ax * y).sum().item()
+    inner_x_aty = (x * aty).sum().item()
+
+    rel_diff = abs(inner_ax_y - inner_x_aty) / (abs(inner_ax_y) + 1e-7)
+    assert rel_diff < 1e-4, f"Adjoint identity failed: <Ax, y>={inner_ax_y}, <x, A^Ty>={inner_x_aty}, rel_diff={rel_diff}"
+
+
+def test_charbonnier_tv_energy_dissipation_monotone():
+    """Charbonnier TV diffusion must monotonically dissipate discrete TV energy."""
+    eps_c = 0.1
+    lambda_tv = 0.015
+
+    def compute_energy(field: torch.Tensor) -> float:
+        dy_dx = field[..., 1:] - field[..., :-1]
+        dy_dy = field[..., 1:, :] - field[..., :-1, :]
+        e_x = torch.sqrt(dy_dx.pow(2) + eps_c ** 2).sum()
+        e_y = torch.sqrt(dy_dy.pow(2) + eps_c ** 2).sum()
+        return (e_x + e_y).item()
+
+    torch.manual_seed(42)
+    curr_y = torch.rand(1, 1, 32, 32) * 5.0
+    prev_energy = compute_energy(curr_y)
+
+    for step in range(5):
+        curr_y = charbonnier_tv_step(curr_y, lambda_tv=lambda_tv, eps_c=eps_c)
+        curr_energy = compute_energy(curr_y)
+        assert curr_energy <= prev_energy + 1e-4, (
+            f"Step {step}: Energy increased from {prev_energy:.4f} to {curr_energy:.4f}"
+        )
+        prev_energy = curr_energy
+
+
+def test_evaluate_v3_refactored_metric_keys():
+    """evaluate_v3 produces all required summary and stratified keys via evaluate_dataset."""
+    from rmr_v3.train import evaluate_v3
+    from torch.utils.data import DataLoader
+
+    cfg = RMRv3Config(pretrained=False, neck_type="additive", iterations=1)
+    model = RMRv3(cfg).eval()
+
+    from rmr_core.data import rasterize_points
+
+    pts = torch.tensor([[10.0, 10.0]])
+    tgt = rasterize_points(pts, 64, 64, stride=4)
+
+    # Synthetic dataset with 2 samples
+    dummy_dataset = [
+        {
+            "image": torch.randn(3, 64, 64),
+            "target_y": tgt,
+            "id": f"dummy_{i}",
+            "height": 64,
+            "width": 64,
+            "points": pts,
+        }
+        for i in range(2)
+    ]
+    loader = DataLoader(dummy_dataset, batch_size=1, collate_fn=lambda b: b)
+
+    device = torch.device("cpu")
+    summary = evaluate_v3(model, loader, device)
+
+    expected_keys = [
+        "MAE", "RMSE", "NAE", "Bias",
+        "mae_sparse", "mae_moderate", "mae_dense",
+        "GAME0", "GAME1", "GAME2", "GAME3",
+        "mean_std_residual", "p50_std_residual", "p90_std_residual",
+    ]
+    for k in expected_keys:
+        assert k in summary, f"Key '{k}' missing from evaluate_v3 summary"
+

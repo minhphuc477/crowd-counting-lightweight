@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Knowledge Distillation Module for RMR-v8 (Stage 3).
 
@@ -62,19 +62,23 @@ class DensityMapKDLoss(nn.Module):
             # Re-normalize mass after interpolation
             yt = yt * (y_teacher.sum(dim=(-2, -1), keepdim=True) / yt.sum(dim=(-2, -1), keepdim=True).clamp_min(self.eps))
 
-        # 1. Spatial distribution KL divergence
-        # Softmax over spatial lattice with temperature
-        flat_ys = (ys / self.temperature).flatten(start_dim=-2)  # [B, 1, H*W]
-        flat_yt = (yt / self.temperature).flatten(start_dim=-2)
+        # 1. Spatial distribution KL divergence (computed only on samples with non-zero teacher count)
+        # Empty background patches (count < 0.5) have no crowd distribution; forcing KL against
+        # softmax(0) would penalize sparsity and teach the student uniform hallucination.
+        count_student = ys.sum(dim=(-2, -1))  # [B, 1]
+        count_teacher = yt.sum(dim=(-2, -1))  # [B, 1]
 
-        log_p_student = F.log_softmax(flat_ys, dim=-1)
-        p_teacher = F.softmax(flat_yt, dim=-1)
+        occ_mask = (count_teacher > 0.5).squeeze(-1)  # [B]
+        if occ_mask.any():
+            flat_ys_occ = (ys[occ_mask] / self.temperature).flatten(start_dim=-2)
+            flat_yt_occ = (yt[occ_mask] / self.temperature).flatten(start_dim=-2)
+            log_p_student = F.log_softmax(flat_ys_occ, dim=-1)
+            p_teacher = F.softmax(flat_yt_occ, dim=-1)
+            kl = F.kl_div(log_p_student, p_teacher, reduction="batchmean") * (self.temperature ** 2)
+        else:
+            kl = torch.tensor(0.0, device=ys.device, dtype=ys.dtype)
 
-        kl = F.kl_div(log_p_student, p_teacher, reduction="batchmean") * (self.temperature ** 2)
-
-        # 2. Total count alignment
-        count_student = ys.sum(dim=(-2, -1))
-        count_teacher = yt.sum(dim=(-2, -1))
+        # 2. Total count alignment (always computed for all samples, enforcing 0 count on background)
         count_l1 = F.smooth_l1_loss(count_student, count_teacher, beta=1.0)
 
         total_kd = self.lambda_spatial_kl * kl + self.lambda_count_kd * count_l1

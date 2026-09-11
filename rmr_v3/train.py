@@ -34,6 +34,7 @@ from rmr_core.data import (
     collate_train,
     compute_manifest_density,
 )
+from rmr_core.evaluation import evaluate_dataset
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import load_rng_state, make_scheduler, safe_torch_save, save_rng_state, seed_everything
 
@@ -77,72 +78,29 @@ def evaluate_v3(
     uniform_reliability: bool = False,
     density_bins: tuple[float, float] = (100.0, 500.0),
 ) -> dict:
-    model.eval()
-    pred_rows = []
     all_diag_rows = []
     traj_rows = []
-    output_stride = getattr(model.cfg, "output_stride", 4)
 
-    for batch_list in loader:
-        for sample in batch_list:
-            image = sample["image"].unsqueeze(0).to(device)
-            target = sample["target_y"].to(device)
+    def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
+        target = sample["target_y"].to(device)
+        d_rows = regional_reliability_rows(out, target.unsqueeze(0))
+        all_diag_rows.extend(d_rows)
+        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
+        if t_diag:
+            traj_rows.append(t_diag)
+        return {}
 
-            out = model(image, uniform_reliability=uniform_reliability, solver_strength=1.0)
-            y = out["y"][0]
-            pred = float(y.sum().item())
-            gt = float(target.sum().item())
-
-            # GT consistency invariant: rasterized count sum must exactly match valid raw points
-            if "points" in sample and "height" in sample and "width" in sample:
-                pts = sample["points"]
-                h_img = sample["height"]
-                w_img = sample["width"]
-                if pts.numel() > 0:
-                    px = pts[:, 0]
-                    py = pts[:, 1]
-                    valid_mask = (px >= 0) & (px < w_img) & (py >= 0) & (py < h_img)
-                    n_valid = int(valid_mask.sum().item())
-                else:
-                    n_valid = 0
-                if abs(gt - float(n_valid)) > 1e-4:
-                    sample_id = sample.get("id", "unknown")
-                    raise ValueError(
-                        f"GT count mismatch on sample '{sample_id}': sum(target_y)={gt:.4f} vs "
-                        f"len(valid_points)={n_valid}. Rasterization and ground-truth count must match exactly."
-                    )
-
-            row = {"gt": gt, "pred": pred}
-            if "points" in sample and "height" in sample and "width" in sample:
-                game_dict = game_physical_image(
-                    y,
-                    sample["points"],
-                    image_h=sample["height"],
-                    image_w=sample["width"],
-                    stride=output_stride,
-                    levels=(0, 1, 2, 3),
-                )
-                for level in range(4):
-                    row[f"GAME{level}"] = game_dict[level]
-            else:
-                for level in range(4):
-                    row[f"GAME{level}"] = game_single(y, target, level)
-            pred_rows.append(row)
-
-            d_rows = regional_reliability_rows(out, target.unsqueeze(0))
-            all_diag_rows.extend(d_rows)
-
-            t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
-            if t_diag:
-                traj_rows.append(t_diag)
-
-    summary = summarize_predictions(pred_rows)
-
-    # Provide lowercase aliases for robustness
-    summary["mae"] = summary["MAE"]
-    summary["rmse"] = summary["RMSE"]
-    summary["nae"] = summary["NAE"]
-    summary["bias"] = summary["Bias"]
+    rows, summary = evaluate_dataset(
+        model=model,
+        loader=loader,
+        device=device,
+        output_stride=getattr(model.cfg, "output_stride", 4),
+        run_tiling=False,
+        forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
+        extra_sample_callback=sample_callback,
+        enforce_gt_consistency=True,
+        density_bins=density_bins,
+    )
 
     corrs = compute_reliability_correlations(all_diag_rows)
     summary.update(corrs)
@@ -164,20 +122,6 @@ def evaluate_v3(
         for k in traj_rows[0].keys():
             vals = [tr[k] for tr in traj_rows if k in tr]
             summary[k] = float(np.mean(vals)) if vals else 0.0
-
-    # Density-stratified MAE
-    gts = np.array([r["gt"] for r in pred_rows])
-    preds = np.array([r["pred"] for r in pred_rows])
-    aes = np.abs(preds - gts)
-
-    lo, hi = density_bins
-    sparse_mask = gts <= lo
-    mod_mask = (gts > lo) & (gts <= hi)
-    dense_mask = gts > hi
-
-    summary["mae_sparse"] = float(np.mean(aes[sparse_mask])) if np.any(sparse_mask) else 0.0
-    summary["mae_moderate"] = float(np.mean(aes[mod_mask])) if np.any(mod_mask) else 0.0
-    summary["mae_dense"] = float(np.mean(aes[dense_mask])) if np.any(dense_mask) else 0.0
 
     return summary
 
@@ -599,9 +543,9 @@ def main() -> None:
             with torch.no_grad():
                 mu_means.append(float(outputs["b_region"].mean().item()))
                 disp_means.append(float(outputs["region_dispersion"].mean().item()))
-                all_disps.extend(outputs["region_dispersion"].float().cpu().numpy().flatten().tolist())
-                all_pred_weights.extend(outputs["region_weight"].float().cpu().numpy().flatten().tolist())
-                all_solver_weights.extend(outputs["solver_region_weight"].float().cpu().numpy().flatten().tolist())
+                all_disps.append(outputs["region_dispersion"].detach().float().flatten())
+                all_pred_weights.append(outputs["region_weight"].detach().float().flatten())
+                all_solver_weights.append(outputs["solver_region_weight"].detach().float().flatten())
 
                 et = outputs.get("energy_trace", [])
                 if et:
@@ -632,9 +576,9 @@ def main() -> None:
         train_cell = cell_loss_accum / num_batches
         train_region_nb = reg_nb_loss_accum / num_batches
 
-        disps_np = np.array(all_disps) if all_disps else np.array([50.0])
-        pred_weights_np = np.array(all_pred_weights) if all_pred_weights else np.array([1.0])
-        solver_weights_np = np.array(all_solver_weights) if all_solver_weights else np.array([1.0])
+        disps_np = torch.cat(all_disps).cpu().numpy() if all_disps else np.array([50.0])
+        pred_weights_np = torch.cat(all_pred_weights).cpu().numpy() if all_pred_weights else np.array([1.0])
+        solver_weights_np = torch.cat(all_solver_weights).cpu().numpy() if all_solver_weights else np.array([1.0])
 
         e_b = float(np.mean(e_befores)) if e_befores else 0.0
         e_a = float(np.mean(e_afters)) if e_afters else 0.0
