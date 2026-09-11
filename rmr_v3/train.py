@@ -322,6 +322,8 @@ def main() -> None:
         cfg["output_dir"] = str(args.output_dir)
     elif args.run_id is not None:
         cfg["output_dir"] = f"runs/sha_a/{args.run_id}"
+    elif "output_dir" not in cfg:
+        cfg["output_dir"] = f"runs/sha_a/{Path(args.config).stem}"
 
     validate_v3_config(cfg)
 
