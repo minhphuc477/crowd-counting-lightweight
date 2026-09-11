@@ -1,0 +1,90 @@
+seed: 42
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
+  crop_size: 512
+  scale_range:
+  - 0.75
+  - 1.25
+  hflip_prob: 0.5
+  brightness_jitter: 0.2
+  contrast_jitter: 0.2
+  gamma_jitter:
+  - 0.6
+  - 1.5
+  random_invert_prob: 0.05
+model:
+  output_stride: 4
+  feature_width: 32
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+  neck_type: aspp_lite
+  aspp_dilations:
+  - 1
+  - 3
+  - 6
+  use_aspp_gap: true
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  regional_feature_stats: mean_std
+  region_head_hidden: 44
+  enable_solver: true
+  iterations: 4
+  omega: 1.0
+  residual_clip: 0.0
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+  reliability_mode: nb_rate_variance
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+  eps: 1.0e-06
+  hurdle_head: false
+  temp_softplus: true
+  tv_lambda: 0.0
+  ema_decay: 0.999
+  init_m0: 0.015795552662961752
+loss:
+  allocation_loss_type: flat_dm16
+  kappa_flat16: 20.0
+  normalize_flat_dm16: true
+  lambda_count: 1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell: 0.25
+  lambda_region_nb: 0.2
+  lambda_hurdle: 0.0
+  lambda_trunc_nb: 0.0
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+  cell_beta: 1.0
+train:
+  epochs: 1000
+  batch_size: 8
+  workers: 4
+  pin_memory: true
+  lr: 0.0001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.0001
+  warmup_epochs: 5
+  grad_clip: 500.0
+  amp: true
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20
+  early_stopping: false
+  patience: 0
+  eval_every: 5
+  deterministic: false
+eval:
+  density_bins:
+  - 100.0
+  - 500.0
+output_dir: runs/sha_a/rmr_v7_ablation_no_hurdle
