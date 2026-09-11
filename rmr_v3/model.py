@@ -81,9 +81,10 @@ class RMRv3Config:
 
     # ── RMR-v7 additions ──────────────────────────────────────────────────────
     # Hurdle NB head: predicts region occupancy probability π_R.
-    # When enabled, the solver target for background regions is zeroed:
-    #     b_solver_R = (1 - sigmoid(z_π_R)).detach() * mu_count_R.detach()
-    # This eliminates systematic under-counting from ASPP wide receptive field.
+    # When enabled, the solver target is gated by occupancy probability:
+    #     b_solver_R = sigmoid(z_π_R).detach() * mu_count_R.detach()
+    # π_R → 0 for empty background regions ⟹ b_solver_R → 0 (suppresses false alarms).
+    # π_R → 1 for occupied crowd regions ⟹ b_solver_R ≈ mu_count_R (full guidance).
     hurdle_head: bool = False
 
     # Total-variation Laplacian smoothing coefficient inside the SIRT loop.

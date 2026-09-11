@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
+import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -123,13 +127,6 @@ def load_model_from_ckpt(
     model.set_solver_strength(1.0)
     model.to(device).eval()
     return model, uniform_reliability, cfg, ckpt
-
-
-
-import datetime
-import hashlib
-import subprocess
-import sys
 
 
 def compute_file_sha256(path: Path | str) -> str:

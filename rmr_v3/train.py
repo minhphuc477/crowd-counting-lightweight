@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
@@ -421,7 +422,6 @@ def main() -> None:
     ema_decay = float(cfg.get("model", {}).get("ema_decay", cfg.get("train", {}).get("ema_decay", 0.0)))
     ema_state: dict | None = None
     if ema_decay > 0.0:
-        import copy
         ema_state = copy.deepcopy(model.state_dict())
         # Convert to float32 on the active device for stable accumulation
         for k in ema_state:
@@ -532,6 +532,15 @@ def main() -> None:
         if "rng_state" in ckpt:
             load_rng_state(ckpt["rng_state"], strict=deterministic)
             print("Restored exact RNG states (random, numpy, torch, cuda)")
+        # Restore EMA shadow state from checkpoint so it isn't reset on resume.
+        # Without this, resuming would restart EMA accumulation from scratch,
+        # losing all progress and producing warm-EMA bias for many epochs.
+        if ema_state is not None and "ema_model" in ckpt:
+            ema_sd = ckpt["ema_model"]
+            for k in ema_state:
+                if k in ema_sd:
+                    ema_state[k].copy_(ema_sd[k].float())
+            print(f"Restored EMA shadow state from checkpoint ({len(ema_sd)} tensors).")
         # Exactly resume at the next epoch index
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))

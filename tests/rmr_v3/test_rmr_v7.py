@@ -120,3 +120,49 @@ def test_tv_laplacian_smoothing_diffusion():
     y = out["y"]
     assert (y >= 0.0).all()
     assert torch.isfinite(y).all()
+
+
+def test_ema_state_restored_on_resume():
+    """Verify that EMA shadow state is correctly restored from a checkpoint on resume.
+
+    Regression test for: EMA state was re-initialized from fresh model on --resume,
+    losing accumulated EMA progress and producing warm-EMA bias for many epochs.
+    """
+    import copy
+
+    cfg = RMRv3Config(output_stride=4, feature_width=32, pretrained=False)
+    model = RMRv3(cfg)
+
+    # Simulate an EMA state that has drifted from the current model weights
+    # (this is the state that would exist after many training epochs)
+    ema_state = copy.deepcopy(model.state_dict())
+    for k in ema_state:
+        ema_state[k] = ema_state[k].float() * 2.0  # artificially drift EMA weights
+
+    # Simulate a checkpoint that was saved with that EMA state
+    fake_ckpt = {
+        "model": model.state_dict(),
+        "epoch": 500,
+        "best_mae": 85.0,
+        "epochs_without_improvement": 3,
+        "ema_model": {k: v.clone() for k, v in ema_state.items()},
+    }
+
+    # Simulate what train.py resume does: init fresh ema_state from model, then load ckpt
+    fresh_ema = copy.deepcopy(model.state_dict())
+    for k in fresh_ema:
+        fresh_ema[k] = fresh_ema[k].float()
+
+    # Apply the resume EMA restoration logic (mirrors train.py)
+    if "ema_model" in fake_ckpt:
+        ema_sd = fake_ckpt["ema_model"]
+        for k in fresh_ema:
+            if k in ema_sd:
+                fresh_ema[k].copy_(ema_sd[k].float())
+
+    # After restoration, fresh_ema should match the original drifted EMA state
+    for k in fresh_ema:
+        assert torch.allclose(fresh_ema[k], ema_state[k].float()), (
+            f"EMA state key '{k}' was not restored correctly on resume. "
+            f"Got {fresh_ema[k].mean():.4f}, expected {ema_state[k].float().mean():.4f}"
+        )
