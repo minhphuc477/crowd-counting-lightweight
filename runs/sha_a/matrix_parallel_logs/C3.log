@@ -1,0 +1,10 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Unexpected keys (norm_head.num_batches_tracked, classifier.bias, classifier.weight, conv_head.weight, norm_head.bias, norm_head.running_mean, norm_head.running_var, norm_head.weight) found while loading pretrained weights. This may be expected if model is being adapted.
+
+================================================================================
+  RMR-v3 Training Initialized
+  Variant: V3-B (Reliability Weighted) | Parameters: 102,825 | Device: cuda:0
+  Epochs: 1000 | Batch Size: 8 | Initial LR: 1.00e-04
+  Output Directory: runs/sha_a/c3_observer_new_rwsirt_seed42
+================================================================================
+
