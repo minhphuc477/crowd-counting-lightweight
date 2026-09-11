@@ -40,15 +40,26 @@ def get_git_info() -> tuple[str, bool]:
 
 
 def compute_file_sha256(path: Path | str) -> str:
-    """Compute deterministic SHA256 hex digest of a file in 64KB blocks."""
+    """Compute deterministic SHA256 hex digest of a file in 64KB blocks.
+
+    For text-based manifest/config files, line endings are normalized (\\r\\n -> \\n)
+    to guarantee cross-platform deterministic hashing between Linux (LF) and Windows (CRLF).
+    """
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"File not found for SHA256 computation: {p}")
     h = hashlib.sha256()
-    with open(p, "rb") as f:
-        while chunk := f.read(65536):
-            h.update(chunk)
+    is_text = p.suffix.lower() in (".jsonl", ".json", ".yaml", ".yml", ".txt", ".csv")
+    if is_text:
+        with open(p, "rb") as f:
+            content = f.read().replace(b"\r\n", b"\n")
+            h.update(content)
+    else:
+        with open(p, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
     return h.hexdigest()
+
 
 
 def build_checkpoint(
