@@ -9,7 +9,7 @@ from rmr_core.operators import (
     RegionSet,
     regional_sum,
 )
-from rmr_v2.losses import (
+from rmr_core.losses import (
     balanced_smooth_l1,
     count_magnitude_loss,
     flat_dm16_loss,
@@ -50,7 +50,7 @@ def hurdle_focal_bce_loss(
     # Focal weight: (1 - p_t)^gamma
     with torch.no_grad():
         p_t = torch.where(y_bin > 0.5, torch.sigmoid(pi_logit.float()), 1.0 - torch.sigmoid(pi_logit.float()))
-        focal_weight = (1.0 - p_t.clamp(min=1e-6)).pow(float(gamma))
+        focal_weight = (1.0 - p_t.clamp(min=1e-6, max=1.0 - 1e-6)).pow(float(gamma))
 
     return (focal_weight * bce).mean()
 
@@ -73,11 +73,11 @@ def truncated_nb_nll_loss(
 
     Returns:
         Scalar truncated NB NLL, averaged over occupied regions.
-        Returns 0.0 if no occupied region exists in batch.
+        Returns 0.0 with autograd connectivity if no occupied region exists in batch.
     """
     occ_mask = (target_region > 0.5)  # [B,1,M]
     if not occ_mask.any():
-        return torch.tensor(0.0, device=mu_count.device, dtype=mu_count.dtype)
+        return (mu_count * 0.0).sum()
 
     per_region_nll = negative_binomial_nll_mean_dispersion(
         target_region,

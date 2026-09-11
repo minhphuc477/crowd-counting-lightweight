@@ -36,7 +36,15 @@ from rmr_core.data import (
 )
 from rmr_core.evaluation import evaluate_dataset
 from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
-from rmr_core.training import load_rng_state, make_scheduler, safe_torch_save, save_rng_state, seed_everything
+from rmr_core.training import (
+    build_checkpoint,
+    get_git_info,
+    load_rng_state,
+    make_scheduler,
+    safe_torch_save,
+    save_rng_state,
+    seed_everything,
+)
 
 from .config import compute_config_hash, validate_resume_compatibility, validate_v3_config
 
@@ -124,19 +132,6 @@ def evaluate_v3(
             summary[k] = float(np.mean(vals)) if vals else 0.0
 
     return summary
-
-
-def get_git_info() -> tuple[str, bool]:
-    try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-    except Exception:
-        commit = "unknown"
-    try:
-        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        dirty = bool(status)
-    except Exception:
-        dirty = False
-    return commit, dirty
 
 
 def main() -> None:
@@ -375,6 +370,7 @@ def main() -> None:
         "train_total", "train_count", "train_flat_dm16", "train_allocation",
         "train_dm16", "train_dm32", "train_dm64",
         "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
+        "train_kd_total", "train_kd_spatial", "train_kd_count",
         "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
         "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
         "solver_weight_mean", "solver_weight_std",
@@ -465,6 +461,9 @@ def main() -> None:
         reg_nb_loss_accum = 0.0
         hurdle_loss_accum = 0.0
         trunc_nb_loss_accum = 0.0
+        kd_total_accum = 0.0
+        kd_spatial_accum = 0.0
+        kd_count_accum = 0.0
 
         mu_means = []
         disp_means = []
@@ -499,6 +498,9 @@ def main() -> None:
                         t_y = t_out["y"] if isinstance(t_out, dict) else t_out
                     kd_res = kd_loss_fn(outputs["y0"], t_y)
                     loss = loss + kd_res["total_kd"]
+                    kd_total_accum += float(kd_res["total_kd"].item())
+                    kd_spatial_accum += float(kd_res["spatial_kl"].item())
+                    kd_count_accum += float(kd_res["count_kd"].item())
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -605,6 +607,9 @@ def main() -> None:
             "train_region_nb": train_region_nb,
             "train_hurdle_bce": hurdle_loss_accum / num_batches if hurdle_loss_accum > 0 else 0.0,
             "train_trunc_nb": trunc_nb_loss_accum / num_batches if trunc_nb_loss_accum > 0 else 0.0,
+            "train_kd_total": kd_total_accum / num_batches if teacher_model is not None else 0.0,
+            "train_kd_spatial": kd_spatial_accum / num_batches if teacher_model is not None else 0.0,
+            "train_kd_count": kd_count_accum / num_batches if teacher_model is not None else 0.0,
             "region_mu_mean": float(np.mean(mu_means)) if mu_means else 0.0,
             "region_dispersion_mean": float(np.mean(disp_means)) if disp_means else 50.0,
             "region_dispersion_p10": float(np.percentile(disps_np, 10)),
@@ -686,29 +691,24 @@ def main() -> None:
             solver_engaged = (not solver_enabled) or (solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs)
             # Guard: only update best_mae after solver ramp has fully engaged (or always if solver is disabled)
             is_best = (cur_mae < best_mae) and solver_engaged
-            git_commit, git_dirty = get_git_info()
             if is_best:
                 best_mae = cur_mae
                 epochs_without_improvement = 0
 
                 # Build checkpoint: store both live weights and EMA weights
-                ckpt_data: dict = {
-                    "epoch": epoch + 1,
-                    "model": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(),
-                    "scaler": scaler.state_dict(),
-                    "rng_state": save_rng_state(),
-                    "solver_strength": solver_strength,
-                    "config": cfg,
-                    "config_hash": run_config_hash,
-                    "best_mae": best_mae,
-                    "epochs_without_improvement": epochs_without_improvement,
-                    "git_commit": git_commit,
-                    "git_dirty": git_dirty,
-                }
-                if ema_state is not None:
-                    ckpt_data["ema_model"] = {k: v.detach().float().cpu() for k, v in ema_state.items()}
+                ckpt_data = build_checkpoint(
+                    epoch=epoch + 1,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    config=cfg,
+                    config_hash=run_config_hash,
+                    best_mae=best_mae,
+                    epochs_without_improvement=epochs_without_improvement,
+                    solver_strength=solver_strength,
+                    ema_state=ema_state,
+                )
 
                 safe_torch_save(ckpt_data, out_dir / "best_val_mae.pt")
                 (out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
@@ -771,24 +771,19 @@ def main() -> None:
             )
 
         # Save last checkpoint
-        git_commit, git_dirty = get_git_info()
-        last_ckpt = {
-            "epoch": epoch + 1,
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "scaler": scaler.state_dict(),
-            "rng_state": save_rng_state(),
-            "solver_strength": solver_strength,
-            "config": cfg,
-            "config_hash": run_config_hash,
-            "best_mae": best_mae,
-            "epochs_without_improvement": epochs_without_improvement,
-            "git_commit": git_commit,
-            "git_dirty": git_dirty,
-        }
-        if ema_state is not None:
-            last_ckpt["ema_model"] = {k: v.detach().float().cpu() for k, v in ema_state.items()}
+        last_ckpt = build_checkpoint(
+            epoch=epoch + 1,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            config=cfg,
+            config_hash=run_config_hash,
+            best_mae=best_mae,
+            epochs_without_improvement=epochs_without_improvement,
+            solver_strength=solver_strength,
+            ema_state=ema_state,
+        )
         safe_torch_save(last_ckpt, out_dir / "last.pt")
 
 

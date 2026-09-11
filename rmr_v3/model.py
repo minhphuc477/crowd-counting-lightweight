@@ -43,7 +43,7 @@ class RMRv3Config:
     # Neck
     neck_type: str = "additive"  # "additive" | "aspp_lite" | "rep_weighted"
     context_dilations: tuple[int, ...] = (1, 2, 3)  # dilations for AdditiveFPNNeck / RepWeightedFPNNeck
-    use_aspp_gap: bool = False  # if True AND neck_type=="aspp_lite", enable GAP branch in ASPP-lite
+    use_aspp_gap: bool = True  # if True AND neck_type=="aspp_lite", enable GAP branch in ASPP-lite
     aspp_dilations: tuple[int, ...] = (1, 3, 6)  # dilations for ASPPLiteFPNNeck branches
 
     # Region dictionary
@@ -117,6 +117,7 @@ class RMRv3Config:
     # Pixels with density >> rho0 have gate ≈ 1 (full correction).
     # Default 0.02 is ~1.27 × init_m0 (empirical mean cell density = 0.015763).
     density_gate_rho: float = 0.02
+    density_gate_floor: float = 0.0
 
     # Total-variation diffusion type applied after each SIRT step.
     # "laplacian":   isotropic Laplacian (v7 default — backward compatible).
@@ -510,6 +511,7 @@ def weighted_normalized_adjoint_field(
     eps: float = 1e-6,
     solver_mode: str = "additive",
     density_gate_rho: float = 0.02,
+    density_gate_floor: float = 0.0,
 ) -> torch.Tensor:
     """Compute:
 
@@ -546,6 +548,7 @@ def weighted_normalized_adjoint_field(
             h,
             w,
             rho0=density_gate_rho,
+            gate_floor=density_gate_floor,
             out_dtype=torch.float32,
         )
     else:
@@ -679,6 +682,7 @@ class RMRv3(nn.Module):
                 in_channels=self.encoder.out_channels,
                 width=cfg.feature_width,
                 aspp_dilations=cfg.aspp_dilations,
+                use_aspp_gap=cfg.use_aspp_gap,
             )
         elif cfg.neck_type == "additive":
             self.fusion = AdditiveFPNNeck(
@@ -725,6 +729,16 @@ class RMRv3(nn.Module):
             self.coord_attn = None
 
         self.solver_strength: float = 1.0
+
+        # Registered non-persistent Laplacian kernel buffer for isotropic TV smoothing
+        self.register_buffer(
+            "_laplace_kernel",
+            torch.tensor(
+                [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
+                dtype=torch.float32,
+            ).view(1, 1, 3, 3),
+            persistent=False,
+        )
 
         self._region_cache: OrderedDict[
             tuple,
@@ -897,15 +911,6 @@ class RMRv3(nn.Module):
         tv_eps_c = float(self.cfg.tv_eps_c)
         solver_mode = str(self.cfg.solver_mode)
 
-        # Pre-allocate isotropic Laplacian kernel only when needed (cached locally)
-        _laplace: torch.Tensor | None = None
-        if tv_lambda > 0.0 and tv_type == "laplacian":
-            _laplace = torch.tensor(
-                [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
-                dtype=torch.float32,
-                device=x.device,
-            ).view(1, 1, 3, 3)
-
         y = y0
 
         iterates = [y0]
@@ -933,6 +938,7 @@ class RMRv3(nn.Module):
                 eps=self.cfg.eps,
                 solver_mode=solver_mode,
                 density_gate_rho=float(self.cfg.density_gate_rho),
+                density_gate_floor=float(self.cfg.density_gate_floor),
             )
 
             y_next = torch.clamp_min(
@@ -948,8 +954,7 @@ class RMRv3(nn.Module):
                     y_next = charbonnier_tv_step(y_next, tv_lambda, tv_eps_c)
                 else:
                     # Isotropic Laplacian TV (v7 default — backward compatible)
-                    assert _laplace is not None
-                    lap = F.conv2d(y_next, _laplace, padding=1)
+                    lap = F.conv2d(y_next, self._laplace_kernel, padding=1)
                     y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
 
             y_next = y_next.to(y.dtype)

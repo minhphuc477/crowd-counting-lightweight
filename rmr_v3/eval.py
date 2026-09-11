@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
+from rmr_core.training import compute_file_sha256, get_git_info
 from .diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
@@ -61,30 +62,6 @@ def load_model_from_ckpt(
     model.set_solver_strength(1.0)
     model.to(device).eval()
     return model, uniform_reliability, cfg, ckpt
-
-
-def compute_file_sha256(path: Path | str) -> str:
-    p = Path(path)
-    if not p.exists() or not p.is_file():
-        return "not_found"
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        while chunk := f.read(65536):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def get_git_info() -> tuple[str, bool]:
-    try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-    except Exception:
-        commit = "unknown"
-    try:
-        status = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        dirty = bool(status)
-    except Exception:
-        dirty = False
-    return commit, dirty
 
 
 def main() -> None:

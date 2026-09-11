@@ -321,10 +321,12 @@ class ASPPLiteFPNNeck(nn.Module):
         in_channels: tuple[int, int, int] = (16, 32, 48),
         width: int = 32,
         aspp_dilations: tuple[int, ...] = (1, 3, 6),
+        use_aspp_gap: bool = True,
     ):
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = width
+        self.use_aspp_gap = bool(use_aspp_gap)
 
         # Lateral 1×1 projections
         self.lat4 = ConvGNAct(c4, width, 1)
@@ -338,12 +340,15 @@ class ASPPLiteFPNNeck(nn.Module):
         ])
         # Global Average Pooling branch: pool → Linear → broadcast
         # Uses a small bottleneck (width → width) to keep params low.
-        self.aspp_gap = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),           # (B, width, 1, 1)
-            nn.Flatten(1),                      # (B, width)
-            nn.Linear(width, width, bias=True), # global context vector
-            nn.SiLU(inplace=False),
-        )
+        if self.use_aspp_gap:
+            self.aspp_gap: nn.Sequential | None = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),           # (B, width, 1, 1)
+                nn.Flatten(1),                      # (B, width)
+                nn.Linear(width, width, bias=True), # global context vector
+                nn.SiLU(inplace=False),
+            )
+        else:
+            self.aspp_gap = None
         # After summing all (len(aspp_dilations) + 1) branches, project back to width.
         # num_branches = len(aspp_dilations) + 1 (GAP) — but since every branch already
         # outputs `width` channels and we sum (not concat), no projection is needed
@@ -367,9 +372,10 @@ class ASPPLiteFPNNeck(nn.Module):
         aspp_out = sum(branch(l16) for branch in self.aspp_dw)  # (B, width, H16, W16)
 
         # GAP branch: project global vector and broadcast back to spatial dims
-        gap_vec = self.aspp_gap(l16)                            # (B, width)
-        gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)     # (B, width, 1, 1)
-        aspp_out = aspp_out + gap_broadcast                     # broadcast add
+        if self.aspp_gap is not None:
+            gap_vec = self.aspp_gap(l16)                            # (B, width)
+            gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)     # (B, width, 1, 1)
+            aspp_out = aspp_out + gap_broadcast                     # broadcast add
 
         # Mix: add residual from l16 then project
         p16_pre = self.aspp_proj(l16 + aspp_out)

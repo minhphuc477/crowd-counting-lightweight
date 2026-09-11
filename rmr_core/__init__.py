@@ -47,7 +47,27 @@ from .operators import (
     regional_adjoint,
     regional_sum,
 )
-from .training import make_scheduler, safe_torch_save, seed_everything
+from .losses import (
+    balanced_smooth_l1,
+    block_sum_2d,
+    count_magnitude_loss,
+    flat_dm16_loss,
+    flat_dm_block_loss,
+    hierarchical_dm_loss,
+    multiscale_dm_loss,
+    negative_binomial_nll_mean_dispersion,
+    scale_balanced_region_rate_loss,
+)
+from .training import (
+    build_checkpoint,
+    compute_file_sha256,
+    get_git_info,
+    load_rng_state,
+    make_scheduler,
+    safe_torch_save,
+    save_rng_state,
+    seed_everything,
+)
 
 __all__ = [
     "MobileNetV4Backbone",
@@ -91,7 +111,21 @@ __all__ = [
     "region_mean_std_features",
     "regional_adjoint",
     "regional_sum",
+    "balanced_smooth_l1",
+    "block_sum_2d",
+    "count_magnitude_loss",
+    "flat_dm16_loss",
+    "flat_dm_block_loss",
+    "hierarchical_dm_loss",
+    "multiscale_dm_loss",
+    "negative_binomial_nll_mean_dispersion",
+    "scale_balanced_region_rate_loss",
+    "build_checkpoint",
+    "compute_file_sha256",
+    "get_git_info",
+    "load_rng_state",
     "make_scheduler",
     "safe_torch_save",
+    "save_rng_state",
     "seed_everything",
 ]

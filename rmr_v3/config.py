@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from rmr_core.data import resolve_manifest_path
+from rmr_core.training import compute_file_sha256
 
 ALLOWED_TOP_LEVEL = {
     "seed",
@@ -73,6 +74,7 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v8 Stage 2
     "solver_mode",
     "density_gate_rho",
+    "density_gate_floor",
     "tv_type",
     "tv_eps_c",
     # RMR-v8 Stage 3
@@ -390,6 +392,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "temp_softplus",
         # RMR-v8 Stage 2 solver fields (changing these changes the SIRT update rule)
         "solver_mode",
+        "density_gate_rho",
+        "density_gate_floor",
         "tv_type",
         # RMR-v8 Stage 3 architecture
         "use_coord_attn",
@@ -451,18 +455,6 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "solver_ramp_epochs": 20,
     "warmup_epochs": 5,
 }
-
-
-def compute_file_sha256(path: Path | str) -> str:
-    """Compute deterministic SHA256 hex digest of a file in 64KB blocks."""
-    p = Path(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"File not found for SHA256 computation: {p}")
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        while chunk := f.read(65536):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _canonicalize_value(val: Any) -> Any:
@@ -653,4 +645,12 @@ def validate_resume_compatibility(
                         f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
                         f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
                     )
+
+
+def __getattr__(name: str):
+    if name == "RMRv3Config":
+        from .model import RMRv3Config
+        return RMRv3Config
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 

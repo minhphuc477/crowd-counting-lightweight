@@ -564,3 +564,75 @@ def test_evaluate_v3_refactored_metric_keys():
     for k in expected_keys:
         assert k in summary, f"Key '{k}' missing from evaluate_v3 summary"
 
+
+def test_game_zero_identically_equals_mae():
+    """GAME(0) must mathematically equal MAE on arbitrary non-square images."""
+    from rmr_core.metrics import game_physical_image
+    import numpy as np
+
+    torch.manual_seed(42)
+    h, w, stride = 137, 219, 4
+    gh, gw = int(np.ceil(h / stride)), int(np.ceil(w / stride))
+    pred_y = torch.rand((1, gh, gw), dtype=torch.float64) * 0.1
+    pts = torch.tensor([[10.2, 15.3], [100.0, 50.0], [218.9, 136.9]], dtype=torch.float64)
+
+    games = game_physical_image(pred_y, pts, image_h=h, image_w=w, stride=stride, levels=(0, 1, 2))
+    gt_count = len(pts)
+    pred_count = pred_y.sum().item()
+    expected_ae = abs(pred_count - gt_count)
+    assert abs(games[0] - expected_ae) < 1e-7, f"GAME(0) {games[0]} != MAE {expected_ae}"
+
+
+def test_nae_with_zero_count_samples():
+    """NAE must handle zero-count images without NaN or infinite values."""
+    from rmr_core.metrics import compute_nae
+    import numpy as np
+
+    preds = np.array([0.5, 10.0, 0.0])
+    targets = np.array([0.0, 10.0, 0.0])
+    nae = compute_nae(preds, targets)
+    assert not np.isnan(nae), "NAE returned NaN on zero-ground-truth samples"
+    assert abs(nae - 0.0) < 1e-6
+
+
+def test_rasterize_points_boundary_inclusion():
+    """Points exactly at boundary (W - 1e-4, H - 1e-4) must be counted and not discarded."""
+    from rmr_core.data import rasterize_points
+
+    h, w, stride = 512, 512, 4
+    pts = torch.tensor([[511.99, 511.99], [0.0, 0.0], [512.0, 512.0]])
+    target_y = rasterize_points(pts, image_h=h, image_w=w, stride=stride)
+    # [512.0, 512.0] is outside [0, 512), while 511.99 is valid
+    assert target_y.sum().item() == 2.0
+
+
+def test_extreme_aspect_ratio_safety():
+    """Extreme panorama images (e.g. 100x1200) scale gracefully without memory blow-up."""
+    from PIL import Image
+    from rmr_core.data import train_transform
+
+    img = Image.new("RGB", (100, 1200), color=(100, 100, 100))
+    pts = torch.tensor([[50.0, 600.0]])
+    cropped_t, cropped_pts = train_transform(img, pts, crop_size=256, scale_range=(1.0, 1.0))
+    assert cropped_t.shape == (3, 256, 256)
+
+
+def test_multiplicative_gated_adjoint_gate_floor_resurrects_zeros():
+    """gate_floor > 0 allows false-negative zero regions to receive non-zero recovery correction."""
+    from rmr_core.operators import multiplicative_gated_adjoint
+
+    boxes = torch.tensor([[0, 0, 16, 16]], dtype=torch.long)
+    values = torch.tensor([[[10.0]]], dtype=torch.float32)
+
+    # Observer erroneously predicts 0 density
+    y_zero = torch.zeros((1, 1, 16, 16), dtype=torch.float32)
+
+    # With gate_floor=0.0: permanently absorbing state (0 correction)
+    field_zero_floor = multiplicative_gated_adjoint(values, boxes, y_zero, 16, 16, gate_floor=0.0)
+    assert field_zero_floor.abs().max().item() == 0.0
+
+    # With default gate_floor=0.02: false negative receives 2% correction, escaping the zero trap
+    field_floor = multiplicative_gated_adjoint(values, boxes, y_zero, 16, 16, gate_floor=0.02)
+    assert field_floor[0, 0, 8, 8].item() == pytest.approx(0.20, rel=1e-3)
+
+

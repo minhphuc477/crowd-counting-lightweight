@@ -1,14 +1,94 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import random
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+
+
+def get_git_info() -> tuple[str, bool]:
+    """Retrieve the current git commit hash and working tree dirty status."""
+    try:
+        commit = (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode("ascii")
+            .strip()
+        )
+    except Exception:
+        commit = "unknown"
+    try:
+        status = (
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], stderr=subprocess.DEVNULL
+            )
+            .decode("utf-8")
+            .strip()
+        )
+        dirty = bool(status)
+    except Exception:
+        dirty = False
+    return commit, dirty
+
+
+def compute_file_sha256(path: Path | str) -> str:
+    """Compute deterministic SHA256 hex digest of a file in 64KB blocks."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"File not found for SHA256 computation: {p}")
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_checkpoint(
+    epoch: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: Any,
+    config: dict[str, Any],
+    config_hash: str,
+    best_mae: float,
+    epochs_without_improvement: int,
+    solver_strength: float = 1.0,
+    ema_state: dict[str, torch.Tensor] | None = None,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Canonical checkpoint bundle builder ensuring all state elements and provenance are recorded."""
+    git_commit, git_dirty = get_git_info()
+    ckpt: dict[str, Any] = {
+        "epoch": epoch,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict() if optimizer is not None else None,
+        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "scaler": scaler.state_dict() if scaler is not None else None,
+        "rng_state": save_rng_state(),
+        "solver_strength": float(solver_strength),
+        "config": config,
+        "config_hash": config_hash,
+        "best_mae": float(best_mae),
+        "epochs_without_improvement": int(epochs_without_improvement),
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+    }
+    if ema_state is not None:
+        ckpt["ema_model"] = {
+            k: v.detach().float().cpu() for k, v in ema_state.items()
+        }
+    if extra_fields:
+        ckpt.update(extra_fields)
+    return ckpt
 
 
 def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = False) -> None:

@@ -193,33 +193,37 @@ def multiplicative_gated_adjoint(
     height: int,
     width: int,
     rho0: float = 0.02,
+    gate_floor: float = 0.0,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    """Multiplicative Gated SIRT adjoint step.
+    """Multiplicative Gated SIRT adjoint step with recovery floor.
 
     Suppresses the correction signal on near-zero pixels via a tanh gate,
     preventing background pixels from being lifted off zero during repeated
     SIRT iterations (the "background lift" degradation observed at T>=2 with
     the plain additive adjoint).
 
+    A small gate_floor > 0 (default: 0.02) prevents the "zero-absorbing state"
+    where a false-negative zero prediction in y_0 can never receive a positive
+    correction from regional evidence.
+
     The gate is:
-        gate(i) = tanh(|y_current(i)| / rho0)
+        gate(i) = (1.0 - floor) * tanh(|y_current(i)| / rho0) + floor
 
-    The gated correction field is:
-        field_mg(i) = gate(i) * field_additive(i)
-
-    Where field_additive is the standard box-scatter adjoint A^T(residual).
+    Where:
+        - At y ~ 0: gate = floor (e.g. 0.02, suppressing background lift by 98%
+          while allowing false-negative regions to recover).
+        - At y >> rho0: gate = 1.0 (full correction for crowd clusters).
 
     Args:
-        values:    [B, C, M]  residual values to scatter (same as regional_adjoint).
-        boxes:     [M, 4]     half-open box coordinates (y1, x1, y2, x2).
-        y_current: [B, 1, H, W]  current density iterate for gate computation.
-        height:    output height H.
-        width:     output width W.
-        rho0:      gate threshold; pixels with y~0 get gate~0,
-                   pixels with y >> rho0 get gate~1. Default 0.02 matches
-                   the empirical mean cell density prior (init_m0 = 0.015763).
-        out_dtype: output dtype (default: values.dtype).
+        values:     [B, C, M]  residual values to scatter (same as regional_adjoint).
+        boxes:      [M, 4]     half-open box coordinates (y1, x1, y2, x2).
+        y_current:  [B, 1, H, W]  current density iterate for gate computation.
+        height:     output height H.
+        width:      output width W.
+        rho0:       gate threshold; default 0.02 matches the empirical mean cell density prior.
+        gate_floor: lower floor for gate to prevent permanent zero traps (default: 0.02).
+        out_dtype:  output dtype (default: values.dtype).
 
     Returns:
         [B, C, H, W] multiplicatively gated correction field.
@@ -227,8 +231,10 @@ def multiplicative_gated_adjoint(
     # Compute the standard additive adjoint field in fp32
     field_additive = regional_adjoint(values, boxes, height, width, out_dtype=torch.float32)
 
-    # Gate: tanh(|y| / rho0) — near zero -> gate~0, far from zero -> gate~1
-    gate = torch.tanh(y_current.float().abs() / float(rho0))  # [B, 1, H, W]
+    # Gate: (1 - floor) * tanh(|y| / rho0) + floor
+    tanh_gate = torch.tanh(y_current.float().abs() / float(rho0))  # [B, 1, H, W]
+    floor_val = float(max(0.0, min(gate_floor, 1.0)))
+    gate = (1.0 - floor_val) * tanh_gate + floor_val
 
     # Broadcast gate over C channels if needed
     gated = gate * field_additive  # [B, C, H, W]
