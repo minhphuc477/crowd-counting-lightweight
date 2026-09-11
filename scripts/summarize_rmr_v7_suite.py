@@ -24,7 +24,8 @@ def main():
     rows = []
     for rd in v7_runs:
         summary_path = rd / "summary.json"
-        eval_path = rd / "eval_metrics.json"
+        eval_candidates = list(rd.glob("eval_*/eval_metrics.json"))
+        eval_path = (rd / "eval_metrics.json") if (rd / "eval_metrics.json").exists() else (eval_candidates[0] if eval_candidates else None)
 
         row = {
             "name": rd.name,
@@ -62,7 +63,7 @@ def main():
                 pass
 
         # If full eval_metrics.json exists (from eval.py), prefer its exact numbers
-        if eval_path.exists():
+        if eval_path is not None and eval_path.exists():
             try:
                 with open(eval_path, "r", encoding="utf-8") as f:
                     ev = json.load(f)
