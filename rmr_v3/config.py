@@ -228,6 +228,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             eps_c = float(m_cfg["tv_eps_c"])
             if eps_c <= 0.0:
                 raise ValueError(f"tv_eps_c must be strictly positive, got {eps_c}")
+        if m_cfg.get("tv_type") == "charbonnier":
+            tv_lambda = float(m_cfg.get("tv_lambda", 0.0))
+            tv_eps_c = float(m_cfg.get("tv_eps_c", 0.1))
+            if tv_lambda > 0.0 and tv_eps_c > 0.0:
+                cfl_limit = tv_eps_c / 4.0
+                if tv_lambda > cfl_limit:
+                    raise ValueError(
+                        f"Charbonnier TV CFL stability violation: tv_lambda ({tv_lambda}) must be <= "
+                        f"tv_eps_c / 4 ({cfl_limit}) to ensure contractivity and prevent numerical divergence."
+                    )
         if bool(m_cfg.get("use_coord_attn", False)):
             neck = str(m_cfg.get("neck_type", "additive"))
             if neck != "aspp_lite":

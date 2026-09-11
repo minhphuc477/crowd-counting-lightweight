@@ -637,13 +637,15 @@ def main() -> None:
             # If EMA is active, temporarily evaluate with EMA weights (what eval.py will use)
             if ema_state is not None:
                 live_backup = {k: v.clone() for k, v in model.state_dict().items()}
-                model.load_state_dict({k: ema_state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in ema_state})
-                val_metrics = evaluate_v3(
-                    model, val_loader, device,
-                    uniform_reliability=uniform_reliability,
-                    density_bins=density_bins,
-                )
-                model.load_state_dict(live_backup)
+                try:
+                    model.load_state_dict({k: ema_state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in ema_state})
+                    val_metrics = evaluate_v3(
+                        model, val_loader, device,
+                        uniform_reliability=uniform_reliability,
+                        density_bins=density_bins,
+                    )
+                finally:
+                    model.load_state_dict(live_backup)
             else:
                 val_metrics = evaluate_v3(
                     model, val_loader, device,

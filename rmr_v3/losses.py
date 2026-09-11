@@ -535,6 +535,9 @@ def compute_rmr_v3_losses(
             losses["total"] = losses["total"] + cfg.lambda_trunc_nb * losses["trunc_nb"]
         else:
             losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
+    else:
+        losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
+        losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
 
     return losses
 

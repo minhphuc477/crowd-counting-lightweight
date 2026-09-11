@@ -7,10 +7,10 @@ from pathlib import Path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Summarize RMR benchmark results across runs.")
+    parser = argparse.ArgumentParser(description="Summarize RMR-v8 benchmark results across all runs.")
     parser.add_argument("--runs-dir", default="runs/sha_a", help="Directory containing run directories")
-    parser.add_argument("--pattern", default="rmr_v7", help="Substring or glob pattern to filter run directory names (default: rmr_v7)")
-    parser.add_argument("--output-md", default="runs/sha_a/rmr_v7_benchmark_summary.md", help="Path to output Markdown table")
+    parser.add_argument("--pattern", default="rmr_v8", help="Substring filter for run directories (default: rmr_v8)")
+    parser.add_argument("--output-md", default="runs/sha_a/rmr_v8_benchmark_summary.md", help="Path to output Markdown table")
     args = parser.parse_args()
 
     runs_dir = Path(args.runs_dir)
@@ -21,7 +21,7 @@ def main():
     pattern = str(args.pattern)
     matched_runs = sorted([d for d in runs_dir.iterdir() if d.is_dir() and pattern in d.name])
     if not matched_runs:
-        print(f"No run directories matching pattern '{pattern}' found in {runs_dir}")
+        print(f"No run directories matching '{pattern}' found in {runs_dir}")
         return
 
     rows = []
@@ -70,7 +70,7 @@ def main():
                 try:
                     with open(sp, "r", encoding="utf-8") as f:
                         s = json.load(f)
-                    
+
                     # Top-level metrics
                     for src_k, target_k in [
                         ("MAE", "mae"), ("mae", "mae"),
@@ -111,7 +111,7 @@ def main():
         rows.append(row)
 
     md = [
-        "# RMR-v7 Benchmark Summary Table (ShanghaiTech Part A)\n\n",
+        f"# RMR-v8 Benchmark Summary Table (ShanghaiTech Part A)\n\n",
         "| Model Run | Trained Epochs | Best Val Epoch | Test MAE | RMSE | NAE | Bias | GAME-0 | GAME-1 | GAME-2 | GAME-3 | Sparse (<=100) | Moderate (101-500) | Dense (>500) |\n",
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     ]

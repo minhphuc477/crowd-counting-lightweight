@@ -80,6 +80,23 @@ def train_transform(
     pts = points_xy.clone().float()
     w0, h0 = image.size
 
+    # Guard against extreme aspect ratio image scaling explosion (e.g. 100x2400 panoramas)
+    aspect_ratio = max(w0, h0) / max(min(w0, h0), 1)
+    if aspect_ratio > 3.0 and min(w0, h0) < crop_size:
+        pad_w = max(0, crop_size - w0)
+        pad_h = max(0, crop_size - h0)
+        if pad_w > 0 or pad_h > 0:
+            new_img = Image.new("RGB", (w0 + pad_w, h0 + pad_h))
+            pad_left = pad_w // 2
+            pad_top = pad_h // 2
+            new_img.paste(image, (pad_left, pad_top))
+            image.close()
+            image = new_img
+            if pts.numel():
+                pts[:, 0] += pad_left
+                pts[:, 1] += pad_top
+            w0, h0 = image.size
+
     min_dim = min(w0, h0)
     min_scale = max(float(scale_range[0]), float(crop_size) / float(min_dim))
     max_scale = max(float(scale_range[1]), min_scale)

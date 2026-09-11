@@ -211,7 +211,7 @@ def multiplicative_gated_adjoint(
         gate(i) = (1.0 - floor) * tanh(|y_current(i)| / rho0) + floor
 
     Where:
-        - At y ~ 0: gate = floor (e.g. 0.02, suppressing background lift by 98%
+        - At y ~ 0: gate = floor (default 0.02, suppressing background lift by 98%
           while allowing false-negative regions to recover).
         - At y >> rho0: gate = 1.0 (full correction for crowd clusters).
 
@@ -247,6 +247,7 @@ def charbonnier_tv_step(
     y: torch.Tensor,
     lambda_tv: float,
     eps_c: float = 0.1,
+    enforce_cfl: bool = False,
 ) -> torch.Tensor:
     """One step of anisotropic Charbonnier Total Variation diffusion.
 
@@ -260,22 +261,24 @@ def charbonnier_tv_step(
     diffusion is suppressed. In flat regions (|grad_y| -> 0), g -> 1/eps_c
     so diffusion is near-isotropic.
 
-    Stability (Von Neumann CFL): lambda_tv should satisfy
-        lambda_tv * (2 / eps_c) < 0.5
-    For eps_c=1e-3, this means lambda_tv < 0.00025.
-    For normal use with eps_c=1e-3, lambda_tv=0.015 is intentional: it applies
-    a moderate, slightly super-CFL diffusion per SIRT step. Larger eps_c
-    values (e.g. 0.1) give stricter CFL bounds for stronger stability.
+    Stability (Von Neumann CFL):
+        The strict 2D explicit Euler CFL bound is: lambda_tv <= eps_c / 4.
+        If enforce_cfl=True and lambda_tv > eps_c / 4, lambda_tv is safely
+        clamped to eps_c / 4 to guarantee contractivity and prevent checkerboard
+        instability or exploding autograd Jacobians.
 
     Args:
-        y:         [B, C, H, W] current density map (float32 expected).
-        lambda_tv: TV diffusion coefficient (typical: 0.010-0.020).
-        eps_c:     Charbonnier regularization epsilon (default 1e-3).
+        y:           [B, C, H, W] current density map (float32 expected).
+        lambda_tv:   TV diffusion coefficient (typical: 0.010-0.020).
+        eps_c:       Charbonnier regularization epsilon (default 0.1).
+        enforce_cfl: If True, clamp lambda_tv to eps_c / 4 for strict stability.
 
     Returns:
         [B, C, H, W] diffused density map, clamped >= 0.
     """
     y_f = y.float()
+    cfl_bound = float(eps_c) / 4.0
+    eff_lambda = min(float(lambda_tv), cfl_bound) if enforce_cfl else float(lambda_tv)
 
     # Forward finite differences for gradient
     # dy_dx: shift in column direction (right neighbour - current), pad right edge with 0
@@ -299,8 +302,134 @@ def charbonnier_tv_step(
 
     divergence = div_x + div_y  # [B, C, H, W]
 
-    y_out = torch.clamp_min(y_f + float(lambda_tv) * divergence, 0.0)
+    y_out = torch.clamp_min(y_f + eff_lambda * divergence, 0.0)
     return y_out.to(y.dtype)
+
+
+def weighted_coverage(
+    weight: torch.Tensor,
+    regions: RegionSet,
+    height: int,
+    width: int,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Compute D_{c,w} diagonal field = A^T w."""
+    cov = regional_adjoint(
+        weight.float(),
+        regions.boxes,
+        height,
+        width,
+        out_dtype=torch.float32,
+    )
+    return cov.clamp_min(float(eps))
+
+
+def weighted_normalized_adjoint_field(
+    y: torch.Tensor,
+    b_region: torch.Tensor,
+    weight: torch.Tensor,
+    regions: RegionSet,
+    *,
+    weighted_cov: torch.Tensor | None = None,
+    residual_clip: float = 0.0,
+    eps: float = 1e-6,
+    solver_mode: str = "additive",
+    density_gate_rho: float = 0.02,
+    density_gate_floor: float = 0.02,
+) -> torch.Tensor:
+    """Compute:
+
+        r = D_cw^-1 A^T W D_a^-1 (A y - b)
+
+    entirely in float32. In multiplicative mode, A^T is replaced with
+    multiplicative_gated_adjoint to suppress corrections on near-zero pixels.
+    """
+    _, _, h, w = y.shape
+
+    y32 = y.float()
+    b32 = b_region.float()
+    weight32 = weight.float()
+
+    q = regional_sum(
+        y32,
+        regions.boxes,
+        out_dtype=torch.float32,
+    )
+
+    delta = q - b32
+
+    area = regions.area.float().view(1, 1, -1)
+    rate_residual = delta / area.clamp_min(1.0)
+
+    weighted_residual = weight32 * rate_residual
+
+    if solver_mode == "multiplicative":
+        back = multiplicative_gated_adjoint(
+            weighted_residual,
+            regions.boxes,
+            y32,
+            h,
+            w,
+            rho0=density_gate_rho,
+            gate_floor=density_gate_floor,
+            out_dtype=torch.float32,
+        )
+    else:
+        back = regional_adjoint(
+            weighted_residual,
+            regions.boxes,
+            h,
+            w,
+            out_dtype=torch.float32,
+        )
+
+    if weighted_cov is None:
+        weighted_cov = weighted_coverage(
+            weight32,
+            regions,
+            h,
+            w,
+            eps=eps,
+        )
+
+    field = back / weighted_cov.float().clamp_min(eps)
+
+    if residual_clip > 0:
+        field = field.clamp(
+            -float(residual_clip),
+            float(residual_clip),
+        )
+
+    return field
+
+
+def weighted_regional_energy(
+    y: torch.Tensor,
+    b_region: torch.Tensor,
+    weight: torch.Tensor,
+    regions: RegionSet,
+) -> torch.Tensor:
+    """Per-sample weighted regional energy.
+
+        E = 1/2 sum_R w_R * (Ay-b)^2 / area_R
+    """
+    q = regional_sum(
+        y.float(),
+        regions.boxes,
+        out_dtype=torch.float32,
+    )
+
+    delta = q - b_region.float()
+
+    area = regions.area.float().view(1, 1, -1)
+
+    energy = 0.5 * (
+        weight.float()
+        * delta.square()
+        / area.clamp_min(1.0)
+    ).sum(dim=(-2, -1))
+
+    return energy
 
 
 def _axis_starts(length: int, window: int, step: int) -> list[int]:

@@ -22,6 +22,9 @@ from rmr_core.operators import (
     region_mean_std_features,
     regional_adjoint,
     regional_sum,
+    weighted_coverage,
+    weighted_normalized_adjoint_field,
+    weighted_regional_energy,
 )
 
 
@@ -117,7 +120,7 @@ class RMRv3Config:
     # Pixels with density >> rho0 have gate ≈ 1 (full correction).
     # Default 0.02 is ~1.27 × init_m0 (empirical mean cell density = 0.015763).
     density_gate_rho: float = 0.02
-    density_gate_floor: float = 0.0
+    density_gate_floor: float = 0.02
 
     # Total-variation diffusion type applied after each SIRT step.
     # "laplacian":   isotropic Laplacian (v7 default — backward compatible).
@@ -480,134 +483,8 @@ def reliability_from_nb(
     }
 
 
-def weighted_coverage(
-    weight: torch.Tensor,
-    regions: RegionSet,
-    height: int,
-    width: int,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    """Compute D_{c,w} diagonal field = A^T w."""
-
-    cov = regional_adjoint(
-        weight.float(),
-        regions.boxes,
-        height,
-        width,
-        out_dtype=torch.float32,
-    )
-
-    return cov.clamp_min(float(eps))
-
-
-def weighted_normalized_adjoint_field(
-    y: torch.Tensor,
-    b_region: torch.Tensor,
-    weight: torch.Tensor,
-    regions: RegionSet,
-    *,
-    weighted_cov: torch.Tensor | None = None,
-    residual_clip: float = 0.0,
-    eps: float = 1e-6,
-    solver_mode: str = "additive",
-    density_gate_rho: float = 0.02,
-    density_gate_floor: float = 0.0,
-) -> torch.Tensor:
-    """Compute:
-
-        r = D_cw^-1 A^T W D_a^-1 (A y - b)
-
-    entirely in float32. In multiplicative mode, A^T is replaced with
-    multiplicative_gated_adjoint to suppress corrections on near-zero pixels.
-    """
-
-    _, _, h, w = y.shape
-
-    y32 = y.float()
-    b32 = b_region.float()
-    weight32 = weight.float()
-
-    q = regional_sum(
-        y32,
-        regions.boxes,
-        out_dtype=torch.float32,
-    )
-
-    delta = q - b32
-
-    area = regions.area.float().view(1, 1, -1)
-    rate_residual = delta / area.clamp_min(1.0)
-
-    weighted_residual = weight32 * rate_residual
-
-    if solver_mode == "multiplicative":
-        back = multiplicative_gated_adjoint(
-            weighted_residual,
-            regions.boxes,
-            y32,
-            h,
-            w,
-            rho0=density_gate_rho,
-            gate_floor=density_gate_floor,
-            out_dtype=torch.float32,
-        )
-    else:
-        back = regional_adjoint(
-            weighted_residual,
-            regions.boxes,
-            h,
-            w,
-            out_dtype=torch.float32,
-        )
-
-    if weighted_cov is None:
-        weighted_cov = weighted_coverage(
-            weight32,
-            regions,
-            h,
-            w,
-            eps=eps,
-        )
-
-    field = back / weighted_cov.float().clamp_min(eps)
-
-    if residual_clip > 0:
-        field = field.clamp(
-            -float(residual_clip),
-            float(residual_clip),
-        )
-
-    return field
-
-
-def weighted_regional_energy(
-    y: torch.Tensor,
-    b_region: torch.Tensor,
-    weight: torch.Tensor,
-    regions: RegionSet,
-) -> torch.Tensor:
-    """Per-sample weighted regional energy.
-
-        E = 1/2 sum_R w_R * (Ay-b)^2 / area_R
-    """
-
-    q = regional_sum(
-        y.float(),
-        regions.boxes,
-        out_dtype=torch.float32,
-    )
-
-    delta = q - b_region.float()
-
-    area = regions.area.float().view(1, 1, -1)
-
-    energy = 0.5 * (
-        weight.float()
-        * delta.square()
-        / area.clamp_min(1.0)
-    ).sum(dim=(-2, -1))
-
-    return energy
+# Note: weighted_coverage, weighted_normalized_adjoint_field, and
+# weighted_regional_energy are canonically imported from rmr_core.operators above.
 
 
 class RMRv3(nn.Module):
