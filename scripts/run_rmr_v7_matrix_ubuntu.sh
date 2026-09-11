@@ -44,17 +44,21 @@ mkdir -p "$LOG_DIR"
 declare -A RUN_CONFIGS=(
     ["rmr_v7_canonical"]="configs/rmr_v7/rmr_v7_canonical.yaml"
     ["rmr_v7_t6_tv"]="configs/rmr_v7/rmr_v7_t6_tv.yaml"
+    ["rmr_v7_t2_fast"]="configs/rmr_v7/rmr_v7_t2_fast.yaml"
     ["rmr_v7_multiscale_dm"]="configs/rmr_v7/rmr_v7_multiscale_dm.yaml"
     ["rmr_v7_ablation_no_hurdle"]="configs/rmr_v7/rmr_v7_ablation_no_hurdle.yaml"
     ["rmr_v7_ablation_no_ema"]="configs/rmr_v7/rmr_v7_ablation_no_ema.yaml"
+    ["rmr_v7_ablation_no_photo_aug"]="configs/rmr_v7/rmr_v7_ablation_no_photo_aug.yaml"
 )
 
 ORDERED_RUNS=(
     "rmr_v7_canonical"
     "rmr_v7_t6_tv"
+    "rmr_v7_t2_fast"
     "rmr_v7_multiscale_dm"
     "rmr_v7_ablation_no_hurdle"
     "rmr_v7_ablation_no_ema"
+    "rmr_v7_ablation_no_photo_aug"
 )
 
 launch_single_run() {
