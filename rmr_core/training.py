@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import math
+import os
 import random
+import time
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
-
-
-import os
-from typing import Any
 
 
 def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = False) -> None:
@@ -103,9 +103,6 @@ def safe_torch_save(
     delay: float = 0.5,
 ) -> None:
     """Windows-safe atomic checkpoint saving with retry logic to avoid file lock collisions."""
-    import time
-    from pathlib import Path
-
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = target.with_name(f"{target.stem}_{os.getpid()}_{time.time_ns()}.tmp")

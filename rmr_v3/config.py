@@ -326,6 +326,11 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "native_scale_pooling",
         "regional_feature_stats",
         "region_head_hidden",
+        # Neck architecture fields (changing these changes model weights layout)
+        "neck_type",
+        "context_dilations",
+        "use_aspp_gap",
+        "aspp_dilations",
         # RMR-v7 critical fields (changing these invalidates checkpoint weights)
         "hurdle_head",
         "temp_softplus",

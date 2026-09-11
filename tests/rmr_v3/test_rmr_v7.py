@@ -166,3 +166,27 @@ def test_ema_state_restored_on_resume():
             f"EMA state key '{k}' was not restored correctly on resume. "
             f"Got {fresh_ema[k].mean():.4f}, expected {ema_state[k].float().mean():.4f}"
         )
+
+
+def test_v7_canonical_parameter_budget():
+    """RMR-v7 canonical config (hurdle_head + temp_softplus) must stay strictly under 105,000 params.
+
+    Base model:    101,763 params (no v7 features)
+    + hurdle_head:  +45 params (Linear(44, 1) in ProbabilisticRegionalEvidenceHead)
+    + temp_softplus: +1 param (learnable τ in FineMeasureHead)
+    V7 canonical:  101,813 params total
+    """
+    cfg = RMRv3Config(
+        pretrained=False,
+        hurdle_head=True,
+        temp_softplus=True,
+        region_head_hidden=44,
+    )
+    model = RMRv3(cfg)
+    n = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    assert n < 105_000, f"OVER BUDGET: {n:,} >= 105,000"
+    assert n == 101_813, (
+        f"V7 canonical expected exactly 101,813 parameters, got {n:,}. "
+        f"If the architecture changed, update this test and document the delta."
+    )
