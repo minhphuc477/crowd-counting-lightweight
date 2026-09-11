@@ -49,6 +49,7 @@ declare -A RUN_CONFIGS=(
     ["rmr_v7_ablation_no_hurdle"]="configs/rmr_v7/rmr_v7_ablation_no_hurdle.yaml"
     ["rmr_v7_ablation_no_ema"]="configs/rmr_v7/rmr_v7_ablation_no_ema.yaml"
     ["rmr_v7_ablation_no_photo_aug"]="configs/rmr_v7/rmr_v7_ablation_no_photo_aug.yaml"
+    ["rmr_v7_ablation_no_temp_softplus"]="configs/rmr_v7/rmr_v7_ablation_no_temp_softplus.yaml"
 )
 
 ORDERED_RUNS=(
@@ -59,6 +60,7 @@ ORDERED_RUNS=(
     "rmr_v7_ablation_no_hurdle"
     "rmr_v7_ablation_no_ema"
     "rmr_v7_ablation_no_photo_aug"
+    "rmr_v7_ablation_no_temp_softplus"
 )
 
 launch_single_run() {

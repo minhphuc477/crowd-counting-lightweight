@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 
@@ -23,12 +24,9 @@ def main():
 
     rows = []
     for rd in v7_runs:
-        summary_path = rd / "summary.json"
-        eval_candidates = list(rd.glob("eval_*/eval_metrics.json"))
-        eval_path = (rd / "eval_metrics.json") if (rd / "eval_metrics.json").exists() else (eval_candidates[0] if eval_candidates else None)
-
         row = {
             "name": rd.name,
+            "trained_epochs": "-",
             "best_epoch": "-",
             "mae": "-",
             "rmse": "-",
@@ -43,58 +41,82 @@ def main():
             "mae_dense": "-",
         }
 
-        # Read summary.json from training
-        if summary_path.exists():
+        # 1. Read train_log.csv to find total trained epochs and best epoch
+        log_csv = rd / "train_log.csv"
+        if log_csv.exists():
             try:
-                with open(summary_path, "r", encoding="utf-8") as f:
-                    s = json.load(f)
-                    row["best_epoch"] = s.get("best_epoch", "-")
-                    best_m = s.get("best_metrics", {})
-                    for k in ("MAE", "RMSE", "NAE", "Bias", "GAME0", "GAME1", "GAME2", "GAME3"):
-                        if k in best_m:
-                            row[k.lower()] = f"{float(best_m[k]):.2f}" if k != "NAE" else f"{float(best_m[k]):.3f}"
-                    if "mae_sparse" in best_m:
-                        row["mae_sparse"] = f"{float(best_m['mae_sparse']):.2f}"
-                    if "mae_moderate" in best_m:
-                        row["mae_mod"] = f"{float(best_m['mae_moderate']):.2f}"
-                    if "mae_dense" in best_m:
-                        row["mae_dense"] = f"{float(best_m['mae_dense']):.2f}"
+                with open(log_csv, "r", encoding="utf-8") as f:
+                    r = list(csv.DictReader(f))
+                    if r:
+                        row["trained_epochs"] = r[-1].get("epoch", "-")
+                        val_rows = [x for x in r if x.get("val_mae") and x["val_mae"] != ""]
+                        if val_rows:
+                            best_r = min(val_rows, key=lambda x: float(x["val_mae"]))
+                            row["best_epoch"] = best_r.get("epoch", "-")
             except Exception:
                 pass
 
-        # If full eval_metrics.json exists (from eval.py), prefer its exact numbers
-        if eval_path is not None and eval_path.exists():
-            try:
-                with open(eval_path, "r", encoding="utf-8") as f:
-                    ev = json.load(f)
-                    row["mae"] = f"{float(ev.get('mae', row['mae'])):.2f}"
-                    row["rmse"] = f"{float(ev.get('rmse', row['rmse'])):.2f}"
-                    row["nae"] = f"{float(ev.get('nae', row['nae'])):.3f}"
-                    row["bias"] = f"{float(ev.get('bias', row['bias'])):+.2f}"
-                    for g in (0, 1, 2, 3):
-                        if f"game_{g}" in ev:
-                            row[f"game{g}"] = f"{float(ev[f'game_{g}']):.2f}"
-                    strat = ev.get("density_stratified_mae", {})
-                    if "<=100" in strat:
+        # 2. Candidate summary JSONs
+        summary_candidates = [
+            rd / "eval_val" / "summary.json",
+            rd / "summary.json",
+            rd / "eval_metrics.json",
+        ] + list(rd.glob("eval_*/summary.json")) + list(rd.glob("eval_*/eval_metrics.json"))
+
+        for sp in summary_candidates:
+            if sp.exists():
+                try:
+                    with open(sp, "r", encoding="utf-8") as f:
+                        s = json.load(f)
+                    
+                    # Top-level metrics
+                    for src_k, target_k in [
+                        ("MAE", "mae"), ("mae", "mae"),
+                        ("RMSE", "rmse"), ("rmse", "rmse"),
+                        ("NAE", "nae"), ("nae", "nae"),
+                        ("Bias", "bias"), ("bias", "bias"),
+                        ("GAME0", "game0"), ("game_0", "game0"),
+                        ("GAME1", "game1"), ("game_1", "game1"),
+                        ("GAME2", "game2"), ("game_2", "game2"),
+                        ("GAME3", "game3"), ("game_3", "game3"),
+                        ("mae_sparse", "mae_sparse"),
+                        ("mae_moderate", "mae_mod"),
+                        ("mae_dense", "mae_dense"),
+                    ]:
+                        if src_k in s and row[target_k] == "-":
+                            val = float(s[src_k])
+                            if target_k == "nae":
+                                row[target_k] = f"{val:.3f}"
+                            elif target_k == "bias":
+                                row[target_k] = f"{val:+.2f}"
+                            else:
+                                row[target_k] = f"{val:.2f}"
+
+                    # Nested density_stratified_mae
+                    strat = s.get("density_stratified_mae", {})
+                    if "<=100" in strat and row["mae_sparse"] == "-":
                         row["mae_sparse"] = f"{float(strat['<=100']['mae']):.2f}"
-                    if "100-500" in strat:
+                    if "100-500" in strat and row["mae_mod"] == "-":
                         row["mae_mod"] = f"{float(strat['100-500']['mae']):.2f}"
-                    if ">500" in strat:
+                    if ">500" in strat and row["mae_dense"] == "-":
                         row["mae_dense"] = f"{float(strat['>500']['mae']):.2f}"
-            except Exception:
-                pass
+
+                    if s.get("best_epoch") and row["best_epoch"] == "-":
+                        row["best_epoch"] = str(s["best_epoch"])
+                except Exception:
+                    pass
 
         rows.append(row)
 
     md = [
-        "# RMR-v7 Benchmark Summary Table\n\n",
-        "| Model Run | Best Epoch | Test MAE | RMSE | NAE | Bias | GAME-0 | GAME-1 | GAME-2 | GAME-3 | Sparse (<=100) | Moderate (101-500) | Dense (>500) |\n",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "# RMR-v7 Benchmark Summary Table (ShanghaiTech Part A)\n\n",
+        "| Model Run | Trained Epochs | Best Val Epoch | Test MAE | RMSE | NAE | Bias | GAME-0 | GAME-1 | GAME-2 | GAME-3 | Sparse (<=100) | Moderate (101-500) | Dense (>500) |\n",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     ]
 
     for r in rows:
         md.append(
-            f"| **{r['name']}** | {r['best_epoch']} | **{r['mae']}** | {r['rmse']} | {r['nae']} | {r['bias']} | "
+            f"| **{r['name']}** | {r['trained_epochs']} | {r['best_epoch']} | **{r['mae']}** | {r['rmse']} | {r['nae']} | {r['bias']} | "
             f"{r['game0']} | {r['game1']} | {r['game2']} | {r['game3']} | {r['mae_sparse']} | {r['mae_mod']} | {r['mae_dense']} |\n"
         )
 
@@ -104,7 +126,7 @@ def main():
     out_p = Path(args.output_md)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     out_p.write_text(md_content, encoding="utf-8")
-    print(f"Saved benchmark summary to {out_p}")
+    print(f"\nSaved benchmark summary to {out_p}")
 
 
 if __name__ == "__main__":
