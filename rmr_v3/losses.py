@@ -301,9 +301,108 @@ class RMRv3LossConfig:
 
     cell_beta: float = 1.0
 
+    # RMR-v8 Stage 2: cell loss mode
+    # "balanced":      balanced smooth-L1 (v7 default — backward compatible)
+    # "mass_weighted": weight per-pixel loss by GT density mass, emphasizing
+    #                  dense crowd regions and reducing 200x dilution effect.
+    cell_loss_mode: str = "balanced"
+    cell_mass_weight_eps: float = 1e-3  # avoid division-by-zero in mass weighting
+    cell_mass_weight_alpha: float = 1.0  # mass boost scaling factor
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "RMRv3LossConfig":
+        if not d:
+            return cls()
+        kwargs: dict = {}
+        use_multi = bool(d.get("use_multiscale_dm", d.get("use_hierarchical_dm", False)))
+        kwargs["use_multiscale_dm"] = use_multi
+        kwargs["use_hierarchical_dm"] = use_multi
+
+        for k, v in d.items():
+            if k in ("use_multiscale_dm", "use_hierarchical_dm"):
+                continue
+            if hasattr(cls, k) and not k.startswith("_"):
+                if isinstance(getattr(cls, k), (int, float, bool, str, tuple)):
+                    if isinstance(getattr(cls, k), tuple) and isinstance(v, (list, tuple)):
+                        kwargs[k] = tuple(v)
+                    elif isinstance(getattr(cls, k), bool):
+                        kwargs[k] = bool(v)
+                    elif isinstance(getattr(cls, k), int):
+                        kwargs[k] = int(v)
+                    elif isinstance(getattr(cls, k), float):
+                        kwargs[k] = float(v)
+                    elif isinstance(getattr(cls, k), str):
+                        kwargs[k] = str(v)
+                    else:
+                        kwargs[k] = v
+                else:
+                    kwargs[k] = v
+        return cls(**kwargs)
+
+
+def mass_weighted_cell_loss(
+    y: torch.Tensor,
+    target: torch.Tensor,
+    beta: float = 1.0,
+    eps: float = 1e-3,
+    alpha: float = 1.0,
+) -> torch.Tensor:
+    """Mass-weighted cell allocation loss (RMR-v8 Stage 2).
+
+    Computes per-pixel smooth-L1 loss weighted by ground truth density mass.
+    To prevent background collapse (where empty background regions receive zero
+    penalty and false positives explode), every pixel receives a baseline weight of
+    1.0, and pixels containing crowd mass receive an additive boost proportional to
+    their density share:
+        p(i) = target(i) / (sum(target) + eps)   # relative crowd mass distribution
+        raw_weight(i) = 1.0 + alpha * (H * W) * p(i)
+        weight(i) = raw_weight(i) / mean(raw_weight)
+
+    Properties:
+    1. If target == 0 everywhere (empty background crop), p(i) == 0, raw_weight(i) == 1.0,
+       weight(i) == 1.0. The loss reduces identically to standard smooth-L1.
+    2. Background pixels (target == 0) always receive non-zero loss weight >= 1.0 / (1.0 + alpha),
+       actively penalizing false positive hallucinations.
+    3. Crowd pixels (target > 0) receive elevated loss weight up to (1.0 + alpha * H * W / N_crowd),
+       ending the ~200x dilution in dense scenes.
+    4. Normalized mean weight is identically 1.0, preserving overall gradient magnitude.
+
+    Args:
+        y:      [B, 1, H, W] predicted density map (float32).
+        target: [B, 1, H, W] GT density map (float32).
+        beta:   smooth-L1 threshold (default 1.0).
+        eps:    small constant for numerical stability.
+        alpha:  relative crowd boost weight (default 1.0).
+
+    Returns:
+        Scalar mass-weighted cell loss.
+    """
+    y_f = y.float()
+    t_f = target.float()
+
+    # Spatial mass per image: [B, 1, 1, 1]
+    total_mass = t_f.sum(dim=(-2, -1), keepdim=True)
+
+    # Normalized mass distribution p in [0, 1]
+    p = torch.where(total_mass > float(eps), t_f / total_mass.clamp_min(float(eps)), torch.zeros_like(t_f))
+
+    # Baseline 1.0 + mass boost
+    hw = float(t_f.shape[-2] * t_f.shape[-1])
+    raw_weight = 1.0 + float(alpha) * hw * p
+
+    # Normalize so mean weight across spatial dimensions is 1.0
+    norm_factor = raw_weight.mean(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
+    weights = raw_weight / norm_factor
+
+    # Per-pixel smooth-L1
+    per_pixel = F.smooth_l1_loss(y_f, t_f, beta=float(beta), reduction="none")
+
+    return (weights * per_pixel).mean()
+
 
 
 def compute_rmr_v3_losses(
@@ -381,11 +480,25 @@ def compute_rmr_v3_losses(
     for bs, val in dm_components.items():
         losses[f"dm_{bs}"] = val
 
-    losses["cell"] = balanced_smooth_l1(
-        y,
-        target_float,
-        beta=cfg.cell_beta,
-    )
+    # ── Stage 2: Cell allocation loss (mode-selectable) ───────────────────────
+    if cfg.cell_loss_mode == "mass_weighted":
+        # Weight per-pixel smooth-L1 by GT density mass.
+        # Dense crowd pixels receive proportionally more gradient than background,
+        # fixing the ~200x dilution effect in balanced smooth-L1.
+        losses["cell"] = mass_weighted_cell_loss(
+            y,
+            target_float,
+            beta=cfg.cell_beta,
+            eps=cfg.cell_mass_weight_eps,
+            alpha=getattr(cfg, "cell_mass_weight_alpha", 1.0),
+        )
+    else:
+        # "balanced": uniform smooth-L1 (v7 default — backward compatible)
+        losses["cell"] = balanced_smooth_l1(
+            y,
+            target_float,
+            beta=cfg.cell_beta,
+        )
 
     losses["region_nb"] = scale_balanced_regional_nb_nll(
         target_region,

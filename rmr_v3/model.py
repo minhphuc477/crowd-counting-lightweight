@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 
 import torch
@@ -10,12 +10,14 @@ import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
-from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, RepWeightedFPNNeck
+from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
+    charbonnier_tv_step,
     fractional_region_average_features,
     fractional_region_mean_std_features,
+    multiplicative_gated_adjoint,
     region_average_features,
     region_mean_std_features,
     regional_adjoint,
@@ -102,7 +104,75 @@ class RMRv3Config:
     # Fixes negative bias saturation at high density (Bias=-14.72 in v6 → near 0 target).
     temp_softplus: bool = False
 
+    # ── RMR-v8 Stage 2 additions ──────────────────────────────────────────────
+    # Solver update rule.
+    # "additive":       plain SIRT adjoint scatter (v7 default — backward compatible)
+    # "multiplicative": gated SIRT adjoint — gate = tanh(|y| / density_gate_rho)
+    #                   suppresses correction on near-zero pixels, fixing background
+    #                   lift degradation observed at T>=2 with additive mode.
+    solver_mode: str = "additive"
 
+    # Gate threshold ρ₀ for multiplicative SIRT.
+    # Pixels with density << rho0 have gate ≈ 0 (no correction).
+    # Pixels with density >> rho0 have gate ≈ 1 (full correction).
+    # Default 0.02 is ~1.27 × init_m0 (empirical mean cell density = 0.015763).
+    density_gate_rho: float = 0.02
+
+    # Total-variation diffusion type applied after each SIRT step.
+    # "laplacian":   isotropic Laplacian (v7 default — backward compatible).
+    # "charbonnier": anisotropic Charbonnier TV — edge-preserving, suppresses
+    #                diffusion across crowd/background boundaries.
+    tv_type: str = "laplacian"
+
+    # Charbonnier TV regularization epsilon ε_c.
+    # Controls edge-sharpness threshold: |grad_y| >> eps_c → diffusivity → 0.
+    # Only used when tv_type=="charbonnier". Default 0.1 ensures CFL stability with lambda_tv=0.015.
+    tv_eps_c: float = 0.1
+
+    # ── RMR-v8 Stage 3 additions ──────────────────────────────────────────────
+    # Coordinate Attention on the P4 output of ASPPLiteFPNNeck.
+    # Uses GroupNorm(1, 8) (NOT BatchNorm — batch_size=1 eval compatibility).
+    # Adds 848 parameters. Only valid when neck_type=="aspp_lite".
+    use_coord_attn: bool = False
+
+    def __post_init__(self) -> None:
+        if self.use_coord_attn and self.neck_type != "aspp_lite":
+            raise ValueError(
+                f"use_coord_attn=True requires neck_type='aspp_lite', got '{self.neck_type}'"
+            )
+
+    @classmethod
+    def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
+        """Cleanly instantiate RMRv3Config from dictionary with aliases and type coercion."""
+        merged = dict(d or {})
+        merged.update(overrides)
+
+        # Handle canonical aliases
+        if "backbone" in merged and "backbone_name" not in merged:
+            merged["backbone_name"] = merged.pop("backbone")
+        if "sirt_omega" in merged and "omega" not in merged:
+            merged["omega"] = merged.pop("sirt_omega")
+
+        kwargs: dict = {}
+        for f in fields(cls):
+            k = f.name
+            if k in merged:
+                v = merged[k]
+                if v is None:
+                    continue
+                if "tuple" in str(f.type) and isinstance(v, (list, tuple)):
+                    kwargs[k] = tuple(v)
+                elif f.type is bool or f.type == "bool":
+                    kwargs[k] = bool(v)
+                elif f.type is int or f.type == "int":
+                    kwargs[k] = int(v)
+                elif f.type is float or f.type == "float":
+                    kwargs[k] = float(v)
+                elif f.type is str or f.type == "str":
+                    kwargs[k] = str(v)
+                else:
+                    kwargs[k] = v
+        return cls(**kwargs)
 
 
 class ProbabilisticRegionalEvidenceHead(nn.Module):
@@ -438,12 +508,15 @@ def weighted_normalized_adjoint_field(
     weighted_cov: torch.Tensor | None = None,
     residual_clip: float = 0.0,
     eps: float = 1e-6,
+    solver_mode: str = "additive",
+    density_gate_rho: float = 0.02,
 ) -> torch.Tensor:
     """Compute:
 
         r = D_cw^-1 A^T W D_a^-1 (A y - b)
 
-    entirely in float32.
+    entirely in float32. In multiplicative mode, A^T is replaced with
+    multiplicative_gated_adjoint to suppress corrections on near-zero pixels.
     """
 
     _, _, h, w = y.shape
@@ -465,13 +538,24 @@ def weighted_normalized_adjoint_field(
 
     weighted_residual = weight32 * rate_residual
 
-    back = regional_adjoint(
-        weighted_residual,
-        regions.boxes,
-        h,
-        w,
-        out_dtype=torch.float32,
-    )
+    if solver_mode == "multiplicative":
+        back = multiplicative_gated_adjoint(
+            weighted_residual,
+            regions.boxes,
+            y32,
+            h,
+            w,
+            rho0=density_gate_rho,
+            out_dtype=torch.float32,
+        )
+    else:
+        back = regional_adjoint(
+            weighted_residual,
+            regions.boxes,
+            h,
+            w,
+            out_dtype=torch.float32,
+        )
 
     if weighted_cov is None:
         weighted_cov = weighted_coverage(
@@ -627,6 +711,19 @@ class RMRv3(nn.Module):
             hurdle_head=cfg.hurdle_head,
         )
 
+        # ── Stage 3: Coordinate Attention on P4 ───────────────────────────────
+        if cfg.use_coord_attn:
+            if cfg.neck_type != "aspp_lite":
+                raise ValueError(
+                    f"use_coord_attn=True requires neck_type='aspp_lite', got '{cfg.neck_type}'"
+                )
+            self.coord_attn: CoordinateAttention | None = CoordinateAttention(
+                channels=cfg.feature_width,
+                reduction=4,
+            )
+        else:
+            self.coord_attn = None
+
         self.solver_strength: float = 1.0
 
         self._region_cache: OrderedDict[
@@ -686,6 +783,10 @@ class RMRv3(nn.Module):
             c8,
             c16,
         )
+
+        # ── Stage 3: Coordinate Attention on P4 (optional) ────────────────────
+        if self.coord_attn is not None:
+            p4 = self.coord_attn(p4)
 
         z0 = self.fine_head(p4)
         if getattr(self.fine_head, "temp_softplus", False):
@@ -790,9 +891,15 @@ class RMRv3(nn.Module):
         )
         effective_omega = float(self.cfg.omega) * strength
 
-        # Optional TV Laplacian kernel (pre-allocated on device, cached as buffer-like)
+        # ── TV diffusion setup ─────────────────────────────────────────────────
         tv_lambda = float(self.cfg.tv_lambda)
-        if tv_lambda > 0.0:
+        tv_type = str(self.cfg.tv_type)
+        tv_eps_c = float(self.cfg.tv_eps_c)
+        solver_mode = str(self.cfg.solver_mode)
+
+        # Pre-allocate isotropic Laplacian kernel only when needed (cached locally)
+        _laplace: torch.Tensor | None = None
+        if tv_lambda > 0.0 and tv_type == "laplacian":
             _laplace = torch.tensor(
                 [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
                 dtype=torch.float32,
@@ -813,6 +920,9 @@ class RMRv3(nn.Module):
                 regions,
             )
 
+            # ── Stage 2a: Solver update step ──────────────────────────────────
+            # In multiplicative mode, weighted_normalized_adjoint_field uses
+            # multiplicative_gated_adjoint to suppress background lift at T>=2.
             field = weighted_normalized_adjoint_field(
                 y,
                 b_solver,
@@ -821,6 +931,8 @@ class RMRv3(nn.Module):
                 weighted_cov=cov_w,
                 residual_clip=self.cfg.residual_clip,
                 eps=self.cfg.eps,
+                solver_mode=solver_mode,
+                density_gate_rho=float(self.cfg.density_gate_rho),
             )
 
             y_next = torch.clamp_min(
@@ -828,12 +940,17 @@ class RMRv3(nn.Module):
                 0.0,
             )
 
-            # TV Laplacian smoothing: suppresses high-frequency noise accumulated
-            # by SIRT backprojection in dense crowd regions.
-            # Forward heat equation: y_{t+1} = y_t + \lambda \Delta y
+            # ── Stage 2b: TV diffusion step ───────────────────────────────────
             if tv_lambda > 0.0:
-                lap = F.conv2d(y_next, _laplace, padding=1)
-                y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
+                if tv_type == "charbonnier":
+                    # Anisotropic Charbonnier TV: edge-preserving diffusion.
+                    # Suppresses noise in flat regions while preserving crowd edges.
+                    y_next = charbonnier_tv_step(y_next, tv_lambda, tv_eps_c)
+                else:
+                    # Isotropic Laplacian TV (v7 default — backward compatible)
+                    assert _laplace is not None
+                    lap = F.conv2d(y_next, _laplace, padding=1)
+                    y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
 
             y_next = y_next.to(y.dtype)
 

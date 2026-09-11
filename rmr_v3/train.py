@@ -48,6 +48,7 @@ from .diagnostics import (
     regional_reliability_rows,
     summarize_diagnostics,
 )
+from .kd import DensityMapKDLoss
 from .losses import RMRv3LossConfig, compute_rmr_v3_losses
 from .model import RMRv3, RMRv3Config
 
@@ -57,107 +58,15 @@ from .model import RMRv3, RMRv3Config
 def make_model(cfg: dict) -> tuple[RMRv3, bool]:
     m_cfg = cfg.get("model", {})
     t_cfg = cfg.get("train", {})
-
-    output_stride = int(m_cfg.get("output_stride", 4))
-    feature_width = int(m_cfg.get("feature_width", 32))
-    backbone_name = str(m_cfg.get("backbone", m_cfg.get("backbone_name", "mobilenetv4_conv_small_050.e3000_r224_in1k")))
-    pretrained = bool(m_cfg.get("pretrained", True))
-    backbone_lr_scale = float(m_cfg.get("backbone_lr_scale", t_cfg.get("backbone_lr_scale", 0.1)))
-
-    init_m0 = float(m_cfg.get("init_m0", 0.015763))
-    region_sizes_px = tuple(int(x) for x in m_cfg.get("region_sizes_px", (32, 64, 128)))
-    region_overlap = float(m_cfg.get("region_overlap", 0.5))
-    include_full_image = bool(m_cfg.get("include_full_image", False))
-
-    iterations = int(m_cfg.get("iterations", 2))
-    omega = float(m_cfg.get("omega", m_cfg.get("sirt_omega", 1.0)))
-    residual_clip = float(m_cfg.get("residual_clip", 0.0))
-
-    dispersion_init = float(m_cfg.get("dispersion_init", 50.0))
-    dispersion_min = float(m_cfg.get("dispersion_min", 0.5))
-    dispersion_max = float(m_cfg.get("dispersion_max", 500.0))
-
-    reliability_mode = str(m_cfg.get("reliability_mode", "nb_rate_variance"))
-    reliability_rate_std_floor = float(m_cfg.get("reliability_rate_std_floor", 0.01))
-    reliability_weight_min = float(m_cfg.get("reliability_weight_min", 0.25))
-    reliability_weight_max = float(m_cfg.get("reliability_weight_max", 4.0))
-    normalize_reliability_within_scale = bool(m_cfg.get("normalize_reliability_within_scale", True))
-
-    detach_region_mean_in_solver = bool(m_cfg.get("detach_region_mean_in_solver", True))
-    detach_reliability_in_solver = bool(m_cfg.get("detach_reliability_in_solver", True))
-
-    uniform_reliability = bool(m_cfg.get("uniform_reliability", False))
-    eps = float(m_cfg.get("eps", 1e-6))
-
-    config = RMRv3Config(
-        output_stride=output_stride,
-        feature_width=feature_width,
-        backbone_name=backbone_name,
-        pretrained=pretrained,
-        backbone_lr_scale=backbone_lr_scale,
-        init_m0=init_m0,
-        neck_type=str(m_cfg.get("neck_type", "additive")),
-        context_dilations=tuple(int(x) for x in m_cfg.get("context_dilations", (1, 2, 3))),
-        use_aspp_gap=bool(m_cfg.get("use_aspp_gap", False)),
-        aspp_dilations=tuple(int(x) for x in m_cfg.get("aspp_dilations", (1, 3, 6))),
-        region_head_hidden=int(m_cfg.get("region_head_hidden", 48)),
-        region_sizes_px=region_sizes_px,
-        region_overlap=region_overlap,
-        include_full_image=include_full_image,
-        enable_solver=bool(m_cfg.get("enable_solver", True)),
-        iterations=iterations,
-        omega=omega,
-        residual_clip=residual_clip,
-        dispersion_init=dispersion_init,
-        dispersion_min=dispersion_min,
-        dispersion_max=dispersion_max,
-        reliability_mode=reliability_mode,
-        reliability_rate_std_floor=reliability_rate_std_floor,
-        reliability_weight_min=reliability_weight_min,
-        reliability_weight_max=reliability_weight_max,
-        normalize_reliability_within_scale=normalize_reliability_within_scale,
-        detach_region_mean_in_solver=detach_region_mean_in_solver,
-        detach_reliability_in_solver=detach_reliability_in_solver,
-        eps=eps,
-        native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
-        regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
-        # RMR-v7 fields
-        hurdle_head=bool(m_cfg.get("hurdle_head", False)),
-        tv_lambda=float(m_cfg.get("tv_lambda", 0.0)),
-        ema_decay=float(m_cfg.get("ema_decay", 0.0)),
-        temp_softplus=bool(m_cfg.get("temp_softplus", False)),
-    )
-
+    bb_lr = float(m_cfg.get("backbone_lr_scale", t_cfg.get("backbone_lr_scale", 0.1)))
+    config = RMRv3Config.from_dict(m_cfg, backbone_lr_scale=bb_lr)
     model = RMRv3(config)
+    uniform_reliability = bool(m_cfg.get("uniform_reliability", False))
     return model, uniform_reliability
 
 
 def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
-    l_cfg = cfg.get("loss", {})
-    use_multi = bool(l_cfg.get("use_multiscale_dm", l_cfg.get("use_hierarchical_dm", False)))
-    return RMRv3LossConfig(
-        lambda_count=float(l_cfg.get("lambda_count", 1.0)),
-        lambda_flat_dm16=float(l_cfg.get("lambda_flat_dm16", 1.0)),
-        lambda_cell=float(l_cfg.get("lambda_cell", 0.25)),
-        lambda_region_nb=float(l_cfg.get("lambda_region_nb", 0.20)),
-        lambda_hurdle=float(l_cfg.get("lambda_hurdle", 0.0)),
-        lambda_trunc_nb=float(l_cfg.get("lambda_trunc_nb", 0.0)),
-        allocation_loss_type=str(l_cfg.get("allocation_loss_type", "flat_dm16")),
-        bayesian_sigma=float(l_cfg.get("bayesian_sigma", 8.0)),
-        bayesian_background_ratio=float(l_cfg.get("bayesian_background_ratio", 0.1)),
-        ot_reg=float(l_cfg.get("ot_reg", 10.0)),
-        ot_num_iters=int(l_cfg.get("ot_num_iters", 20)),
-        use_multiscale_dm=use_multi,
-        use_hierarchical_dm=use_multi,
-        dm_block_sizes_px=tuple(int(x) for x in l_cfg.get("dm_block_sizes_px", (16, 32, 64))),
-        dm_weights=tuple(float(x) for x in l_cfg.get("dm_weights", (0.50, 0.30, 0.20))),
-        dm_kappas=tuple(float(x) for x in l_cfg.get("dm_kappas", (20.0, 20.0, 20.0))),
-        count_loss_mode=str(l_cfg.get("count_loss_mode", "nb")),
-        count_nb_dispersion=float(l_cfg.get("count_nb_dispersion", 50.0)),
-        kappa_flat16=float(l_cfg.get("kappa_flat16", 20.0)),
-        normalize_flat_dm16=bool(l_cfg.get("normalize_flat_dm16", True)),
-        cell_beta=float(l_cfg.get("cell_beta", 1.0)),
-    )
+    return RMRv3LossConfig.from_dict(cfg.get("loss", {}))
 
 
 @torch.no_grad()
@@ -301,6 +210,7 @@ def main() -> None:
     ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
+    ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -429,6 +339,30 @@ def main() -> None:
         for k in ema_state:
             ema_state[k] = ema_state[k].float()
         print(f"EMA enabled: decay={ema_decay:.4f}")
+
+    # Stage 3: Teacher model for Knowledge Distillation (optional)
+    teacher_model = None
+    kd_loss_fn = None
+    teacher_ckpt_path = args.teacher_ckpt or cfg.get("train", {}).get("teacher_ckpt")
+    if teacher_ckpt_path:
+        tp = Path(teacher_ckpt_path)
+        if tp.is_file():
+            print(f"[Stage 3 KD] Loading teacher checkpoint: {tp}")
+            try:
+                from .eval import load_model_from_ckpt
+                teacher_model, _, _, _ = load_model_from_ckpt(tp, device, use_ema=True)
+                teacher_model = teacher_model.to(device).eval()
+                for p in teacher_model.parameters():
+                    p.requires_grad = False
+                kd_loss_fn = DensityMapKDLoss(
+                    lambda_spatial_kl=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
+                    lambda_count_kd=float(cfg.get("loss", {}).get("lambda_kd_count", 0.5)),
+                ).to(device)
+                print(f"[Stage 3 KD] Teacher loaded and frozen successfully.")
+            except Exception as e:
+                print(f"[Stage 3 KD Warning] Failed to load teacher from {tp}: {e}. Proceeding without KD.")
+        else:
+            print(f"[Stage 3 KD Warning] Teacher checkpoint not found at '{tp}'. Proceeding without KD.")
 
     epochs = int(cfg.get("train", {}).get("epochs", 1000))
     lr_init = float(cfg.get("train", {}).get("lr", 1e-4))
@@ -614,6 +548,13 @@ def main() -> None:
                 outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
                 losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
                 loss = losses["total"]
+
+                if teacher_model is not None and kd_loss_fn is not None:
+                    with torch.no_grad():
+                        t_out = teacher_model(images)
+                        t_y = t_out["y"] if isinstance(t_out, dict) else t_out
+                    kd_res = kd_loss_fn(outputs["y0"], t_y)
+                    loss = loss + kd_res["total_kd"]
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)

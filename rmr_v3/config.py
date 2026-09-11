@@ -70,6 +70,13 @@ ALLOWED_MODEL_KEYS = {
     "tv_lambda",
     "ema_decay",
     "temp_softplus",
+    # RMR-v8 Stage 2
+    "solver_mode",
+    "density_gate_rho",
+    "tv_type",
+    "tv_eps_c",
+    # RMR-v8 Stage 3
+    "use_coord_attn",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -94,6 +101,12 @@ ALLOWED_LOSS_KEYS = {
     "dm_block_sizes_px",
     "dm_weights",
     "dm_kappas",
+    # RMR-v8 Stage 2 & 3
+    "cell_loss_mode",
+    "cell_mass_weight_eps",
+    "cell_mass_weight_alpha",
+    "lambda_kd_spatial",
+    "lambda_kd_count",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -114,6 +127,7 @@ ALLOWED_TRAIN_KEYS = {
     "solver_ramp_epochs",
     "deterministic",
     "ema_decay",
+    "teacher_ckpt",
 }
 
 
@@ -192,8 +206,48 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             stats = str(m_cfg["regional_feature_stats"])
             if stats not in ("mean", "mean_std"):
                 raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{stats}'")
+        if "solver_mode" in m_cfg:
+            solver_mode = str(m_cfg["solver_mode"])
+            if solver_mode not in ("additive", "multiplicative"):
+                raise ValueError(
+                    f"solver_mode must be 'additive' or 'multiplicative', got '{solver_mode}'"
+                )
+        if "tv_type" in m_cfg:
+            tv_type = str(m_cfg["tv_type"])
+            if tv_type not in ("laplacian", "charbonnier"):
+                raise ValueError(
+                    f"tv_type must be 'laplacian' or 'charbonnier', got '{tv_type}'"
+                )
+        if "density_gate_rho" in m_cfg:
+            rho = float(m_cfg["density_gate_rho"])
+            if rho <= 0.0:
+                raise ValueError(f"density_gate_rho must be strictly positive, got {rho}")
+        if "tv_eps_c" in m_cfg:
+            eps_c = float(m_cfg["tv_eps_c"])
+            if eps_c <= 0.0:
+                raise ValueError(f"tv_eps_c must be strictly positive, got {eps_c}")
+        if bool(m_cfg.get("use_coord_attn", False)):
+            neck = str(m_cfg.get("neck_type", "additive"))
+            if neck != "aspp_lite":
+                raise ValueError(
+                    f"use_coord_attn=True requires neck_type='aspp_lite', got '{neck}'"
+                )
 
-    # Validate Multi-Scale / Hierarchical DM loss configuration
+    # Validate loss section — Stage 2 extensions
+    l_cfg_pre = cfg.get("loss", {})
+    if isinstance(l_cfg_pre, dict):
+        if "cell_loss_mode" in l_cfg_pre:
+            clm = str(l_cfg_pre["cell_loss_mode"])
+            if clm not in ("balanced", "mass_weighted"):
+                raise ValueError(
+                    f"cell_loss_mode must be 'balanced' or 'mass_weighted', got '{clm}'"
+                )
+        if "cell_mass_weight_eps" in l_cfg_pre:
+            eps_mw = float(l_cfg_pre["cell_mass_weight_eps"])
+            if eps_mw <= 0.0:
+                raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {eps_mw}")
+
+
     l_cfg = cfg.get("loss", {})
     if isinstance(l_cfg, dict):
         if bool(l_cfg.get("use_multiscale_dm", False)) or bool(l_cfg.get("use_hierarchical_dm", False)):
@@ -334,6 +388,11 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         # RMR-v7 critical fields (changing these invalidates checkpoint weights)
         "hurdle_head",
         "temp_softplus",
+        # RMR-v8 Stage 2 solver fields (changing these changes the SIRT update rule)
+        "solver_mode",
+        "tv_type",
+        # RMR-v8 Stage 3 architecture
+        "use_coord_attn",
     ],
     "loss": [
         "lambda_count",
@@ -350,6 +409,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dm_block_sizes_px",
         "dm_weights",
         "dm_kappas",
+        # RMR-v8 Stage 2 loss fields
+        "cell_loss_mode",
     ],
     "train": [
         "lr",

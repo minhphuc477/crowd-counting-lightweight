@@ -36,74 +36,8 @@ def load_model_from_ckpt(
     cfg = ckpt.get("config", {})
     m_cfg = cfg.get("model", {})
 
-    output_stride = int(m_cfg.get("output_stride", 4))
-    feature_width = int(m_cfg.get("feature_width", 32))
-    backbone_name = str(m_cfg.get("backbone", m_cfg.get("backbone_name", "mobilenetv4_conv_small_050.e3000_r224_in1k")))
-    pretrained = False  # loading weights from ckpt
-
-    init_m0 = float(m_cfg.get("init_m0", 0.015763))
-    region_sizes_px = tuple(int(x) for x in m_cfg.get("region_sizes_px", (32, 64, 128)))
-    region_overlap = float(m_cfg.get("region_overlap", 0.5))
-    include_full_image = bool(m_cfg.get("include_full_image", False))
-
-    iterations = int(m_cfg.get("iterations", 2))
-    omega = float(m_cfg.get("omega", m_cfg.get("sirt_omega", 1.0)))
-    residual_clip = float(m_cfg.get("residual_clip", 0.0))
-
-    dispersion_init = float(m_cfg.get("dispersion_init", 50.0))
-    dispersion_min = float(m_cfg.get("dispersion_min", 0.5))
-    dispersion_max = float(m_cfg.get("dispersion_max", 500.0))
-
-    reliability_mode = str(m_cfg.get("reliability_mode", "nb_rate_variance"))
-    reliability_rate_std_floor = float(m_cfg.get("reliability_rate_std_floor", 0.01))
-    reliability_weight_min = float(m_cfg.get("reliability_weight_min", 0.25))
-    reliability_weight_max = float(m_cfg.get("reliability_weight_max", 4.0))
-    normalize_reliability_within_scale = bool(m_cfg.get("normalize_reliability_within_scale", True))
-
-    detach_region_mean_in_solver = bool(m_cfg.get("detach_region_mean_in_solver", True))
-    detach_reliability_in_solver = bool(m_cfg.get("detach_reliability_in_solver", True))
-
+    config = RMRv3Config.from_dict(m_cfg, pretrained=False)
     uniform_reliability = bool(m_cfg.get("uniform_reliability", False))
-    eps = float(m_cfg.get("eps", 1e-6))
-
-    config = RMRv3Config(
-        output_stride=output_stride,
-        feature_width=feature_width,
-        backbone_name=backbone_name,
-        pretrained=pretrained,
-        init_m0=init_m0,
-        region_sizes_px=region_sizes_px,
-        region_overlap=region_overlap,
-        include_full_image=include_full_image,
-        iterations=iterations,
-        omega=omega,
-        residual_clip=residual_clip,
-        dispersion_init=dispersion_init,
-        dispersion_min=dispersion_min,
-        dispersion_max=dispersion_max,
-        reliability_mode=reliability_mode,
-        reliability_rate_std_floor=reliability_rate_std_floor,
-        reliability_weight_min=reliability_weight_min,
-        reliability_weight_max=reliability_weight_max,
-        normalize_reliability_within_scale=normalize_reliability_within_scale,
-        detach_region_mean_in_solver=detach_region_mean_in_solver,
-        detach_reliability_in_solver=detach_reliability_in_solver,
-        eps=eps,
-        native_scale_pooling=bool(m_cfg.get("native_scale_pooling", False)),
-        regional_feature_stats=str(m_cfg.get("regional_feature_stats", "mean")),
-        neck_type=str(m_cfg.get("neck_type", "additive")),
-        context_dilations=tuple(int(x) for x in m_cfg.get("context_dilations", (1, 2, 3))),
-        use_aspp_gap=bool(m_cfg.get("use_aspp_gap", False)),
-        aspp_dilations=tuple(int(x) for x in m_cfg.get("aspp_dilations", (1, 3, 6))),
-        region_head_hidden=int(m_cfg.get("region_head_hidden", 48)),
-        enable_solver=bool(m_cfg.get("enable_solver", True)),
-        # RMR-v7 fields
-        hurdle_head=bool(m_cfg.get("hurdle_head", False)),
-        tv_lambda=float(m_cfg.get("tv_lambda", 0.0)),
-        temp_softplus=bool(m_cfg.get("temp_softplus", False)),
-        # ema_decay not needed at eval time (no training)
-    )
-
     model = RMRv3(config)
 
     # Prefer EMA weights if saved (higher quality than live weights)
