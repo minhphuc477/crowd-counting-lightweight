@@ -136,6 +136,7 @@ ALLOWED_TRAIN_KEYS = {
     "deterministic",
     "ema_decay",
     "teacher_ckpt",
+    "min_lr_ratio",
 }
 
 

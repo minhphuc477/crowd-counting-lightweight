@@ -56,7 +56,7 @@ model:
   normalize_reliability_within_scale: true
   detach_region_mean_in_solver: true
   detach_reliability_in_solver: true
-  hurdle_head: false
+  hurdle_head: true
   temp_softplus: false
   use_coord_attn: false
   ema_decay: 0.999
@@ -71,10 +71,11 @@ loss:
   lambda_region_nb: 0.2
   count_loss_mode: nb
   count_nb_dispersion: 50.0
-  cell_loss_mode: balanced
+  cell_loss_mode: mass_weighted
   cell_beta: 1.0
-  lambda_hurdle: 0.0
-  lambda_trunc_nb: 0.0
+  cell_mass_weight_alpha: 1.0
+  lambda_hurdle: 0.1
+  lambda_trunc_nb: 0.1
 train:
   epochs: 1000
   batch_size: 8
@@ -84,6 +85,7 @@ train:
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
   warmup_epochs: 5
+  min_lr_ratio: 0.05
   grad_clip: 10.0
   amp: true
   solver_warmup_epochs: 5

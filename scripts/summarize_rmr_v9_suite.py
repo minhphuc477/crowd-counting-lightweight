@@ -33,6 +33,8 @@ def main():
         "rmr_v9_ablation_no_proximal",
         "rmr_v9_ablation_isotropic",
         "rmr_v9_ablation_mean_only",
+        "rmr_v9_ablation_no_hurdle",
+        "rmr_v9_ablation_balanced_cell",
         "rmr_v9_control_no_solver",
     ]
 

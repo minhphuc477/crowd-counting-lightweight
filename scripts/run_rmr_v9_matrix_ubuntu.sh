@@ -47,6 +47,8 @@ declare -A RUN_CONFIGS=(
     ["rmr_v9_ablation_no_proximal"]="configs/rmr_v9/rmr_v9_ablation_no_proximal.yaml"
     ["rmr_v9_ablation_isotropic"]="configs/rmr_v9/rmr_v9_ablation_isotropic.yaml"
     ["rmr_v9_ablation_mean_only"]="configs/rmr_v9/rmr_v9_ablation_mean_only.yaml"
+    ["rmr_v9_ablation_no_hurdle"]="configs/rmr_v9/rmr_v9_ablation_no_hurdle.yaml"
+    ["rmr_v9_ablation_balanced_cell"]="configs/rmr_v9/rmr_v9_ablation_balanced_cell.yaml"
     ["rmr_v9_control_no_solver"]="configs/rmr_v9/rmr_v9_control_no_solver.yaml"
 )
 
@@ -56,6 +58,8 @@ ORDERED_RUNS=(
     "rmr_v9_ablation_no_proximal"
     "rmr_v9_ablation_isotropic"
     "rmr_v9_ablation_mean_only"
+    "rmr_v9_ablation_no_hurdle"
+    "rmr_v9_ablation_balanced_cell"
     "rmr_v9_control_no_solver"
 )
 

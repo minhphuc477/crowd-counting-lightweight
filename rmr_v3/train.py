@@ -751,20 +751,36 @@ def main() -> None:
     )
 
     backbone_scale = float(cfg.get("train", {}).get("backbone_lr_scale", cfg.get("model", {}).get("backbone_lr_scale", 0.1)))
-    backbone_params = list(model.encoder.parameters())
-    backbone_ids = set(id(p) for p in backbone_params)
-    other_params = [p for p in model.parameters() if id(p) not in backbone_ids]
+    wd = float(cfg.get("train", {}).get("weight_decay", 1e-4))
+
+    # Decouple parameter groups: exclude 1D tensors (biases, GroupNorm scale/shift)
+    # and calibrated priors (e.g. fine_head bias b0, dispersion bias, tau) from weight decay.
+    # Applying weight decay to b0 (-4.1422) pulls it toward 0, which exponentially inflates
+    # baseline background density and causes massive positive bias drift in late epochs.
+    bb_decay, bb_no_decay = [], []
+    other_decay, other_no_decay = [], []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        is_bb = name.startswith("encoder.")
+        if param.ndim <= 1 or name.endswith(".bias") or "tau" in name:
+            (bb_no_decay if is_bb else other_no_decay).append(param)
+        else:
+            (bb_decay if is_bb else other_decay).append(param)
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": backbone_params, "lr": lr_init * backbone_scale},
-            {"params": other_params, "lr": lr_init},
+            {"params": bb_decay, "lr": lr_init * backbone_scale, "weight_decay": wd},
+            {"params": bb_no_decay, "lr": lr_init * backbone_scale, "weight_decay": 0.0},
+            {"params": other_decay, "lr": lr_init, "weight_decay": wd},
+            {"params": other_no_decay, "lr": lr_init, "weight_decay": 0.0},
         ],
-        weight_decay=float(cfg.get("train", {}).get("weight_decay", 1e-4)),
     )
 
     warmup_epochs = int(cfg.get("train", {}).get("warmup_epochs", 5))
-    scheduler = make_scheduler(optimizer, epochs, warmup_epochs)
+    min_lr_ratio = float(cfg.get("train", {}).get("min_lr_ratio", 0.05))
+    scheduler = make_scheduler(optimizer, epochs, warmup_epochs, min_lr_ratio=min_lr_ratio)
     amp = bool(cfg.get("train", {}).get("amp", True) and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
     loss_cfg = make_loss_cfg(cfg)

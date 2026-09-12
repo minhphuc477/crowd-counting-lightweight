@@ -178,8 +178,9 @@ def make_scheduler(
     warmup: int = 5,
     *,
     warmup_epochs: int | None = None,
+    min_lr_ratio: float = 0.05,
 ) -> torch.optim.lr_scheduler.LambdaLR:
-    """Linear warmup followed by cosine annealing learning rate scheduler."""
+    """Linear warmup followed by cosine annealing learning rate scheduler with a minimum floor."""
     if warmup_epochs is not None:
         warmup = warmup_epochs
 
@@ -187,7 +188,8 @@ def make_scheduler(
         if epoch < warmup:
             return max(1e-3, (epoch + 1) / max(1, warmup))
         p = (epoch - warmup) / max(1, epochs - warmup)
-        return 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
+        cosine = 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fn)
 

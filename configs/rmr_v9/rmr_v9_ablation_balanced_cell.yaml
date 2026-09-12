@@ -1,4 +1,4 @@
-seed: 42
+﻿seed: 42
 
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -22,11 +22,11 @@ model:
   neck_type:    additive
   context_dilations: [1, 2, 3]
 
-  region_sizes_px:  [32, 64, 128]
+  region_sizes_px:  [32, 64, 128, [64, 32], [32, 64]]
   region_overlap:   0.5
   include_full_image: false
 
-  regional_feature_stats: mean
+  regional_feature_stats: mean_std
   region_head_hidden: 48
 
   enable_solver:   true
@@ -36,10 +36,10 @@ model:
   residual_clip:   0.0
   eps:             1.0e-6
 
+  proximal_tau:    0.015
+
   tv_lambda:       0.02
   tv_type:         laplacian
-
-  proximal_tau:    0.0
 
   dispersion_init: 50.0
   dispersion_min:  0.5
@@ -52,7 +52,7 @@ model:
   detach_region_mean_in_solver:    true
   detach_reliability_in_solver:    true
 
-  hurdle_head:    false
+  hurdle_head:    true
   temp_softplus:  false
   use_coord_attn: false
 
@@ -74,8 +74,8 @@ loss:
   cell_loss_mode:     balanced
   cell_beta:          1.0
 
-  lambda_hurdle:    0.0
-  lambda_trunc_nb:  0.0
+  lambda_hurdle:    0.1
+  lambda_trunc_nb:  0.1
 
 train:
   epochs:          1000

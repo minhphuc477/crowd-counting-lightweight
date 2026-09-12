@@ -26,6 +26,8 @@ EXPECTED_CONFIG_NAMES = [
     "rmr_v9_ablation_no_proximal.yaml",
     "rmr_v9_ablation_isotropic.yaml",
     "rmr_v9_ablation_mean_only.yaml",
+    "rmr_v9_ablation_no_hurdle.yaml",
+    "rmr_v9_ablation_balanced_cell.yaml",
     "rmr_v9_control_no_solver.yaml",
 ]
 
