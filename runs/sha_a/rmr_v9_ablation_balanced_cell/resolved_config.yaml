@@ -29,6 +29,10 @@ model:
   - 32
   - 64
   - 128
+  - - 64
+    - 32
+  - - 32
+    - 64
   region_overlap: 0.5
   include_full_image: false
   regional_feature_stats: mean_std
@@ -67,9 +71,8 @@ loss:
   lambda_region_nb: 0.2
   count_loss_mode: nb
   count_nb_dispersion: 50.0
-  cell_loss_mode: mass_weighted
+  cell_loss_mode: balanced
   cell_beta: 1.0
-  cell_mass_weight_alpha: 1.0
   lambda_hurdle: 0.1
   lambda_trunc_nb: 0.1
 train:
@@ -94,4 +97,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/rmr_v9_ablation_isotropic
+output_dir: runs/sha_a/rmr_v9_ablation_balanced_cell
