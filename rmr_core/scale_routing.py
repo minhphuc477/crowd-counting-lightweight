@@ -16,7 +16,7 @@ class ScaleRoutingHead(nn.Module):
 
     Parameter budget:
       - Depthwise 3x3: in_channels * 1 * 9 + in_channels = 320 params.
-      - BatchNorm2d: 2 * in_channels = 64 params.
+      - GroupNorm(8, in_channels): 2 * in_channels = 64 params (batch-size independent).
       - Pointwise 1x1: in_channels * num_scales + num_scales = 99 params.
       Total trainable parameters: 483 (< 500 budget).
     """
@@ -39,7 +39,7 @@ class ScaleRoutingHead(nn.Module):
             groups=in_channels,
             bias=True,
         )
-        self.norm = nn.BatchNorm2d(in_channels)
+        self.norm = nn.GroupNorm(8, in_channels)
         self.act = nn.ReLU(inplace=True)
         self.pw = nn.Conv2d(
             in_channels,

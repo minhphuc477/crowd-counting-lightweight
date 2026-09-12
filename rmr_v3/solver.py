@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from rmr_core.operators import (
     RegionSet,
     charbonnier_tv_step,
+    partition_regions_by_scale,
     weighted_coverage,
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
@@ -147,6 +148,26 @@ def unrolled_sirt_solver(
     tau_step = (effective_omega * effective_tau) / max(int(iterations), 1)
     tv_step = effective_tv_lambda / max(int(iterations), 1)
 
+    # Short-circuit: When solver strength is 0.0 (e.g. during warmup epochs) or iterations <= 0,
+    # y remains identically y0. Bypassing the unrolled loop completely eliminates wasted
+    # forward/adjoint passes and GPU allocations during the warmup phase.
+    if iterations <= 0 or (effective_omega == 0.0 and effective_tv_lambda == 0.0 and tau_step == 0.0):
+        return {
+            "y": y0,
+            "iterates": [y0],
+            "residual_fields": [],
+            "energy_trace": [],
+            "effective_omega": effective_omega,
+            "effective_tv_lambda": effective_tv_lambda,
+        }
+
+    # Pre-partition regions by scale once before the T-iteration solver loop.
+    # This completely eliminates dynamic boolean masking and tensor slicing allocations inside the loop.
+    scale_partitions = None
+    if scale_routing_weights is not None:
+        k_scales = scale_routing_weights.shape[1]
+        scale_partitions = partition_regions_by_scale(regions, k_scales, device=y0.device)
+
     # Compute weighted coverage field: D_w = A^T w (optionally scale-routed)
     cov_w = weighted_coverage(
         weight_solver,
@@ -155,6 +176,7 @@ def unrolled_sirt_solver(
         w,
         eps=eps,
         scale_routing_weights=scale_routing_weights,
+        scale_partitions=scale_partitions,
     )
 
     y = y0
@@ -183,6 +205,7 @@ def unrolled_sirt_solver(
             density_gate_rho=float(density_gate_rho),
             density_gate_floor=float(density_gate_floor),
             scale_routing_weights=scale_routing_weights,
+            scale_partitions=scale_partitions,
         )
 
         y_step = y.float() - effective_omega * field

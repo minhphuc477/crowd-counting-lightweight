@@ -67,6 +67,7 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "weight_clip_low_fraction", "weight_clip_high_fraction",
     "solver_energy_before", "solver_energy_after", "solver_energy_reduction",
     "weight_mean_32", "weight_mean_64", "weight_mean_128",
+    "scale_pi_32", "scale_pi_64", "scale_pi_128",
     "val_mae", "val_rmse", "val_nae", "val_bias",
     "val_game0", "val_game1", "val_game2", "val_game3",
     "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
@@ -120,6 +121,9 @@ class DiagnosticTracker:
         self.w_scale_32: list[float] = []
         self.w_scale_64: list[float] = []
         self.w_scale_128: list[float] = []
+        self.scale_pi_32: list[float] = []
+        self.scale_pi_64: list[float] = []
+        self.scale_pi_128: list[float] = []
 
     @torch.no_grad()
     def update(self, outputs: dict[str, Any]) -> None:
@@ -145,6 +149,12 @@ class DiagnosticTracker:
             self.w_scale_64.append(float(w[..., m64].mean().item()))
         if m128.any():
             self.w_scale_128.append(float(w[..., m128].mean().item()))
+
+        scale_w = outputs.get("scale_weights", None)
+        if scale_w is not None and scale_w.shape[1] >= 3:
+            self.scale_pi_32.append(float(scale_w[:, 0].mean().item()))
+            self.scale_pi_64.append(float(scale_w[:, 1].mean().item()))
+            self.scale_pi_128.append(float(scale_w[:, 2].mean().item()))
 
     def summarize(self) -> dict[str, float]:
         disps_np = torch.cat(self.all_disps).cpu().numpy() if self.all_disps else np.array([50.0])
@@ -180,6 +190,9 @@ class DiagnosticTracker:
             "weight_mean_32": float(np.mean(self.w_scale_32)) if self.w_scale_32 else 1.0,
             "weight_mean_64": float(np.mean(self.w_scale_64)) if self.w_scale_64 else 1.0,
             "weight_mean_128": float(np.mean(self.w_scale_128)) if self.w_scale_128 else 1.0,
+            "scale_pi_32": float(np.mean(self.scale_pi_32)) if self.scale_pi_32 else 0.0,
+            "scale_pi_64": float(np.mean(self.scale_pi_64)) if self.scale_pi_64 else 0.0,
+            "scale_pi_128": float(np.mean(self.scale_pi_128)) if self.scale_pi_128 else 0.0,
         }
 
 
@@ -469,6 +482,11 @@ def format_dynamic_training_banner(
 
         w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else "Negative-Binomial (W=diag(w_R))"
         solver_parts.append(f"Weighting={w_mode}")
+        if getattr(m_cfg, "dynamic_scale_routing", False):
+            k_num = len(getattr(m_cfg, "region_sizes_px", [32, 64, 128]))
+            solver_parts.append(f"ScaleRouting=Dynamic(K={k_num})")
+        else:
+            solver_parts.append("ScaleRouting=Isotropic")
         solver_desc = " | ".join(solver_parts)
 
     # 4. Heads & Densities

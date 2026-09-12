@@ -311,6 +311,35 @@ def charbonnier_tv_step(
     return y_out.to(y.dtype)
 
 
+def partition_regions_by_scale(
+    regions: RegionSet,
+    k_scales: int,
+    device: torch.device | str | None = None,
+) -> list[tuple[int, torch.Tensor | None, torch.Tensor | None]]:
+    """Partition RegionSet boxes by scale index k in [0, k_scales - 1].
+
+    Assigns full-image regions (scale_id == -1) to the coarsest scale (k_scales - 1).
+    Returns list of (k, mask_k, boxes_k) tuples to eliminate dynamic boolean masking and
+    allocation churn during iterative solver loops.
+    """
+    dev = device if device is not None else regions.boxes.device
+    scale_ids = regions.scale_id.to(device=dev)
+    # Full-image regions (scale_id == -1) map to the coarsest scale
+    scale_ids = torch.where(
+        scale_ids < 0,
+        torch.tensor(k_scales - 1, device=scale_ids.device, dtype=scale_ids.dtype),
+        scale_ids.clamp(0, k_scales - 1),
+    )
+    partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] = []
+    for k in range(k_scales):
+        mask_k = (scale_ids == k)
+        if mask_k.any():
+            partitions.append((k, mask_k, regions.boxes[mask_k]))
+        else:
+            partitions.append((k, None, None))
+    return partitions
+
+
 def weighted_coverage(
     weight: torch.Tensor,
     regions: RegionSet,
@@ -318,17 +347,21 @@ def weighted_coverage(
     width: int,
     eps: float = 1e-6,
     scale_routing_weights: torch.Tensor | None = None,
+    scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
 ) -> torch.Tensor:
     """Compute D_{c,w} diagonal field = A^T w, optionally modulated by spatial scale routing weights."""
     if scale_routing_weights is not None:
-        b, k_scales, h, w = scale_routing_weights.shape
-        cov_total = torch.zeros((b, 1, h, w), device=weight.device, dtype=torch.float32)
-        scale_ids = regions.scale_id.to(device=weight.device).clamp(0, k_scales - 1)
-        for k in range(k_scales):
-            mask_k = (scale_ids == k)
-            if not mask_k.any():
+        b, k_scales = scale_routing_weights.shape[:2]
+        if scale_routing_weights.shape[-2:] != (height, width):
+            scale_routing_weights = F.interpolate(
+                scale_routing_weights, size=(height, width), mode="bilinear", align_corners=False
+            )
+        cov_total = torch.zeros((b, 1, height, width), device=weight.device, dtype=torch.float32)
+        if scale_partitions is None:
+            scale_partitions = partition_regions_by_scale(regions, k_scales, device=weight.device)
+        for k, mask_k, boxes_k in scale_partitions:
+            if mask_k is None or boxes_k is None:
                 continue
-            boxes_k = regions.boxes[mask_k]
             weight_k = weight[:, :, mask_k].float()
             cov_k = regional_adjoint(weight_k, boxes_k, height, width, out_dtype=torch.float32)
             pi_k = scale_routing_weights[:, k:k+1, :, :].float()
@@ -358,6 +391,7 @@ def weighted_normalized_adjoint_field(
     density_gate_rho: float = 0.02,
     density_gate_floor: float = 0.02,
     scale_routing_weights: torch.Tensor | None = None,
+    scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
 ) -> torch.Tensor:
     """Compute:
 
@@ -386,14 +420,17 @@ def weighted_normalized_adjoint_field(
     weighted_residual = weight32 * rate_residual
 
     if scale_routing_weights is not None:
-        b, k_scales, _, _ = scale_routing_weights.shape
+        b, k_scales = scale_routing_weights.shape[:2]
+        if scale_routing_weights.shape[-2:] != (h, w):
+            scale_routing_weights = F.interpolate(
+                scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
+            )
         back_total = torch.zeros((b, 1, h, w), device=y.device, dtype=torch.float32)
-        scale_ids = regions.scale_id.to(device=y.device).clamp(0, k_scales - 1)
-        for k in range(k_scales):
-            mask_k = (scale_ids == k)
-            if not mask_k.any():
+        if scale_partitions is None:
+            scale_partitions = partition_regions_by_scale(regions, k_scales, device=y.device)
+        for k, mask_k, boxes_k in scale_partitions:
+            if mask_k is None or boxes_k is None:
                 continue
-            boxes_k = regions.boxes[mask_k]
             residual_k = weighted_residual[:, :, mask_k]
             if solver_mode == "multiplicative":
                 back_k = multiplicative_gated_adjoint(
@@ -446,6 +483,7 @@ def weighted_normalized_adjoint_field(
             w,
             eps=eps,
             scale_routing_weights=scale_routing_weights,
+            scale_partitions=scale_partitions,
         )
 
     field = back / weighted_cov.float().clamp_min(eps)

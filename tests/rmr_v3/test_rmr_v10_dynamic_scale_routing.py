@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from rmr_core.operators import (
     build_multiscale_regions,
+    partition_regions_by_scale,
     weighted_coverage,
     weighted_normalized_adjoint_field,
 )
@@ -268,3 +269,102 @@ def test_one_batch_overfit_dsr_sparse_and_dense():
     assert model.scale_router is not None
     assert model.scale_router.pw.weight.grad is not None
     assert model.scale_router.pw.weight.grad.abs().sum().item() > 0.0
+
+
+def test_partition_regions_by_scale_and_equivalence():
+    """Verify partition_regions_by_scale and numerical equivalence of pre-partitioned operators."""
+    h, w = 48, 64
+    regions = build_multiscale_regions(h, w, 4, (32, 64, 128), 0.5, include_full_image=True, device="cpu")
+    k_scales = 3
+
+    partitions = partition_regions_by_scale(regions, k_scales)
+    assert len(partitions) == k_scales
+
+    # Verify full-image region (-1) was mapped to coarsest scale (k_scales - 1 == 2)
+    full_mask = (regions.scale_id == -1)
+    if full_mask.any():
+        _, coarsest_mask, _ = partitions[2]
+        assert coarsest_mask is not None
+        assert coarsest_mask[full_mask].all()
+
+    # Numerical equivalence test: with and without precomputed scale_partitions
+    pi = torch.softmax(torch.randn(2, k_scales, h, w), dim=1)
+    weights = torch.rand(2, 1, len(regions.boxes)) + 0.5
+    y = torch.rand(2, 1, h, w)
+    b = torch.ones(2, 1, len(regions.boxes))
+
+    cov_on_the_fly = weighted_coverage(weights, regions, h, w, scale_routing_weights=pi)
+    cov_prepartitioned = weighted_coverage(weights, regions, h, w, scale_routing_weights=pi, scale_partitions=partitions)
+    assert torch.allclose(cov_on_the_fly, cov_prepartitioned, atol=1e-7)
+
+    field_on_the_fly = weighted_normalized_adjoint_field(
+        y, b, weights, regions, weighted_cov=cov_on_the_fly, scale_routing_weights=pi
+    )
+    field_prepartitioned = weighted_normalized_adjoint_field(
+        y, b, weights, regions, weighted_cov=cov_prepartitioned, scale_routing_weights=pi, scale_partitions=partitions
+    )
+    assert torch.allclose(field_on_the_fly, field_prepartitioned, atol=1e-7)
+
+
+def test_solver_warmup_short_circuit():
+    """Verify that unrolled_sirt_solver short-circuits with 0 work when solver_strength == 0.0."""
+    y0 = torch.rand(2, 1, 32, 32)
+    regions = build_multiscale_regions(32, 32, 4, (32, 64, 128), 0.5, False, device="cpu")
+    m = len(regions.boxes)
+    b_solver = torch.ones(2, 1, m)
+    weight_solver = torch.ones(2, 1, m)
+    pi = torch.softmax(torch.randn(2, 3, 32, 32), dim=1)
+
+    # When solver_strength == 0.0
+    res = unrolled_sirt_solver(
+        y0=y0,
+        b_solver=b_solver,
+        weight_solver=weight_solver,
+        regions=regions,
+        iterations=6,
+        solver_strength=0.0,
+        scale_routing_weights=pi,
+    )
+
+    # Must be identical to y0
+    assert torch.equal(res["y"], y0)
+    assert len(res["iterates"]) == 1
+    assert len(res["residual_fields"]) == 0
+    assert len(res["energy_trace"]) == 0
+    assert res["effective_omega"] == 0.0
+
+
+def test_scale_router_telemetry_tracker():
+    """Verify DiagnosticTracker logs scale_pi_32, scale_pi_64, scale_pi_128."""
+    from rmr_v3.train import DiagnosticTracker
+
+    cfg = RMRv3Config(dynamic_scale_routing=True, pretrained=False)
+    model = RMRv3(cfg)
+    tracker = DiagnosticTracker(model)
+
+    regions = build_multiscale_regions(32, 32, 4, (32, 64, 128), 0.5, False, device="cpu")
+    m = len(regions.boxes)
+
+    # Synthetic outputs with scale_weights: [2, 3, 32, 32]
+    # scale 0 (32) = 0.6, scale 1 (64) = 0.3, scale 2 (128) = 0.1
+    scale_weights = torch.tensor([0.6, 0.3, 0.1]).view(1, 3, 1, 1).expand(2, 3, 32, 32)
+
+    fake_outputs = {
+        "b_region": torch.ones(2, 1, m),
+        "region_dispersion": torch.full((2, 1, m), 50.0),
+        "region_weight": torch.ones(2, 1, m),
+        "solver_region_weight": torch.ones(2, 1, m),
+        "regions": regions,
+        "scale_weights": scale_weights,
+    }
+
+    tracker.update(fake_outputs)
+    summary = tracker.summarize()
+
+    assert "scale_pi_32" in summary
+    assert "scale_pi_64" in summary
+    assert "scale_pi_128" in summary
+    assert abs(summary["scale_pi_32"] - 0.6) < 1e-4
+    assert abs(summary["scale_pi_64"] - 0.3) < 1e-4
+    assert abs(summary["scale_pi_128"] - 0.1) < 1e-4
+

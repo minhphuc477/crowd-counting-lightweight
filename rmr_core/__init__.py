@@ -42,6 +42,7 @@ from .operators import (
     fractional_region_average_features,
     fractional_region_mean_std_features,
     multiplicative_gated_adjoint,
+    partition_regions_by_scale,
     prefix2d,
     rectangle_sum_from_prefix,
     region_average_features,
@@ -53,6 +54,7 @@ from .operators import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
+from .scale_routing import ScaleRoutingHead
 from .losses import (
     balanced_smooth_l1,
     block_sum_2d,
@@ -113,6 +115,7 @@ __all__ = [
     "fractional_region_average_features",
     "fractional_region_mean_std_features",
     "multiplicative_gated_adjoint",
+    "partition_regions_by_scale",
     "prefix2d",
     "rectangle_sum_from_prefix",
     "region_average_features",
@@ -120,6 +123,7 @@ __all__ = [
     "region_mean_std_features",
     "regional_adjoint",
     "regional_sum",
+    "ScaleRoutingHead",
     "weighted_coverage",
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
