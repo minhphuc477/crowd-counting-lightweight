@@ -79,6 +79,8 @@ ALLOWED_MODEL_KEYS = {
     "tv_eps_c",
     # RMR-v8 Stage 3
     "use_coord_attn",
+    # RMR-v9.1 / AQ-RMR additions
+    "proximal_tau",
 }
 
 ALLOWED_LOSS_KEYS = {

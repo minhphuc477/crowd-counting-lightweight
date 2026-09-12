@@ -139,6 +139,14 @@ class RMRv3Config:
     # Adds 848 parameters. Only valid when neck_type=="aspp_lite".
     use_coord_attn: bool = False
 
+    # ── RMR-v9.1 / AQ-RMR additions ──────────────────────────────────────────
+    # Proximal L1-Soft-Thresholding threshold τ in the SIRT solver loop.
+    # When > 0, applies the exact proximal operator S_τ^+(z) = max(0, z - τ)
+    # after the additive update, introducing a noise deadband [0, τ] that
+    # completely suppresses background mass smearing (phantom count lift)
+    # without creating a zero-absorbing barrier. 0.0 = disabled (default).
+    proximal_tau: float = 0.0
+
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
             raise ValueError(
@@ -818,10 +826,12 @@ class RMRv3(nn.Module):
                 density_gate_floor=float(self.cfg.density_gate_floor),
             )
 
-            y_next = torch.clamp_min(
-                y.float() - effective_omega * field,
-                0.0,
-            )
+            y_step = y.float() - effective_omega * field
+            tau = float(getattr(self.cfg, "proximal_tau", 0.0))
+            if tau > 0.0:
+                y_next = torch.clamp_min(y_step - tau, 0.0)
+            else:
+                y_next = torch.clamp_min(y_step, 0.0)
 
             # ── Stage 2b: TV diffusion step ───────────────────────────────────
             if tv_lambda > 0.0:
