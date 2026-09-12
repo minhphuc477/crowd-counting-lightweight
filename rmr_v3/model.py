@@ -27,6 +27,11 @@ from rmr_core.operators import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
+from .solver import (
+    laplacian_tv_diffusion,
+    proximal_soft_threshold,
+    unrolled_sirt_solver,
+)
 
 
 def _softplus_inverse(y: float) -> float:
@@ -795,97 +800,31 @@ class RMRv3(nn.Module):
                 out["hurdle_logit"] = hurdle_logit
             return out
 
-        cov_w = weighted_coverage(
-            weight_solver,
-            regions,
-            h,
-            w,
+        solver_res = unrolled_sirt_solver(
+            y0=y0,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            iterations=self.cfg.iterations,
+            omega=self.cfg.omega,
+            solver_strength=self.solver_strength if solver_strength is None else solver_strength,
+            residual_clip=self.cfg.residual_clip,
             eps=self.cfg.eps,
+            solver_mode=self.cfg.solver_mode,
+            density_gate_rho=self.cfg.density_gate_rho,
+            density_gate_floor=self.cfg.density_gate_floor,
+            proximal_tau=self.cfg.proximal_tau,
+            tv_lambda=self.cfg.tv_lambda,
+            tv_type=self.cfg.tv_type,
+            tv_eps_c=self.cfg.tv_eps_c,
+            laplace_kernel=self._laplace_kernel,
         )
 
-        strength = float(
-            self.solver_strength
-            if solver_strength is None
-            else min(max(solver_strength, 0.0), 1.0)
-        )
-        effective_omega = float(self.cfg.omega) * strength
-
-        # ── TV diffusion setup ─────────────────────────────────────────────────
-        tv_lambda = float(self.cfg.tv_lambda) * strength
-        tv_type = str(self.cfg.tv_type)
-        tv_eps_c = float(self.cfg.tv_eps_c)
-        solver_mode = str(self.cfg.solver_mode)
-
-        # Proximal L1-shrinkage: scaled by effective step size and distributed across unrolled iterations
-        tau = float(self.cfg.proximal_tau)
-        tau_step = (effective_omega * tau) / max(int(self.cfg.iterations), 1)
-
-        y = y0
-
-        iterates = [y0]
-        residual_fields = []
-        energy_trace = []
-
-        for _ in range(self.cfg.iterations):
-            energy_before = weighted_regional_energy(
-                y,
-                b_solver,
-                weight_solver,
-                regions,
-            )
-
-            # ── Stage 2a: Solver update step ──────────────────────────────────
-            # In multiplicative mode, weighted_normalized_adjoint_field uses
-            # multiplicative_gated_adjoint to suppress background lift at T>=2.
-            field = weighted_normalized_adjoint_field(
-                y,
-                b_solver,
-                weight_solver,
-                regions,
-                weighted_cov=cov_w,
-                residual_clip=self.cfg.residual_clip,
-                eps=self.cfg.eps,
-                solver_mode=solver_mode,
-                density_gate_rho=float(self.cfg.density_gate_rho),
-                density_gate_floor=float(self.cfg.density_gate_floor),
-            )
-
-            y_step = y.float() - effective_omega * field
-            if tau_step > 0.0:
-                y_next = torch.clamp_min(y_step - tau_step, 0.0)
-            else:
-                y_next = torch.clamp_min(y_step, 0.0)
-
-            # ── Stage 2b: TV diffusion step ───────────────────────────────────
-            if tv_lambda > 0.0:
-                if tv_type == "charbonnier":
-                    # Anisotropic Charbonnier TV: edge-preserving diffusion.
-                    # Suppresses noise in flat regions while preserving crowd edges.
-                    y_next = charbonnier_tv_step(y_next, tv_lambda, tv_eps_c)
-                else:
-                    # Isotropic Laplacian TV (v7 default — backward compatible)
-                    lap = F.conv2d(y_next, self._laplace_kernel.to(y_next.dtype), padding=1)
-                    y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
-
-            y_next = y_next.to(y.dtype)
-
-            energy_after = weighted_regional_energy(
-                y_next,
-                b_solver,
-                weight_solver,
-                regions,
-            )
-
-            energy_trace.append(
-                {
-                    "before": energy_before,
-                    "after": energy_after,
-                }
-            )
-
-            residual_fields.append(field)
-            iterates.append(y_next)
-            y = y_next
+        y = solver_res["y"]
+        iterates = solver_res["iterates"]
+        residual_fields = solver_res["residual_fields"]
+        energy_trace = solver_res["energy_trace"]
+        strength = solver_res["effective_omega"] / max(self.cfg.omega, 1e-8)
 
         out = {
             "y": y,

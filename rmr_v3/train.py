@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import copy
+from contextlib import contextmanager
 import csv
 import json
 import math
-import os
-import random
-import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 # Windows stdout encoding safety
 if hasattr(sys.stdout, "reconfigure"):
@@ -25,6 +23,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import numpy as np
 import torch
+import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 
@@ -35,19 +34,16 @@ from rmr_core.data import (
     compute_manifest_density,
 )
 from rmr_core.evaluation import evaluate_dataset
-from rmr_core.metrics import game_physical_image, game_single, summarize_predictions
 from rmr_core.training import (
     build_checkpoint,
     get_git_info,
     load_rng_state,
     make_scheduler,
     safe_torch_save,
-    save_rng_state,
     seed_everything,
 )
 
 from .config import compute_config_hash, validate_resume_compatibility, validate_v3_config
-
 from .diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
@@ -55,13 +51,285 @@ from .diagnostics import (
     compute_solver_trajectory_diagnostics,
     compute_uncertainty_calibration_bins,
     regional_reliability_rows,
-    summarize_diagnostics,
 )
 from .kd import DensityMapKDLoss
 from .losses import RMRv3LossConfig, compute_rmr_v3_losses
 from .model import RMRv3, RMRv3Config
 
 
+TRAIN_LOG_FIELDNAMES: list[str] = [
+    "epoch", "lr_backbone", "lr_main", "solver_strength",
+    "train_total", "train_count", "train_flat_dm16", "train_allocation",
+    "train_dm16", "train_dm32", "train_dm64",
+    "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
+    "train_kd_total", "train_kd_spatial", "train_kd_count",
+    "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
+    "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
+    "solver_weight_mean", "solver_weight_std",
+    "weight_clip_low_fraction", "weight_clip_high_fraction",
+    "solver_energy_before", "solver_energy_after", "solver_energy_reduction",
+    "weight_mean_32", "weight_mean_64", "weight_mean_128",
+    "val_mae", "val_rmse", "val_nae", "val_bias",
+    "val_game0", "val_game1", "val_game2", "val_game3",
+    "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
+    "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
+    "spearman_pred_weight_error",
+    "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
+    "mean_std_residual",
+    "coverage_50", "coverage_80", "coverage_95",
+    "calib_gap_50", "calib_gap_80", "calib_gap_95",
+    "dispersion_sat_low_fraction", "dispersion_sat_high_fraction",
+    "solver_help_fraction", "solver_harm_fraction", "energy_monotonic_fraction",
+    "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
+]
+
+
+class LossTracker:
+    """Tracks and averages multi-task training loss components across mini-batches."""
+
+    def __init__(self) -> None:
+        self.totals: dict[str, float] = {}
+        self.count: int = 0
+
+    def update(self, loss_dict: dict[str, Any]) -> None:
+        self.count += 1
+        for k, v in loss_dict.items():
+            if isinstance(v, torch.Tensor):
+                val = float(v.item())
+            elif isinstance(v, (float, int)):
+                val = float(v)
+            else:
+                continue
+            self.totals[k] = self.totals.get(k, 0.0) + val
+
+    def averages(self) -> dict[str, float]:
+        c = max(self.count, 1)
+        return {k: v / c for k, v in self.totals.items()}
+
+
+class DiagnosticTracker:
+    """Collects and computes batch-level regional statistics and solver energy traces."""
+
+    def __init__(self, model: RMRv3) -> None:
+        self.model = model
+        self.mu_means: list[float] = []
+        self.disp_means: list[float] = []
+        self.all_disps: list[torch.Tensor] = []
+        self.all_pred_weights: list[torch.Tensor] = []
+        self.all_solver_weights: list[torch.Tensor] = []
+        self.e_befores: list[float] = []
+        self.e_afters: list[float] = []
+        self.w_scale_32: list[float] = []
+        self.w_scale_64: list[float] = []
+        self.w_scale_128: list[float] = []
+
+    @torch.no_grad()
+    def update(self, outputs: dict[str, Any]) -> None:
+        self.mu_means.append(float(outputs["b_region"].mean().item()))
+        self.disp_means.append(float(outputs["region_dispersion"].mean().item()))
+        self.all_disps.append(outputs["region_dispersion"].detach().cpu().float().flatten())
+        self.all_pred_weights.append(outputs["region_weight"].detach().cpu().float().flatten())
+        self.all_solver_weights.append(outputs["solver_region_weight"].detach().cpu().float().flatten())
+
+        et = outputs.get("energy_trace", [])
+        if et:
+            self.e_befores.append(float(et[0]["before"].mean().item()))
+            self.e_afters.append(float(et[-1]["after"].mean().item()))
+
+        regions = outputs["regions"]
+        w = outputs["solver_region_weight"]
+        m32 = regions.scale_id == 0
+        m64 = regions.scale_id == 1
+        m128 = regions.scale_id == 2
+        if m32.any():
+            self.w_scale_32.append(float(w[..., m32].mean().item()))
+        if m64.any():
+            self.w_scale_64.append(float(w[..., m64].mean().item()))
+        if m128.any():
+            self.w_scale_128.append(float(w[..., m128].mean().item()))
+
+    def summarize(self) -> dict[str, float]:
+        disps_np = torch.cat(self.all_disps).cpu().numpy() if self.all_disps else np.array([50.0])
+        pred_weights_np = torch.cat(self.all_pred_weights).cpu().numpy() if self.all_pred_weights else np.array([1.0])
+        solver_weights_np = torch.cat(self.all_solver_weights).cpu().numpy() if self.all_solver_weights else np.array([1.0])
+
+        e_b = float(np.mean(self.e_befores)) if self.e_befores else 0.0
+        e_a = float(np.mean(self.e_afters)) if self.e_afters else 0.0
+        e_red = (e_b - e_a) / max(e_b, 1e-8)
+
+        w_min_val = self.model.cfg.reliability_weight_min
+        w_max_val = self.model.cfg.reliability_weight_max
+        w_low_frac = float(np.mean(pred_weights_np <= w_min_val + 1e-4))
+        w_high_frac = float(np.mean(pred_weights_np >= w_max_val - 1e-4))
+
+        return {
+            "region_mu_mean": float(np.mean(self.mu_means)) if self.mu_means else 0.0,
+            "region_dispersion_mean": float(np.mean(self.disp_means)) if self.disp_means else 50.0,
+            "region_dispersion_p10": float(np.percentile(disps_np, 10)),
+            "region_dispersion_p50": float(np.percentile(disps_np, 50)),
+            "region_dispersion_p90": float(np.percentile(disps_np, 90)),
+            "region_weight_mean": float(np.mean(pred_weights_np)),
+            "region_weight_std": float(np.std(pred_weights_np)),
+            "region_weight_min": float(np.min(pred_weights_np)),
+            "region_weight_max": float(np.max(pred_weights_np)),
+            "solver_weight_mean": float(np.mean(solver_weights_np)),
+            "solver_weight_std": float(np.std(solver_weights_np)),
+            "weight_clip_low_fraction": w_low_frac,
+            "weight_clip_high_fraction": w_high_frac,
+            "solver_energy_before": e_b,
+            "solver_energy_after": e_a,
+            "solver_energy_reduction": e_red,
+            "weight_mean_32": float(np.mean(self.w_scale_32)) if self.w_scale_32 else 1.0,
+            "weight_mean_64": float(np.mean(self.w_scale_64)) if self.w_scale_64 else 1.0,
+            "weight_mean_128": float(np.mean(self.w_scale_128)) if self.w_scale_128 else 1.0,
+        }
+
+
+class EMAManager:
+    """Maintains on-device float32 shadow parameters with swap context management."""
+
+    def __init__(self, model: RMRv3, decay: float = 0.999) -> None:
+        self.decay = float(decay)
+        self.state: dict[str, torch.Tensor] = {}
+        if self.decay > 0.0:
+            for name, p in model.named_parameters():
+                self.state[name] = p.detach().clone().float()
+            for name, b in model.named_buffers():
+                self.state[name] = b.detach().clone().float()
+
+    @torch.no_grad()
+    def update(self, model: RMRv3) -> None:
+        if not self.state or self.decay <= 0.0:
+            return
+        d = self.decay
+        for name, param in model.named_parameters():
+            if name in self.state:
+                self.state[name].mul_(d).add_(param.detach().float(), alpha=1.0 - d)
+        for name, buf in model.named_buffers():
+            if name in self.state:
+                self.state[name].copy_(buf.float())
+
+    def restore(self, ckpt: dict[str, Any]) -> bool:
+        if not self.state or "ema_model" not in ckpt:
+            return False
+        ema_sd = ckpt["ema_model"]
+        for k in self.state:
+            if k in ema_sd:
+                self.state[k].copy_(ema_sd[k].to(device=self.state[k].device).float())
+        return True
+
+    @contextmanager
+    def swap_into(self, model: RMRv3, device: torch.device):
+        """Temporarily swap EMA shadow weights into the model for evaluation."""
+        if not self.state or self.decay <= 0.0:
+            yield
+            return
+        live_backup = {k: v.clone() for k, v in model.state_dict().items()}
+        try:
+            model.load_state_dict(
+                {k: self.state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in self.state}
+            )
+            yield
+        finally:
+            model.load_state_dict(live_backup)
+
+
+class CheckpointManager:
+    """Encapsulates checkpoint saving (last.pt, best.pt) and early stopping."""
+
+    def __init__(
+        self,
+        out_dir: Path,
+        cfg: dict[str, Any],
+        config_hash: str,
+        patience: int = 0,
+        solver_warmup_epochs: int = 5,
+        solver_ramp_epochs: int = 20,
+        best_mae: float = float("inf"),
+        epochs_without_improvement: int = 0,
+    ) -> None:
+        self.out_dir = out_dir
+        self.cfg = cfg
+        self.config_hash = config_hash
+        self.patience = patience
+        self.solver_warmup_epochs = solver_warmup_epochs
+        self.solver_ramp_epochs = solver_ramp_epochs
+        self.best_mae = best_mae
+        self.epochs_without_improvement = epochs_without_improvement
+
+    def save_last(
+        self,
+        epoch: int,
+        model: RMRv3,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Any,
+        scaler: torch.amp.GradScaler,
+        solver_strength: float,
+        ema_manager: EMAManager,
+    ) -> None:
+        ckpt = build_checkpoint(
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            config=self.cfg,
+            config_hash=self.config_hash,
+            best_mae=self.best_mae,
+            epochs_without_improvement=self.epochs_without_improvement if self.patience > 0 else 0,
+            solver_strength=solver_strength,
+            ema_state=ema_manager.state if ema_manager.state else None,
+        )
+        safe_torch_save(ckpt, self.out_dir / "last.pt")
+
+    def evaluate_and_save_best(
+        self,
+        epoch: int,
+        cur_mae: float,
+        val_metrics: dict[str, Any],
+        model: RMRv3,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Any,
+        scaler: torch.amp.GradScaler,
+        solver_strength: float,
+        ema_manager: EMAManager,
+        eval_every: int,
+    ) -> tuple[bool, str]:
+        solver_enabled = getattr(model.cfg, "enable_solver", True)
+        solver_engaged = (not solver_enabled) or (
+            solver_strength >= 1.0 or epoch >= self.solver_warmup_epochs + self.solver_ramp_epochs
+        )
+        is_best = (cur_mae < self.best_mae) and solver_engaged
+
+        if is_best:
+            self.best_mae = cur_mae
+            self.epochs_without_improvement = 0
+            ckpt = build_checkpoint(
+                epoch=epoch,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                config=self.cfg,
+                config_hash=self.config_hash,
+                best_mae=self.best_mae,
+                epochs_without_improvement=self.epochs_without_improvement,
+                solver_strength=solver_strength,
+                ema_state=ema_manager.state if ema_manager.state else None,
+            )
+            safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
+            (self.out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
+            (self.out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
+            return True, " >>> [NEW BEST CHECKPOINT SAVED] <<<"
+        else:
+            if solver_engaged and self.patience > 0:
+                self.epochs_without_improvement += eval_every
+            tag = f" (Solver ramping: epoch {epoch}/{self.solver_warmup_epochs + self.solver_ramp_epochs})" if not solver_engaged else ""
+            return False, tag
+
+    @property
+    def should_stop_early(self) -> bool:
+        return self.patience > 0 and self.epochs_without_improvement >= self.patience
 
 
 def make_model(cfg: dict) -> tuple[RMRv3, bool]:
@@ -114,9 +382,7 @@ def evaluate_v3(
     summary.update(corrs)
 
     calib = compute_uncertainty_calibration_bins(all_diag_rows)
-    summary["mean_std_residual"] = calib["mean_std_residual"]
-    summary["p50_std_residual"] = calib["p50_std_residual"]
-    summary["p90_std_residual"] = calib["p90_std_residual"]
+    summary["calibration"] = calib
 
     disp_min = float(getattr(model.cfg, "dispersion_min", 0.5))
     disp_max = float(getattr(model.cfg, "dispersion_max", 500.0))
@@ -237,6 +503,63 @@ def format_dynamic_training_banner(
     return "\n".join(banner)
 
 
+def train_one_epoch(
+    model: RMRv3,
+    train_loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: torch.amp.GradScaler,
+    loss_cfg: RMRv3LossConfig,
+    device: torch.device,
+    amp: bool,
+    grad_clip: float,
+    uniform_reliability: bool,
+    solver_strength: float,
+    ema_manager: EMAManager,
+    teacher_model: Any = None,
+    kd_loss_fn: Any = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
+    model.train()
+    loss_tracker = LossTracker()
+    diag_tracker = DiagnosticTracker(model)
+
+    for batch in train_loader:
+        images = batch["image"].to(device)
+        targets = batch["target_y"].to(device)
+
+        optimizer.zero_grad(set_to_none=True)
+
+        with torch.amp.autocast("cuda", enabled=amp):
+            outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
+            losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
+            loss = losses["total"]
+
+            if teacher_model is not None and kd_loss_fn is not None:
+                with torch.no_grad():
+                    t_out = teacher_model(images)
+                    t_y = t_out["y"] if isinstance(t_out, dict) else t_out
+                kd_res = kd_loss_fn(outputs["y0"], t_y)
+                loss = loss + kd_res["total_kd"]
+                losses["kd_total"] = kd_res["total_kd"]
+                losses["kd_spatial"] = kd_res["spatial_kl"]
+                losses["kd_count"] = kd_res["count_kd"]
+
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        scaler.step(optimizer)
+        scaler.update()
+
+        ema_manager.update(model)
+
+        loss_tracker.update(losses)
+        diag_tracker.update(outputs)
+
+    scheduler.step()
+    return loss_tracker.averages(), diag_tracker.summarize()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train RMR-v3 (RW-RMR)")
     ap.add_argument("--config", required=True, help="Path to config YAML")
@@ -351,11 +674,10 @@ def main() -> None:
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", False))
     train_loader = DataLoader(
         train_ds,
-        batch_size=cfg.get("train", {}).get("batch_size", 8),
+        batch_size=int(cfg.get("train", {}).get("batch_size", 8)),
         shuffle=True,
         num_workers=workers,
         pin_memory=pin_mem,
-        persistent_workers=(workers > 0),
         collate_fn=collate_train,
         drop_last=True,
     )
@@ -371,35 +693,35 @@ def main() -> None:
     model, uniform_reliability = make_model(cfg)
     model.to(device)
 
-    # EMA shadow model (RMR-v7+): maintains a smoothed copy of weights to avoid
-    # best-epoch overfitting caused by training noise late in training.
-    ema_decay = float(cfg.get("model", {}).get("ema_decay", cfg.get("train", {}).get("ema_decay", 0.0)))
-    ema_state: dict | None = None
-    if ema_decay > 0.0:
-        ema_state = copy.deepcopy(model.state_dict())
-        # Convert to float32 on the active device for stable accumulation
-        for k in ema_state:
-            ema_state[k] = ema_state[k].float()
+    # EMA Tracking setup
+    ema_decay = float(cfg.get("train", {}).get("ema_decay", cfg.get("model", {}).get("ema_decay", 0.0)))
+    ema_manager = EMAManager(model, decay=ema_decay)
+    if ema_manager.state:
         print(f"EMA enabled: decay={ema_decay:.4f}")
 
-    # Stage 3: Teacher model for Knowledge Distillation (optional)
+    # Teacher model for Stage 3 KD
     teacher_model = None
     kd_loss_fn = None
     teacher_ckpt_path = args.teacher_ckpt or cfg.get("train", {}).get("teacher_ckpt")
     if teacher_ckpt_path:
         tp = Path(teacher_ckpt_path)
-        if tp.is_file():
-            print(f"[Stage 3 KD] Loading teacher checkpoint: {tp}")
+        if tp.exists():
             try:
-                from .eval import load_model_from_ckpt
-                teacher_model, _, _, _ = load_model_from_ckpt(tp, device, use_ema=True)
-                teacher_model = teacher_model.to(device).eval()
+                try:
+                    t_ckpt = torch.load(tp, map_location="cpu", weights_only=False)
+                except TypeError:
+                    t_ckpt = torch.load(tp, map_location="cpu")
+                t_cfg = t_ckpt.get("config", {})
+                teacher_model, _ = make_model(t_cfg)
+                teacher_model.load_state_dict(t_ckpt["model"])
+                teacher_model.switch_to_deploy()
+                teacher_model.to(device).eval()
                 for p in teacher_model.parameters():
                     p.requires_grad = False
                 kd_loss_fn = DensityMapKDLoss(
-                    lambda_spatial_kl=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
-                    lambda_count_kd=float(cfg.get("loss", {}).get("lambda_kd_count", 0.5)),
-                ).to(device)
+                    lambda_spatial=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
+                    lambda_count=float(cfg.get("loss", {}).get("lambda_kd_count", 0.1)),
+                )
                 print(f"[Stage 3 KD] Teacher loaded and frozen successfully.")
             except Exception as e:
                 print(f"[Stage 3 KD Warning] Failed to load teacher from {tp}: {e}. Proceeding without KD.")
@@ -409,7 +731,6 @@ def main() -> None:
     epochs = int(cfg.get("train", {}).get("epochs", 1000))
     lr_init = float(cfg.get("train", {}).get("lr", 1e-4))
     bs = int(cfg.get("train", {}).get("batch_size", 8))
-
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     print(
@@ -449,40 +770,13 @@ def main() -> None:
     grad_clip = float(cfg.get("train", {}).get("grad_clip", 500.0))
     eval_every = int(cfg.get("train", {}).get("eval_every", 10))
     density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
+    patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
 
     solver_warmup_epochs = int(cfg.get("train", {}).get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 20))
 
-    log_csv = out_dir / "train_log.csv"
-    fieldnames = [
-        "epoch", "lr_backbone", "lr_main", "solver_strength",
-        "train_total", "train_count", "train_flat_dm16", "train_allocation",
-        "train_dm16", "train_dm32", "train_dm64",
-        "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
-        "train_kd_total", "train_kd_spatial", "train_kd_count",
-        "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
-        "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
-        "solver_weight_mean", "solver_weight_std",
-        "weight_clip_low_fraction", "weight_clip_high_fraction",
-        "solver_energy_before", "solver_energy_after", "solver_energy_reduction",
-        "weight_mean_32", "weight_mean_64", "weight_mean_128",
-        "val_mae", "val_rmse", "val_nae", "val_bias",
-        "val_game0", "val_game1", "val_game2", "val_game3",
-        "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
-        "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
-        "spearman_pred_weight_error",
-        "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
-        "mean_std_residual",
-        "coverage_50", "coverage_80", "coverage_95",
-        "calib_gap_50", "calib_gap_80", "calib_gap_95",
-        "dispersion_sat_low_fraction", "dispersion_sat_high_fraction",
-        "solver_help_fraction", "solver_harm_fraction", "energy_monotonic_fraction",
-        "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
-    ]
-
     start_epoch = 0
     best_mae = float("inf")
-    patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
     epochs_without_improvement = 0
 
     if resume_ckpt is not None:
@@ -497,24 +791,28 @@ def main() -> None:
         if "rng_state" in ckpt:
             load_rng_state(ckpt["rng_state"], strict=deterministic)
             print("Restored exact RNG states (random, numpy, torch, cuda)")
-        # Restore EMA shadow state from checkpoint so it isn't reset on resume.
-        # Without this, resuming would restart EMA accumulation from scratch,
-        # losing all progress and producing warm-EMA bias for many epochs.
-        if ema_state is not None and "ema_model" in ckpt:
-            ema_sd = ckpt["ema_model"]
-            for k in ema_state:
-                if k in ema_sd:
-                    ema_state[k].copy_(ema_sd[k].to(device=ema_state[k].device).float())
-            print(f"Restored EMA shadow state from checkpoint ({len(ema_sd)} tensors).")
-        # Exactly resume at the next epoch index
+        if ema_manager.restore(ckpt):
+            print(f"Restored EMA shadow state from checkpoint ({len(ema_manager.state)} tensors).")
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
         epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0)) if patience > 0 else 0
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
 
+    ckpt_manager = CheckpointManager(
+        out_dir=out_dir,
+        cfg=cfg,
+        config_hash=run_config_hash,
+        patience=patience,
+        solver_warmup_epochs=solver_warmup_epochs,
+        solver_ramp_epochs=solver_ramp_epochs,
+        best_mae=best_mae,
+        epochs_without_improvement=epochs_without_improvement,
+    )
+
+    log_csv = out_dir / "train_log.csv"
     if not log_csv.exists() or start_epoch == 0:
         with open(log_csv, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(f, fieldnames=TRAIN_LOG_FIELDNAMES, extrasaction="ignore")
             writer.writeheader()
     else:
         try:
@@ -522,230 +820,74 @@ def main() -> None:
                 reader = csv.DictReader(f)
                 rows_to_keep = [r for r in reader if int(r.get("epoch", 0)) <= start_epoch]
             with open(log_csv, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                writer = csv.DictWriter(f, fieldnames=TRAIN_LOG_FIELDNAMES, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(rows_to_keep)
         except Exception as e:
             print(f"Warning: could not filter train_log.csv on resume ({e}), proceeding with append.")
 
     for epoch in range(start_epoch, epochs):
-        # Solver warmup and ramp protocol:
-        # - epoch 0..solver_warmup_epochs-1: solver_strength = 0
-        # - epoch solver_warmup_epochs..solver_warmup_epochs+solver_ramp_epochs-1: linear ramp 0->1
-        # - epoch >= solver_warmup_epochs+solver_ramp_epochs: full solver strength 1.0
         if epoch < solver_warmup_epochs:
             solver_strength = 0.0
         else:
             solver_strength = min(1.0, float(epoch - solver_warmup_epochs + 1) / max(1.0, float(solver_ramp_epochs)))
         model.set_solver_strength(solver_strength)
 
-        model.train()
-        total_loss_accum = 0.0
-        count_loss_accum = 0.0
-        alloc_loss_accum = 0.0
-        dm16_loss_accum = 0.0
-        dm32_loss_accum = 0.0
-        dm64_loss_accum = 0.0
-        cell_loss_accum = 0.0
-        reg_nb_loss_accum = 0.0
-        hurdle_loss_accum = 0.0
-        trunc_nb_loss_accum = 0.0
-        kd_total_accum = 0.0
-        kd_spatial_accum = 0.0
-        kd_count_accum = 0.0
-
-        mu_means = []
-        disp_means = []
-        all_disps = []
-        all_pred_weights = []
-        all_solver_weights = []
-        e_befores = []
-        e_afters = []
-
-        w_scale_32 = []
-        w_scale_64 = []
-        w_scale_128 = []
-
         cur_lr_bb = optimizer.param_groups[0]["lr"]
         cur_lr_main = optimizer.param_groups[1]["lr"]
 
-        for batch in train_loader:
-            # Correct collate_train keys: "image" and "target_y"
-            images = batch["image"].to(device)
-            targets = batch["target_y"].to(device)
+        loss_avgs, diag_summary = train_one_epoch(
+            model=model,
+            train_loader=train_loader,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            loss_cfg=loss_cfg,
+            device=device,
+            amp=amp,
+            grad_clip=grad_clip,
+            uniform_reliability=uniform_reliability,
+            solver_strength=solver_strength,
+            ema_manager=ema_manager,
+            teacher_model=teacher_model,
+            kd_loss_fn=kd_loss_fn,
+        )
 
-            optimizer.zero_grad(set_to_none=True)
+        train_allocation = loss_avgs.get("allocation", 0.0)
+        train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
 
-            with torch.amp.autocast("cuda", enabled=amp):
-                outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
-                losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
-                loss = losses["total"]
-
-                if teacher_model is not None and kd_loss_fn is not None:
-                    with torch.no_grad():
-                        t_out = teacher_model(images)
-                        t_y = t_out["y"] if isinstance(t_out, dict) else t_out
-                    kd_res = kd_loss_fn(outputs["y0"], t_y)
-                    loss = loss + kd_res["total_kd"]
-                    kd_total_accum += float(kd_res["total_kd"].item())
-                    kd_spatial_accum += float(kd_res["spatial_kl"].item())
-                    kd_count_accum += float(kd_res["count_kd"].item())
-
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            scaler.step(optimizer)
-            scaler.update()
-
-            # EMA weight update (RMR-v7+): runs entirely on device in float32.
-            # Avoids CPU-host sync overhead and fixes device-mismatch crash on CUDA.
-            if ema_state is not None:
-                with torch.no_grad():
-                    for name, param in model.named_parameters():
-                        if name in ema_state:
-                            ema_state[name].mul_(ema_decay).add_(
-                                param.detach().float(), alpha=1.0 - ema_decay
-                            )
-                    for name, buf in model.named_buffers():
-                        if name in ema_state:
-                            ema_state[name].copy_(buf.float())
-
-            total_loss_accum += float(loss.item())
-            count_loss_accum += float(losses["count"].item())
-            alloc_loss_accum += float(losses["allocation"].item())
-            if "dm_16" in losses:
-                dm16_loss_accum += float(losses["dm_16"].item())
-            elif "dm_32" not in losses and "dm_64" not in losses:
-                # flat_dm16 alias: allocation == dm16 for this path
-                dm16_loss_accum += float(losses["allocation"].item())
-            if "dm_32" in losses:
-                dm32_loss_accum += float(losses["dm_32"].item())
-            if "dm_64" in losses:
-                dm64_loss_accum += float(losses["dm_64"].item())
-            cell_loss_accum += float(losses["cell"].item())
-            reg_nb_loss_accum += float(losses["region_nb"].item())
-            if "hurdle_bce" in losses:
-                hurdle_loss_accum += float(losses["hurdle_bce"].item())
-            if "trunc_nb" in losses:
-                trunc_nb_loss_accum += float(losses["trunc_nb"].item())
-
-
-            # Log tensors
-            with torch.no_grad():
-                mu_means.append(float(outputs["b_region"].mean().item()))
-                disp_means.append(float(outputs["region_dispersion"].mean().item()))
-                all_disps.append(outputs["region_dispersion"].detach().cpu().float().flatten())
-                all_pred_weights.append(outputs["region_weight"].detach().cpu().float().flatten())
-                all_solver_weights.append(outputs["solver_region_weight"].detach().cpu().float().flatten())
-
-                et = outputs.get("energy_trace", [])
-                if et:
-                    e_befores.append(float(et[0]["before"].mean().item()))
-                    e_afters.append(float(et[-1]["after"].mean().item()))
-
-                regions = outputs["regions"]
-                w = outputs["solver_region_weight"]
-                m32 = regions.scale_id == 0
-                m64 = regions.scale_id == 1
-                m128 = regions.scale_id == 2
-                if m32.any():
-                    w_scale_32.append(float(w[..., m32].mean().item()))
-                if m64.any():
-                    w_scale_64.append(float(w[..., m64].mean().item()))
-                if m128.any():
-                    w_scale_128.append(float(w[..., m128].mean().item()))
-
-        scheduler.step()
-        # Explicitly free batch references from the final iteration before eval/logging
-        try:
-            del images, targets, outputs, losses
-        except NameError:
-            pass
-
-        num_batches = max(1, len(train_loader))
-        train_total = total_loss_accum / num_batches
-        train_count = count_loss_accum / num_batches
-        train_allocation = alloc_loss_accum / num_batches
-        train_dm16 = dm16_loss_accum / num_batches
-        train_dm32 = dm32_loss_accum / num_batches
-        train_dm64 = dm64_loss_accum / num_batches
-        train_cell = cell_loss_accum / num_batches
-        train_region_nb = reg_nb_loss_accum / num_batches
-
-        disps_np = torch.cat(all_disps).cpu().numpy() if all_disps else np.array([50.0])
-        pred_weights_np = torch.cat(all_pred_weights).cpu().numpy() if all_pred_weights else np.array([1.0])
-        solver_weights_np = torch.cat(all_solver_weights).cpu().numpy() if all_solver_weights else np.array([1.0])
-
-        e_b = float(np.mean(e_befores)) if e_befores else 0.0
-        e_a = float(np.mean(e_afters)) if e_afters else 0.0
-        e_red = (e_b - e_a) / max(e_b, 1e-8)
-
-        w_min_val = model.cfg.reliability_weight_min
-        w_max_val = model.cfg.reliability_weight_max
-        w_low_frac = float(np.mean(pred_weights_np <= w_min_val + 1e-4))
-        w_high_frac = float(np.mean(pred_weights_np >= w_max_val - 1e-4))
-
-        row_log = {
+        row_log: dict[str, Any] = {
             "epoch": epoch + 1,
             "lr_backbone": cur_lr_bb,
             "lr_main": cur_lr_main,
             "solver_strength": solver_strength,
-            "train_total": train_total,
-            "train_count": train_count,
-            "train_flat_dm16": train_allocation,  # backward compatibility alias
+            "train_total": loss_avgs.get("total", 0.0),
+            "train_count": loss_avgs.get("count", 0.0),
+            "train_flat_dm16": train_allocation,
             "train_allocation": train_allocation,
             "train_dm16": train_dm16,
-            "train_dm32": train_dm32,
-            "train_dm64": train_dm64,
-            "train_cell": train_cell,
-            "train_region_nb": train_region_nb,
-            "train_hurdle_bce": hurdle_loss_accum / num_batches if hurdle_loss_accum > 0 else 0.0,
-            "train_trunc_nb": trunc_nb_loss_accum / num_batches if trunc_nb_loss_accum > 0 else 0.0,
-            "train_kd_total": kd_total_accum / num_batches if teacher_model is not None else 0.0,
-            "train_kd_spatial": kd_spatial_accum / num_batches if teacher_model is not None else 0.0,
-            "train_kd_count": kd_count_accum / num_batches if teacher_model is not None else 0.0,
-            "region_mu_mean": float(np.mean(mu_means)) if mu_means else 0.0,
-            "region_dispersion_mean": float(np.mean(disp_means)) if disp_means else 50.0,
-            "region_dispersion_p10": float(np.percentile(disps_np, 10)),
-            "region_dispersion_p50": float(np.percentile(disps_np, 50)),
-            "region_dispersion_p90": float(np.percentile(disps_np, 90)),
-            "region_weight_mean": float(np.mean(pred_weights_np)),
-            "region_weight_std": float(np.std(pred_weights_np)),
-            "region_weight_min": float(np.min(pred_weights_np)),
-            "region_weight_max": float(np.max(pred_weights_np)),
-            "solver_weight_mean": float(np.mean(solver_weights_np)),
-            "solver_weight_std": float(np.std(solver_weights_np)),
-            "weight_clip_low_fraction": w_low_frac,
-            "weight_clip_high_fraction": w_high_frac,
-            "solver_energy_before": e_b,
-            "solver_energy_after": e_a,
-            "solver_energy_reduction": e_red,
-            "weight_mean_32": float(np.mean(w_scale_32)) if w_scale_32 else 1.0,
-            "weight_mean_64": float(np.mean(w_scale_64)) if w_scale_64 else 1.0,
-            "weight_mean_128": float(np.mean(w_scale_128)) if w_scale_128 else 1.0,
+            "train_dm32": loss_avgs.get("dm_32", 0.0),
+            "train_dm64": loss_avgs.get("dm_64", 0.0),
+            "train_cell": loss_avgs.get("cell", 0.0),
+            "train_region_nb": loss_avgs.get("region_nb", 0.0),
+            "train_hurdle_bce": loss_avgs.get("hurdle_bce", 0.0),
+            "train_trunc_nb": loss_avgs.get("trunc_nb", 0.0),
+            "train_kd_total": loss_avgs.get("kd_total", 0.0),
+            "train_kd_spatial": loss_avgs.get("kd_spatial", 0.0),
+            "train_kd_count": loss_avgs.get("kd_count", 0.0),
+            **diag_summary,
         }
 
         # Periodic evaluation
         is_eval_epoch = (epoch + 1) % eval_every == 0 or (epoch + 1) == epochs
         if is_eval_epoch and val_loader is not None:
-            # If EMA is active, temporarily evaluate with EMA weights (what eval.py will use)
-            if ema_state is not None:
-                live_backup = {k: v.clone() for k, v in model.state_dict().items()}
-                try:
-                    model.load_state_dict({k: ema_state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in ema_state})
-                    val_metrics = evaluate_v3(
-                        model, val_loader, device,
-                        uniform_reliability=uniform_reliability,
-                        density_bins=density_bins,
-                    )
-                finally:
-                    model.load_state_dict(live_backup)
-            else:
+            with ema_manager.swap_into(model, device):
                 val_metrics = evaluate_v3(
                     model, val_loader, device,
                     uniform_reliability=uniform_reliability,
                     density_bins=density_bins,
                 )
+
             row_log.update({
                 "val_mae": float(val_metrics["MAE"]),
                 "val_rmse": float(val_metrics["RMSE"]),
@@ -783,42 +925,18 @@ def main() -> None:
             })
 
             cur_mae = float(val_metrics["MAE"])
-            solver_enabled = getattr(model.cfg, "enable_solver", True)
-            solver_engaged = (not solver_enabled) or (solver_strength >= 1.0 or epoch + 1 >= solver_warmup_epochs + solver_ramp_epochs)
-            # Guard: only update best_mae after solver ramp has fully engaged (or always if solver is disabled)
-            is_best = (cur_mae < best_mae) and solver_engaged
-            if is_best:
-                best_mae = cur_mae
-                epochs_without_improvement = 0
-
-                # Build checkpoint: store both live weights and EMA weights
-                ckpt_data = build_checkpoint(
-                    epoch=epoch + 1,
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    scaler=scaler,
-                    config=cfg,
-                    config_hash=run_config_hash,
-                    best_mae=best_mae,
-                    epochs_without_improvement=epochs_without_improvement,
-                    solver_strength=solver_strength,
-                    ema_state=ema_state,
-                )
-
-                safe_torch_save(ckpt_data, out_dir / "best_val_mae.pt")
-                (out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
-                (out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
-
-            else:
-                if solver_engaged and patience > 0:
-                    epochs_without_improvement += eval_every
-
-            status_tag = ""
-            if is_best:
-                status_tag = " >>> [NEW BEST CHECKPOINT SAVED] <<<"
-            elif not solver_engaged:
-                status_tag = f" (Solver ramping: epoch {epoch+1}/{solver_warmup_epochs + solver_ramp_epochs})"
+            is_best, status_tag = ckpt_manager.evaluate_and_save_best(
+                epoch=epoch + 1,
+                cur_mae=cur_mae,
+                val_metrics=val_metrics,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                solver_strength=solver_strength,
+                ema_manager=ema_manager,
+                eval_every=eval_every,
+            )
 
             sparse_s = f"Sparse(<=100): {val_metrics.get('mae_sparse', 0.0):.2f}" if "mae_sparse" in val_metrics else ""
             mod_s = f"Mod(101-500): {val_metrics.get('mae_moderate', 0.0):.2f}" if "mae_moderate" in val_metrics else ""
@@ -828,11 +946,10 @@ def main() -> None:
             cov_50 = f"{val_metrics.get('coverage_50', 0.0)*100:.1f}%" if "coverage_50" in val_metrics else "N/A"
             cov_80 = f"{val_metrics.get('coverage_80', 0.0)*100:.1f}%" if "coverage_80" in val_metrics else "N/A"
             cov_95 = f"{val_metrics.get('coverage_95', 0.0)*100:.1f}%" if "coverage_95" in val_metrics else "N/A"
-
-            hurdle_str = f" | h_bce: {hurdle_loss_accum / num_batches:.4f}" if hurdle_loss_accum > 0 else ""
+            hurdle_str = f" | h_bce: {loss_avgs.get('hurdle_bce', 0.0):.4f}" if loss_avgs.get("hurdle_bce", 0.0) > 0 else ""
 
             if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
-                alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{train_dm32:.3f}, 64:{train_dm64:.3f})"
+                alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
             else:
                 alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
@@ -840,56 +957,49 @@ def main() -> None:
                 f"\n{'='*92}\n"
                 f"  EPOCH [{epoch+1:04d}/{epochs:04d}] PERIODIC EVALUATION (182 test samples)\n"
                 f"{'-'*92}\n"
-                f"  Train Loss    : {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}{hurdle_str}]\n"
-                f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {e_red*100:.1f}% | W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | W_solv: {row_log['solver_weight_mean']:.2f}\n"
+                f"  Train Loss    : {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}]\n"
+                f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {diag_summary['solver_energy_reduction']*100:.1f}% | W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | W_solv: {row_log['solver_weight_mean']:.2f}\n"
                 f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
                 f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
                 f"  Uncertainty   : Coverage: 50%={cov_50}, 80%={cov_80}, 95%={cov_95} | Median Disp: {row_log['region_dispersion_p50']:.1f}\n"
-                f"  Checkpoint    : Current Val MAE: {cur_mae:.2f} | Best Val MAE: {best_mae:.2f}{status_tag}\n"
+                f"  Checkpoint    : Current Val MAE: {cur_mae:.2f} | Best Val MAE: {ckpt_manager.best_mae:.2f}{status_tag}\n"
                 f"{'='*92}\n",
                 flush=True,
             )
         else:
             if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
-                alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{train_dm32:.3f}, 64:{train_dm64:.3f})"
+                alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
             else:
                 alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
-            hurdle_str = f" | h_bce: {hurdle_loss_accum / num_batches:.4f}" if hurdle_loss_accum > 0 else ""
+            hurdle_str = f" | h_bce: {loss_avgs.get('hurdle_bce', 0.0):.4f}" if loss_avgs.get("hurdle_bce", 0.0) > 0 else ""
 
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
-                f"Loss: {train_total:.4f} [cnt: {train_count:.2f}, {alloc_repr}, cell: {train_cell:.3f}, reg_nb: {train_region_nb:.3f}{hurdle_str}] | "
+                f"Loss: {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}] | "
                 f"SolvStr: {solver_strength:.2f} | "
                 f"Disp: {row_log['region_dispersion_p50']:.1f} | "
                 f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}",
                 flush=True,
             )
 
-        # Save last checkpoint
-        last_ckpt = build_checkpoint(
+        ckpt_manager.save_last(
             epoch=epoch + 1,
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,
             scaler=scaler,
-            config=cfg,
-            config_hash=run_config_hash,
-            best_mae=best_mae,
-            epochs_without_improvement=epochs_without_improvement if patience > 0 else 0,
             solver_strength=solver_strength,
-            ema_state=ema_state,
+            ema_manager=ema_manager,
         )
-        safe_torch_save(last_ckpt, out_dir / "last.pt")
-
 
         with open(log_csv, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(f, fieldnames=TRAIN_LOG_FIELDNAMES, extrasaction="ignore")
             writer.writerow(row_log)
 
-        if is_eval_epoch and val_loader is not None and patience > 0 and epochs_without_improvement >= patience:
+        if is_eval_epoch and val_loader is not None and ckpt_manager.should_stop_early:
             print(
-                f"\n[Early Stopping] No validation MAE improvement for {epochs_without_improvement} epochs "
+                f"\n[Early Stopping] No validation MAE improvement for {ckpt_manager.epochs_without_improvement} epochs "
                 f"(patience={patience}). Terminating training at epoch {epoch + 1}.",
                 flush=True,
             )
