@@ -175,9 +175,14 @@ def load_rng_state(state: dict[str, Any] | None, strict: bool = False) -> None:
 def make_scheduler(
     optimizer: torch.optim.Optimizer,
     epochs: int,
-    warmup: int,
+    warmup: int = 5,
+    *,
+    warmup_epochs: int | None = None,
 ) -> torch.optim.lr_scheduler.LambdaLR:
     """Linear warmup followed by cosine annealing learning rate scheduler."""
+    if warmup_epochs is not None:
+        warmup = warmup_epochs
+
     def fn(epoch: int) -> float:
         if epoch < warmup:
             return max(1e-3, (epoch + 1) / max(1, warmup))

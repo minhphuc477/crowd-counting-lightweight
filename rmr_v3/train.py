@@ -415,12 +415,12 @@ def main() -> None:
             ema_sd = ckpt["ema_model"]
             for k in ema_state:
                 if k in ema_sd:
-                    ema_state[k].copy_(ema_sd[k].float())
+                    ema_state[k].copy_(ema_sd[k].to(device=ema_state[k].device).float())
             print(f"Restored EMA shadow state from checkpoint ({len(ema_sd)} tensors).")
         # Exactly resume at the next epoch index
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
-        epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0))
+        epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0)) if patience > 0 else 0
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
 
     if not log_csv.exists() or start_epoch == 0:
@@ -545,9 +545,9 @@ def main() -> None:
             with torch.no_grad():
                 mu_means.append(float(outputs["b_region"].mean().item()))
                 disp_means.append(float(outputs["region_dispersion"].mean().item()))
-                all_disps.append(outputs["region_dispersion"].detach().float().flatten())
-                all_pred_weights.append(outputs["region_weight"].detach().float().flatten())
-                all_solver_weights.append(outputs["solver_region_weight"].detach().float().flatten())
+                all_disps.append(outputs["region_dispersion"].detach().cpu().float().flatten())
+                all_pred_weights.append(outputs["region_weight"].detach().cpu().float().flatten())
+                all_solver_weights.append(outputs["solver_region_weight"].detach().cpu().float().flatten())
 
                 et = outputs.get("energy_trace", [])
                 if et:
@@ -567,6 +567,11 @@ def main() -> None:
                     w_scale_128.append(float(w[..., m128].mean().item()))
 
         scheduler.step()
+        # Explicitly free batch references from the final iteration before eval/logging
+        try:
+            del images, targets, outputs, losses
+        except NameError:
+            pass
 
         num_batches = max(1, len(train_loader))
         train_total = total_loss_accum / num_batches
@@ -717,7 +722,7 @@ def main() -> None:
                 (out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
 
             else:
-                if solver_engaged:
+                if solver_engaged and patience > 0:
                     epochs_without_improvement += eval_every
 
             status_tag = ""
@@ -782,7 +787,7 @@ def main() -> None:
             config=cfg,
             config_hash=run_config_hash,
             best_mae=best_mae,
-            epochs_without_improvement=epochs_without_improvement,
+            epochs_without_improvement=epochs_without_improvement if patience > 0 else 0,
             solver_strength=solver_strength,
             ema_state=ema_state,
         )

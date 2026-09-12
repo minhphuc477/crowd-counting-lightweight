@@ -77,7 +77,7 @@ def train_transform(
         gamma_jitter:      (lo, hi) log-uniform gamma exponent, applied with prob 0.5
         random_invert_prob: probability of pixel-inversion (1.0 - x), models dark/negative images
     """
-    pts = points_xy.clone().float()
+    pts = points_xy.clone().float().reshape(-1, 2)
     w0, h0 = image.size
 
     # Guard against extreme aspect ratio image scaling explosion (e.g. 100x2400 panoramas)
@@ -86,7 +86,7 @@ def train_transform(
         pad_w = max(0, crop_size - w0)
         pad_h = max(0, crop_size - h0)
         if pad_w > 0 or pad_h > 0:
-            new_img = Image.new("RGB", (w0 + pad_w, h0 + pad_h))
+            new_img = Image.new("RGB", (w0 + pad_w, h0 + pad_h), color=(128, 128, 128))
             pad_left = pad_w // 2
             pad_top = pad_h // 2
             new_img.paste(image, (pad_left, pad_top))
@@ -124,11 +124,17 @@ def train_transform(
             (pts[:, 1] >= 0) & (pts[:, 1] < crop_size)
         )
         pts = pts[keep]
+        # Invariant: coordinates within the crop are clamped to the closed support
+        # [0.0, crop_size - 1.0] so that pixel-center reflection (crop_size - 1) - x
+        # is an exact, closed involution without negative underflow or boundary collapse.
+        pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
+        pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
 
     if hflip_prob > 0.0 and random.random() < hflip_prob:
         image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if pts.numel():
-            pts[:, 0] = (crop_size - 1) - pts[:, 0]
+            pts[:, 0] = (float(crop_size) - 1.0) - pts[:, 0]
+            pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
 
     image_t = TF.to_tensor(image)
     image.close()

@@ -43,37 +43,43 @@ def predict_tiled(
     Halo affects context only; only the core prediction is written to the output.
     """
     forward_kwargs = forward_kwargs or {}
-    _, h, w = image.shape
-    s = output_stride
-    tile_size = max(s, _aligned_floor(tile_size, s))
-    halo = max(0, _aligned_floor(halo, s))
-    gh, gw = math.ceil(h / s), math.ceil(w / s)
-    canvas = image.new_zeros((1, gh, gw))
+    was_training = model.training
+    model.eval()
+    try:
+        _, h, w = image.shape
+        s = output_stride
+        tile_size = max(s, _aligned_floor(tile_size, s))
+        halo = max(0, _aligned_floor(halo, s))
+        gh, gw = math.ceil(h / s), math.ceil(w / s)
+        canvas = image.new_zeros((1, gh, gw))
 
-    ys = list(range(0, h, tile_size))
-    xs = list(range(0, w, tile_size))
-    for y0 in ys:
-        y1 = min(h, y0 + tile_size)
-        for x0 in xs:
-            x1 = min(w, x0 + tile_size)
+        ys = list(range(0, h, tile_size))
+        xs = list(range(0, w, tile_size))
+        for y0 in ys:
+            y1 = min(h, y0 + tile_size)
+            for x0 in xs:
+                x1 = min(w, x0 + tile_size)
 
-            sy0 = max(0, _aligned_floor(y0 - halo, s))
-            sx0 = max(0, _aligned_floor(x0 - halo, s))
-            sy1 = min(h, _aligned_ceil(y1 + halo, s))
-            sx1 = min(w, _aligned_ceil(x1 + halo, s))
-            patch = image[:, sy0:sy1, sx0:sx1].unsqueeze(0)
-            y_patch = model(patch, **forward_kwargs)["y"][0]
+                sy0 = max(0, _aligned_floor(y0 - halo, s))
+                sx0 = max(0, _aligned_floor(x0 - halo, s))
+                sy1 = min(h, _aligned_ceil(y1 + halo, s))
+                sx1 = min(w, _aligned_ceil(x1 + halo, s))
+                patch = image[:, sy0:sy1, sx0:sx1].unsqueeze(0)
+                y_patch = model(patch, **forward_kwargs)["y"][0]
 
-            gy0 = y0 // s
-            gx0 = x0 // s
-            gy1 = math.ceil(y1 / s)
-            gx1 = math.ceil(x1 / s)
-            ly0 = (y0 - sy0) // s
-            lx0 = (x0 - sx0) // s
-            hh = gy1 - gy0
-            ww = gx1 - gx0
-            canvas[:, gy0:gy1, gx0:gx1] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
-    return canvas
+                gy0 = y0 // s
+                gx0 = x0 // s
+                gy1 = math.ceil(y1 / s)
+                gx1 = math.ceil(x1 / s)
+                ly0 = (y0 - sy0) // s
+                lx0 = (x0 - sx0) // s
+                hh = gy1 - gy0
+                ww = gx1 - gx0
+                canvas[:, gy0:gy1, gx0:gx1] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
+        return canvas
+    finally:
+        if was_training:
+            model.train()
 
 
 @torch.no_grad()
