@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
+from rmr_core.scale_routing import ScaleRoutingHead
 from rmr_core.operators import (
     RegionSet,
     _canonicalize_region_size,
@@ -152,6 +153,12 @@ class RMRv3Config:
     proximal_mode: str = "soft"
     proximal_mu: float = 3.0
 
+    # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────────
+    # When True, instantiates ScaleRoutingHead (483 params) to predict continuous
+    # spatial scale probability pi(x, y) in Delta^{K-1} over the K observation scales.
+    dynamic_scale_routing: bool = False
+    scale_router_temperature: float = 1.0
+
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
             raise ValueError(
@@ -180,6 +187,10 @@ class RMRv3Config:
         if self.tv_lambda < 0.0:
             raise ValueError(
                 f"tv_lambda must be non-negative, got {self.tv_lambda}"
+            )
+        if self.scale_router_temperature <= 0.0:
+            raise ValueError(
+                f"scale_router_temperature must be strictly positive, got {self.scale_router_temperature}"
             )
 
     @classmethod
@@ -641,6 +652,16 @@ class RMRv3(nn.Module):
         else:
             self.coord_attn = None
 
+        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
+        if cfg.dynamic_scale_routing:
+            self.scale_router: ScaleRoutingHead | None = ScaleRoutingHead(
+                in_channels=cfg.feature_width,
+                num_scales=len(cfg.region_sizes_px),
+                temperature=cfg.scale_router_temperature,
+            )
+        else:
+            self.scale_router = None
+
         self.solver_strength: float = 1.0
 
         # Registered non-persistent Laplacian kernel buffer for isotropic TV smoothing
@@ -773,6 +794,11 @@ class RMRv3(nn.Module):
         # Collect hurdle logit for loss computation (not detached)
         hurdle_logit = regional.get("hurdle_logit", None)  # [B,1,M] or None
 
+        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
+        scale_weights = None
+        if self.scale_router is not None:
+            scale_weights = self.scale_router(p4)
+
         # Bypass solver loop if solver is disabled (direct baseline mode)
         if not self.cfg.enable_solver:
             out = {
@@ -796,6 +822,8 @@ class RMRv3(nn.Module):
                 "uniform_reliability": uniform_reliability,
                 "solver_strength": 0.0,
             }
+            if scale_weights is not None:
+                out["scale_weights"] = scale_weights
             if hurdle_logit is not None:
                 out["hurdle_logit"] = hurdle_logit
             return out
@@ -820,6 +848,7 @@ class RMRv3(nn.Module):
             tv_type=self.cfg.tv_type,
             tv_eps_c=self.cfg.tv_eps_c,
             laplace_kernel=self._laplace_kernel,
+            scale_routing_weights=scale_weights,
         )
 
         y = solver_res["y"]
@@ -855,6 +884,8 @@ class RMRv3(nn.Module):
             "solver_strength": strength,
         }
 
+        if scale_weights is not None:
+            out["scale_weights"] = scale_weights
         if hurdle_logit is not None:
             out["hurdle_logit"] = hurdle_logit
         return out

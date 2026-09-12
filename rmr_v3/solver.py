@@ -97,6 +97,7 @@ def unrolled_sirt_solver(
     tv_type: str = "laplacian",
     tv_eps_c: float = 0.1,
     laplace_kernel: torch.Tensor | None = None,
+    scale_routing_weights: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -124,6 +125,7 @@ def unrolled_sirt_solver(
         tv_type: "laplacian" (isotropic) or "charbonnier" (edge-preserving).
         tv_eps_c: Charbonnier TV smoothness constant.
         laplace_kernel: Optional pre-allocated 3x3 Laplacian convolution kernel.
+        scale_routing_weights: Optional spatial scale routing probabilities [B, K, H, W].
 
     Returns:
         Dictionary containing:
@@ -139,18 +141,20 @@ def unrolled_sirt_solver(
     effective_omega = float(omega) * strength
     effective_tv_lambda = float(tv_lambda) * strength
     effective_tau = float(proximal_tau)
-    # tau_step is the per-iteration proximal threshold.
-    # Divide by T so that total L1 shrinkage over all iterations equals omega*tau,
-    # making tau a T-invariant hyperparameter (same budget regardless of iterations).
+    # tau_step and tv_step are per-iteration budgets.
+    # Divide by T so that total shrinkage/diffusion over all iterations equals the hyperparameter,
+    # making tau and tv_lambda strictly T-invariant hyperparameters.
     tau_step = (effective_omega * effective_tau) / max(int(iterations), 1)
+    tv_step = effective_tv_lambda / max(int(iterations), 1)
 
-    # Compute weighted coverage field: D_w = A^T w
+    # Compute weighted coverage field: D_w = A^T w (optionally scale-routed)
     cov_w = weighted_coverage(
         weight_solver,
         regions,
         h,
         w,
         eps=eps,
+        scale_routing_weights=scale_routing_weights,
     )
 
     y = y0
@@ -178,6 +182,7 @@ def unrolled_sirt_solver(
             solver_mode=solver_mode,
             density_gate_rho=float(density_gate_rho),
             density_gate_floor=float(density_gate_floor),
+            scale_routing_weights=scale_routing_weights,
         )
 
         y_step = y.float() - effective_omega * field
@@ -195,11 +200,11 @@ def unrolled_sirt_solver(
             )
 
         # ── Step 3: Total Variation diffusion ─────────────────────────────────
-        if effective_tv_lambda > 0.0:
+        if tv_step > 0.0:
             if tv_type == "charbonnier":
-                y_next = charbonnier_tv_step(y_next, effective_tv_lambda, float(tv_eps_c))
+                y_next = charbonnier_tv_step(y_next, tv_step, float(tv_eps_c))
             else:
-                y_next = laplacian_tv_diffusion(y_next, effective_tv_lambda, kernel=laplace_kernel)
+                y_next = laplacian_tv_diffusion(y_next, tv_step, kernel=laplace_kernel)
 
         y_next = y_next.to(dtype=y.dtype)
 

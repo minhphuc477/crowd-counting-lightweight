@@ -317,8 +317,24 @@ def weighted_coverage(
     height: int,
     width: int,
     eps: float = 1e-6,
+    scale_routing_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Compute D_{c,w} diagonal field = A^T w."""
+    """Compute D_{c,w} diagonal field = A^T w, optionally modulated by spatial scale routing weights."""
+    if scale_routing_weights is not None:
+        b, k_scales, h, w = scale_routing_weights.shape
+        cov_total = torch.zeros((b, 1, h, w), device=weight.device, dtype=torch.float32)
+        scale_ids = regions.scale_id.to(device=weight.device).clamp(0, k_scales - 1)
+        for k in range(k_scales):
+            mask_k = (scale_ids == k)
+            if not mask_k.any():
+                continue
+            boxes_k = regions.boxes[mask_k]
+            weight_k = weight[:, :, mask_k].float()
+            cov_k = regional_adjoint(weight_k, boxes_k, height, width, out_dtype=torch.float32)
+            pi_k = scale_routing_weights[:, k:k+1, :, :].float()
+            cov_total = cov_total + pi_k * cov_k
+        return cov_total.clamp_min(float(eps))
+
     cov = regional_adjoint(
         weight.float(),
         regions.boxes,
@@ -341,13 +357,14 @@ def weighted_normalized_adjoint_field(
     solver_mode: str = "additive",
     density_gate_rho: float = 0.02,
     density_gate_floor: float = 0.02,
+    scale_routing_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute:
 
         r = D_cw^-1 A^T W D_a^-1 (A y - b)
 
-    entirely in float32. In multiplicative mode, A^T is replaced with
-    multiplicative_gated_adjoint to suppress corrections on near-zero pixels.
+    entirely in float32, with optional spatial scale routing modulation.
+    In multiplicative mode, A^T is replaced with multiplicative_gated_adjoint.
     """
     _, _, h, w = y.shape
 
@@ -368,25 +385,58 @@ def weighted_normalized_adjoint_field(
 
     weighted_residual = weight32 * rate_residual
 
-    if solver_mode == "multiplicative":
-        back = multiplicative_gated_adjoint(
-            weighted_residual,
-            regions.boxes,
-            y32,
-            h,
-            w,
-            rho0=density_gate_rho,
-            gate_floor=density_gate_floor,
-            out_dtype=torch.float32,
-        )
+    if scale_routing_weights is not None:
+        b, k_scales, _, _ = scale_routing_weights.shape
+        back_total = torch.zeros((b, 1, h, w), device=y.device, dtype=torch.float32)
+        scale_ids = regions.scale_id.to(device=y.device).clamp(0, k_scales - 1)
+        for k in range(k_scales):
+            mask_k = (scale_ids == k)
+            if not mask_k.any():
+                continue
+            boxes_k = regions.boxes[mask_k]
+            residual_k = weighted_residual[:, :, mask_k]
+            if solver_mode == "multiplicative":
+                back_k = multiplicative_gated_adjoint(
+                    residual_k,
+                    boxes_k,
+                    y32,
+                    h,
+                    w,
+                    rho0=density_gate_rho,
+                    gate_floor=density_gate_floor,
+                    out_dtype=torch.float32,
+                )
+            else:
+                back_k = regional_adjoint(
+                    residual_k,
+                    boxes_k,
+                    h,
+                    w,
+                    out_dtype=torch.float32,
+                )
+            pi_k = scale_routing_weights[:, k:k+1, :, :].float()
+            back_total = back_total + pi_k * back_k
+        back = back_total
     else:
-        back = regional_adjoint(
-            weighted_residual,
-            regions.boxes,
-            h,
-            w,
-            out_dtype=torch.float32,
-        )
+        if solver_mode == "multiplicative":
+            back = multiplicative_gated_adjoint(
+                weighted_residual,
+                regions.boxes,
+                y32,
+                h,
+                w,
+                rho0=density_gate_rho,
+                gate_floor=density_gate_floor,
+                out_dtype=torch.float32,
+            )
+        else:
+            back = regional_adjoint(
+                weighted_residual,
+                regions.boxes,
+                h,
+                w,
+                out_dtype=torch.float32,
+            )
 
     if weighted_cov is None:
         weighted_cov = weighted_coverage(
@@ -395,6 +445,7 @@ def weighted_normalized_adjoint_field(
             h,
             w,
             eps=eps,
+            scale_routing_weights=scale_routing_weights,
         )
 
     field = back / weighted_cov.float().clamp_min(eps)

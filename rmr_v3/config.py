@@ -85,6 +85,8 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v10 additions
     "proximal_mode",
     "proximal_mu",
+    "dynamic_scale_routing",
+    "scale_router_temperature",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -264,6 +266,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             tvl = float(m_cfg["tv_lambda"])
             if tvl < 0.0:
                 raise ValueError(f"tv_lambda must be non-negative, got {tvl}")
+        if "scale_router_temperature" in m_cfg:
+            stemp = float(m_cfg["scale_router_temperature"])
+            if stemp <= 0.0:
+                raise ValueError(f"scale_router_temperature must be strictly positive, got {stemp}")
         if bool(m_cfg.get("use_coord_attn", False)):
             neck = str(m_cfg.get("neck_type", "additive"))
             if neck != "aspp_lite":
@@ -454,6 +460,11 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "use_coord_attn",
         # RMR-v9.1 / AQ-RMR additions
         "proximal_tau",
+        # RMR-v10 additions
+        "proximal_mode",
+        "proximal_mu",
+        "dynamic_scale_routing",
+        "scale_router_temperature",
     ],
     "loss": [
         "lambda_count",

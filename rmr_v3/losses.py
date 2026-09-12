@@ -464,12 +464,51 @@ def compute_rmr_v3_losses(
 
     losses: dict[str, torch.Tensor] = {}
 
-    losses["count"] = count_magnitude_loss(
-        y,
-        target_float,
-        mode=cfg.count_loss_mode,
-        dispersion=cfg.count_nb_dispersion,
-    )
+    # Helper to compute count loss on an arbitrary density map
+    def _compute_count_loss(density_map: torch.Tensor) -> torch.Tensor:
+        return count_magnitude_loss(
+            density_map,
+            target_float,
+            mode=cfg.count_loss_mode,
+            dispersion=cfg.count_nb_dispersion,
+        )
+
+    # Helper to compute cell loss on an arbitrary density map
+    def _compute_cell_loss(density_map: torch.Tensor) -> torch.Tensor:
+        if cfg.cell_loss_mode == "mass_weighted":
+            return mass_weighted_cell_loss(
+                density_map,
+                target_float,
+                beta=cfg.cell_beta,
+                eps=cfg.cell_mass_weight_eps,
+                alpha=float(cfg.cell_mass_weight_alpha),
+            )
+        else:
+            return balanced_smooth_l1(
+                density_map,
+                target_float,
+                beta=cfg.cell_beta,
+            )
+
+    # ── Target supervision selection for count and cell (RMR-v10 Symmetric Dual) ──
+    if cfg.dm_target == "dual":
+        loss_count_y = _compute_count_loss(y)
+        loss_count_y0 = _compute_count_loss(y0)
+        losses["count"] = 0.5 * loss_count_y + 0.5 * loss_count_y0
+        losses["count_y"] = loss_count_y
+        losses["count_y0"] = loss_count_y0
+
+        loss_cell_y = _compute_cell_loss(y)
+        loss_cell_y0 = _compute_cell_loss(y0)
+        losses["cell"] = 0.5 * loss_cell_y + 0.5 * loss_cell_y0
+        losses["cell_y"] = loss_cell_y
+        losses["cell_y0"] = loss_cell_y0
+    elif cfg.dm_target == "y0":
+        losses["count"] = _compute_count_loss(y0)
+        losses["cell"] = _compute_cell_loss(y0)
+    else:  # "y"
+        losses["count"] = _compute_count_loss(y)
+        losses["cell"] = _compute_cell_loss(y)
 
     # ── Allocation loss target selection (RMR-v9/v10) ──
     # "y0": supervise initial carrier y0 (decoupled guidance).
@@ -532,26 +571,6 @@ def compute_rmr_v3_losses(
     losses["flat_dm16"] = loss_allocation  # backward compatibility alias
     for bs, val in dm_components.items():
         losses[f"dm_{bs}"] = val
-
-    # ── Stage 2: Cell allocation loss (mode-selectable) ───────────────────────
-    if cfg.cell_loss_mode == "mass_weighted":
-        # Weight per-pixel smooth-L1 by GT density mass.
-        # Dense crowd pixels receive proportionally more gradient than background,
-        # fixing the ~200x dilution effect in balanced smooth-L1.
-        losses["cell"] = mass_weighted_cell_loss(
-            y,
-            target_float,
-            beta=cfg.cell_beta,
-            eps=cfg.cell_mass_weight_eps,
-            alpha=float(cfg.cell_mass_weight_alpha),
-        )
-    else:
-        # "balanced": uniform smooth-L1 (v7 default — backward compatible)
-        losses["cell"] = balanced_smooth_l1(
-            y,
-            target_float,
-            beta=cfg.cell_beta,
-        )
 
     losses["region_nb"] = scale_balanced_regional_nb_nll(
         target_region,
