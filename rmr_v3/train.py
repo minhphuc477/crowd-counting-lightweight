@@ -134,6 +134,109 @@ def evaluate_v3(
     return summary
 
 
+def format_dynamic_training_banner(
+    model: RMRv3,
+    cfg: dict[str, Any],
+    run_id: str | None,
+    n_params: int,
+    device: torch.device,
+    epochs: int,
+    bs: int,
+    lr_init: float,
+    out_dir: Path,
+) -> str:
+    """Format a dynamic, attribute-driven training banner without hardcoded version strings."""
+    m_cfg = model.cfg
+
+    # 1. Carrier & Backbone
+    bb_name = m_cfg.backbone_name.split(".")[0]
+    stride = getattr(m_cfg, "output_stride", 4)
+    feat_w = getattr(m_cfg, "feature_width", 32)
+    neck_desc = getattr(m_cfg, "neck_type", "additive")
+    if getattr(m_cfg, "use_coord_attn", False):
+        neck_desc += "+CoordAttn"
+    carrier_line = f"Stride-{stride} | Backbone: {bb_name} | Neck: {neck_desc} (C={feat_w})"
+
+    # 2. Geometry & Spatial Pooling
+    region_sizes = list(getattr(m_cfg, "region_sizes_px", (32, 64, 128)))
+    is_aniso = any(isinstance(s, (tuple, list)) and len(s) == 2 and s[0] != s[1] for s in region_sizes)
+    geo_tag = "Anisotropic Perspective" if is_aniso else "Isotropic"
+
+    reg_strs = []
+    for s in region_sizes:
+        if isinstance(s, (tuple, list)):
+            reg_strs.append(f"({s[0]}x{s[1]})")
+        else:
+            reg_strs.append(str(s))
+    overlap = getattr(m_cfg, "region_overlap", 0.5)
+    reg_desc = f"[{', '.join(reg_strs)}] px ({geo_tag}, overlap={overlap:.0%})"
+
+    pool_mode = getattr(m_cfg, "regional_feature_stats", "mean")
+    if pool_mode == "mean_std":
+        pooling_desc = "Spatial Moments (Mean+Std)"
+    elif getattr(m_cfg, "native_scale_pooling", False):
+        pooling_desc = "Native Multiscale Pooling"
+    else:
+        pooling_desc = "Spatial Average"
+
+    # 3. Inverse Solver Engine
+    if not getattr(m_cfg, "enable_solver", True):
+        solver_desc = "Disabled (Direct Feedforward Carrier Head)"
+    else:
+        solver_parts = []
+        if getattr(m_cfg, "proximal_tau", 0.0) > 0.0:
+            solver_parts.append(f"Proximal RW-SIRT (tau={m_cfg.proximal_tau})")
+        elif getattr(m_cfg, "solver_mode", "additive") == "multiplicative":
+            solver_parts.append(f"Density-Gated RW-SIRT (rho={m_cfg.density_gate_rho})")
+        else:
+            solver_parts.append("Additive RW-SIRT")
+
+        solver_parts.append(f"T={getattr(m_cfg, 'iterations', 2)}")
+        solver_parts.append(f"omega={getattr(m_cfg, 'omega', 1.0)}")
+
+        tv_lam = getattr(m_cfg, "tv_lambda", 0.0)
+        if tv_lam > 0.0:
+            tv_t = getattr(m_cfg, "tv_type", "laplacian").capitalize()
+            solver_parts.append(f"{tv_t} TV (lambda={tv_lam})")
+
+        w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else "Negative-Binomial (W=diag(w_R))"
+        solver_parts.append(f"Weighting={w_mode}")
+        solver_desc = " | ".join(solver_parts)
+
+    # 4. Heads & Densities
+    guidance_head = "Hurdle-NB (Occupancy Gated)" if getattr(m_cfg, "hurdle_head", False) else "Negative-Binomial"
+    if getattr(m_cfg, "temp_softplus", False):
+        density_head = "Learnable Temp Softplus"
+    else:
+        m0_val = getattr(m_cfg, "init_m0", 0.015763)
+        density_head = f"Calibrated Softplus (m0={m0_val:.5f})"
+
+    # 5. Supervision Target & Loss
+    dm_target = cfg.get("loss", {}).get("dm_target", "y0")
+    target_desc = "Post-Solver Y (End-to-End Measure Optimization)" if dm_target == "y" else "Pre-Solver Y0 (Decoupled Carrier Guidance)"
+    loss_type = cfg.get("loss", {}).get("allocation_loss_type", "flat_dm16")
+    supervision_desc = f"{target_desc} -> {loss_type.upper()}"
+
+    budget_pct = (n_params / 105_000) * 100
+    headroom = 105_000 - n_params
+    run_label = run_id if run_id else Path(cfg.get("output_dir", "unspecified")).name
+
+    banner = [
+        "=" * 80,
+        f"  RMR Training Initialized [Dynamic Architecture Engine]",
+        f"  Run: {run_label} | Parameters: {n_params:,} / 105,000 budget ({budget_pct:.1f}% used, +{headroom:,} headroom)",
+        f"  Carrier: {carrier_line}",
+        f"  Geometry: {reg_desc} | Pooling: {pooling_desc}",
+        f"  Solver: {solver_desc}",
+        f"  Heads: Regional={guidance_head} | Density={density_head}",
+        f"  Supervision: {supervision_desc}",
+        f"  Training: Epochs: {epochs} | Batch Size: {bs} | Initial LR: {lr_init:.2e} | Device: {device}",
+        f"  Output Directory: {out_dir}",
+        "=" * 80,
+    ]
+    return "\n".join(banner)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train RMR-v3 (RW-RMR)")
     ap.add_argument("--config", required=True, help="Path to config YAML")
@@ -308,48 +411,20 @@ def main() -> None:
     bs = int(cfg.get("train", {}).get("batch_size", 8))
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    cfg_str = str(args.config).lower() + " " + str(args.run_id or "").lower()
-
-    if "rmr_v9" in cfg_str or getattr(model.cfg, "proximal_tau", 0.0) > 0.0 or any(isinstance(s, (tuple, list)) for s in getattr(model.cfg, "region_sizes_px", ())):
-        if "aq_rmr" in cfg_str or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std":
-            banner_title = "RMR-v9.1 / AQ-RMR Training Initialized"
-            variant_name = "AQ-RMR (Anisotropic Perspective + MeanStd + Proximal RW-SIRT)"
-        else:
-            banner_title = "RMR-v9 Training Initialized"
-            variant_name = "RMR-v9 Canonical (Additive RW-SIRT + Post-Solver Flat-DM16)"
-    elif "rmr_v8" in cfg_str:
-        banner_title = "RMR-v8 Training Initialized"
-        variant_name = f"RMR-v8 ({getattr(model.cfg, 'solver_mode', 'additive')}+{getattr(model.cfg, 'tv_type', 'laplacian')})"
-    elif "rmr_v7" in cfg_str:
-        banner_title = "RMR-v7 Training Initialized"
-        variant_name = "RMR-v7 (Hurdle-NB + TV Laplacian + EMA)"
-    elif (
-        getattr(model.cfg, "native_scale_pooling", False)
-        or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std"
-        or cfg.get("loss", {}).get("use_multiscale_dm", False)
-        or "rmr_v4" in cfg_str
-    ):
-        sub_tags = []
-        if getattr(model.cfg, "native_scale_pooling", False):
-            sub_tags.append("NativePool")
-        if getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std":
-            sub_tags.append("MeanStd")
-        if cfg.get("loss", {}).get("use_multiscale_dm", False):
-            sub_tags.append("MultiScaleDM")
-        sub_str = "+".join(sub_tags) if sub_tags else "Candidate"
-        variant_name = f"RMR-v4 ({sub_str})"
-        banner_title = "RMR-v4 Training Initialized"
-    else:
-        variant_name = "V3-A (Probabilistic Uniform)" if uniform_reliability else "V3-B (Reliability Weighted)"
-        banner_title = "RMR-v3 Training Initialized"
 
     print(
-        f"\n{'=' * 80}\n"
-        f"  {banner_title}\n"
-        f"  Variant: {variant_name} | Parameters: {n_params:,} | Device: {device}\n"
-        f"  Epochs: {epochs} | Batch Size: {bs} | Initial LR: {lr_init:.2e}\n"
-        f"  Output Directory: {out_dir}\n"
-        f"{'=' * 80}\n",
+        "\n"
+        + format_dynamic_training_banner(
+            model=model,
+            cfg=cfg,
+            run_id=args.run_id,
+            n_params=n_params,
+            device=device,
+            epochs=epochs,
+            bs=bs,
+            lr_init=lr_init,
+            out_dir=out_dir,
+        ),
         flush=True,
     )
 

@@ -704,18 +704,11 @@ def load_config(path: str | Path) -> dict[str, Any]:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Configuration file not found: {p}")
-    with open(p, "r", encoding="utf-8") as f:
+    with open(p, "r", encoding="utf-8-sig") as f:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict):
         raise ValueError(f"Configuration at {p} must parse to a dictionary, got {type(cfg).__name__}")
     validate_v3_config(cfg)
     return cfg
-
-
-def __getattr__(name: str):
-    if name == "RMRv3Config":
-        from .model import RMRv3Config
-        return RMRv3Config
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
