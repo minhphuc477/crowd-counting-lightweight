@@ -13,6 +13,7 @@ from rmr_core.heads import FineMeasureHead
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.operators import (
     RegionSet,
+    _canonicalize_region_size,
     build_multiscale_regions,
     charbonnier_tv_step,
     fractional_region_average_features,
@@ -173,7 +174,10 @@ class RMRv3Config:
                 if v is None:
                     continue
                 if "tuple" in str(f.type) and isinstance(v, (list, tuple)):
-                    kwargs[k] = tuple(v)
+                    kwargs[k] = tuple(
+                        tuple(x) if isinstance(x, (list, tuple)) else x
+                        for x in v
+                    )
                 elif f.type is bool or f.type == "bool":
                     kwargs[k] = bool(v)
                 elif f.type is int or f.type == "int":
@@ -231,7 +235,9 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         if regional_feature_stats not in ("mean", "mean_std"):
             raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{regional_feature_stats}'")
 
-        self.region_sizes_px = tuple(int(x) for x in region_sizes_px)
+        self.region_sizes_px = tuple(
+            _canonicalize_region_size(x) for x in region_sizes_px
+        )
         self.dispersion_min = float(dispersion_min)
         self.dispersion_max = float(dispersion_max)
         self.native_scale_pooling = bool(native_scale_pooling)
@@ -295,15 +301,18 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             dtype=dtype,
         )
 
-        for sid, size_px in enumerate(self.region_sizes_px):
+        for sid, size_spec in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
             if not bool(mask.any()):
                 continue
 
-            if size_px <= 32:
+            hy_px, wx_px = _canonicalize_region_size(size_spec)
+            max_size_px = max(hy_px, wx_px)
+
+            if max_size_px <= 32:
                 feat = p4
                 dst_stride = 4
-            elif size_px <= 64:
+            elif max_size_px <= 64:
                 feat = p8
                 dst_stride = 8
             else:
@@ -348,9 +357,10 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
             ms = pooled.shape[1]
 
+            geom_scale_px = math.sqrt(float(hy_px) * float(wx_px))
             log_scale = torch.full(
                 (1, ms, 1),
-                math.log(float(size_px) / 32.0),
+                math.log(geom_scale_px / 32.0),
                 device=device,
                 dtype=dtype,
             ).expand(b, -1, -1)
@@ -688,10 +698,7 @@ class RMRv3(nn.Module):
             p4 = self.coord_attn(p4)
 
         z0 = self.fine_head(p4)
-        if getattr(self.fine_head, "temp_softplus", False):
-            y0 = z0
-        else:
-            y0 = F.softplus(z0)
+        y0 = z0 if self.fine_head.temp_softplus else self.fine_head.activate(z0)
 
         h, w = y0.shape[-2:]
 
@@ -827,7 +834,7 @@ class RMRv3(nn.Module):
             )
 
             y_step = y.float() - effective_omega * field
-            tau = float(getattr(self.cfg, "proximal_tau", 0.0))
+            tau = float(self.cfg.proximal_tau)
             if tau > 0.0:
                 y_next = torch.clamp_min(y_step - tau, 0.0)
             else:

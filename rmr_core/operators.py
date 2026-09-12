@@ -447,22 +447,33 @@ def _axis_starts(length: int, window: int, step: int) -> list[int]:
     return sorted(set(starts))
 
 
+def _canonicalize_region_size(s: int | Sequence[int]) -> tuple[int, int]:
+    """Convert any region size specification to an explicit (height_px, width_px) tuple."""
+    if isinstance(s, (tuple, list)):
+        if len(s) != 2:
+            raise ValueError(f"Region size specification must be an integer or (height, width) pair, got {s}")
+        return (int(s[0]), int(s[1]))
+    val = int(s)
+    return (val, val)
+
+
 @functools.lru_cache(maxsize=32)
 def _build_multiscale_regions_cached(
     height: int,
     width: int,
     output_stride: int,
-    region_sizes_px: tuple[int, ...],
+    region_sizes_px: tuple[tuple[int, int], ...],
     overlap: float,
     include_full_image: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[tuple[int, int, int, int]]]:
     boxes: list[tuple[int, int, int, int]] = []
     scale_ids: list[int] = []
 
-    for sid, size_px in enumerate(region_sizes_px):
-        win = max(1, int(round(size_px / output_stride)))
-        wy = min(win, height)
-        wx = min(win, width)
+    for sid, (hy_px, wx_px) in enumerate(region_sizes_px):
+        win_y = max(1, int(round(hy_px / output_stride)))
+        win_x = max(1, int(round(wx_px / output_stride)))
+        wy = min(win_y, height)
+        wx = min(win_x, width)
         sy = max(1, int(round(wy * (1.0 - overlap))))
         sx = max(1, int(round(wx * (1.0 - overlap))))
         ys = _axis_starts(height, wy, sy)
@@ -488,22 +499,24 @@ def build_multiscale_regions(
     height: int,
     width: int,
     output_stride: int,
-    region_sizes_px: Sequence[int] = (16, 32, 64, 128),
+    region_sizes_px: Sequence[int | tuple[int, int] | list[int]] = (16, 32, 64, 128),
     overlap: float = 0.5,
     include_full_image: bool = True,
     device: torch.device | str | None = None,
 ) -> RegionSet:
     """Build deterministic overlapping rectangular regions with LRU caching.
 
-    Region sizes are specified in image pixels and quantized to the output grid.
+    Region sizes can be specified as scalar image pixels (square windows)
+    or (height_px, width_px) tuples for anisotropic perspective windows.
+    Windows are quantized to the output grid.
     The last window on each axis is forced to touch the image/grid boundary.
     Cached across calls with maxsize=32.
     """
     if not (0.0 <= overlap < 1.0):
         raise ValueError("overlap must be in [0,1)")
-    region_sizes_tuple = tuple(int(s) for s in region_sizes_px)
+    canonical_sizes = tuple(_canonicalize_region_size(s) for s in region_sizes_px)
     box_t, scale_t, area_t, boxes_list = _build_multiscale_regions_cached(
-        height, width, output_stride, region_sizes_tuple, float(overlap), bool(include_full_image)
+        height, width, output_stride, canonical_sizes, float(overlap), bool(include_full_image)
     )
     if device is not None:
         box_t = box_t.to(device)

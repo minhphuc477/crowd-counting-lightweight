@@ -51,12 +51,18 @@ class FineMeasureHead(nn.Module):
             # Learnable temperature τ; initialized to 1.0 (identical to vanilla softplus)
             self.tau = nn.Parameter(torch.ones(1))
 
+    def activate(self, z: torch.Tensor) -> torch.Tensor:
+        """Compute calibrated non-negative measure Y0 from latent logit field z0."""
+        if self.temp_softplus:
+            tau = self.tau.clamp_min(0.1)
+            return tau * F.softplus(z / tau)
+        return F.softplus(z)
+
     def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
         if isinstance(f, tuple):
             f = f[0]
         z = self.body(f)
         if self.temp_softplus:
-            tau = self.tau.clamp_min(0.1)
-            return tau * F.softplus(z / tau)
+            return self.activate(z)
         return z
 

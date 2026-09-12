@@ -448,9 +448,7 @@ def compute_rmr_v3_losses(
 
     # ── Allocation loss target selection (RMR-v9: dm_target="y" supervises post-solver output) ──
     # "y0" (default, backward compatible): supervise the initial density map before SIRT.
-    # "y":  supervise the final reconciled density map — closes the supervision gap between
-    #       Flat-DM16 allocation and the solver's terminal output (architectural spec Section 7.2).
-    dm_input = y if getattr(cfg, "dm_target", "y0") == "y" else y0
+    dm_input = y if cfg.dm_target == "y" else y0
 
     dm_components: dict[int, torch.Tensor] = {}
     if cfg.allocation_loss_type == "bayesian":
@@ -504,7 +502,7 @@ def compute_rmr_v3_losses(
             target_float,
             beta=cfg.cell_beta,
             eps=cfg.cell_mass_weight_eps,
-            alpha=getattr(cfg, "cell_mass_weight_alpha", 1.0),
+            alpha=float(cfg.cell_mass_weight_alpha),
         )
     else:
         # "balanced": uniform smooth-L1 (v7 default — backward compatible)

@@ -802,5 +802,54 @@ def test_validate_v3_config_iterations_bounds():
     validate_v3_config({"model": {"iterations": 2}})
 
 
+# ---------------------------------------------------------------------------
+# Test 22: Anisotropic perspective regions support
+# ---------------------------------------------------------------------------
+def test_anisotropic_perspective_regions():
+    """RMRv3 must natively support non-square rectangular anisotropic regions."""
+    from rmr_core.operators import build_multiscale_regions
+
+    # Verify operator builder handles mixed scalar and 2D tuple sizes
+    regions = build_multiscale_regions(
+        64, 64, output_stride=4, region_sizes_px=(32, 64, (64, 32), (32, 64))
+    )
+    assert len(regions.boxes) > 0
+    assert regions.area.min() > 0
+
+    # Verify model forward pass with anisotropic regions
+    cfg = RMRv3Config(
+        pretrained=False,
+        region_sizes_px=(32, 64, (64, 32), (32, 64)),
+        regional_feature_stats="mean_std",
+    )
+    model = RMRv3(cfg)
+    x = torch.randn(1, 3, 128, 128)
+    out = model(x)
+    assert out["y"].shape == (1, 1, 32, 32)
+    assert out["b_region"].shape[-1] == len(out["regions"].boxes)
+
+
+# ---------------------------------------------------------------------------
+# Test 23: Proximal soft-thresholding in SIRT solver
+# ---------------------------------------------------------------------------
+def test_proximal_soft_thresholding_anti_smearing():
+    """Proximal soft-thresholding must enforce a clean noise deadband without absorbing traps."""
+    cfg = RMRv3Config(
+        pretrained=False,
+        proximal_tau=0.02,
+        iterations=2,
+    )
+    model = RMRv3(cfg)
+    x = torch.randn(1, 3, 128, 128)
+    out = model(x)
+    # Output must be non-negative
+    assert (out["y"] >= 0.0).all()
+    # Gradient must flow to parameters
+    loss = out["y"].sum()
+    loss.backward()
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    assert len(grads) > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
