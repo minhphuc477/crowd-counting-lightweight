@@ -309,11 +309,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         feature_dim = int(p4.shape[1])
         out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
-        out = torch.zeros(
-            (b, m_total, out_dim),
-            device=device,
-            dtype=dtype,
-        )
+        feat_list = []
 
         for sid, size_spec in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
@@ -372,17 +368,19 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             ms = pooled.shape[1]
 
             geom_scale_px = math.sqrt(float(hy_px) * float(wx_px))
-            log_scale = torch.full(
-                (1, ms, 1),
-                math.log(geom_scale_px / 32.0),
-                device=device,
-                dtype=dtype,
-            ).expand(b, -1, -1)
-
-            out[:, mask] = torch.cat(
-                [pooled, log_scale],
-                dim=-1,
+            log_scale = torch.full_like(
+                pooled[..., :1],
+                fill_value=float(math.log(geom_scale_px / 32.0)),
             )
+
+            feat_list.append(
+                torch.cat(
+                    [pooled, log_scale],
+                    dim=-1,
+                )
+            )
+
+        out = torch.cat(feat_list, dim=1) if feat_list else torch.zeros((p4.shape[0], m_total, out_dim), device=device, dtype=dtype)
 
         # Main method disables full-image regions.
         # Keep an explicit guard so a bad config cannot silently proceed.
@@ -480,19 +478,14 @@ def reliability_from_nb(
     precision = 1.0 / rate_var.clamp_min(eps)
 
     if normalize_within_scale:
-        weight = torch.ones_like(precision)
+        weight = torch.zeros_like(precision)
 
         for sid in torch.unique(regions.scale_id):
-            mask = regions.scale_id == sid
-
-            q = precision[..., mask]
-
-            q_mean = q.mean(
-                dim=-1,
-                keepdim=True,
-            ).clamp_min(eps)
-
-            weight[..., mask] = q / q_mean
+            mask = (regions.scale_id == sid).to(dtype=precision.dtype).view(1, 1, -1)
+            q_sum = (precision * mask).sum(dim=-1, keepdim=True)
+            count = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            q_mean = (q_sum / count).clamp_min(eps)
+            weight = weight + (precision / q_mean) * mask
     else:
         weight = precision / precision.mean(
             dim=-1,

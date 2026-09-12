@@ -23,7 +23,26 @@ if _REPOSITORY_ROOT not in sys.path:
 from hpc.models.micf_lite import MICFLite
 
 
-def build_model_from_config(cfg: dict) -> MICFLite:
+def is_rmr_config(cfg: dict) -> bool:
+    """Determine whether the configuration specifies an RMR model."""
+    m_cfg = cfg.get("model", {})
+    return (
+        "region_sizes_px" in m_cfg
+        or "neck_type" in m_cfg
+        or "enable_solver" in m_cfg
+        or "iterations" in m_cfg
+        or "reliability_mode" in m_cfg
+    )
+
+
+def build_model_from_config(cfg: dict) -> nn.Module:
+    if is_rmr_config(cfg):
+        from rmr_v3.train import make_model
+        model, _ = make_model(cfg)
+        if hasattr(model, "switch_to_deploy"):
+            model.switch_to_deploy()
+        return model
+
     m_cfg = cfg.get("model", {})
     return MICFLite(
         backbone_name=m_cfg.get(

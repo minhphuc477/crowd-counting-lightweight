@@ -19,7 +19,26 @@ if _REPOSITORY_ROOT not in sys.path:
 from hpc.models.micf_lite import MICFLite
 
 
-def build_micf_model_from_config(cfg: dict) -> MICFLite:
+def is_rmr_config(cfg: dict) -> bool:
+    """Determine whether the configuration specifies an RMR model."""
+    m_cfg = cfg.get("model", {})
+    return (
+        "region_sizes_px" in m_cfg
+        or "neck_type" in m_cfg
+        or "enable_solver" in m_cfg
+        or "iterations" in m_cfg
+        or "reliability_mode" in m_cfg
+    )
+
+
+def build_model_from_config(cfg: dict) -> nn.Module:
+    if is_rmr_config(cfg):
+        from rmr_v3.train import make_model
+        model, _ = make_model(cfg)
+        if hasattr(model, "switch_to_deploy"):
+            model.switch_to_deploy()
+        return model
+
     m_cfg = cfg.get("model", {})
     return MICFLite(
         backbone_name=m_cfg.get("backbone", "mobilenetv4_conv_small_050"),
@@ -37,6 +56,9 @@ def build_micf_model_from_config(cfg: dict) -> MICFLite:
     )
 
 
+build_micf_model_from_config = build_model_from_config
+
+
 def _shape(value) -> str:
     if isinstance(value, torch.Tensor):
         return "x".join(str(int(x)) for x in value.shape)
@@ -46,12 +68,16 @@ def _shape(value) -> str:
 
 
 def _component(name: str) -> str:
-    if name.startswith("backbone."):
+    if name.startswith("backbone.") or name.startswith("encoder."):
         return "backbone"
-    if name.startswith("neck."):
+    if name.startswith("neck.") or name.startswith("fusion.") or name.startswith("coord_attn."):
         return "neck"
     if name.startswith("context.") or name.startswith("context_module."):
         return "context"
+    if name.startswith("fine_head."):
+        return "fine_head"
+    if name.startswith("region_head."):
+        return "region_head"
     return "head"
 
 
@@ -116,16 +142,29 @@ def collect_architecture(cfg: dict, height: int, width: int) -> dict:
             hooks.append(module.register_forward_hook(leaf_hook(name, module)))
     try:
         image = torch.zeros(1, 3, height, width)
-        field = model(image)
+        out = model(image)
+        field = out["y"] if isinstance(out, dict) else out
     finally:
         for handle in hooks:
             handle.remove()
 
-    component_params = {
-        "backbone": sum(p.numel() for p in model.backbone.parameters()),
-        "neck": sum(p.numel() for p in model.neck.parameters()),
-        "head": sum(p.numel() for name, p in model.named_parameters() if not name.startswith("backbone.") and not name.startswith("neck.")),
-    }
+    is_rmr = is_rmr_config(cfg)
+    if is_rmr:
+        neck_p = sum(p.numel() for p in model.fusion.parameters())
+        if getattr(model, "coord_attn", None) is not None:
+            neck_p += sum(p.numel() for p in model.coord_attn.parameters())
+        component_params = {
+            "backbone": sum(p.numel() for p in model.encoder.parameters()),
+            "neck": neck_p,
+            "fine_head": sum(p.numel() for p in model.fine_head.parameters()),
+            "region_head": sum(p.numel() for p in model.region_head.parameters()),
+        }
+    else:
+        component_params = {
+            "backbone": sum(p.numel() for p in model.backbone.parameters()),
+            "neck": sum(p.numel() for p in model.neck.parameters()),
+            "head": sum(p.numel() for name, p in model.named_parameters() if not name.startswith("backbone.") and not name.startswith("neck.")),
+        }
     component_macs = defaultdict(int)
     for row in rows:
         component_macs[row["component"]] += row["conv_macs"]
@@ -133,6 +172,7 @@ def collect_architecture(cfg: dict, height: int, width: int) -> dict:
     m_cfg = cfg.get("model", {})
     return {
         "model": model,
+        "is_rmr": is_rmr,
         "resolved": m_cfg,
         "rows": rows,
         "component_params": component_params,
@@ -153,14 +193,16 @@ def write_csv(path: str, rows: list[dict]) -> None:
 
 def write_markdown(path: str, config_path: str, result: dict, height: int, width: int) -> None:
     resolved = result["resolved"]
+    is_rmr = result.get("is_rmr", False)
+    family_title = "RMR" if is_rmr else "MICF"
+    bb_name = resolved.get("backbone_name", resolved.get("backbone", "mobilenetv4_conv_small_050"))
+    stride = resolved.get("output_stride", 4 if is_rmr else 16)
     lines = [
-        "# MICF Executed Architecture Table",
+        f"# {family_title} Executed Architecture Table",
         "",
         f"- Config: `{os.path.abspath(config_path)}`",
-        f"- Backbone: `{resolved.get('backbone', 'mobilenetv4_conv_small_050')}`",
-        f"- Head Type: `{resolved.get('head_type', 'cumulative')}`",
-        f"- Integral Context: `{resolved.get('use_integral_context', False)}`",
-        f"- Output Stride: `{resolved.get('output_stride', 16)}`",
+        f"- Backbone: `{bb_name}`",
+        f"- Output Stride: `{stride}`",
         f"- Input: `1x3x{height}x{width}`",
         f"- Output Field: `{result['output_shape']}`",
         f"- Total Parameters: **{result['total_params']:,}**",

@@ -1,10 +1,11 @@
-"""Export MICF-Lite model to ONNX format and verify dynamic multi-shape parity."""
+"""Export MICF-Lite and RMR-v3 models to ONNX format and verify parity."""
 
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +18,24 @@ if _REPOSITORY_ROOT not in sys.path:
 from hpc.models.micf_lite import MICFLite
 
 
-def build_model_from_config(cfg: dict) -> MICFLite:
+def is_rmr_config(cfg: dict) -> bool:
+    """Determine whether the configuration specifies an RMR model."""
+    m_cfg = cfg.get("model", {})
+    return (
+        "region_sizes_px" in m_cfg
+        or "neck_type" in m_cfg
+        or "enable_solver" in m_cfg
+        or "iterations" in m_cfg
+        or "reliability_mode" in m_cfg
+    )
+
+
+def build_model_from_config(cfg: dict) -> nn.Module:
+    if is_rmr_config(cfg):
+        from rmr_v3.train import make_model
+        model, _ = make_model(cfg)
+        return model
+
     m_cfg = cfg.get("model", {})
     return MICFLite(
         backbone_name=m_cfg.get(
@@ -38,28 +56,43 @@ def build_model_from_config(cfg: dict) -> MICFLite:
     )
 
 
-class _ExportMICFWrapper(nn.Module):
-    """Wrapper targeting forward for clean ONNX export."""
+class _ExportWrapper(nn.Module):
+    """Wrapper targeting forward for clean single-tensor ONNX export."""
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, is_rmr: bool = False):
         super().__init__()
         self.model = model
+        self.is_rmr = is_rmr
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        out = self.model(x)
+        if self.is_rmr and isinstance(out, dict):
+            return out["y"]
+        return out
 
 
 def export_model_to_onnx(
     checkpoint_path: str | None,
     config_path: str,
-    output_onnx: str = "runs/micf_lite.onnx",
-    input_resolution: int = 256,
+    output_onnx: str = "runs/model.onnx",
+    input_resolution: int | None = None,
     opset_version: int = 17,
     allow_random_init: bool = False,
+    deploy_mode: bool = True,
     skip_verify: bool = False,
 ) -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+
+    is_rmr = is_rmr_config(cfg)
+    model_family = "RMR" if is_rmr else "MICF"
+    print(f"Detected model architecture family: {model_family}")
+
+    if input_resolution is None:
+        if is_rmr:
+            input_resolution = int(cfg.get("data", {}).get("crop_size", 512))
+        else:
+            input_resolution = 256
 
     has_checkpoint = checkpoint_path is not None and checkpoint_path.lower() not in {"none", ""}
     if has_checkpoint and allow_random_init:
@@ -89,22 +122,34 @@ def export_model_to_onnx(
         print("Exporting model with initial random weights (--allow-random-init specified).")
 
     model.eval()
-    export_module = _ExportMICFWrapper(model)
 
+    if deploy_mode and hasattr(model, "switch_to_deploy"):
+        model.switch_to_deploy()
+        print("Switched model to fused deployment mode (switch_to_deploy).")
+
+    export_module = _ExportWrapper(model, is_rmr=is_rmr)
     dummy_input = torch.randn(1, 3, input_resolution, input_resolution)
     os.makedirs(os.path.dirname(os.path.abspath(output_onnx)), exist_ok=True)
 
-    # Export to ONNX with dynamic batch and spatial dimensions
+    # Note on dynamic axes:
+    # MICF supports fully dynamic batch and spatial dimensions.
+    # RMR models evaluate multi-scale box grid partitions for the specific spatial resolution
+    # at trace time. Static spatial resolution is thus used for RMR to guarantee exact geometric consistency.
+    if is_rmr:
+        dynamic_axes = None
+    else:
+        dynamic_axes = {
+            "image": {0: "batch_size", 2: "height", 3: "width"},
+            "output_field": {0: "batch_size", 2: "out_height", 3: "out_width"},
+        }
+
     torch.onnx.export(
         export_module,
         dummy_input,
         output_onnx,
         input_names=["image"],
         output_names=["output_field"],
-        dynamic_axes={
-            "image": {0: "batch_size", 2: "height", 3: "width"},
-            "output_field": {0: "batch_size", 2: "out_height", 3: "out_width"},
-        },
+        dynamic_axes=dynamic_axes,
         opset_version=opset_version,
         training=torch.onnx.TrainingMode.EVAL,
     )
@@ -122,12 +167,18 @@ def export_model_to_onnx(
         return
 
     ort_session = ort.InferenceSession(output_onnx, providers=["CPUExecutionProvider"])
-    test_shapes = [
-        (1, 3, input_resolution, input_resolution),
-        (2, 3, input_resolution, input_resolution),
-        (1, 3, 320, 320),
-        (1, 3, 384, 512),
-    ]
+
+    if is_rmr:
+        test_shapes = [
+            (1, 3, input_resolution, input_resolution),
+        ]
+    else:
+        test_shapes = [
+            (1, 3, input_resolution, input_resolution),
+            (2, 3, input_resolution, input_resolution),
+            (1, 3, 320, 320),
+            (1, 3, 384, 512),
+        ]
 
     for shape in test_shapes:
         x_test = np.random.randn(*shape).astype(np.float32)
@@ -140,13 +191,14 @@ def export_model_to_onnx(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export MICF-Lite to ONNX")
-    parser.add_argument("--config", default="configs/pilot_micf/psfh_b8_k4.yaml")
+    parser = argparse.ArgumentParser(description="Export MICF-Lite or RMR-v3 to ONNX")
+    parser.add_argument("--config", default="configs/rmr_v9/rmr_v9_canonical.yaml")
     parser.add_argument("--checkpoint", default=None)
-    parser.add_argument("--output", default="runs/micf_lite.onnx")
-    parser.add_argument("--resolution", type=int, default=256)
+    parser.add_argument("--output", default="runs/exported_model.onnx")
+    parser.add_argument("--resolution", type=int, default=None, help="Input resolution (default: config crop size or 256/512)")
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--allow-random-init", action="store_true")
+    parser.add_argument("--no-deploy", dest="deploy_mode", action="store_false", help="Do not switch to deploy mode")
     parser.add_argument("--skip-verify", action="store_true")
     args = parser.parse_args()
 
@@ -157,6 +209,7 @@ def main() -> None:
         input_resolution=args.resolution,
         opset_version=args.opset,
         allow_random_init=args.allow_random_init,
+        deploy_mode=args.deploy_mode,
         skip_verify=args.skip_verify,
     )
 

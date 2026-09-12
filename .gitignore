@@ -24,6 +24,7 @@ data/*
 *.tar.gz
 *.zip
 *.npy
+*.onnx
 
 # Smoke & Temporary test outputs
 analysis_smoke/
