@@ -76,7 +76,7 @@ class DensityMapKDLoss(nn.Module):
             p_teacher = F.softmax(flat_yt_occ, dim=-1)
             kl = F.kl_div(log_p_student, p_teacher, reduction="batchmean") * (self.temperature ** 2)
         else:
-            kl = torch.tensor(0.0, device=ys.device, dtype=ys.dtype)
+            kl = (ys * 0.0).sum()
 
         # 2. Total count alignment (always computed for all samples, enforcing 0 count on background)
         count_l1 = F.smooth_l1_loss(count_student, count_teacher, beta=1.0)

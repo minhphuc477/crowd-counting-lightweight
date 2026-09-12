@@ -169,3 +169,83 @@ def test_solver_energy_reduction_and_monotonicity():
         eb = step["before"].item()
         ea = step["after"].item()
         assert ea < eb
+
+
+def test_kd_density_map_empty_and_occupied_autograd():
+    """Verify DensityMapKDLoss autograd graph connectivity on both empty background and occupied patches."""
+    from rmr_v3.kd import DensityMapKDLoss
+
+    kd_fn = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.5, temperature=1.0)
+
+    # Empty teacher
+    ys = torch.rand(2, 1, 32, 32, requires_grad=True)
+    yt_empty = torch.zeros(2, 1, 32, 32)
+    res_empty = kd_fn(ys, yt_empty)
+    assert res_empty["spatial_kl"].item() == 0.0
+    res_empty["total_kd"].backward()
+    assert ys.grad is not None and torch.isfinite(ys.grad).all()
+
+    # Occupied teacher
+    ys = torch.rand(2, 1, 32, 32, requires_grad=True)
+    yt_occ = torch.zeros(2, 1, 32, 32)
+    yt_occ[0, 0, 10:15, 10:15] = 2.0
+    yt_occ[1, 0, 20:25, 20:25] = 3.0
+    res_occ = kd_fn(ys, yt_occ)
+    assert res_occ["spatial_kl"].item() > 0.0
+    res_occ["total_kd"].backward()
+    assert ys.grad is not None and torch.isfinite(ys.grad).all()
+
+
+def test_predict_tiled_exact_identity_and_seam_invariance():
+    """Verify that predict_tiled is strictly identical to full-image inference for images <= tile_size."""
+    from rmr_core.evaluation import predict_tiled
+
+    cfg = RMRv3Config(pretrained=False, iterations=2)
+    model = RMRv3(cfg).eval()
+
+    # 1. Image <= tile_size: must be mathematically identical
+    img = torch.randn(3, 256, 256)
+    with torch.no_grad():
+        y_direct = model(img.unsqueeze(0))["y"][0]
+        y_tiled = predict_tiled(model, img, output_stride=4, tile_size=512, halo=64)
+
+    diff = (y_direct - y_tiled).abs().max().item()
+    assert diff < 1e-6, f"Tiled prediction differs on small image: {diff:.2e}"
+
+    # 2. Large image > tile_size: must produce valid contiguous canvas
+    img_large = torch.randn(3, 600, 800)
+    with torch.no_grad():
+        y_large = predict_tiled(model, img_large, output_stride=4, tile_size=512, halo=64)
+    assert y_large.shape == (1, 150, 200)
+    assert torch.isfinite(y_large).all()
+    assert (y_large >= 0.0).all()
+
+
+def test_nb_interval_coverage_diagnostics():
+    """Verify that compute_nb_interval_coverage accurately computes confidence intervals."""
+    from rmr_v3.diagnostics import compute_nb_interval_coverage
+
+    # Generate synthetic observations from known Negative Binomial distribution
+    np.random.seed(42)
+    rows = []
+    mu_true = 25.0
+    r_true = 10.0
+    p_true = r_true / (r_true + mu_true)
+
+    # Sample 1000 draws from NB(r, p)
+    samples = np.random.negative_binomial(r_true, p_true, size=1000)
+    for i, s in enumerate(samples):
+        rows.append({
+            "pred_count": float(mu_true),
+            "dispersion": float(r_true),
+            "gt_count": float(s),
+            "scale_id": i % 3,
+        })
+
+    coverage_dict = compute_nb_interval_coverage(rows, nominal_levels=(0.50, 0.80, 0.95))
+
+    # For discrete integer distributions, empirical coverage is conservative: coverage >= nominal - 0.02
+    assert 0.48 <= coverage_dict["coverage_50"] <= 0.65
+    assert abs(coverage_dict["coverage_80"] - 0.80) < 0.04
+    assert abs(coverage_dict["coverage_95"] - 0.95) < 0.03
+
