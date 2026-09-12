@@ -383,6 +383,9 @@ def evaluate_v3(
 
     calib = compute_uncertainty_calibration_bins(all_diag_rows)
     summary["calibration"] = calib
+    summary["mean_std_residual"] = calib["mean_std_residual"]
+    summary["p50_std_residual"] = calib["p50_std_residual"]
+    summary["p90_std_residual"] = calib["p90_std_residual"]
 
     disp_min = float(getattr(model.cfg, "dispersion_min", 0.5))
     disp_max = float(getattr(model.cfg, "dispersion_max", 500.0))
