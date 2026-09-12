@@ -82,6 +82,9 @@ ALLOWED_MODEL_KEYS = {
     "use_coord_attn",
     # RMR-v9.1 / AQ-RMR additions
     "proximal_tau",
+    # RMR-v10 additions
+    "proximal_mode",
+    "proximal_mu",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -249,6 +252,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             ptau = float(m_cfg["proximal_tau"])
             if ptau < 0.0:
                 raise ValueError(f"proximal_tau must be non-negative, got {ptau}")
+        if "proximal_mode" in m_cfg:
+            pmode = str(m_cfg["proximal_mode"])
+            if pmode not in ("firm", "soft", "none", "clamp"):
+                raise ValueError(f"proximal_mode must be 'firm', 'soft', or 'none', got '{pmode}'")
+        if "proximal_mu" in m_cfg:
+            pmu = float(m_cfg["proximal_mu"])
+            if pmu <= 1.0:
+                raise ValueError(f"proximal_mu must be > 1.0, got {pmu}")
         if "tv_lambda" in m_cfg:
             tvl = float(m_cfg["tv_lambda"])
             if tvl < 0.0:
@@ -265,8 +276,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     if isinstance(l_cfg_pre, dict):
         if "dm_target" in l_cfg_pre:
             dmt = str(l_cfg_pre["dm_target"])
-            if dmt not in ("y", "y0"):
-                raise ValueError(f"dm_target must be 'y' or 'y0', got '{dmt}'")
+            if dmt not in ("y", "y0", "dual"):
+                raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{dmt}'")
         if "dm_strict" in l_cfg_pre:
             if not isinstance(l_cfg_pre["dm_strict"], bool):
                 raise ValueError(f"dm_strict must be a boolean, got {type(l_cfg_pre['dm_strict']).__name__}")

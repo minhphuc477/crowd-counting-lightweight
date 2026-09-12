@@ -452,7 +452,8 @@ def format_dynamic_training_banner(
     else:
         solver_parts = []
         if getattr(m_cfg, "proximal_tau", 0.0) > 0.0:
-            solver_parts.append(f"Proximal RW-SIRT (tau={m_cfg.proximal_tau})")
+            p_mode = getattr(m_cfg, "proximal_mode", "firm").upper()
+            solver_parts.append(f"Proximal {p_mode} RW-SIRT (tau={m_cfg.proximal_tau}, mu={getattr(m_cfg, 'proximal_mu', 3.0)})")
         elif getattr(m_cfg, "solver_mode", "additive") == "multiplicative":
             solver_parts.append(f"Density-Gated RW-SIRT (rho={m_cfg.density_gate_rho})")
         else:
@@ -473,14 +474,18 @@ def format_dynamic_training_banner(
     # 4. Heads & Densities
     guidance_head = "Hurdle-NB (Occupancy Gated)" if getattr(m_cfg, "hurdle_head", False) else "Negative-Binomial"
     if getattr(m_cfg, "temp_softplus", False):
-        density_head = "Learnable Temp Softplus"
+        density_head = "FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])"
     else:
-        m0_val = getattr(m_cfg, "init_m0", 0.015763)
-        density_head = f"Calibrated Softplus (m0={m0_val:.5f})"
+        density_head = "FineMeasureHead (Calibrated Log-Space Softplus)"
 
     # 5. Supervision Target & Loss
     dm_target = cfg.get("loss", {}).get("dm_target", "y0")
-    target_desc = "Post-Solver Y (End-to-End Measure Optimization)" if dm_target == "y" else "Pre-Solver Y0 (Decoupled Carrier Guidance)"
+    if dm_target == "dual":
+        target_desc = "Dual-Depth [0.5 Y0 + 0.5 Y] (Anchored Guidance + End-to-End Solver)"
+    elif dm_target == "y":
+        target_desc = "Post-Solver Y (End-to-End Measure Optimization)"
+    else:
+        target_desc = "Pre-Solver Y0 (Decoupled Carrier Guidance)"
     loss_type = cfg.get("loss", {}).get("allocation_loss_type", "flat_dm16")
     supervision_desc = f"{target_desc} -> {loss_type.upper()}"
 

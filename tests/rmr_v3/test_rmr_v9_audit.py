@@ -604,7 +604,7 @@ def test_config_validation_guards():
         validate_v3_config({"model": {"tv_lambda": -0.02}})
 
     # Invalid dm_target rejected
-    with pytest.raises(ValueError, match="dm_target must be 'y' or 'y0'"):
+    with pytest.raises(ValueError, match="dm_target must be"):
         validate_v3_config({"loss": {"dm_target": "invalid"}})
 
     # Invalid count_loss_mode rejected

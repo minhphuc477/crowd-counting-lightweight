@@ -140,11 +140,17 @@ class RMRv3Config:
 
     # ── RMR-v9.1 / AQ-RMR additions ──────────────────────────────────────────
     # Proximal L1-Soft-Thresholding threshold τ in the SIRT solver loop.
-    # When > 0, applies the exact proximal operator S_τ^+(z) = max(0, z - τ)
-    # after the additive update, introducing a noise deadband [0, τ] that
-    # completely suppresses background mass smearing (phantom count lift)
-    # without creating a zero-absorbing barrier. 0.0 = disabled (default).
+    # When > 0, applies proximal operator after the additive update, introducing a noise deadband
+    # [0, τ] that completely suppresses background mass smearing (phantom count lift).
     proximal_tau: float = 0.0
+
+    # ── RMR-v10 additions ────────────────────────────────────────────────────
+    # Proximal mode:
+    # "firm": Minimax Concave Penalty (MCP) firm thresholding. Zero shrinkage on peaks (dense anti-erosion).
+    # "soft": Standard L1 soft-thresholding S_tau^+(z) = max(0, z - tau) (backward compatible default).
+    # "none": Non-negative clamp only.
+    proximal_mode: str = "soft"
+    proximal_mu: float = 3.0
 
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
@@ -162,6 +168,14 @@ class RMRv3Config:
         if self.proximal_tau < 0.0:
             raise ValueError(
                 f"proximal_tau must be non-negative, got {self.proximal_tau}"
+            )
+        if self.proximal_mode not in ("firm", "soft", "none", "clamp"):
+            raise ValueError(
+                f"proximal_mode must be 'firm', 'soft', or 'none', got '{self.proximal_mode}'"
+            )
+        if self.proximal_mu <= 1.0:
+            raise ValueError(
+                f"proximal_mu must be > 1.0, got {self.proximal_mu}"
             )
         if self.tv_lambda < 0.0:
             raise ValueError(
@@ -800,6 +814,8 @@ class RMRv3(nn.Module):
             density_gate_rho=self.cfg.density_gate_rho,
             density_gate_floor=self.cfg.density_gate_floor,
             proximal_tau=self.cfg.proximal_tau,
+            proximal_mode=self.cfg.proximal_mode,
+            proximal_mu=self.cfg.proximal_mu,
             tv_lambda=self.cfg.tv_lambda,
             tv_type=self.cfg.tv_type,
             tv_eps_c=self.cfg.tv_eps_c,

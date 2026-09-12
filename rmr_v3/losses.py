@@ -321,19 +321,18 @@ class RMRv3LossConfig:
     cell_mass_weight_eps: float = 1e-3  # avoid division-by-zero in mass weighting
     cell_mass_weight_alpha: float = 1.0  # mass boost scaling factor
 
-    # RMR-v9: control which density map is supervised by the Dirichlet-Multinomial allocation loss.
+    # RMR-v9/v10: control which density map is supervised by the Dirichlet-Multinomial allocation loss.
     # "y0" (default): supervise the initial pre-solver density map (backward compatible, v7/v8 default).
     # "y":  supervise the final post-solver density map.
-    #       Aligns Flat-DM16 with the terminal spatial output, closing the supervision gap between
-    #       the allocation loss and the solver's reconciled measure (spec Section 7.2).
+    # "dual": supervise both 0.5 * L(y) + 0.5 * L(y0), anchoring y0 to GT while optimizing y end-to-end.
     dm_target: str = "y0"
     dm_strict: bool = True
 
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
-        if self.dm_target not in ("y", "y0"):
-            raise ValueError(f"dm_target must be 'y' or 'y0', got '{self.dm_target}'")
+        if self.dm_target not in ("y", "y0", "dual"):
+            raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{self.dm_target}'")
         if self.count_loss_mode not in ("nb", "log1p", "l1"):
             raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{self.count_loss_mode}'")
         if self.cell_loss_mode not in ("balanced", "mass_weighted"):
@@ -472,48 +471,62 @@ def compute_rmr_v3_losses(
         dispersion=cfg.count_nb_dispersion,
     )
 
-    # ── Allocation loss target selection (RMR-v9: dm_target="y" supervises post-solver output) ──
-    # "y0" (default, backward compatible): supervise the initial density map before SIRT.
-    dm_input = y if cfg.dm_target == "y" else y0
+    # ── Allocation loss target selection (RMR-v9/v10) ──
+    # "y0": supervise initial carrier y0 (decoupled guidance).
+    # "y":  supervise terminal output y (end-to-end unrolled optimization).
+    # "dual": supervise both 0.5 * L(y) + 0.5 * L(y0) (anchors y0 to GT while optimizing y).
+    def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
+        comps: dict[int, torch.Tensor] = {}
+        if cfg.allocation_loss_type == "bayesian":
+            loss_val = bayesian_loss(
+                inp,
+                points,
+                sigma=cfg.bayesian_sigma,
+                background_ratio=cfg.bayesian_background_ratio,
+                stride=4,
+            )
+        elif cfg.allocation_loss_type == "ot_sinkhorn":
+            loss_val = sinkhorn_ot_loss(
+                inp,
+                points,
+                reg=cfg.ot_reg,
+                num_iters=cfg.ot_num_iters,
+                stride=4,
+            )
+        elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
+            loss_val, comps = multiscale_dm_loss(
+                inp,
+                target_float,
+                block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
+                weights=tuple(float(x) for x in cfg.dm_weights),
+                kappas=tuple(float(x) for x in cfg.dm_kappas),
+                stride=4,
+                normalize_by_count=cfg.normalize_flat_dm16,
+                strict=cfg.dm_strict,
+                return_components=True,
+            )
+        else:
+            loss_val = flat_dm16_loss(
+                inp,
+                target_float,
+                kappa=cfg.kappa_flat16,
+                normalize_by_count=cfg.normalize_flat_dm16,
+                strict=cfg.dm_strict,
+            )
+            comps[16] = loss_val
+        return loss_val, comps
 
     dm_components: dict[int, torch.Tensor] = {}
-    if cfg.allocation_loss_type == "bayesian":
-        loss_allocation = bayesian_loss(
-            dm_input,
-            points,
-            sigma=cfg.bayesian_sigma,
-            background_ratio=cfg.bayesian_background_ratio,
-            stride=4,
-        )
-    elif cfg.allocation_loss_type == "ot_sinkhorn":
-        loss_allocation = sinkhorn_ot_loss(
-            dm_input,
-            points,
-            reg=cfg.ot_reg,
-            num_iters=cfg.ot_num_iters,
-            stride=4,
-        )
-    elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
-        loss_allocation, dm_components = multiscale_dm_loss(
-            dm_input,
-            target_float,
-            block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
-            weights=tuple(float(x) for x in cfg.dm_weights),
-            kappas=tuple(float(x) for x in cfg.dm_kappas),
-            stride=4,
-            normalize_by_count=cfg.normalize_flat_dm16,
-            strict=cfg.dm_strict,
-            return_components=True,
-        )
-    else:
-        loss_allocation = flat_dm16_loss(
-            dm_input,
-            target_float,
-            kappa=cfg.kappa_flat16,
-            normalize_by_count=cfg.normalize_flat_dm16,
-            strict=cfg.dm_strict,
-        )
-        dm_components[16] = loss_allocation
+    if cfg.dm_target == "dual":
+        loss_alloc_y, dm_components = _compute_single_allocation(y)
+        loss_alloc_y0, _ = _compute_single_allocation(y0)
+        loss_allocation = 0.5 * loss_alloc_y + 0.5 * loss_alloc_y0
+        losses["allocation_y"] = loss_alloc_y
+        losses["allocation_y0"] = loss_alloc_y0
+    elif cfg.dm_target == "y":
+        loss_allocation, dm_components = _compute_single_allocation(y)
+    else:  # "y0"
+        loss_allocation, dm_components = _compute_single_allocation(y0)
 
     losses["allocation"] = loss_allocation
     losses["flat_dm16"] = loss_allocation  # backward compatibility alias

@@ -30,6 +30,34 @@ def proximal_soft_threshold(y: torch.Tensor, tau: float) -> torch.Tensor:
     return torch.clamp_min(y - tau, 0.0)
 
 
+def proximal_firm_threshold(
+    y: torch.Tensor,
+    tau: float,
+    mu: float = 3.0,
+) -> torch.Tensor:
+    """Exact proximal operator for Minimax Concave Penalty (MCP) / Firm Thresholding:
+
+        S_firm^+(z; tau, mu) =
+            0                                  if z <= tau
+            (mu / (mu - 1)) * (z - tau)        if tau < z <= mu * tau
+            z                                  if z > mu * tau
+
+    Properties for crowd counting:
+    - z <= tau: Background noise is strictly zeroed out (anti-smearing / zero deadband).
+    - z > mu * tau: Real crowd peaks suffer ZERO shrinkage (identity mapping),
+      completely resolving the dense clump mass erosion caused by soft-thresholding.
+    - tau < z <= mu * tau: Smooth, continuous monotonic transition.
+    """
+    if tau <= 0.0:
+        return torch.clamp_min(y, 0.0)
+    mu_val = float(max(mu, 1.001))
+    mu_tau = mu_val * tau
+    slope = mu_val / (mu_val - 1.0)
+    ramp = slope * (y - tau)
+    out = torch.where(y > mu_tau, y, ramp)
+    return torch.clamp_min(out, 0.0)
+
+
 def laplacian_tv_diffusion(
     y: torch.Tensor,
     tv_lambda: float,
@@ -63,6 +91,8 @@ def unrolled_sirt_solver(
     density_gate_rho: float = 0.02,
     density_gate_floor: float = 0.02,
     proximal_tau: float = 0.0,
+    proximal_mode: str = "soft",
+    proximal_mu: float = 3.0,
     tv_lambda: float = 0.0,
     tv_type: str = "laplacian",
     tv_eps_c: float = 0.1,
@@ -152,8 +182,17 @@ def unrolled_sirt_solver(
 
         y_step = y.float() - effective_omega * field
 
-        # ── Step 2: Proximal soft-thresholding L1-shrinkage ────────────────────
-        y_next = proximal_soft_threshold(y_step, tau=tau_step)
+        # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
+        if proximal_mode == "firm":
+            y_next = proximal_firm_threshold(y_step, tau=tau_step, mu=float(proximal_mu))
+        elif proximal_mode == "soft":
+            y_next = proximal_soft_threshold(y_step, tau=tau_step)
+        elif proximal_mode in ("none", "clamp"):
+            y_next = torch.clamp_min(y_step, 0.0)
+        else:
+            raise ValueError(
+                f"Unknown proximal_mode: '{proximal_mode}'. Must be 'firm', 'soft', or 'none'."
+            )
 
         # ── Step 3: Total Variation diffusion ─────────────────────────────────
         if effective_tv_lambda > 0.0:
