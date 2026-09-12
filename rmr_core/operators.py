@@ -24,6 +24,11 @@ class RegionSet:
     area: torch.Tensor
     boxes_list: list[tuple[int, int, int, int]] | None = None
 
+    @property
+    def areas(self) -> torch.Tensor:
+        """Alias for `area` for spec-consistency (RegionSet.areas == RegionSet.area)."""
+        return self.area
+
     def to(self, device: torch.device | str) -> "RegionSet":
         return RegionSet(
             boxes=self.boxes.to(device),

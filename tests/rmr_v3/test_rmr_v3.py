@@ -347,9 +347,14 @@ def test_config_validation_guards():
     with pytest.raises(ValueError, match="Unsupported reliability_mode"):
         RMRv3(RMRv3Config(reliability_mode="invalid_mode", pretrained=False))
 
-    # Invalid region sizes
+    # region_sizes_px: any non-empty tuple is now valid (anisotropic regions supported)
+    # Verify that empty region_sizes_px still raises
     with pytest.raises(ValueError, match="region_sizes_px"):
-        RMRv3(RMRv3Config(region_sizes_px=(32, 64), pretrained=False))
+        RMRv3(RMRv3Config(region_sizes_px=(), pretrained=False))
+
+    # Previously-rejected non-standard sizes must now be accepted (anisotropic perspective regions)
+    m_nonstandard = RMRv3(RMRv3Config(region_sizes_px=(32, 64), pretrained=False))
+    assert m_nonstandard is not None
 
     # Invalid weight bounds
     with pytest.raises(ValueError, match="reliability_weight_min"):

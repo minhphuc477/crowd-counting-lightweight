@@ -309,9 +309,17 @@ class RMRv3LossConfig:
     cell_mass_weight_eps: float = 1e-3  # avoid division-by-zero in mass weighting
     cell_mass_weight_alpha: float = 1.0  # mass boost scaling factor
 
+    # RMR-v9: control which density map is supervised by the Dirichlet-Multinomial allocation loss.
+    # "y0" (default): supervise the initial pre-solver density map (backward compatible, v7/v8 default).
+    # "y":  supervise the final post-solver density map.
+    #       Aligns Flat-DM16 with the terminal spatial output, closing the supervision gap between
+    #       the allocation loss and the solver's reconciled measure (spec Section 7.2).
+    dm_target: str = "y0"
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
+
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "RMRv3LossConfig":
@@ -438,10 +446,16 @@ def compute_rmr_v3_losses(
         dispersion=cfg.count_nb_dispersion,
     )
 
+    # ── Allocation loss target selection (RMR-v9: dm_target="y" supervises post-solver output) ──
+    # "y0" (default, backward compatible): supervise the initial density map before SIRT.
+    # "y":  supervise the final reconciled density map — closes the supervision gap between
+    #       Flat-DM16 allocation and the solver's terminal output (architectural spec Section 7.2).
+    dm_input = y if getattr(cfg, "dm_target", "y0") == "y" else y0
+
     dm_components: dict[int, torch.Tensor] = {}
     if cfg.allocation_loss_type == "bayesian":
         loss_allocation = bayesian_loss(
-            y0,
+            dm_input,
             points,
             sigma=cfg.bayesian_sigma,
             background_ratio=cfg.bayesian_background_ratio,
@@ -449,7 +463,7 @@ def compute_rmr_v3_losses(
         )
     elif cfg.allocation_loss_type == "ot_sinkhorn":
         loss_allocation = sinkhorn_ot_loss(
-            y0,
+            dm_input,
             points,
             reg=cfg.ot_reg,
             num_iters=cfg.ot_num_iters,
@@ -457,7 +471,7 @@ def compute_rmr_v3_losses(
         )
     elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
         loss_allocation, dm_components = multiscale_dm_loss(
-            y0,
+            dm_input,
             target_float,
             block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
             weights=tuple(float(x) for x in cfg.dm_weights),
@@ -468,7 +482,7 @@ def compute_rmr_v3_losses(
         )
     else:
         loss_allocation = flat_dm16_loss(
-            y0,
+            dm_input,
             target_float,
             kappa=cfg.kappa_flat16,
             normalize_by_count=cfg.normalize_flat_dm16,

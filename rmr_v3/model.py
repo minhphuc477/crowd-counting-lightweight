@@ -520,9 +520,9 @@ class RMRv3(nn.Module):
                 f"Unsupported reliability_mode: {cfg.reliability_mode}. Only 'nb_rate_variance' is supported."
             )
 
-        if tuple(cfg.region_sizes_px) not in {(32, 64, 128), (16, 32, 64, 128)}:
+        if len(cfg.region_sizes_px) == 0:
             raise ValueError(
-                f"RMR-v3 requires region_sizes_px in [(32, 64, 128), (16, 32, 64, 128)], got {cfg.region_sizes_px}"
+                "region_sizes_px must not be empty"
             )
 
         if cfg.reliability_weight_min <= 0:
