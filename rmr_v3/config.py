@@ -109,6 +109,8 @@ ALLOWED_LOSS_KEYS = {
     "cell_mass_weight_alpha",
     "lambda_kd_spatial",
     "lambda_kd_count",
+    # RMR-v9: allocation loss target ("y0" | "y")
+    "dm_target",
 }
 
 ALLOWED_TRAIN_KEYS = {
