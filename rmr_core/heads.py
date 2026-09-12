@@ -65,6 +65,15 @@ class FineMeasureHead(nn.Module):
         return self.body(f)
 
     def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+        """Return the pre-activation logit field z0 (legacy interface, preserved for rmr_v2).
+
+        NOTE: This method intentionally returns a raw logit when temp_softplus=False,
+        and a density when temp_softplus=True — a known inconsistency retained for
+        backward-compatibility with rmr_v2/model.py which calls:
+            z0 = fine_head(f)
+            y0 = F.softplus(z0)
+        New code (rmr_v3+) must call forward_logits() + activate() separately.
+        """
         z = self.forward_logits(f)
         if self.temp_softplus:
             return self.activate(z)

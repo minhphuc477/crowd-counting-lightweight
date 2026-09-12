@@ -109,6 +109,9 @@ def unrolled_sirt_solver(
     effective_omega = float(omega) * strength
     effective_tv_lambda = float(tv_lambda) * strength
     effective_tau = float(proximal_tau)
+    # tau_step is the per-iteration proximal threshold.
+    # Divide by T so that total L1 shrinkage over all iterations equals omega*tau,
+    # making tau a T-invariant hyperparameter (same budget regardless of iterations).
     tau_step = (effective_omega * effective_tau) / max(int(iterations), 1)
 
     # Compute weighted coverage field: D_w = A^T w

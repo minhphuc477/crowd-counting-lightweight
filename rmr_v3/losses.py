@@ -271,7 +271,9 @@ def sinkhorn_ot_loss(
             v = log_p - torch.logsumexp((-c + u.unsqueeze(1)) / eps, dim=0)
 
         log_gamma = (u.unsqueeze(1) + v.unsqueeze(0) - c) / eps
-        gamma = torch.exp(torch.clamp(log_gamma, max=0.0))
+        # Numerically stable: shift by max (does not change relative weights or OT cost).
+        # Do NOT clamp(max=0.0) — valid transport entries can have log_gamma > 0.
+        gamma = torch.exp(log_gamma - log_gamma.detach().max())
         ot_cost = (gamma * c).sum()
 
         count_err = torch.abs(total_pred - float(n)) / float(max(n, 1))
