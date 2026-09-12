@@ -315,10 +315,19 @@ class RMRv3LossConfig:
     #       Aligns Flat-DM16 with the terminal spatial output, closing the supervision gap between
     #       the allocation loss and the solver's reconciled measure (spec Section 7.2).
     dm_target: str = "y0"
+    dm_strict: bool = True
 
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
+        if self.dm_target not in ("y", "y0"):
+            raise ValueError(f"dm_target must be 'y' or 'y0', got '{self.dm_target}'")
+        if self.count_loss_mode not in ("nb", "log1p", "l1"):
+            raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{self.count_loss_mode}'")
+        if self.cell_loss_mode not in ("balanced", "mass_weighted"):
+            raise ValueError(f"cell_loss_mode must be 'balanced' or 'mass_weighted', got '{self.cell_loss_mode}'")
+        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
+            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
 
 
     @classmethod
@@ -476,6 +485,7 @@ def compute_rmr_v3_losses(
             kappas=tuple(float(x) for x in cfg.dm_kappas),
             stride=4,
             normalize_by_count=cfg.normalize_flat_dm16,
+            strict=cfg.dm_strict,
             return_components=True,
         )
     else:
@@ -484,6 +494,7 @@ def compute_rmr_v3_losses(
             target_float,
             kappa=cfg.kappa_flat16,
             normalize_by_count=cfg.normalize_flat_dm16,
+            strict=cfg.dm_strict,
         )
         dm_components[16] = loss_allocation
 

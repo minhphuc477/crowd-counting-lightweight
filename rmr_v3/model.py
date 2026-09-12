@@ -153,6 +153,22 @@ class RMRv3Config:
             raise ValueError(
                 f"use_coord_attn=True requires neck_type='aspp_lite', got '{self.neck_type}'"
             )
+        if self.solver_mode not in ("additive", "multiplicative"):
+            raise ValueError(
+                f"solver_mode must be 'additive' or 'multiplicative', got '{self.solver_mode}'"
+            )
+        if self.tv_type not in ("laplacian", "charbonnier"):
+            raise ValueError(
+                f"tv_type must be 'laplacian' or 'charbonnier', got '{self.tv_type}'"
+            )
+        if self.proximal_tau < 0.0:
+            raise ValueError(
+                f"proximal_tau must be non-negative, got {self.proximal_tau}"
+            )
+        if self.tv_lambda < 0.0:
+            raise ValueError(
+                f"tv_lambda must be non-negative, got {self.tv_lambda}"
+            )
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -466,12 +482,9 @@ def reliability_from_nb(
     precision = 1.0 / rate_var.clamp_min(eps)
 
     if normalize_within_scale:
-        weight = torch.empty_like(precision)
+        weight = torch.ones_like(precision)
 
         for sid in torch.unique(regions.scale_id):
-            if int(sid.item()) < 0:
-                continue
-
             mask = regions.scale_id == sid
 
             q = precision[..., mask]
@@ -697,8 +710,8 @@ class RMRv3(nn.Module):
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
-        z0 = self.fine_head(p4)
-        y0 = z0 if self.fine_head.temp_softplus else self.fine_head.activate(z0)
+        z0 = self.fine_head.forward_logits(p4)
+        y0 = self.fine_head.activate(z0)
 
         h, w = y0.shape[-2:]
 
@@ -848,7 +861,7 @@ class RMRv3(nn.Module):
                     y_next = charbonnier_tv_step(y_next, tv_lambda, tv_eps_c)
                 else:
                     # Isotropic Laplacian TV (v7 default — backward compatible)
-                    lap = F.conv2d(y_next, self._laplace_kernel, padding=1)
+                    lap = F.conv2d(y_next, self._laplace_kernel.to(y_next.dtype), padding=1)
                     y_next = torch.clamp_min(y_next + tv_lambda * lap, 0.0)
 
             y_next = y_next.to(y.dtype)

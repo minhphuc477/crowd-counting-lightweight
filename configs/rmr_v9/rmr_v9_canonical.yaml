@@ -1,4 +1,4 @@
-﻿seed: 42
+seed: 42
 
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -38,6 +38,8 @@ model:
 
   tv_lambda:       0.02
   tv_type:         laplacian
+
+  proximal_tau:    0.0
 
   dispersion_init: 50.0
   dispersion_min:  0.5

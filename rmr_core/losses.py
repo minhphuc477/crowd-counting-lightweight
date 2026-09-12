@@ -45,8 +45,8 @@ def negative_binomial_nll_mean_dispersion(
         raise ValueError(
             f"Negative-Binomial dispersion parameter r must be in (0, {_MAX_DISPERSION}], got {dispersion}"
         )
-    if torch.any(y < 0):
-        raise ValueError("Negative-Binomial targets must be non-negative")
+    if not torch.isfinite(y).all() or torch.any(y < 0):
+        raise ValueError("Negative-Binomial targets must be finite non-negative numbers")
 
     log_r_plus_mu = torch.log(r + mu)
     nll = -(
@@ -140,23 +140,35 @@ def flat_dm_block_loss(
     stride: int = 4,
     eps: float = 1e-8,
     normalize_by_count: bool = True,
+    strict: bool = True,
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial allocation loss on arbitrary block_px sizes."""
     if block_px % stride != 0:
         raise ValueError(f"block_px ({block_px}) must be divisible by stride ({stride})")
 
     k = block_px // stride
-    if pred_map.shape[-2] % k != 0 or pred_map.shape[-1] % k != 0:
-        raise ValueError(
-            f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {pred_map.shape[-2:]}"
-        )
-    if target_map.shape[-2] % k != 0 or target_map.shape[-1] % k != 0:
-        raise ValueError(
-            f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {target_map.shape[-2:]}"
-        )
+    h_pred, w_pred = pred_map.shape[-2:]
+    h_tgt, w_tgt = target_map.shape[-2:]
 
-    pred_block = block_sum_2d(pred_map.float(), k=k, strict=True).flatten(1)
-    target_block = block_sum_2d(target_map.float(), k=k, strict=True).flatten(1)
+    if h_pred % k != 0 or w_pred % k != 0:
+        if strict:
+            raise ValueError(
+                f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {pred_map.shape[-2:]}"
+            )
+    if h_tgt % k != 0 or w_tgt % k != 0:
+        if strict:
+            raise ValueError(
+                f"FlatDM{block_px} requires grid dimensions divisible by block size k={k}: grid {target_map.shape[-2:]}"
+            )
+
+    if not strict and (h_pred < k or w_pred < k or h_tgt < k or w_tgt < k):
+        return pred_map.new_tensor(0.0)
+
+    pred_block = block_sum_2d(pred_map.float(), k=k, strict=strict).flatten(1)
+    target_block = block_sum_2d(target_map.float(), k=k, strict=strict).flatten(1)
+
+    if pred_block.shape[-1] == 0:
+        return pred_map.new_tensor(0.0)
 
     pi = probs_from_positive_mass(pred_block, tiny=eps)
     alpha = float(kappa) * pi
@@ -178,6 +190,7 @@ def multiscale_dm_loss(
     stride: int = 4,
     eps: float = 1e-8,
     normalize_by_count: bool = True,
+    strict: bool = True,
     return_components: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """Multi-Scale Dirichlet-Multinomial allocation loss across independent block granularities.
@@ -219,6 +232,7 @@ def multiscale_dm_loss(
             stride=stride,
             eps=eps,
             normalize_by_count=normalize_by_count,
+            strict=strict,
         )
         components[int(block_px)] = li
         terms.append((float(w) / wsum) * li)
@@ -240,6 +254,7 @@ def flat_dm16_loss(
     stride: int = 4,
     eps: float = 1e-8,
     normalize_by_count: bool = True,
+    strict: bool = True,
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (backward compatible)."""
     return flat_dm_block_loss(
@@ -250,6 +265,7 @@ def flat_dm16_loss(
         stride=stride,
         eps=eps,
         normalize_by_count=normalize_by_count,
+        strict=strict,
     )
 
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from rmr_core.data import resolve_manifest_path
 from rmr_core.training import compute_file_sha256
+from .model import RMRv3Config
 
 ALLOWED_TOP_LEVEL = {
     "seed",
@@ -113,6 +114,7 @@ ALLOWED_LOSS_KEYS = {
     "lambda_kd_count",
     # RMR-v9: allocation loss target ("y0" | "y")
     "dm_target",
+    "dm_strict",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -242,6 +244,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                         f"Charbonnier TV CFL stability violation: tv_lambda ({tv_lambda}) must be <= "
                         f"tv_eps_c / 4 ({cfl_limit}) to ensure contractivity and prevent numerical divergence."
                     )
+        if "proximal_tau" in m_cfg:
+            ptau = float(m_cfg["proximal_tau"])
+            if ptau < 0.0:
+                raise ValueError(f"proximal_tau must be non-negative, got {ptau}")
+        if "tv_lambda" in m_cfg:
+            tvl = float(m_cfg["tv_lambda"])
+            if tvl < 0.0:
+                raise ValueError(f"tv_lambda must be non-negative, got {tvl}")
         if bool(m_cfg.get("use_coord_attn", False)):
             neck = str(m_cfg.get("neck_type", "additive"))
             if neck != "aspp_lite":
@@ -252,6 +262,23 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
     if isinstance(l_cfg_pre, dict):
+        if "dm_target" in l_cfg_pre:
+            dmt = str(l_cfg_pre["dm_target"])
+            if dmt not in ("y", "y0"):
+                raise ValueError(f"dm_target must be 'y' or 'y0', got '{dmt}'")
+        if "dm_strict" in l_cfg_pre:
+            if not isinstance(l_cfg_pre["dm_strict"], bool):
+                raise ValueError(f"dm_strict must be a boolean, got {type(l_cfg_pre['dm_strict']).__name__}")
+        if "count_loss_mode" in l_cfg_pre:
+            clm = str(l_cfg_pre["count_loss_mode"])
+            if clm not in ("nb", "log1p", "l1"):
+                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{clm}'")
+        if "allocation_loss_type" in l_cfg_pre:
+            alt = str(l_cfg_pre["allocation_loss_type"])
+            if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
+                raise ValueError(
+                    f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{alt}'"
+                )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])
             if clm not in ("balanced", "mass_weighted"):
@@ -409,8 +436,12 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "density_gate_rho",
         "density_gate_floor",
         "tv_type",
+        "tv_lambda",
+        "tv_eps_c",
         # RMR-v8 Stage 3 architecture
         "use_coord_attn",
+        # RMR-v9.1 / AQ-RMR additions
+        "proximal_tau",
     ],
     "loss": [
         "lambda_count",
@@ -429,6 +460,11 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dm_kappas",
         # RMR-v8 Stage 2 loss fields
         "cell_loss_mode",
+        "cell_mass_weight_alpha",
+        "cell_mass_weight_eps",
+        # RMR-v9 allocation loss fields
+        "allocation_loss_type",
+        "dm_target",
     ],
     "train": [
         "lr",
@@ -659,6 +695,21 @@ def validate_resume_compatibility(
                         f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
                         f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
                     )
+
+
+def load_config(path: str | Path) -> dict[str, Any]:
+    """Load, parse, and validate an RMR YAML configuration file."""
+    import yaml
+
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Configuration file not found: {p}")
+    with open(p, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Configuration at {p} must parse to a dictionary, got {type(cfg).__name__}")
+    validate_v3_config(cfg)
+    return cfg
 
 
 def __getattr__(name: str):

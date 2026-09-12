@@ -452,8 +452,13 @@ def _canonicalize_region_size(s: int | Sequence[int]) -> tuple[int, int]:
     if isinstance(s, (tuple, list)):
         if len(s) != 2:
             raise ValueError(f"Region size specification must be an integer or (height, width) pair, got {s}")
-        return (int(s[0]), int(s[1]))
+        hy, wx = int(s[0]), int(s[1])
+        if hy <= 0 or wx <= 0:
+            raise ValueError(f"Region dimensions must be strictly positive, got ({hy}, {wx})")
+        return (hy, wx)
     val = int(s)
+    if val <= 0:
+        raise ValueError(f"Region dimension must be strictly positive, got {val}")
     return (val, val)
 
 
@@ -492,7 +497,7 @@ def _build_multiscale_regions_cached(
     box_t = torch.tensor(boxes, dtype=torch.long)
     scale_t = torch.tensor(scale_ids, dtype=torch.long)
     area_t = ((box_t[:, 2] - box_t[:, 0]) * (box_t[:, 3] - box_t[:, 1])).float()
-    return box_t, scale_t, area_t, list(boxes)
+    return box_t.clone(), scale_t.clone(), area_t.clone(), list(boxes)
 
 
 def build_multiscale_regions(
@@ -512,6 +517,10 @@ def build_multiscale_regions(
     The last window on each axis is forced to touch the image/grid boundary.
     Cached across calls with maxsize=32.
     """
+    if height <= 0 or width <= 0:
+        raise ValueError(f"Image grid dimensions must be strictly positive, got height={height}, width={width}")
+    if output_stride <= 0:
+        raise ValueError(f"output_stride must be strictly positive, got {output_stride}")
     if not (0.0 <= overlap < 1.0):
         raise ValueError("overlap must be in [0,1)")
     canonical_sizes = tuple(_canonicalize_region_size(s) for s in region_sizes_px)
@@ -563,12 +572,20 @@ def region_mean_std_features(
     boxes: torch.Tensor,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Extract both spatial mean and standard deviation over bounding boxes in FP32."""
+    """Extract both spatial mean and standard deviation over bounding boxes in FP32.
+
+    Uses a shifted two-pass variance calculation (subtracting channel spatial mean)
+    to eliminate floating-point catastrophic cancellation under unnormalized or shifted features.
+    """
     f32 = feature.float()
-    mean = region_average_features(f32, boxes)
-    mean_sq = region_average_features(f32.square(), boxes)
-    var = (mean_sq - mean.square()).clamp_min(0.0)
+    shift = f32.mean(dim=(-2, -1), keepdim=True)
+    f32_centered = f32 - shift
+
+    mean_centered = region_average_features(f32_centered, boxes)
+    mean_sq_centered = region_average_features(f32_centered.square(), boxes)
+    var = (mean_sq_centered - mean_centered.square()).clamp_min(0.0)
     std = torch.sqrt(var + eps)
+    mean = mean_centered + shift.view(f32.shape[0], 1, f32.shape[1])
     return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 
@@ -606,12 +623,20 @@ def fractional_region_mean_std_features(
     float_boxes: torch.Tensor,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Extract both spatial mean and standard deviation over continuous boxes in FP32."""
+    """Extract both spatial mean and standard deviation over continuous boxes in FP32.
+
+    Uses a shifted two-pass variance calculation (subtracting channel spatial mean)
+    to eliminate floating-point catastrophic cancellation under unnormalized or shifted features.
+    """
     f32 = feature.float()
-    mean = fractional_region_average_features(f32, float_boxes)
-    mean_sq = fractional_region_average_features(f32.square(), float_boxes)
-    var = (mean_sq - mean.square()).clamp_min(0.0)
+    shift = f32.mean(dim=(-2, -1), keepdim=True)
+    f32_centered = f32 - shift
+
+    mean_centered = fractional_region_average_features(f32_centered, float_boxes)
+    mean_sq_centered = fractional_region_average_features(f32_centered.square(), float_boxes)
+    var = (mean_sq_centered - mean_centered.square()).clamp_min(0.0)
     std = torch.sqrt(var + eps)
+    mean = mean_centered + shift.view(f32.shape[0], 1, f32.shape[1])
     return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 

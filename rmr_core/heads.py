@@ -58,10 +58,14 @@ class FineMeasureHead(nn.Module):
             return tau * F.softplus(z / tau)
         return F.softplus(z)
 
-    def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+    def forward_logits(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+        """Compute raw pre-activation logit field z0."""
         if isinstance(f, tuple):
             f = f[0]
-        z = self.body(f)
+        return self.body(f)
+
+    def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+        z = self.forward_logits(f)
         if self.temp_softplus:
             return self.activate(z)
         return z
