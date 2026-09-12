@@ -4,16 +4,13 @@ import csv
 import json
 import math
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-
-from .data import CrowdManifestDataset, collate_eval
 from .metrics import (
     bootstrap_ci,
-    density_stratified_mae,
     game_physical_image,
     game_single,
     summarize_predictions,

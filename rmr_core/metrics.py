@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-from collections import defaultdict
 from typing import Sequence
 
 import numpy as np

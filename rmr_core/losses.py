@@ -199,6 +199,9 @@ def multiscale_dm_loss(
     block scales (e.g. 16px, 32px, 64px), capturing local-to-regional count allocation
     without imposing a strict conditional tree-factored probability structure.
     """
+    if not block_sizes_px:
+        raise ValueError("block_sizes_px must not be empty")
+
     if weights is None:
         if len(block_sizes_px) == 3 and block_sizes_px == (16, 32, 64):
             weights = (0.50, 0.30, 0.20)
@@ -324,9 +327,11 @@ def compute_losses(
     outputs: dict,
     target_y: torch.Tensor,
     variant: str,
-    cfg: LossConfig = LossConfig(),
+    cfg: LossConfig | None = None,
 ) -> dict[str, torch.Tensor]:
     """Losses for all matched RQ variants (RMR-v2)."""
+    if cfg is None:
+        cfg = LossConfig()
     y = outputs["y"]
     y0 = outputs["y0"]
     regions: RegionSet | None = outputs.get("regions")

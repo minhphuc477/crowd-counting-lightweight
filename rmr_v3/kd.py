@@ -15,9 +15,6 @@ Design Principles:
    to student channel width (32) with cosine distance loss.
 """
 
-import math
-from typing import Sequence
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,14 +25,29 @@ class DensityMapKDLoss(nn.Module):
 
     def __init__(
         self,
-        lambda_spatial_kl: float = 1.0,
-        lambda_count_kd: float = 0.5,
+        lambda_spatial_kl: float | None = None,
+        lambda_count_kd: float | None = None,
         temperature: float = 1.0,
         eps: float = 1e-6,
+        *,
+        lambda_spatial: float | None = None,
+        lambda_count: float | None = None,
     ) -> None:
         super().__init__()
-        self.lambda_spatial_kl = float(lambda_spatial_kl)
-        self.lambda_count_kd = float(lambda_count_kd)
+        if lambda_spatial_kl is not None:
+            self.lambda_spatial_kl = float(lambda_spatial_kl)
+        elif lambda_spatial is not None:
+            self.lambda_spatial_kl = float(lambda_spatial)
+        else:
+            self.lambda_spatial_kl = 1.0
+
+        if lambda_count_kd is not None:
+            self.lambda_count_kd = float(lambda_count_kd)
+        elif lambda_count is not None:
+            self.lambda_count_kd = float(lambda_count)
+        else:
+            self.lambda_count_kd = 0.5
+
         self.temperature = float(temperature)
         self.eps = float(eps)
 
@@ -47,8 +59,8 @@ class DensityMapKDLoss(nn.Module):
         """Compute distillation losses between student and teacher density maps.
 
         Args:
-            y_student: [B, 1, H, W] student density prediction (float32).
-            y_teacher: [B, 1, H, W] teacher density prediction (float32, detached).
+            y_student: [B, 1, H, W] or [B, H, W] student density prediction.
+            y_teacher: [B, 1, H, W] or [B, H, W] teacher density prediction.
 
         Returns:
             Dictionary with 'spatial_kl', 'count_kd', and 'total_kd'.
@@ -56,11 +68,24 @@ class DensityMapKDLoss(nn.Module):
         ys = y_student.float()
         yt = y_teacher.float().detach()
 
+        # Canonicalize to 4D [B, 1, H, W] to avoid broadcasting bugs
+        if ys.ndim == 3:
+            ys = ys.unsqueeze(1)
+        elif ys.ndim == 4 and ys.shape[1] > 1:
+            ys = ys[:, :1]
+
+        if yt.ndim == 3:
+            yt = yt.unsqueeze(1)
+        elif yt.ndim == 4 and yt.shape[1] > 1:
+            yt = yt[:, :1]
+
         # Resize teacher if spatial dimensions differ
         if ys.shape[-2:] != yt.shape[-2:]:
+            orig_teacher_mass = yt.sum(dim=(-2, -1), keepdim=True)
             yt = F.interpolate(yt, size=ys.shape[-2:], mode="bilinear", align_corners=False)
-            # Re-normalize mass after interpolation
-            yt = yt * (y_teacher.sum(dim=(-2, -1), keepdim=True) / yt.sum(dim=(-2, -1), keepdim=True).clamp_min(self.eps))
+            # Re-normalize mass after interpolation (preserving total count)
+            interp_mass = yt.sum(dim=(-2, -1), keepdim=True).clamp_min(self.eps)
+            yt = yt * (orig_teacher_mass / interp_mass)
 
         # 1. Spatial distribution KL divergence (computed only on samples with non-zero teacher count)
         # Empty background patches (count < 0.5) have no crowd distribution; forcing KL against
@@ -68,10 +93,10 @@ class DensityMapKDLoss(nn.Module):
         count_student = ys.sum(dim=(-2, -1))  # [B, 1]
         count_teacher = yt.sum(dim=(-2, -1))  # [B, 1]
 
-        occ_mask = (count_teacher > 0.5).squeeze(-1)  # [B]
+        occ_mask = (count_teacher > 0.5).reshape(-1)  # [B]
         if occ_mask.any():
-            flat_ys_occ = (ys[occ_mask] / self.temperature).flatten(start_dim=-2)
-            flat_yt_occ = (yt[occ_mask] / self.temperature).flatten(start_dim=-2)
+            flat_ys_occ = (ys[occ_mask] / self.temperature).flatten(start_dim=1)
+            flat_yt_occ = (yt[occ_mask] / self.temperature).flatten(start_dim=1)
             log_p_student = F.log_softmax(flat_ys_occ, dim=-1)
             p_teacher = F.softmax(flat_yt_occ, dim=-1)
             kl = F.kl_div(log_p_student, p_teacher, reduction="batchmean") * (self.temperature ** 2)

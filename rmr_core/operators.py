@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -550,8 +549,8 @@ def region_geometry(
     """
     boxes = boxes.float()
     y1, x1, y2, x2 = boxes.unbind(-1)
-    h = (y2 - y1).clamp_min(1.0)
-    w = (x2 - x1).clamp_min(1.0)
+    h = (y2 - y1).abs().clamp_min(1.0)
+    w = (x2 - x1).abs().clamp_min(1.0)
     log_h = torch.log(h + eps)
     log_w = torch.log(w + eps)
     log_area = torch.log(h * w + eps)
@@ -562,7 +561,7 @@ def region_geometry(
 def region_average_features(features: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     """Average pooled region features: [B,C,H,W] -> [B,M,C]."""
     sums = regional_sum(features, boxes, out_dtype=torch.float32)  # [B,C,M]
-    area = ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).float()
+    area = ((boxes[:, 2] - boxes[:, 0]).abs() * (boxes[:, 3] - boxes[:, 1]).abs()).float()
     avg = sums / area.view(1, 1, -1).clamp_min(1.0)
     return avg.transpose(1, 2).contiguous().to(features.dtype)
 
@@ -604,16 +603,16 @@ def fractional_region_average_features(
 
     h, w = features.shape[-2:]
     y1, x1, y2, x2 = float_boxes.float().unbind(dim=-1)
-    y1_c = y1.clamp(0.0, float(h))
-    y2_c = y2.clamp(0.0, float(h))
-    x1_c = x1.clamp(0.0, float(w))
-    x2_c = x2.clamp(0.0, float(w))
+    y_min = torch.minimum(y1, y2).clamp(0.0, float(h))
+    y_max = torch.maximum(y1, y2).clamp(0.0, float(h))
+    x_min = torch.minimum(x1, x2).clamp(0.0, float(w))
+    x_max = torch.maximum(x1, x2).clamp(0.0, float(w))
 
-    clamped_boxes = torch.stack([y1_c, x1_c, y2_c, x2_c], dim=-1)
+    clamped_boxes = torch.stack([y_min, x_min, y_max, x_max], dim=-1)
     pref = prefix2d(features, preserve_fp32=True)
     sums = fractional_box_sum(pref, clamped_boxes)  # [B, C, M] in fp32
 
-    area = ((y2_c - y1_c) * (x2_c - x1_c)).clamp_min(1e-6)  # [M]
+    area = ((y_max - y_min) * (x_max - x_min)).clamp_min(1e-6)  # [M]
     avg = sums / area.view(1, 1, -1)
     return avg.transpose(1, 2).contiguous().to(features.dtype)
 

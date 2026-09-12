@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +14,6 @@ from rmr_core.losses import (
     balanced_smooth_l1,
     count_magnitude_loss,
     flat_dm16_loss,
-    hierarchical_dm_loss,
     multiscale_dm_loss,
     negative_binomial_nll_mean_dispersion,
 )
@@ -37,6 +37,11 @@ def hurdle_focal_bce_loss(
     Returns:
         Scalar focal BCE loss.
     """
+    if pi_logit.ndim == 2:
+        pi_logit = pi_logit.unsqueeze(1)
+    if target_region.ndim == 2:
+        target_region = target_region.unsqueeze(1)
+
     # Binary occupancy label: 1 if any count in region, 0 if empty background.
     y_bin = (target_region > 0.5).float()
 
@@ -75,6 +80,13 @@ def truncated_nb_nll_loss(
         Scalar truncated NB NLL, averaged over occupied regions.
         Returns 0.0 with autograd connectivity if no occupied region exists in batch.
     """
+    if target_region.ndim == 2:
+        target_region = target_region.unsqueeze(1)
+    if mu_count.ndim == 2:
+        mu_count = mu_count.unsqueeze(1)
+    if dispersion.ndim == 2:
+        dispersion = dispersion.unsqueeze(1)
+
     occ_mask = (target_region > 0.5)  # [B,1,M]
     if not occ_mask.any():
         return (mu_count * 0.0).sum()
@@ -212,7 +224,6 @@ def sinkhorn_ot_loss(
     Measures Wasserstein transportation distance from normalized Y0 to ground truth points.
     Numerically stabilized with bounded dual variables and clamped log-domain scaling.
     """
-    import math
     b, _, h, w = prob_y0.shape
     device = prob_y0.device
     dtype = prob_y0.dtype
@@ -398,6 +409,11 @@ def mass_weighted_cell_loss(
     Returns:
         Scalar mass-weighted cell loss.
     """
+    if target.ndim == 3:
+        target = target.unsqueeze(1)
+    if y.ndim == 3:
+        y = y.unsqueeze(1)
+
     y_f = y.float()
     t_f = target.float()
 

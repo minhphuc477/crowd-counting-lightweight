@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any, Sequence
 import numpy as np
 import scipy.stats

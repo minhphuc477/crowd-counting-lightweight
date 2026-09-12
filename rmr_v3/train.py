@@ -4,7 +4,6 @@ import argparse
 from contextlib import contextmanager
 import csv
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,6 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import numpy as np
 import torch
-import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 
@@ -722,8 +720,8 @@ def main() -> None:
                 for p in teacher_model.parameters():
                     p.requires_grad = False
                 kd_loss_fn = DensityMapKDLoss(
-                    lambda_spatial=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
-                    lambda_count=float(cfg.get("loss", {}).get("lambda_kd_count", 0.1)),
+                    lambda_spatial_kl=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
+                    lambda_count_kd=float(cfg.get("loss", {}).get("lambda_kd_count", 0.1)),
                 )
                 print(f"[Stage 3 KD] Teacher loaded and frozen successfully.")
             except Exception as e:

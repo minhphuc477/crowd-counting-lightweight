@@ -15,23 +15,16 @@ from rmr_core.operators import (
     RegionSet,
     _canonicalize_region_size,
     build_multiscale_regions,
-    charbonnier_tv_step,
     fractional_region_average_features,
     fractional_region_mean_std_features,
-    multiplicative_gated_adjoint,
     region_average_features,
     region_mean_std_features,
-    regional_adjoint,
     regional_sum,
     weighted_coverage,
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
-from .solver import (
-    laplacian_tv_diffusion,
-    proximal_soft_threshold,
-    unrolled_sirt_solver,
-)
+from .solver import unrolled_sirt_solver
 
 
 def _softplus_inverse(y: float) -> float:
