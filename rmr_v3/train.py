@@ -205,8 +205,10 @@ class EMAManager:
         if self.decay > 0.0:
             for name, p in model.named_parameters():
                 self.state[name] = p.detach().clone().float()
+            persistent_keys = set(model.state_dict().keys())
             for name, b in model.named_buffers():
-                self.state[name] = b.detach().clone().float()
+                if name in persistent_keys:
+                    self.state[name] = b.detach().clone().float()
 
     @torch.no_grad()
     def update(self, model: RMRv3) -> None:
@@ -237,9 +239,11 @@ class EMAManager:
             return
         live_backup = {k: v.clone() for k, v in model.state_dict().items()}
         try:
-            model.load_state_dict(
-                {k: self.state[k].to(device=device, dtype=live_backup[k].dtype) for k in live_backup if k in self.state}
-            )
+            swap_dict = {
+                k: (self.state[k].to(device=device, dtype=live_backup[k].dtype) if k in self.state else live_backup[k])
+                for k in live_backup
+            }
+            model.load_state_dict(swap_dict, strict=True)
             yield
         finally:
             model.load_state_dict(live_backup)

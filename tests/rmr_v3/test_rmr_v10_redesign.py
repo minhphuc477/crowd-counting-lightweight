@@ -141,8 +141,11 @@ def test_dual_depth_allocation_loss():
 # ── 3. Parameter Budget Compliance Tests ──────────────────────────────────────
 
 @pytest.mark.parametrize("config_path", [
+    "configs/rmr_v10/rmr_v10_dynamic_scale_routing.yaml",
     "configs/rmr_v10/rmr_v10_canonical.yaml",
+    "configs/rmr_v10/rmr_v10_canonical_isotropic.yaml",
     "configs/rmr_v10/rmr_v10_ablation_no_firm.yaml",
+    "configs/rmr_v10/rmr_v10_ablation_no_dual_sup.yaml",
     "configs/rmr_v10/rmr_v10_ablation_dm_y0_only.yaml",
     "configs/rmr_v10/rmr_v10_ablation_additive_neck.yaml",
     "configs/rmr_v10/rmr_v10_control_no_solver.yaml",
@@ -167,8 +170,14 @@ def test_rmr_v10_configs_budget_and_validity(config_path: str):
         f"Parameter budget exceeded in {config_path}: {n_params} > 105,000"
     )
 
-    # Verify key architectural invariants for canonical
-    if "canonical" in config_path:
+    # Verify key architectural invariants
+    if "dynamic_scale_routing" in config_path:
+        assert n_params == 104_440, f"DSR param count expected 104,440, got {n_params}"
+        assert model_cfg.dynamic_scale_routing is True
+    elif "additive_neck" in config_path:
+        assert n_params == 101_813, f"Additive neck param count expected 101,813, got {n_params}"
+        assert model_cfg.neck_type == "additive"
+    elif "canonical" in config_path:
         assert n_params == 103_957, f"Canonical param count expected 103,957, got {n_params}"
         assert model_cfg.neck_type == "aspp_lite"
         assert model_cfg.use_aspp_gap is True
