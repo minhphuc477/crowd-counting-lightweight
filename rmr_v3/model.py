@@ -811,10 +811,14 @@ class RMRv3(nn.Module):
         effective_omega = float(self.cfg.omega) * strength
 
         # ── TV diffusion setup ─────────────────────────────────────────────────
-        tv_lambda = float(self.cfg.tv_lambda)
+        tv_lambda = float(self.cfg.tv_lambda) * strength
         tv_type = str(self.cfg.tv_type)
         tv_eps_c = float(self.cfg.tv_eps_c)
         solver_mode = str(self.cfg.solver_mode)
+
+        # Proximal L1-shrinkage: scaled by effective step size and distributed across unrolled iterations
+        tau = float(self.cfg.proximal_tau)
+        tau_step = (effective_omega * tau) / max(int(self.cfg.iterations), 1)
 
         y = y0
 
@@ -847,9 +851,8 @@ class RMRv3(nn.Module):
             )
 
             y_step = y.float() - effective_omega * field
-            tau = float(self.cfg.proximal_tau)
-            if tau > 0.0:
-                y_next = torch.clamp_min(y_step - tau, 0.0)
+            if tau_step > 0.0:
+                y_next = torch.clamp_min(y_step - tau_step, 0.0)
             else:
                 y_next = torch.clamp_min(y_step, 0.0)
 
