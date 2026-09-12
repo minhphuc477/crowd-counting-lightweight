@@ -308,13 +308,27 @@ def main() -> None:
     bs = int(cfg.get("train", {}).get("batch_size", 8))
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    is_v4 = bool(
+    cfg_str = str(args.config).lower() + " " + str(args.run_id or "").lower()
+
+    if "rmr_v9" in cfg_str or getattr(model.cfg, "proximal_tau", 0.0) > 0.0 or any(isinstance(s, (tuple, list)) for s in getattr(model.cfg, "region_sizes_px", ())):
+        if "aq_rmr" in cfg_str or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std":
+            banner_title = "RMR-v9.1 / AQ-RMR Training Initialized"
+            variant_name = "AQ-RMR (Anisotropic Perspective + MeanStd + Proximal RW-SIRT)"
+        else:
+            banner_title = "RMR-v9 Training Initialized"
+            variant_name = "RMR-v9 Canonical (Additive RW-SIRT + Post-Solver Flat-DM16)"
+    elif "rmr_v8" in cfg_str:
+        banner_title = "RMR-v8 Training Initialized"
+        variant_name = f"RMR-v8 ({getattr(model.cfg, 'solver_mode', 'additive')}+{getattr(model.cfg, 'tv_type', 'laplacian')})"
+    elif "rmr_v7" in cfg_str:
+        banner_title = "RMR-v7 Training Initialized"
+        variant_name = "RMR-v7 (Hurdle-NB + TV Laplacian + EMA)"
+    elif (
         getattr(model.cfg, "native_scale_pooling", False)
         or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std"
         or cfg.get("loss", {}).get("use_multiscale_dm", False)
-        or "rmr_v4" in str(args.config).lower()
-    )
-    if is_v4:
+        or "rmr_v4" in cfg_str
+    ):
         sub_tags = []
         if getattr(model.cfg, "native_scale_pooling", False):
             sub_tags.append("NativePool")
