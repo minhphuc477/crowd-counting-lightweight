@@ -86,7 +86,7 @@ train:
   backbone_lr_scale: 0.1
   weight_decay:    1.0e-4
   warmup_epochs:   5
-  grad_clip:       500.0
+  grad_clip: 10.0
   amp:             true
   solver_warmup_epochs: 5
   solver_ramp_epochs:   20
