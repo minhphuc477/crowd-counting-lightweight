@@ -35,14 +35,17 @@ def laplacian_tv_diffusion(
     tv_lambda: float,
     kernel: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Isotropic Laplacian total-variation diffusion step: y <- max(0, y + lambda * Delta y)."""
+    """Isotropic Laplacian total-variation diffusion step with Neumann zero-flux boundary:
+    y <- max(0, y + lambda * Delta y). Uses replication padding so sum(Delta y) == 0.
+    """
     if tv_lambda <= 0.0:
         return y
     if kernel is None:
         kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
     else:
         kernel = kernel.to(device=y.device, dtype=y.dtype)
-    lap = F.conv2d(y, kernel, padding=1)
+    y_pad = F.pad(y, (1, 1, 1, 1), mode="replicate")
+    lap = F.conv2d(y_pad, kernel, padding=0)
     return torch.clamp_min(y + tv_lambda * lap, 0.0)
 
 

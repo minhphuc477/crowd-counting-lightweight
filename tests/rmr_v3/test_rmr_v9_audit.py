@@ -916,3 +916,52 @@ def test_extreme_densities_stability():
         if p.grad is not None:
             assert torch.isfinite(p.grad).all(), "NaN/Inf gradient in dense crop!"
 
+
+def test_dot_product_adjoint_invariant():
+    """Verify exact Claerbout dot-product test: <A x, v> == <x, A^T v> to machine precision.
+
+    This proves that regional_adjoint is the mathematically exact adjoint of regional_sum,
+    including for anisotropic rectangular regions (e.g. (64, 32) and (32, 64)).
+    """
+    from rmr_core.operators import build_multiscale_regions, regional_sum, regional_adjoint
+
+    h, w = 48, 64
+    regions = build_multiscale_regions(
+        h, w, output_stride=4, region_sizes_px=(32, 64, (64, 32), (32, 64))
+    )
+    m = regions.boxes.shape[0]
+
+    torch.manual_seed(42)
+    x = torch.randn(2, 1, h, w, dtype=torch.float64)
+    v = torch.randn(2, 1, m, dtype=torch.float64)
+
+    # Forward A x
+    ax = regional_sum(x, regions.boxes, out_dtype=torch.float64)
+    # Adjoint A^T v
+    at_v = regional_adjoint(v, regions.boxes, h, w, out_dtype=torch.float64)
+
+    dot1 = (ax * v).sum().item()
+    dot2 = (x * at_v).sum().item()
+
+    rel_err = abs(dot1 - dot2) / max(abs(dot1), abs(dot2))
+    assert rel_err < 1e-12, f"Adjoint invariant violated! rel_err={rel_err:.2e}"
+
+
+def test_laplacian_tv_diffusion_mass_conservation():
+    """Verify that Laplacian TV diffusion strictly conserves total spatial mass via Neumann zero-flux."""
+    from rmr_v3.solver import laplacian_tv_diffusion
+
+    torch.manual_seed(42)
+    y = torch.rand(4, 1, 32, 32) * 10.0
+    mass_before = y.sum(dim=(-2, -1))
+
+    # Apply TV diffusion
+    y_diff = laplacian_tv_diffusion(y, tv_lambda=0.02)
+    mass_after = y_diff.sum(dim=(-2, -1))
+
+    # Since y >= 0 and TV diffusion on positive smooth fields with clamp_min(0)
+    # should strictly satisfy zero flux across borders, relative error is at float32 machine precision:
+    rel_mass_err = ((mass_before - mass_after).abs() / mass_before).max().item()
+    assert rel_mass_err < 1e-6, f"Laplacian TV diffusion leaked mass! rel_mass_err={rel_mass_err:.2e}"
+
+
