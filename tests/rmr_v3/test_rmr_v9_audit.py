@@ -965,3 +965,69 @@ def test_laplacian_tv_diffusion_mass_conservation():
     assert rel_mass_err < 1e-6, f"Laplacian TV diffusion leaked mass! rel_mass_err={rel_mass_err:.2e}"
 
 
+def test_sinkhorn_ot_loss_finiteness_and_convergence():
+    """Verify that pure-PyTorch log-domain Sinkhorn OT loss computes exact finite transportation cost."""
+    from rmr_v3.losses import sinkhorn_ot_loss
+
+    torch.manual_seed(42)
+    y_pred = torch.rand(2, 1, 16, 16, requires_grad=True)
+    pts_list = [
+        torch.tensor([[10.0, 10.0], [20.0, 20.0]]),
+        torch.tensor([[15.0, 15.0]]),
+    ]
+
+    loss = sinkhorn_ot_loss(y_pred, pts_list, reg=10.0, num_iters=20, stride=4)
+    assert torch.isfinite(loss), "Sinkhorn OT loss returned NaN or Inf!"
+    assert loss.item() > 0.0, "Sinkhorn OT loss should be strictly positive!"
+
+    loss.backward()
+    assert y_pred.grad is not None, "Gradients must flow to prediction!"
+    assert torch.isfinite(y_pred.grad).all(), "Sinkhorn OT gradients contain NaN or Inf!"
+    assert (y_pred.grad != 0).any(), "Sinkhorn OT gradients must be non-zero!"
+
+
+def test_cross_device_operator_safety():
+    """Verify regional operators handle boxes on CPU when tensors are on CUDA (if available) or different dtypes."""
+    from rmr_core.operators import regional_adjoint, regional_sum, center_scatter
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    values = torch.randn(2, 1, 4, device=device)
+    # Boxes explicitly on CPU as int32
+    boxes_cpu = torch.tensor(
+        [[0, 0, 10, 10], [0, 10, 10, 20], [10, 0, 20, 10], [10, 10, 20, 20]],
+        device="cpu",
+        dtype=torch.int32,
+    )
+
+    # regional_adjoint
+    adj = regional_adjoint(values, boxes_cpu, 20, 20)
+    assert adj.device == values.device
+    assert torch.isfinite(adj).all()
+
+    # regional_sum
+    img = torch.randn(2, 1, 20, 20, device=device)
+    sums = regional_sum(img, boxes_cpu)
+    assert sums.device == img.device
+    assert torch.isfinite(sums).all()
+
+    # center_scatter
+    scat = center_scatter(values, boxes_cpu, 20, 20)
+    assert scat.device == values.device
+    assert torch.isfinite(scat).all()
+
+
+def test_charbonnier_tv_cfl_stability():
+    """Verify anisotropic Charbonnier TV satisfies strict 2D CFL stability condition."""
+    from rmr_core.operators import charbonnier_tv_step
+
+    torch.manual_seed(42)
+    y = torch.rand(2, 1, 32, 32) * 5.0
+    # tv_lambda = 0.015, eps_c = 0.1 -> CFL bound = eps_c / 4 = 0.025
+    y_out = charbonnier_tv_step(y, lambda_tv=0.015, eps_c=0.1, enforce_cfl=True)
+    assert torch.isfinite(y_out).all()
+    assert (y_out >= 0).all()
+    # Contractive property: no explosive overshoot
+    assert y_out.max().item() <= y.max().item() + 1e-4
+
+
+

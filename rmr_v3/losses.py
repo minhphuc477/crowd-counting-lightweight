@@ -259,22 +259,19 @@ def sinkhorn_ot_loss(
         # Cost matrix normalized in [0, 1]
         diff = pts_norm.unsqueeze(1) - grid_norm.unsqueeze(0)  # [N, M, 2]
         c = (diff ** 2).sum(dim=-1).clamp(0.0, 1.0)
+        c_scaled = c / eps
 
         log_p = torch.log(p.clamp_min(1e-8))
         log_q = torch.log(q.clamp_min(1e-8))
         u = torch.zeros_like(q)
         v = torch.zeros_like(p)
 
-        # Log-domain stabilized Sinkhorn iterations
+        # Log-domain stabilized Sinkhorn iterations in scaled dual coordinates
         for _ in range(num_iters):
-            u = log_q - torch.logsumexp((-c + v.unsqueeze(0)) / eps, dim=1)
-            v = log_p - torch.logsumexp((-c + u.unsqueeze(1)) / eps, dim=0)
+            u = log_q - torch.logsumexp(-c_scaled + v.unsqueeze(0), dim=1)
+            v = log_p - torch.logsumexp(-c_scaled + u.unsqueeze(1), dim=0)
 
-        log_gamma = (u.unsqueeze(1) + v.unsqueeze(0) - c) / eps
-        # Log-domain doubly-stochastic normalization via Sinkhorn projection.
-        # Simple max-shift causes -inf gradients; logsumexp projection is stable.
-        log_gamma = log_gamma - torch.logsumexp(log_gamma, dim=1, keepdim=True)
-        log_gamma = log_gamma - torch.logsumexp(log_gamma, dim=0, keepdim=True)
+        log_gamma = u.unsqueeze(1) + v.unsqueeze(0) - c_scaled
         gamma = torch.exp(log_gamma)
         ot_cost = (gamma * c).sum()
 

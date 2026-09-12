@@ -75,7 +75,7 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     """
     if boxes.ndim != 2 or boxes.shape[-1] != 4:
         raise ValueError("boxes must have shape [M,4]")
-    boxes = boxes.long()
+    boxes = boxes.to(device=prefix.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
     br = _gather_prefix(prefix, y2, x2)
     tr = _gather_prefix(prefix, y1, x2)
@@ -95,8 +95,8 @@ def continuous_prefix_eval(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tenso
     h_max = float(hp - 1)
     w_max = float(wp - 1)
 
-    y_clamped = y.clamp(0.0, h_max)
-    x_clamped = x.clamp(0.0, w_max)
+    y_clamped = y.to(device=prefix.device, dtype=torch.float32).clamp(0.0, h_max)
+    x_clamped = x.to(device=prefix.device, dtype=torch.float32).clamp(0.0, w_max)
 
     r = torch.floor(y_clamped).long().clamp(0, hp - 2)
     c_idx = torch.floor(x_clamped).long().clamp(0, wp - 2)
@@ -121,6 +121,7 @@ def fractional_box_sum(prefix: torch.Tensor, float_boxes: torch.Tensor) -> torch
     """
     if float_boxes.ndim != 2 or float_boxes.shape[-1] != 4:
         raise ValueError("float_boxes must have shape [M, 4]")
+    float_boxes = float_boxes.to(device=prefix.device, dtype=torch.float32)
     y1, x1, y2, x2 = float_boxes.unbind(dim=-1)
     br = continuous_prefix_eval(prefix, y2, x2)
     tr = continuous_prefix_eval(prefix, y1, x2)
@@ -167,7 +168,7 @@ def regional_adjoint(
     if boxes.shape != (m, 4):
         raise ValueError(f"boxes must be [{m},4], got {tuple(boxes.shape)}")
 
-    boxes = boxes.long()
+    boxes = boxes.to(device=values.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
     hp, wp = height + 1, width + 1
 
@@ -653,6 +654,7 @@ def center_scatter(
     if values.ndim != 3 or values.shape[1] != 1:
         raise ValueError("center_scatter expects values [B,1,M]")
     b, _, m = values.shape
+    boxes = boxes.to(device=values.device, dtype=torch.long)
     y = ((boxes[:, 0] + boxes[:, 2] - 1) // 2).long().clamp(0, height - 1)
     x = ((boxes[:, 1] + boxes[:, 3] - 1) // 2).long().clamp(0, width - 1)
     idx = (y * width + x).view(1, 1, m).expand(b, 1, -1)
