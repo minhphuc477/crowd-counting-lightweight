@@ -779,3 +779,140 @@ def test_compute_rmr_v3_losses_non_divisible_dimensions():
     assert torch.isfinite(losses["total"])
     assert torch.isfinite(losses["allocation"])
 
+
+# ===========================================================================
+# Section 8: Solver Warmup Invariance, Zero-Collapse Prevention, & Continuous Ramp
+# ===========================================================================
+
+def test_solver_warmup_invariance_zero_collapse_prevention():
+    """Verify that solver warmup (strength=0.0) guarantees y == y0 identically.
+
+    This explicitly tests the zero-density collapse bug where unscaled proximal tau
+    and unscaled TV diffusion previously subtracted density at strength=0.0,
+    causing y to collapse to 0.0 and count loss to explode to 6000+.
+    """
+    torch.manual_seed(42)
+    cfg = RMRv3Config(
+        pretrained=False,
+        iterations=6,
+        proximal_tau=0.015,
+        tv_lambda=0.02,
+        tv_type="laplacian",
+        regional_feature_stats="mean_std",
+        region_sizes_px=(32, 64, 128, (64, 32), (32, 64)),
+    )
+    model = RMRv3(cfg)
+    model.eval()
+
+    x = torch.randn(2, 3, 128, 128)
+
+    # 1. Warmup state (solver_strength = 0.0)
+    out_warmup = model(x, solver_strength=0.0)
+    y_warmup = out_warmup["y"]
+    y0_warmup = out_warmup["y0"]
+
+    # Invariant 1: y MUST be identical to y0 when strength = 0.0
+    assert torch.equal(y_warmup, y0_warmup), (
+        f"Warmup invariance violated! Max diff: {(y_warmup - y0_warmup).abs().max().item()}"
+    )
+
+    # Invariant 2: Density must be positive (no zero-collapse)
+    assert (y_warmup > 0.0).any()
+    assert y_warmup.sum().item() > 10.0, (
+        f"Zero-density collapse! Total mass={y_warmup.sum().item()}"
+    )
+
+    # Invariant 3: Count loss against calibrated crowd density must be small (< 10.0, not 6000+)
+    # For a 128x128 image (32x32 grid = 1024 cells), calibrated prior m0=0.01576 gives ~16 count.
+    target = torch.zeros(2, 1, 32, 32)
+    for b in range(2):
+        pts = torch.randint(0, 32, (16, 2))
+        target[b, 0, pts[:, 0], pts[:, 1]] += 1.0
+
+    loss_cfg = RMRv3LossConfig(dm_target="y")
+    losses = compute_rmr_v3_losses(out_warmup, target, loss_cfg)
+    assert losses["count"].item() < 10.0, (
+        f"Count loss exploded in warmup! Loss: {losses['count'].item()}"
+    )
+    assert losses["total"].item() < 30.0, (
+        f"Total loss exploded in warmup! Loss: {losses['total'].item()}"
+    )
+
+
+def test_solver_ramp_continuous_progression():
+    """Verify that as solver_strength increases from 0.0 -> 0.5 -> 1.0,
+    the proximal deadband scales smoothly and monotonically cleans background mass.
+    """
+    torch.manual_seed(42)
+    cfg = RMRv3Config(
+        pretrained=False,
+        iterations=6,
+        proximal_tau=0.015,
+        tv_lambda=0.02,
+        regional_feature_stats="mean_std",
+        region_sizes_px=(32, 64, 128, (64, 32), (32, 64)),
+    )
+    model = RMRv3(cfg)
+    model.eval()
+
+    x = torch.randn(1, 3, 128, 128)
+
+    out_0 = model(x, solver_strength=0.0)
+    out_5 = model(x, solver_strength=0.5)
+    out_1 = model(x, solver_strength=1.0)
+
+    mass_0 = out_0["y"].sum().item()
+    mass_5 = out_5["y"].sum().item()
+    mass_1 = out_1["y"].sum().item()
+
+    # When background noise is cleaned by proximal tau, total predicted mass decreases smoothly
+    assert mass_0 >= mass_5 >= mass_1, (
+        f"Monotonic background cleaning violated: mass_0={mass_0:.2f}, mass_5={mass_5:.2f}, mass_1={mass_1:.2f}"
+    )
+    # But mass must not collapse to 0
+    assert mass_1 > 0.5 * mass_0, (
+        f"Excessive mass destruction! mass_1={mass_1:.2f} vs mass_0={mass_0:.2f}"
+    )
+
+
+def test_extreme_densities_stability():
+    """Verify numerical stability under empty crop (0 count) and ultra-dense crop (2000 count)."""
+    cfg = RMRv3Config(
+        pretrained=False,
+        iterations=6,
+        proximal_tau=0.015,
+        tv_lambda=0.02,
+        regional_feature_stats="mean_std",
+        region_sizes_px=(32, 64, 128, (64, 32), (32, 64)),
+    )
+    model = RMRv3(cfg)
+    loss_cfg = RMRv3LossConfig(dm_target="y")
+
+    # Case 1: Empty crop (all 0)
+    x1 = torch.randn(2, 3, 128, 128)
+    out1 = model(x1, solver_strength=1.0)
+    target_empty = torch.zeros(2, 1, 32, 32)
+    losses_empty = compute_rmr_v3_losses(out1, target_empty, loss_cfg)
+    assert torch.isfinite(losses_empty["total"]), "Empty crop produced non-finite loss!"
+    losses_empty["total"].backward()
+    for p in model.parameters():
+        if p.grad is not None:
+            assert torch.isfinite(p.grad).all(), "NaN/Inf gradient in empty crop!"
+
+    # Case 2: Extreme dense crop (2000 count) with fresh forward pass
+    model.zero_grad(set_to_none=True)
+    x2 = torch.randn(2, 3, 128, 128)
+    out2 = model(x2, solver_strength=1.0)
+    target_dense = torch.zeros(2, 1, 32, 32)
+    pts = torch.randint(0, 32, (2000, 2))
+    for pt in pts:
+        target_dense[0, 0, pt[0], pt[1]] += 1.0
+        target_dense[1, 0, pt[0], pt[1]] += 1.0
+
+    losses_dense = compute_rmr_v3_losses(out2, target_dense, loss_cfg)
+    assert torch.isfinite(losses_dense["total"]), "Dense crop produced non-finite loss!"
+    losses_dense["total"].backward()
+    for p in model.parameters():
+        if p.grad is not None:
+            assert torch.isfinite(p.grad).all(), "NaN/Inf gradient in dense crop!"
+
