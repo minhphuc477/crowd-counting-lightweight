@@ -392,13 +392,14 @@ class RMRv3LossConfig:
 def curvature_power_loss(
     y: torch.Tensor,
     target: torch.Tensor,
-    eps: float = 1e-4,
+    eps: float = 0.01,
 ) -> torch.Tensor:
     """Curvature-preserving square-root power loss for high-density crowds (RMR-v11).
 
     Computes L_curv = mean(|sqrt(y + eps) - sqrt(y_gt + eps)|^2).
-    In the square-root domain, the gradient for under-counted dense clusters is amplified,
-    counteracting gradient starvation from overwhelming background pixels.
+    In the square-root domain, the gradient for under-counted dense clusters is amplified
+    by up to (1 + 1/sqrt(eps)) = 11x, counteracting gradient starvation while eps=0.01
+    strictly bounds the gradient magnitude within [-9.0, +1.0] for optimizer stability.
     """
     if target.ndim == 3:
         target = target.unsqueeze(1)
@@ -413,7 +414,7 @@ def curvature_power_loss(
 def topk_hard_background_loss(
     y: torch.Tensor,
     target: torch.Tensor,
-    ratio: float = 0.10,
+    ratio: float = 0.05,
     bg_threshold: float = 1e-5,
 ) -> torch.Tensor:
     """Top-K Hard Negative Background Mining Loss (RMR-v11).
@@ -432,7 +433,7 @@ def topk_hard_background_loss(
     if not bg_mask.any():
         return (y_f * 0.0).sum()
 
-    bg_preds = y_f[bg_mask]
+    bg_preds = torch.clamp_min(y_f[bg_mask], 0.0)
     num_bg = bg_preds.numel()
     k = max(1, int(float(ratio) * num_bg))
 
@@ -699,7 +700,10 @@ def compute_rmr_v3_losses(
         t_bin = (target_float > 0.0).float()
         if t_bin.ndim == 3:
             t_bin = t_bin.unsqueeze(1)
-        fg_bce = F.binary_cross_entropy_with_logits(fg_logit.float(), t_bin)
+        # Dilate point impulses with 3x3 max-pooling (covers ~12x12 px at stride 4)
+        # to match human head physical extent and prevent point-target collapse
+        t_dilated = F.max_pool2d(t_bin, kernel_size=3, stride=1, padding=1)
+        fg_bce = F.binary_cross_entropy_with_logits(fg_logit.float(), t_dilated)
         losses["fg_bce"] = fg_bce
         losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
     else:

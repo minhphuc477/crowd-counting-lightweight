@@ -87,7 +87,7 @@ loss:
   lambda_curvature: 0.0
 
   lambda_hard_bg:   0.10
-  hard_bg_ratio:    0.10
+  hard_bg_ratio:    0.05
   lambda_fg_gate:   0.05
 
   count_loss_mode:    nb

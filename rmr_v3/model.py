@@ -775,7 +775,9 @@ class RMRv3(nn.Module):
         fg_logit = None
         if self.fg_gate is not None:
             fg_logit = self.fg_gate(p4)
-            fg_mask = torch.sigmoid(fg_logit)
+            # Residual safety floor (0.70 + 0.30 * sigmoid): guarantees gate is strictly in [0.70, 1.0],
+            # completely preventing zero-absorbing barriers and false-negative head erasure.
+            fg_mask = 0.70 + 0.30 * torch.sigmoid(fg_logit)
             y0 = y0 * fg_mask
 
         h, w = y0.shape[-2:]

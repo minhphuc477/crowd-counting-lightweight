@@ -77,16 +77,16 @@ loss:
 
   lambda_count:     1.0
   lambda_flat_dm16: 1.0
-  lambda_cell:      0.75
+  lambda_cell:      0.25
   lambda_region_nb: 0.20
   lambda_hurdle:    0.10
   lambda_trunc_nb:  0.20
 
-  lambda_curvature: 0.50
+  lambda_curvature: 0.25
 
   # ABLATION: Disable Top-K Hard Negative Background Mining
   lambda_hard_bg:   0.0
-  hard_bg_ratio:    0.10
+  hard_bg_ratio:    0.05
 
   lambda_fg_gate:   0.05
 
@@ -96,8 +96,8 @@ loss:
   cell_loss_mode:         mass_weighted
   cell_beta:              1.0
   cell_mass_weight_eps:   0.001
-  cell_mass_weight_alpha: 3.5
-  cell_mass_weight_gamma: 1.25
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.15
 
 train:
   epochs:          1000

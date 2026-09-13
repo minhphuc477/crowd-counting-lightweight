@@ -158,10 +158,10 @@ def test_foreground_gate_subhead():
     fg_logit = out["fg_logit"]
     assert fg_logit.shape == (2, 1, 32, 32)
 
-    # Verify modulation: out['y0'] is modulated by sigmoid(fg_logit)
+    # Verify modulation: out['y0'] is modulated by residual safety floor (0.70 + 0.30 * sigmoid(fg_logit))
     z0 = model.fine_head.forward_logits(model.fusion(*model.encoder(x))[0])
     raw_y0 = model.fine_head.activate(z0)
-    expected_y0 = raw_y0 * torch.sigmoid(fg_logit)
+    expected_y0 = raw_y0 * (0.70 + 0.30 * torch.sigmoid(fg_logit))
     assert torch.allclose(out["y0"], expected_y0, atol=1e-5)
 
     # Verify backprop flows into fg_gate
@@ -300,17 +300,17 @@ def test_rmr_v11_end_to_end_forward_backward_amp():
         dm_target="dual",
         lambda_count=1.0,
         lambda_flat_dm16=1.0,
-        lambda_cell=0.75,
+        lambda_cell=0.25,
         lambda_region_nb=0.20,
         lambda_hurdle=0.10,
         lambda_trunc_nb=0.20,
-        lambda_curvature=0.50,
+        lambda_curvature=0.25,
         lambda_hard_bg=0.10,
-        hard_bg_ratio=0.10,
+        hard_bg_ratio=0.05,
         lambda_fg_gate=0.05,
         cell_loss_mode="mass_weighted",
-        cell_mass_weight_alpha=3.5,
-        cell_mass_weight_gamma=1.25,
+        cell_mass_weight_alpha=2.0,
+        cell_mass_weight_gamma=1.15,
     )
 
     model = RMRv3(cfg)
