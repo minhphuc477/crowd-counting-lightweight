@@ -4,7 +4,7 @@ data:
   train_manifest: data/sha_a_train_all.jsonl
   val_manifest:   data/sha_a_test.jsonl
   crop_size:      512
-  scale_range:    [0.75, 1.25]
+  scale_range:    [0.70, 1.35]
   hflip_prob:     0.5
   brightness_jitter:   0.2
   contrast_jitter:     0.2

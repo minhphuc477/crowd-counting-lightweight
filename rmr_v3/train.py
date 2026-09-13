@@ -572,7 +572,20 @@ def train_one_epoch(
                 with torch.no_grad():
                     t_out = teacher_model(images)
                     t_y = t_out["y"] if isinstance(t_out, dict) else t_out
-                kd_res = kd_loss_fn(outputs["y0"], t_y)
+
+                if getattr(loss_cfg, "dm_target", "y0") == "dual":
+                    kd_y0 = kd_loss_fn(outputs["y0"], t_y)
+                    kd_y = kd_loss_fn(outputs["y"], t_y)
+                    kd_res = {
+                        "total_kd": 0.5 * kd_y0["total_kd"] + 0.5 * kd_y["total_kd"],
+                        "spatial_kl": 0.5 * kd_y0["spatial_kl"] + 0.5 * kd_y["spatial_kl"],
+                        "count_kd": 0.5 * kd_y0["count_kd"] + 0.5 * kd_y["count_kd"],
+                    }
+                elif getattr(loss_cfg, "dm_target", "y0") == "y":
+                    kd_res = kd_loss_fn(outputs["y"], t_y)
+                else:
+                    kd_res = kd_loss_fn(outputs["y0"], t_y)
+
                 loss = loss + kd_res["total_kd"]
                 losses["kd_total"] = kd_res["total_kd"]
                 losses["kd_spatial"] = kd_res["spatial_kl"]
@@ -746,7 +759,17 @@ def main() -> None:
                     t_ckpt = torch.load(tp, map_location="cpu")
                 t_cfg = t_ckpt.get("config", {})
                 teacher_model, _ = make_model(t_cfg)
-                teacher_model.load_state_dict(t_ckpt["model"])
+                # Prioritize EMA weights if present, falling back to raw model weights or state dict
+                if "ema_model" in t_ckpt:
+                    t_state = t_ckpt["ema_model"]
+                    tag = "ema_model"
+                elif "model" in t_ckpt:
+                    t_state = t_ckpt["model"]
+                    tag = "model"
+                else:
+                    t_state = t_ckpt
+                    tag = "direct_state_dict"
+                teacher_model.load_state_dict(t_state)
                 teacher_model.switch_to_deploy()
                 teacher_model.to(device).eval()
                 for p in teacher_model.parameters():
@@ -755,7 +778,7 @@ def main() -> None:
                     lambda_spatial_kl=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
                     lambda_count_kd=float(cfg.get("loss", {}).get("lambda_kd_count", 0.1)),
                 )
-                print(f"[Stage 3 KD] Teacher loaded and frozen successfully.")
+                print(f"[Stage 3 KD] Teacher loaded and frozen successfully from '{tp}' (weights: {tag}).")
             except Exception as e:
                 print(f"[Stage 3 KD Warning] Failed to load teacher from {tp}: {e}. Proceeding without KD.")
         else:

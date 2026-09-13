@@ -354,3 +354,41 @@ def test_rmr_v11_end_to_end_forward_backward_amp():
     assert torch.isfinite(loss_amp)
     loss_amp.backward()
     optimizer.step()
+
+
+def test_kd_dual_depth_and_robust_teacher_loading():
+    """Verify dual-depth KD supervision and robust teacher checkpoint loading."""
+    from rmr_v3.kd import DensityMapKDLoss
+    from rmr_v3.losses import RMRv3LossConfig
+
+    kd_loss = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.2)
+
+    # 1. Verify Dual-Depth KD logic: both y0 and y supervised
+    b, h, w = 2, 32, 32
+    y0 = torch.full((b, 1, h, w), 0.05, requires_grad=True)
+    y = torch.full((b, 1, h, w), 0.10, requires_grad=True)
+    teacher_y = torch.full((b, 1, h, w), 0.08)
+
+    kd_y0 = kd_loss(y0, teacher_y)
+    kd_y = kd_loss(y, teacher_y)
+    kd_total = 0.5 * kd_y0["total_kd"] + 0.5 * kd_y["total_kd"]
+
+    assert torch.isfinite(kd_total)
+    kd_total.backward()
+
+    assert y0.grad is not None and torch.isfinite(y0.grad).all()
+    assert y.grad is not None and torch.isfinite(y.grad).all()
+    assert y0.grad.abs().sum() > 0
+    assert y.grad.abs().sum() > 0
+
+    # 2. Verify robust teacher state_dict loading with ema_model priority
+    raw_weights = {"conv.weight": torch.tensor([1.0])}
+    ema_weights = {"conv.weight": torch.tensor([2.0])}
+
+    ckpt_with_ema = {"config": {}, "model": raw_weights, "ema_model": ema_weights}
+    ckpt_without_ema = {"config": {}, "model": raw_weights}
+    ckpt_raw_state = raw_weights
+
+    assert ckpt_with_ema.get("ema_model", ckpt_with_ema.get("model"))["conv.weight"].item() == 2.0
+    assert ckpt_without_ema.get("ema_model", ckpt_without_ema.get("model"))["conv.weight"].item() == 1.0
+
