@@ -1005,11 +1005,19 @@ def main() -> None:
             else:
                 alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
+            v11_str = ""
+            if loss_avgs.get("curvature", 0.0) > 0:
+                v11_str += f" | curv: {loss_avgs.get('curvature', 0.0):.4f}"
+            if loss_avgs.get("hard_bg", 0.0) > 0:
+                v11_str += f" | h_bg: {loss_avgs.get('hard_bg', 0.0):.4f}"
+            if loss_avgs.get("fg_bce", 0.0) > 0:
+                v11_str += f" | fg_bce: {loss_avgs.get('fg_bce', 0.0):.4f}"
+
             print(
                 f"\n{'='*92}\n"
                 f"  EPOCH [{epoch+1:04d}/{epochs:04d}] PERIODIC EVALUATION (182 test samples)\n"
                 f"{'-'*92}\n"
-                f"  Train Loss    : {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}]\n"
+                f"  Train Loss    : {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]\n"
                 f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {diag_summary['solver_energy_reduction']*100:.1f}% | W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | W_solv: {row_log['solver_weight_mean']:.2f}\n"
                 f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
                 f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
@@ -1025,10 +1033,17 @@ def main() -> None:
                 alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
             hurdle_str = f" | h_bce: {loss_avgs.get('hurdle_bce', 0.0):.4f}" if loss_avgs.get("hurdle_bce", 0.0) > 0 else ""
+            v11_str = ""
+            if loss_avgs.get("curvature", 0.0) > 0:
+                v11_str += f" | curv: {loss_avgs.get('curvature', 0.0):.4f}"
+            if loss_avgs.get("hard_bg", 0.0) > 0:
+                v11_str += f" | h_bg: {loss_avgs.get('hard_bg', 0.0):.4f}"
+            if loss_avgs.get("fg_bce", 0.0) > 0:
+                v11_str += f" | fg_bce: {loss_avgs.get('fg_bce', 0.0):.4f}"
 
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "
-                f"Loss: {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}] | "
+                f"Loss: {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}] | "
                 f"SolvStr: {solver_strength:.2f} | "
                 f"Disp: {row_log['region_dispersion_p50']:.1f} | "
                 f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}",
