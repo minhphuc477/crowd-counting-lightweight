@@ -87,6 +87,10 @@ ALLOWED_MODEL_KEYS = {
     "proximal_mu",
     "dynamic_scale_routing",
     "scale_router_temperature",
+    # RMR-v11 additions
+    "trust_region_kappa",
+    "trust_region_floor",
+    "foreground_gate",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -120,6 +124,12 @@ ALLOWED_LOSS_KEYS = {
     # RMR-v9: allocation loss target ("y0" | "y")
     "dm_target",
     "dm_strict",
+    # RMR-v11 additions
+    "cell_mass_weight_gamma",
+    "lambda_curvature",
+    "lambda_hard_bg",
+    "hard_bg_ratio",
+    "lambda_fg_gate",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -270,6 +280,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             stemp = float(m_cfg["scale_router_temperature"])
             if stemp <= 0.0:
                 raise ValueError(f"scale_router_temperature must be strictly positive, got {stemp}")
+        if "trust_region_kappa" in m_cfg:
+            kappa = float(m_cfg["trust_region_kappa"])
+            if kappa < 0.0:
+                raise ValueError(f"trust_region_kappa must be non-negative, got {kappa}")
+        if "trust_region_floor" in m_cfg:
+            floor_val = float(m_cfg["trust_region_floor"])
+            if floor_val <= 0.0:
+                raise ValueError(f"trust_region_floor must be strictly positive, got {floor_val}")
         if bool(m_cfg.get("use_coord_attn", False)):
             neck = str(m_cfg.get("neck_type", "additive"))
             if neck != "aspp_lite":
@@ -307,6 +325,26 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             eps_mw = float(l_cfg_pre["cell_mass_weight_eps"])
             if eps_mw <= 0.0:
                 raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {eps_mw}")
+        if "cell_mass_weight_gamma" in l_cfg_pre:
+            gamma_val = float(l_cfg_pre["cell_mass_weight_gamma"])
+            if gamma_val <= 0.0:
+                raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {gamma_val}")
+        if "lambda_curvature" in l_cfg_pre:
+            lam_curv = float(l_cfg_pre["lambda_curvature"])
+            if lam_curv < 0.0:
+                raise ValueError(f"lambda_curvature must be non-negative, got {lam_curv}")
+        if "lambda_hard_bg" in l_cfg_pre:
+            lam_hbg = float(l_cfg_pre["lambda_hard_bg"])
+            if lam_hbg < 0.0:
+                raise ValueError(f"lambda_hard_bg must be non-negative, got {lam_hbg}")
+        if "hard_bg_ratio" in l_cfg_pre:
+            hbg_ratio = float(l_cfg_pre["hard_bg_ratio"])
+            if not (0.0 < hbg_ratio <= 1.0):
+                raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {hbg_ratio}")
+        if "lambda_fg_gate" in l_cfg_pre:
+            lam_fg = float(l_cfg_pre["lambda_fg_gate"])
+            if lam_fg < 0.0:
+                raise ValueError(f"lambda_fg_gate must be non-negative, got {lam_fg}")
 
 
     l_cfg = cfg.get("loss", {})
@@ -465,6 +503,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "proximal_mu",
         "dynamic_scale_routing",
         "scale_router_temperature",
+        # RMR-v11 additions
+        "trust_region_kappa",
+        "trust_region_floor",
+        "foreground_gate",
     ],
     "loss": [
         "lambda_count",
@@ -488,6 +530,12 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         # RMR-v9 allocation loss fields
         "allocation_loss_type",
         "dm_target",
+        # RMR-v11 loss fields
+        "cell_mass_weight_gamma",
+        "lambda_curvature",
+        "lambda_hard_bg",
+        "hard_bg_ratio",
+        "lambda_fg_gate",
     ],
     "train": [
         "lr",

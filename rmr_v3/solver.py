@@ -99,6 +99,8 @@ def unrolled_sirt_solver(
     tv_eps_c: float = 0.1,
     laplace_kernel: torch.Tensor | None = None,
     scale_routing_weights: torch.Tensor | None = None,
+    trust_region_kappa: float = 0.0,
+    trust_region_floor: float = 0.005,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -208,7 +210,12 @@ def unrolled_sirt_solver(
             scale_partitions=scale_partitions,
         )
 
-        y_step = y.float() - effective_omega * field
+        step_delta = effective_omega * field
+        if trust_region_kappa > 0.0:
+            bound = float(trust_region_kappa) * torch.clamp_min(y.float(), float(trust_region_floor))
+            step_delta = torch.clamp(step_delta, min=-bound, max=bound)
+
+        y_step = y.float() - step_delta
 
         # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
         if proximal_mode == "firm":

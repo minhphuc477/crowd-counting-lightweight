@@ -328,6 +328,13 @@ class RMRv3LossConfig:
     dm_target: str = "y0"
     dm_strict: bool = True
 
+    # ── RMR-v11 additions ────────────────────────────────────────────────────
+    cell_mass_weight_gamma: float = 1.0  # exponent on normalized crowd mass distribution
+    lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
+    lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
+    hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
+    lambda_fg_gate: float = 0.0          # weight for foreground gate BCE loss (0 = disabled)
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
@@ -339,6 +346,16 @@ class RMRv3LossConfig:
             raise ValueError(f"cell_loss_mode must be 'balanced' or 'mass_weighted', got '{self.cell_loss_mode}'")
         if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
             raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
+        if self.cell_mass_weight_gamma <= 0.0:
+            raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {self.cell_mass_weight_gamma}")
+        if self.lambda_curvature < 0.0:
+            raise ValueError(f"lambda_curvature must be non-negative, got {self.lambda_curvature}")
+        if self.lambda_hard_bg < 0.0:
+            raise ValueError(f"lambda_hard_bg must be non-negative, got {self.lambda_hard_bg}")
+        if not (0.0 < self.hard_bg_ratio <= 1.0):
+            raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {self.hard_bg_ratio}")
+        if self.lambda_fg_gate < 0.0:
+            raise ValueError(f"lambda_fg_gate must be non-negative, got {self.lambda_fg_gate}")
 
 
     @classmethod
@@ -372,14 +389,66 @@ class RMRv3LossConfig:
         return cls(**kwargs)
 
 
+def curvature_power_loss(
+    y: torch.Tensor,
+    target: torch.Tensor,
+    eps: float = 1e-4,
+) -> torch.Tensor:
+    """Curvature-preserving square-root power loss for high-density crowds (RMR-v11).
+
+    Computes L_curv = mean(|sqrt(y + eps) - sqrt(y_gt + eps)|^2).
+    In the square-root domain, the gradient for under-counted dense clusters is amplified,
+    counteracting gradient starvation from overwhelming background pixels.
+    """
+    if target.ndim == 3:
+        target = target.unsqueeze(1)
+    if y.ndim == 3:
+        y = y.unsqueeze(1)
+    y_f = y.float().clamp_min(0.0)
+    t_f = target.float().clamp_min(0.0)
+    diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
+    return torch.mean(diff.square())
+
+
+def topk_hard_background_loss(
+    y: torch.Tensor,
+    target: torch.Tensor,
+    ratio: float = 0.10,
+    bg_threshold: float = 1e-5,
+) -> torch.Tensor:
+    """Top-K Hard Negative Background Mining Loss (RMR-v11).
+
+    Extracts background pixels where target <= bg_threshold, and applies
+    a quadratic penalty to the top `ratio` fraction of highest predicted false alarms.
+    Exerts sharp quadratic repulsion on textured pavement, trees, and architectural facades.
+    """
+    if target.ndim == 3:
+        target = target.unsqueeze(1)
+    if y.ndim == 3:
+        y = y.unsqueeze(1)
+    y_f = y.float()
+    t_f = target.float()
+    bg_mask = (t_f <= float(bg_threshold))
+    if not bg_mask.any():
+        return (y_f * 0.0).sum()
+
+    bg_preds = y_f[bg_mask]
+    num_bg = bg_preds.numel()
+    k = max(1, int(float(ratio) * num_bg))
+
+    topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
+    return torch.mean(topk_vals.square())
+
+
 def mass_weighted_cell_loss(
     y: torch.Tensor,
     target: torch.Tensor,
     beta: float = 1.0,
     eps: float = 1e-3,
     alpha: float = 1.0,
+    gamma: float = 1.0,
 ) -> torch.Tensor:
-    """Mass-weighted cell allocation loss (RMR-v8 Stage 2).
+    """Mass-weighted cell allocation loss (RMR-v8 Stage 2 / RMR-v11).
 
     Computes per-pixel smooth-L1 loss weighted by ground truth density mass.
     To prevent background collapse (where empty background regions receive zero
@@ -387,7 +456,8 @@ def mass_weighted_cell_loss(
     1.0, and pixels containing crowd mass receive an additive boost proportional to
     their density share:
         p(i) = target(i) / (sum(target) + eps)   # relative crowd mass distribution
-        raw_weight(i) = 1.0 + alpha * (H * W) * p(i)
+        p_gamma(i) = (p(i)^gamma) / sum(p^gamma) # optional power shaping (gamma=1.25 in v11)
+        raw_weight(i) = 1.0 + alpha * (H * W) * p_gamma(i)
         weight(i) = raw_weight(i) / mean(raw_weight)
 
     Properties:
@@ -405,6 +475,7 @@ def mass_weighted_cell_loss(
         beta:   smooth-L1 threshold (default 1.0).
         eps:    small constant for numerical stability.
         alpha:  relative crowd boost weight (default 1.0).
+        gamma:  power exponent on mass distribution (default 1.0).
 
     Returns:
         Scalar mass-weighted cell loss.
@@ -422,6 +493,11 @@ def mass_weighted_cell_loss(
 
     # Normalized mass distribution p in [0, 1]
     p = torch.where(total_mass > float(eps), t_f / total_mass.clamp_min(float(eps)), torch.zeros_like(t_f))
+
+    if abs(float(gamma) - 1.0) > 1e-5:
+        p_pow = p.pow(float(gamma))
+        sum_p_pow = p_pow.sum(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
+        p = p_pow / sum_p_pow
 
     # Baseline 1.0 + mass boost
     hw = float(t_f.shape[-2] * t_f.shape[-1])
@@ -482,6 +558,7 @@ def compute_rmr_v3_losses(
                 beta=cfg.cell_beta,
                 eps=cfg.cell_mass_weight_eps,
                 alpha=float(cfg.cell_mass_weight_alpha),
+                gamma=float(cfg.cell_mass_weight_gamma),
             )
         else:
             return balanced_smooth_l1(
@@ -585,6 +662,48 @@ def compute_rmr_v3_losses(
         + cfg.lambda_cell * losses["cell"]
         + cfg.lambda_region_nb * losses["region_nb"]
     )
+
+    # ── RMR-v11 Curvature Power Loss ─────────────────────────────────────────
+    if cfg.lambda_curvature > 0.0:
+        loss_curv_y = curvature_power_loss(y, target_float)
+        if cfg.dm_target == "dual":
+            loss_curv_y0 = curvature_power_loss(y0, target_float)
+            loss_curv = 0.5 * loss_curv_y + 0.5 * loss_curv_y0
+        elif cfg.dm_target == "y0":
+            loss_curv = curvature_power_loss(y0, target_float)
+        else:
+            loss_curv = loss_curv_y
+        losses["curvature"] = loss_curv
+        losses["total"] = losses["total"] + cfg.lambda_curvature * loss_curv
+    else:
+        losses["curvature"] = torch.tensor(0.0, device=y.device)
+
+    # ── RMR-v11 Top-K Hard Background Mining Loss ───────────────────────────
+    if cfg.lambda_hard_bg > 0.0:
+        loss_hard_bg_y = topk_hard_background_loss(y, target_float, ratio=cfg.hard_bg_ratio)
+        if cfg.dm_target == "dual":
+            loss_hard_bg_y0 = topk_hard_background_loss(y0, target_float, ratio=cfg.hard_bg_ratio)
+            loss_hard_bg = 0.5 * loss_hard_bg_y + 0.5 * loss_hard_bg_y0
+        elif cfg.dm_target == "y0":
+            loss_hard_bg = topk_hard_background_loss(y0, target_float, ratio=cfg.hard_bg_ratio)
+        else:
+            loss_hard_bg = loss_hard_bg_y
+        losses["hard_bg"] = loss_hard_bg
+        losses["total"] = losses["total"] + cfg.lambda_hard_bg * loss_hard_bg
+    else:
+        losses["hard_bg"] = torch.tensor(0.0, device=y.device)
+
+    # ── RMR-v11 Decoupled Foreground Gating Loss ─────────────────────────────
+    fg_logit = outputs.get("fg_logit", None)
+    if fg_logit is not None and cfg.lambda_fg_gate > 0.0:
+        t_bin = (target_float > 0.0).float()
+        if t_bin.ndim == 3:
+            t_bin = t_bin.unsqueeze(1)
+        fg_bce = F.binary_cross_entropy_with_logits(fg_logit.float(), t_bin)
+        losses["fg_bce"] = fg_bce
+        losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
+    else:
+        losses["fg_bce"] = torch.tensor(0.0, device=y.device)
 
     # ── RMR-v7 Hurdle losses (opt-in; skipped when lambda=0 or logit absent) ──
     hurdle_logit = outputs.get("hurdle_logit", None)

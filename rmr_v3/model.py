@@ -159,6 +159,16 @@ class RMRv3Config:
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
 
+    # ── RMR-v11 additions ────────────────────────────────────────────────────
+    # Trust-region relative update clamping in SIRT solver:
+    # Bounds relative update delta_y_t to [-kappa * y_t, +kappa * max(y_t, floor)]
+    trust_region_kappa: float = 0.0
+    trust_region_floor: float = 0.005
+
+    # Decoupled foreground gating sub-head (1x1 conv, 33 params)
+    # When True, predicts spatial foreground probability map to suppress texture false alarms
+    foreground_gate: bool = False
+
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
             raise ValueError(
@@ -191,6 +201,14 @@ class RMRv3Config:
         if self.scale_router_temperature <= 0.0:
             raise ValueError(
                 f"scale_router_temperature must be strictly positive, got {self.scale_router_temperature}"
+            )
+        if self.trust_region_kappa < 0.0:
+            raise ValueError(
+                f"trust_region_kappa must be non-negative, got {self.trust_region_kappa}"
+            )
+        if self.trust_region_floor <= 0.0:
+            raise ValueError(
+                f"trust_region_floor must be strictly positive, got {self.trust_region_floor}"
             )
 
     @classmethod
@@ -662,6 +680,20 @@ class RMRv3(nn.Module):
         else:
             self.scale_router = None
 
+        # ── Foreground Gating Sub-Head (RMR-v11) ──────────────────────────
+        if cfg.foreground_gate:
+            self.fg_gate: nn.Conv2d | None = nn.Conv2d(
+                cfg.feature_width,
+                1,
+                kernel_size=1,
+                bias=True,
+            )
+            # Initialize with small positive bias (2.0 -> sigmoid ~0.88) so early training passes signal through
+            nn.init.normal_(self.fg_gate.weight, std=0.01)
+            nn.init.constant_(self.fg_gate.bias, 2.0)
+        else:
+            self.fg_gate = None
+
         self.solver_strength: float = 1.0
 
         # Registered non-persistent Laplacian kernel buffer for isotropic TV smoothing
@@ -738,6 +770,13 @@ class RMRv3(nn.Module):
 
         z0 = self.fine_head.forward_logits(p4)
         y0 = self.fine_head.activate(z0)
+
+        # ── Decoupled Foreground Gating (RMR-v11) ────────────────────────────
+        fg_logit = None
+        if self.fg_gate is not None:
+            fg_logit = self.fg_gate(p4)
+            fg_mask = torch.sigmoid(fg_logit)
+            y0 = y0 * fg_mask
 
         h, w = y0.shape[-2:]
 
@@ -826,6 +865,8 @@ class RMRv3(nn.Module):
                 out["scale_weights"] = scale_weights
             if hurdle_logit is not None:
                 out["hurdle_logit"] = hurdle_logit
+            if fg_logit is not None:
+                out["fg_logit"] = fg_logit
             return out
 
         solver_res = unrolled_sirt_solver(
@@ -849,6 +890,8 @@ class RMRv3(nn.Module):
             tv_eps_c=self.cfg.tv_eps_c,
             laplace_kernel=self._laplace_kernel,
             scale_routing_weights=scale_weights,
+            trust_region_kappa=self.cfg.trust_region_kappa,
+            trust_region_floor=self.cfg.trust_region_floor,
         )
 
         y = solver_res["y"]
@@ -888,6 +931,8 @@ class RMRv3(nn.Module):
             out["scale_weights"] = scale_weights
         if hurdle_logit is not None:
             out["hurdle_logit"] = hurdle_logit
+        if fg_logit is not None:
+            out["fg_logit"] = fg_logit
         return out
 
     def switch_to_deploy(self) -> None:

@@ -60,6 +60,7 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "train_total", "train_count", "train_flat_dm16", "train_allocation",
     "train_dm16", "train_dm32", "train_dm64",
     "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
+    "train_curvature", "train_hard_bg", "train_fg_bce",
     "train_kd_total", "train_kd_spatial", "train_kd_count",
     "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
     "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
@@ -491,6 +492,8 @@ def format_dynamic_training_banner(
             solver_parts.append(f"ScaleRouting=Dynamic(K={k_num})")
         else:
             solver_parts.append("ScaleRouting=Isotropic")
+        if getattr(m_cfg, "trust_region_kappa", 0.0) > 0.0:
+            solver_parts.append(f"TrustRegion(kappa={m_cfg.trust_region_kappa})")
         solver_desc = " | ".join(solver_parts)
 
     # 4. Heads & Densities
@@ -499,6 +502,8 @@ def format_dynamic_training_banner(
         density_head = "FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])"
     else:
         density_head = "FineMeasureHead (Calibrated Log-Space Softplus)"
+    if getattr(m_cfg, "foreground_gate", False):
+        density_head += " + FG-Gate(33p)"
 
     # 5. Supervision Target & Loss
     dm_target = cfg.get("loss", {}).get("dm_target", "y0")
@@ -916,6 +921,9 @@ def main() -> None:
             "train_region_nb": loss_avgs.get("region_nb", 0.0),
             "train_hurdle_bce": loss_avgs.get("hurdle_bce", 0.0),
             "train_trunc_nb": loss_avgs.get("trunc_nb", 0.0),
+            "train_curvature": loss_avgs.get("curvature", 0.0),
+            "train_hard_bg": loss_avgs.get("hard_bg", 0.0),
+            "train_fg_bce": loss_avgs.get("fg_bce", 0.0),
             "train_kd_total": loss_avgs.get("kd_total", 0.0),
             "train_kd_spatial": loss_avgs.get("kd_spatial", 0.0),
             "train_kd_count": loss_avgs.get("kd_count", 0.0),
