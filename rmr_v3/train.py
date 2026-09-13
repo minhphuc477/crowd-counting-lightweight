@@ -4,9 +4,19 @@ import argparse
 from contextlib import contextmanager
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+# Ensure repository root is on sys.path and remove script dir to prevent shadowing stdlib modules (e.g. profile)
+_script_dir = str(Path(__file__).resolve().parent)
+while _script_dir in sys.path:
+    sys.path.remove(_script_dir)
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # Windows stdout encoding safety
 if hasattr(sys.stdout, "reconfigure"):
@@ -41,8 +51,8 @@ from rmr_core.training import (
     seed_everything,
 )
 
-from .config import compute_config_hash, validate_resume_compatibility, validate_v3_config
-from .diagnostics import (
+from rmr_v3.config import compute_config_hash, validate_resume_compatibility, validate_v3_config
+from rmr_v3.diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
     compute_reliability_correlations,
@@ -50,9 +60,9 @@ from .diagnostics import (
     compute_uncertainty_calibration_bins,
     regional_reliability_rows,
 )
-from .kd import DensityMapKDLoss
-from .losses import RMRv3LossConfig, compute_rmr_v3_losses
-from .model import RMRv3, RMRv3Config
+from rmr_v3.kd import DensityMapKDLoss
+from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
+from rmr_v3.model import RMRv3, RMRv3Config
 
 
 TRAIN_LOG_FIELDNAMES: list[str] = [
@@ -84,8 +94,8 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
 ]
 
 
-from .tracking import LossTracker, DiagnosticTracker, format_dynamic_training_banner
-from .checkpoint import EMAManager, CheckpointManager
+from rmr_v3.tracking import LossTracker, DiagnosticTracker, format_dynamic_training_banner
+from rmr_v3.checkpoint import EMAManager, CheckpointManager
 
 __all__ = [
     "LossTracker",

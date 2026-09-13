@@ -5,8 +5,30 @@ import csv
 import datetime
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
+
+# Ensure repository root is on sys.path and remove script dir to prevent shadowing stdlib modules (e.g. profile)
+_script_dir = str(Path(__file__).resolve().parent)
+while _script_dir in sys.path:
+    sys.path.remove(_script_dir)
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+# Windows stdout encoding safety
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import numpy as np
 import torch
@@ -15,7 +37,7 @@ from torch.utils.data import DataLoader
 from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
 from rmr_core.training import compute_file_sha256, get_git_info
-from .diagnostics import (
+from rmr_v3.diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
     compute_reliability_correlations,
@@ -23,7 +45,7 @@ from .diagnostics import (
     compute_uncertainty_calibration_bins,
     regional_reliability_rows,
 )
-from .model import RMRv3, RMRv3Config
+from rmr_v3.model import RMRv3, RMRv3Config
 
 
 def load_model_from_ckpt(
