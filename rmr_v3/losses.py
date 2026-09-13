@@ -335,6 +335,12 @@ class RMRv3LossConfig:
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
     lambda_fg_gate: float = 0.0          # weight for foreground gate BCE loss (0 = disabled)
 
+    # ── RMR-v12 Density-Gated Curvature additions ────────────────────────────
+    curvature_gate_threshold: float = 0.0  # density threshold to activate curvature loss (0 = disabled / full image)
+    curvature_gate_kernel: int = 5         # kernel size for local density pooling (covers 20x20 px at stride 4)
+    curvature_gate_mode: str = "none"      # "none" | "hard" | "soft"
+    curvature_gate_scale: float = 0.02     # temperature for soft sigmoid transition
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
@@ -348,6 +354,8 @@ class RMRv3LossConfig:
             raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
         if self.cell_mass_weight_gamma <= 0.0:
             raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {self.cell_mass_weight_gamma}")
+        if self.curvature_gate_mode not in ("none", "hard", "soft"):
+            raise ValueError(f"curvature_gate_mode must be 'none', 'hard', or 'soft', got '{self.curvature_gate_mode}'")
         if self.lambda_curvature < 0.0:
             raise ValueError(f"lambda_curvature must be non-negative, got {self.lambda_curvature}")
         if self.lambda_hard_bg < 0.0:
@@ -393,13 +401,21 @@ def curvature_power_loss(
     y: torch.Tensor,
     target: torch.Tensor,
     eps: float = 0.01,
+    threshold: float = 0.0,
+    kernel_size: int = 5,
+    mode: str = "none",
+    smooth_scale: float = 0.02,
 ) -> torch.Tensor:
-    """Curvature-preserving square-root power loss for high-density crowds (RMR-v11).
+    """Curvature-preserving square-root power loss for high-density crowds (RMR-v11/v12).
 
     Computes L_curv = mean(|sqrt(y + eps) - sqrt(y_gt + eps)|^2).
     In the square-root domain, the gradient for under-counted dense clusters is amplified
     by up to (1 + 1/sqrt(eps)) = 11x, counteracting gradient starvation while eps=0.01
     strictly bounds the gradient magnitude within [-9.0, +1.0] for optimizer stability.
+
+    In RMR-v12, density-gated mode ('hard' or 'soft') restricts curvature loss to high-density
+    regions where local crowd density exceeds `threshold`. This eliminates mass over-inflation
+    on isolated heads in moderate crowds while preserving the anti-saturation gradient on dense clumps.
     """
     if target.ndim == 3:
         target = target.unsqueeze(1)
@@ -408,7 +424,27 @@ def curvature_power_loss(
     y_f = y.float().clamp_min(0.0)
     t_f = target.float().clamp_min(0.0)
     diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
-    return torch.mean(diff.square())
+    diff_sq = diff.square()
+
+    if mode == "none" or float(threshold) <= 0.0:
+        return torch.mean(diff_sq)
+
+    # Compute local density via average pooling (covers (kernel_size * stride)^2 pixels)
+    pad = int(kernel_size) // 2
+    local_density = F.avg_pool2d(t_f, kernel_size=int(kernel_size), stride=1, padding=pad)
+
+    if mode == "hard":
+        gate = (local_density >= float(threshold)).float()
+    elif mode == "soft":
+        gate = torch.sigmoid((local_density - float(threshold)) / float(smooth_scale))
+    else:
+        raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
+
+    gate_sum = gate.sum()
+    if gate_sum > 0:
+        return (gate * diff_sq).sum() / gate_sum
+    else:
+        return (y_f * 0.0).sum()  # Maintain autograd computational graph
 
 
 def topk_hard_background_loss(
@@ -664,14 +700,24 @@ def compute_rmr_v3_losses(
         + cfg.lambda_region_nb * losses["region_nb"]
     )
 
-    # ── RMR-v11 Curvature Power Loss ─────────────────────────────────────────
+    # ── RMR-v11/v12 Curvature Power Loss ─────────────────────────────────────
     if cfg.lambda_curvature > 0.0:
-        loss_curv_y = curvature_power_loss(y, target_float)
+        def _compute_curv(dmap: torch.Tensor) -> torch.Tensor:
+            return curvature_power_loss(
+                dmap,
+                target_float,
+                threshold=cfg.curvature_gate_threshold,
+                kernel_size=cfg.curvature_gate_kernel,
+                mode=cfg.curvature_gate_mode,
+                smooth_scale=cfg.curvature_gate_scale,
+            )
+
+        loss_curv_y = _compute_curv(y)
         if cfg.dm_target == "dual":
-            loss_curv_y0 = curvature_power_loss(y0, target_float)
+            loss_curv_y0 = _compute_curv(y0)
             loss_curv = 0.5 * loss_curv_y + 0.5 * loss_curv_y0
         elif cfg.dm_target == "y0":
-            loss_curv = curvature_power_loss(y0, target_float)
+            loss_curv = _compute_curv(y0)
         else:
             loss_curv = loss_curv_y
         losses["curvature"] = loss_curv

@@ -130,6 +130,11 @@ ALLOWED_LOSS_KEYS = {
     "lambda_hard_bg",
     "hard_bg_ratio",
     "lambda_fg_gate",
+    # RMR-v12 additions
+    "curvature_gate_threshold",
+    "curvature_gate_kernel",
+    "curvature_gate_mode",
+    "curvature_gate_scale",
 }
 
 ALLOWED_TRAIN_KEYS = {
