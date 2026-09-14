@@ -98,6 +98,12 @@ ALLOWED_MODEL_KEYS = {
     "use_top_down_semantic_gate",
     "tdsg_floor",
     "fg_gate_floor",
+    # RMR-v15 additions
+    "scale_conditioned_prior",
+    "pre_solver_scale_gating",
+    "scale_gating_power",
+    "dynamic_trust_gate",
+    "trust_gate_init_bias",
 }
 
 ALLOWED_LOSS_KEYS = {
