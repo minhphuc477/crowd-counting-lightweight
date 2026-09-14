@@ -30,6 +30,12 @@ def _softplus_inverse(y: float) -> float:
     return math.log(math.expm1(y))
 
 
+def _deep_tuple(val: Any) -> Any:
+    if isinstance(val, (list, tuple)):
+        return tuple(_deep_tuple(x) for x in val)
+    return val
+
+
 @dataclass
 class RMRv3Config:
     # Fine grid / carrier
@@ -189,6 +195,13 @@ class RMRv3Config:
     fg_gate_floor: float = 0.70
 
     def __post_init__(self) -> None:
+        if self.region_sizes_px is not None:
+            self.region_sizes_px = _deep_tuple(self.region_sizes_px)
+        if self.aspp_dilations is not None:
+            self.aspp_dilations = _deep_tuple(self.aspp_dilations)
+        if self.context_dilations is not None:
+            self.context_dilations = _deep_tuple(self.context_dilations)
+
         if self.use_coord_attn and self.neck_type != "aspp_lite":
             raise ValueError(
                 f"use_coord_attn=True requires neck_type='aspp_lite', got '{self.neck_type}'"
@@ -486,7 +499,7 @@ class RMRv3(nn.Module):
             h,
             w,
             self.cfg.output_stride,
-            self.cfg.region_sizes_px,
+            _deep_tuple(self.cfg.region_sizes_px),
             self.cfg.region_overlap,
             device.type,
             device.index if device.type == "cuda" else None,

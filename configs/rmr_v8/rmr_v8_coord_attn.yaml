@@ -25,7 +25,7 @@ model:
   region_overlap:   0.5
   include_full_image: false
   regional_feature_stats: mean_std
-  region_head_hidden: 44
+  region_head_hidden: 38
   enable_solver:   true
   iterations:      2
   omega:           1.0

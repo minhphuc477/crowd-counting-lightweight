@@ -19,10 +19,11 @@ class RMRModelOutput(dict):
     """
 
     def __getattr__(self, key: str) -> Any:
-        try:
+        if key in self:
             return self[key]
-        except KeyError:
-            raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
+        if key in ("hurdle_logit", "fg_logit", "scale_weights"):
+            return None
+        raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
 
     def __setattr__(self, key: str, value: Any) -> None:
         self[key] = value
