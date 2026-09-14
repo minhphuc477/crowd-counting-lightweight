@@ -262,18 +262,21 @@ def reliability_from_nb(
     regions: RegionSet,
     *,
     mode: str = "nb_rate_variance",
+    hurdle_pi: torch.Tensor | None = None,
     rate_std_floor: float = 0.01,
     weight_min: float = 0.25,
     weight_max: float = 4.0,
     normalize_within_scale: bool = True,
     eps: float = 1e-6,
 ) -> dict[str, torch.Tensor]:
-    """Derive regional reliability from NB predictive rate variance or SNR.
+    """Derive regional reliability from NB predictive rate variance, SNR, or Hurdle-hybrid.
 
     Modes:
     - 'nb_rate_variance': q = 1 / (Var[rate] + floor^2), classical inverse variance.
     - 'snr': q = mu^2 / Var[N] = r * mu / (r + mu), Signal-to-Noise Ratio weighting
              that prioritizes high-certainty crowd clumps over noisy empty background.
+    - 'hybrid_hurdle': Blends rate variance on background (pi_R -> 0 => w -> 4.0)
+                       with SNR on crowd clusters (pi_R -> 1 => w -> 4.0).
     """
 
     mu = mu_count.float().clamp_min(0.0)
@@ -289,32 +292,42 @@ def reliability_from_nb(
     rate_var = count_var / area.square()
     rate_var = rate_var + floor_var
 
-    if mode == "snr":
+    def _normalize_precision(p: torch.Tensor) -> torch.Tensor:
+        if normalize_within_scale:
+            w = torch.zeros_like(p)
+            for sid in torch.unique(regions.scale_id):
+                mask = (regions.scale_id == sid).to(dtype=p.dtype).view(1, 1, -1)
+                q_sum = (p * mask).sum(dim=-1, keepdim=True)
+                count = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+                q_mean = (q_sum / count).clamp_min(eps)
+                w = w + (p / q_mean) * mask
+        else:
+            w = p / p.mean(dim=-1, keepdim=True).clamp_min(eps)
+        return w.clamp(min=float(weight_min), max=float(weight_max))
+
+    if mode == "hybrid_hurdle":
+        prec_var = 1.0 / rate_var.clamp_min(eps)
+        prec_snr = (r * mu) / (r + mu + float(eps))
+        w_var = _normalize_precision(prec_var)
+        w_snr = _normalize_precision(prec_snr)
+
+        if hurdle_pi is not None:
+            pi = hurdle_pi.float().clamp(0.0, 1.0)
+            if pi.ndim == 2:
+                pi = pi.unsqueeze(1)
+        else:
+            pi = torch.ones_like(prec_snr)
+
+        weight = (1.0 - pi) * w_var + pi * w_snr
+        precision = (1.0 - pi) * prec_var + pi * prec_snr
+    elif mode == "snr":
         # Signal-to-Noise Ratio: mu^2 / Var[N] = r * mu / (r + mu + eps)
         # Scales naturally with crowd presence and certainty, prioritizing genuine clusters
         precision = (r * mu) / (r + mu + float(eps))
+        weight = _normalize_precision(precision)
     else:
         precision = 1.0 / rate_var.clamp_min(eps)
-
-    if normalize_within_scale:
-        weight = torch.zeros_like(precision)
-
-        for sid in torch.unique(regions.scale_id):
-            mask = (regions.scale_id == sid).to(dtype=precision.dtype).view(1, 1, -1)
-            q_sum = (precision * mask).sum(dim=-1, keepdim=True)
-            count = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
-            q_mean = (q_sum / count).clamp_min(eps)
-            weight = weight + (precision / q_mean) * mask
-    else:
-        weight = precision / precision.mean(
-            dim=-1,
-            keepdim=True,
-        ).clamp_min(eps)
-
-    weight = weight.clamp(
-        min=float(weight_min),
-        max=float(weight_max),
-    )
+        weight = _normalize_precision(precision)
 
     return {
         "weight": weight,

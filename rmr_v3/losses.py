@@ -346,6 +346,7 @@ class RMRv3LossConfig:
     scale_align_tau_dense: float = 0.12  # local density threshold for fine scale (16x16)
     scale_align_tau_sparse: float = 0.03 # local density threshold for coarse scale (64x64)
     scale_align_kernel: int = 5          # kernel size for local density estimation
+    scale_align_mask_bg: bool = True     # RMR-v14: mask out background pixels from scale alignment KL loss
 
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
@@ -574,28 +575,32 @@ def physical_scale_alignment_loss(
     tau_dense: float = 0.12,
     tau_sparse: float = 0.03,
     kernel_size: int = 5,
-    eps: float = 1e-7,
+    eps: float = 1e-6,
+    mask_background: bool = True,
 ) -> torch.Tensor:
-    """Physical scale alignment cross-entropy / KL loss (RMR-v13).
+    """Physical Scale Alignment Loss (RMR-v13 / RMR-v14).
 
-    Directly supervises the continuous spatial scale distribution pi(u) in Delta^{K-1}
-    predicted by ScaleRoutingHead. Aligns the receptive field scale with the physical
-    head size determined by local crowd density:
-    - High density (d >= tau_dense, head size < 16x16 px) -> Scale 0 (16x16)
-    - Low density (d <= tau_sparse, head size > 32x32 px) -> Scale 2 (64x64)
-    - Moderate density (in-between)                       -> Scale 1 (32x32)
+    Supervises the scale router's spatial scale probabilities pi(x, y) with a
+    continuous physics-based prior derived from local crowd density:
+    - High local density (heads close together) -> fine scale (Scale 0, e.g. 32x32 px)
+    - Medium local density                      -> intermediate scale (Scale 1, e.g. 64x64 px)
+    - Low local density                         -> coarse scale (Scale 2, e.g. 128x128 px)
 
-    Target distribution pi*(u) is constructed via continuous piecewise-linear
-    barycentric coordinates on the 2-simplex, ensuring pi*(u) in Delta^2 everywhere.
+    In RMR-v14: When mask_background=True, the loss is computed strictly on foreground
+    regions where local density >= tau_sparse. This prevents empty background pixels
+    from being artificially forced into Scale 2, eliminating phantom background count
+    accumulations on repetitive textures (e.g. IMG_113 pavement).
+
     The loss computes the Kullback-Leibler divergence KL(pi* || pi).
 
     Args:
-        scale_weights: [B, K, H, W] predicted scale probabilities from ScaleRoutingHead.
-        target_y:      [B, 1, H, W] or [B, H, W] GT density map.
-        tau_dense:     Density threshold for dense crowd (Scale 0).
-        tau_sparse:    Density threshold for sparse crowd (Scale 2).
-        kernel_size:   Pooling kernel size for local density computation.
-        eps:           Epsilon for numerical safety in log.
+        scale_weights:   [B, K, H, W] predicted scale probabilities from ScaleRoutingHead.
+        target_y:        [B, 1, H, W] or [B, H, W] GT density map.
+        tau_dense:       Density threshold for dense crowd (Scale 0).
+        tau_sparse:      Density threshold for sparse crowd (Scale 2).
+        kernel_size:     Pooling kernel size for local density computation.
+        eps:             Epsilon for numerical safety in log.
+        mask_background: If True, only penalize pixels with local density >= tau_sparse.
 
     Returns:
         Scalar non-negative KL divergence loss.
@@ -633,6 +638,13 @@ def physical_scale_alignment_loss(
     )
     target_log_pred = target_pi * torch.log(pred_pi)
     kl_per_pixel = (target_log_target - target_log_pred).sum(dim=1)
+
+    if mask_background:
+        fg_mask = (local_density >= float(tau_sparse)).float().squeeze(1)  # [B, H, W]
+        if fg_mask.sum() > 0:
+            return (kl_per_pixel * fg_mask).sum() / fg_mask.sum().clamp_min(1.0)
+        else:
+            return (kl_per_pixel * 0.0).sum()
 
     return kl_per_pixel.mean()
 
@@ -866,7 +878,7 @@ def compute_rmr_v3_losses(
         losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
         losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
 
-    # ── RMR-v13 Physical Scale Alignment Loss ────────────────────────────────
+    # ── RMR-v13/v14 Physical Scale Alignment Loss ────────────────────────────
     scale_weights = outputs.get("scale_weights", None)
     if scale_weights is not None and cfg.lambda_scale_align > 0.0:
         losses["scale_align"] = physical_scale_alignment_loss(
@@ -875,6 +887,7 @@ def compute_rmr_v3_losses(
             tau_dense=cfg.scale_align_tau_dense,
             tau_sparse=cfg.scale_align_tau_sparse,
             kernel_size=cfg.scale_align_kernel,
+            mask_background=cfg.scale_align_mask_bg,
         )
         losses["total"] = losses["total"] + cfg.lambda_scale_align * losses["scale_align"]
     else:

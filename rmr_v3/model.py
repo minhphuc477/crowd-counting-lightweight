@@ -180,7 +180,18 @@ class RMRv3Config:
     # Regional evidence reliability weighting mode:
     # "nb_rate_variance": classical inverse variance q = 1 / Var[rate].
     # "snr": Signal-to-Noise Ratio weighting q = r * mu / (r + mu), prioritizing genuine clusters.
+    # "hybrid_hurdle": Hurdle-gated hybrid: (1 - pi_R) * w_var + pi_R * w_snr (RMR-v14).
     reliability_mode: str = "nb_rate_variance"
+
+    # ── RMR-v14 additions ────────────────────────────────────────────────────
+    # Top-Down Semantic Context Gating (TDSG):
+    # When True, instantiates Conv2d(feature_width, 1, 1) (33 params) on P16
+    # to semantically modulate P4 high-resolution features before the fine head.
+    use_top_down_semantic_gate: bool = False
+    tdsg_floor: float = 0.20
+
+    # Decoupled foreground gating safety floor (default 0.70 for backward compatibility, 0.10 for v14)
+    fg_gate_floor: float = 0.70
 
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
@@ -231,9 +242,17 @@ class RMRv3Config:
             raise ValueError(
                 f"morozov_gamma must be non-negative, got {self.morozov_gamma}"
             )
-        if self.reliability_mode not in ("nb_rate_variance", "snr"):
+        if self.reliability_mode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
-                f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance' or 'snr'."
+                f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
+            )
+        if not (0.0 <= self.tdsg_floor <= 1.0):
+            raise ValueError(
+                f"tdsg_floor must be in [0.0, 1.0], got {self.tdsg_floor}"
+            )
+        if not (0.0 <= self.fg_gate_floor <= 1.0):
+            raise ValueError(
+                f"fg_gate_floor must be in [0.0, 1.0], got {self.fg_gate_floor}"
             )
 
 
@@ -314,9 +333,9 @@ class RMRv3(nn.Module):
         if cfg.omega <= 0:
             raise ValueError("omega must be > 0")
 
-        if cfg.reliability_mode not in ("nb_rate_variance", "snr"):
+        if cfg.reliability_mode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
-                f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance' or 'snr'."
+                f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
             )
 
         if len(cfg.region_sizes_px) == 0:
@@ -428,6 +447,20 @@ class RMRv3(nn.Module):
         else:
             self.fg_gate = None
 
+        # ── Top-Down Semantic Context Gating (RMR-v14) ────────────────────────
+        if cfg.use_top_down_semantic_gate:
+            self.tdsg: nn.Conv2d | None = nn.Conv2d(
+                cfg.feature_width,
+                1,
+                kernel_size=1,
+                bias=True,
+            )
+            # Initialize with positive bias so early training passes full signal through
+            nn.init.normal_(self.tdsg.weight, std=0.01)
+            nn.init.constant_(self.tdsg.bias, 2.0)
+        else:
+            self.tdsg = None
+
         self.solver_strength: float = 1.0
 
         # Registered non-persistent Laplacian kernel buffer for isotropic TV smoothing
@@ -498,6 +531,16 @@ class RMRv3(nn.Module):
             c16,
         )
 
+        # ── Top-Down Semantic Context Gating (RMR-v14) ────────────────────────
+        if self.tdsg is not None:
+            sem_logit = self.tdsg(p16)
+            sem_gate = F.interpolate(
+                sem_logit, size=p4.shape[-2:], mode="bilinear", align_corners=False
+            )
+            sem_floor = float(self.cfg.tdsg_floor)
+            sem_mask = sem_floor + (1.0 - sem_floor) * torch.sigmoid(sem_gate)
+            p4 = p4 * sem_mask
+
         # ── Stage 3: Coordinate Attention on P4 (optional) ────────────────────
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
@@ -505,13 +548,15 @@ class RMRv3(nn.Module):
         z0 = self.fine_head.forward_logits(p4)
         y0 = self.fine_head.activate(z0)
 
-        # ── Decoupled Foreground Gating (RMR-v11) ────────────────────────────
+        # ── Decoupled Foreground Gating (RMR-v11/v14) ─────────────────────────
         fg_logit = None
         if self.fg_gate is not None:
             fg_logit = self.fg_gate(p4)
-            # Residual safety floor (0.70 + 0.30 * sigmoid): guarantees gate is strictly in [0.70, 1.0],
-            # completely preventing zero-absorbing barriers and false-negative head erasure.
-            fg_mask = 0.70 + 0.30 * torch.sigmoid(fg_logit)
+            # Dynamic safety floor (fg_gate_floor + (1 - fg_gate_floor) * sigmoid):
+            # Allows deep background suppression down to fg_gate_floor (0.10 in v14 vs 0.70 in v11)
+            # while guaranteeing non-zero gradient flow.
+            floor = float(self.cfg.fg_gate_floor)
+            fg_mask = floor + (1.0 - floor) * torch.sigmoid(fg_logit)
             y0 = y0 * fg_mask
 
         h, w = y0.shape[-2:]
@@ -530,11 +575,16 @@ class RMRv3(nn.Module):
         mu_count = regional["mu_count"]
         dispersion = regional["dispersion"]
 
+        hurdle_pi_for_rel = None
+        if self.cfg.hurdle_head and "hurdle_logit" in regional:
+            hurdle_pi_for_rel = torch.sigmoid(regional["hurdle_logit"])
+
         reliability = reliability_from_nb(
             mu_count,
             dispersion,
             regions,
             mode=self.cfg.reliability_mode,
+            hurdle_pi=hurdle_pi_for_rel,
             rate_std_floor=self.cfg.reliability_rate_std_floor,
             weight_min=self.cfg.reliability_weight_min,
             weight_max=self.cfg.reliability_weight_max,

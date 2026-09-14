@@ -94,6 +94,10 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v13 additions
     "adjoint_mode",
     "morozov_gamma",
+    # RMR-v14 additions
+    "use_top_down_semantic_gate",
+    "tdsg_floor",
+    "fg_gate_floor",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -143,6 +147,8 @@ ALLOWED_LOSS_KEYS = {
     "scale_align_tau_dense",
     "scale_align_tau_sparse",
     "scale_align_kernel",
+    # RMR-v14 additions
+    "scale_align_mask_bg",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -315,10 +321,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             m_gamma = float(m_cfg["morozov_gamma"])
             if m_gamma < 0.0:
                 raise ValueError(f"morozov_gamma must be non-negative, got {m_gamma}")
-        if "reliability_mode" in m_cfg:
-            rmode = str(m_cfg["reliability_mode"])
-            if rmode not in ("nb_rate_variance", "snr"):
-                raise ValueError(f"reliability_mode must be 'nb_rate_variance' or 'snr', got '{rmode}'")
+            if "reliability_mode" in m_cfg:
+                rmode = str(m_cfg["reliability_mode"])
+                if rmode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
+                    raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
