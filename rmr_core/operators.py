@@ -324,6 +324,7 @@ def partition_regions_by_scale(
     """
     dev = device if device is not None else regions.boxes.device
     scale_ids = regions.scale_id.to(device=dev)
+    boxes = regions.boxes.to(device=dev)
     # Full-image regions (scale_id == -1) map to the coarsest scale
     scale_ids = torch.where(
         scale_ids < 0,
@@ -334,7 +335,7 @@ def partition_regions_by_scale(
     for k in range(k_scales):
         mask_k = (scale_ids == k)
         if mask_k.any():
-            partitions.append((k, mask_k, regions.boxes[mask_k]))
+            partitions.append((k, mask_k, boxes[mask_k]))
         else:
             partitions.append((k, None, None))
     return partitions

@@ -76,7 +76,8 @@ class FineMeasureHead(nn.Module):
             sw = scale_weights[:, :k, :, :]
             b_eff = (sw * self.scale_beta.view(1, k, 1, 1)).sum(dim=1, keepdim=True)
             tau_base = self.tau.clamp_min(0.1) if self.temp_softplus else 1.0
-            tau_eff = tau_base * torch.exp((sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True))
+            gamma_shift = (sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True).clamp(-5.0, 5.0)
+            tau_eff = (tau_base * torch.exp(gamma_shift)).clamp_min(0.05)
             return tau_eff * F.softplus((z + b_eff) / tau_eff)
 
         if self.temp_softplus:

@@ -357,6 +357,7 @@ def apply_scale_consistency_gating(
     """
     b, k_scales = scale_weights.shape[:2]
     w_out = weight.clone()
+    area = regions.area.to(device=weight.device)
 
     scale_partitions = partition_regions_by_scale(regions, k_scales, device=weight.device)
     for k, mask_k, boxes_k in scale_partitions:
@@ -364,7 +365,7 @@ def apply_scale_consistency_gating(
             continue
         pi_k = scale_weights[:, k:k+1, :, :].float()
         sum_pi_k = regional_sum(pi_k, boxes_k)  # [B, 1, M_k]
-        area_k = regions.area[mask_k].float().view(1, 1, -1).to(weight.device)
+        area_k = area[mask_k].float().view(1, 1, -1)
         mean_pi_k = (sum_pi_k / area_k.clamp_min(1.0)).clamp(0.0, 1.0)
 
         gate = (mean_pi_k + float(eps)).pow(float(power))
