@@ -649,6 +649,38 @@ def physical_scale_alignment_loss(
     return kl_per_pixel.mean()
 
 
+class TargetSupervisionRouter:
+    """Routes target supervision across terminal measure y, initial carrier y0, or symmetric dual.
+
+    Eliminates duplicated 3-way branching across count, cell, curvature, and hard background losses.
+    """
+
+    def __init__(self, target_mode: str = "y") -> None:
+        if target_mode not in ("dual", "y0", "y"):
+            raise ValueError(f"Unknown target supervision mode: '{target_mode}'. Expected 'dual', 'y0', or 'y'.")
+        self.mode = target_mode
+
+    def dispatch(
+        self,
+        fn: Any,
+        y: torch.Tensor,
+        y0: torch.Tensor,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Dispatch loss computation according to target supervision mode."""
+        if self.mode == "dual":
+            l_y = fn(y, *args, **kwargs)
+            l_y0 = fn(y0, *args, **kwargs)
+            return 0.5 * l_y + 0.5 * l_y0, {"y": l_y, "y0": l_y0}
+        elif self.mode == "y0":
+            l_y0 = fn(y0, *args, **kwargs)
+            return l_y0, {"y0": l_y0}
+        else:
+            l_y = fn(y, *args, **kwargs)
+            return l_y, {"y": l_y}
+
+
 def compute_rmr_v3_losses(
     outputs: dict,
     target_y: torch.Tensor,
@@ -661,6 +693,7 @@ def compute_rmr_v3_losses(
     y = outputs["y"].float()
     y0 = outputs["y0"].float()
     target_float = target_y.float()
+    zero_val = y.sum() * 0.0
 
     regions: RegionSet = outputs["regions"]
 
@@ -674,6 +707,7 @@ def compute_rmr_v3_losses(
     )
 
     losses: dict[str, torch.Tensor] = {}
+    router = TargetSupervisionRouter(cfg.dm_target)
 
     # Helper to compute count loss on an arbitrary density map
     def _compute_count_loss(density_map: torch.Tensor) -> torch.Tensor:
@@ -703,29 +737,19 @@ def compute_rmr_v3_losses(
             )
 
     # ── Target supervision selection for count and cell (RMR-v10 Symmetric Dual) ──
-    if cfg.dm_target == "dual":
-        loss_count_y = _compute_count_loss(y)
-        loss_count_y0 = _compute_count_loss(y0)
-        losses["count"] = 0.5 * loss_count_y + 0.5 * loss_count_y0
-        losses["count_y"] = loss_count_y
-        losses["count_y0"] = loss_count_y0
+    loss_count, aux_count = router.dispatch(_compute_count_loss, y, y0)
+    losses["count"] = loss_count
+    if "y" in aux_count and "y0" in aux_count:
+        losses["count_y"] = aux_count["y"]
+        losses["count_y0"] = aux_count["y0"]
 
-        loss_cell_y = _compute_cell_loss(y)
-        loss_cell_y0 = _compute_cell_loss(y0)
-        losses["cell"] = 0.5 * loss_cell_y + 0.5 * loss_cell_y0
-        losses["cell_y"] = loss_cell_y
-        losses["cell_y0"] = loss_cell_y0
-    elif cfg.dm_target == "y0":
-        losses["count"] = _compute_count_loss(y0)
-        losses["cell"] = _compute_cell_loss(y0)
-    else:  # "y"
-        losses["count"] = _compute_count_loss(y)
-        losses["cell"] = _compute_cell_loss(y)
+    loss_cell, aux_cell = router.dispatch(_compute_cell_loss, y, y0)
+    losses["cell"] = loss_cell
+    if "y" in aux_cell and "y0" in aux_cell:
+        losses["cell_y"] = aux_cell["y"]
+        losses["cell_y0"] = aux_cell["y0"]
 
     # ── Allocation loss target selection (RMR-v9/v10) ──
-    # "y0": supervise initial carrier y0 (decoupled guidance).
-    # "y":  supervise terminal output y (end-to-end unrolled optimization).
-    # "dual": supervise both 0.5 * L(y) + 0.5 * L(y0) (anchors y0 to GT while optimizing y).
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
         if cfg.allocation_loss_type == "bayesian":
@@ -810,33 +834,22 @@ def compute_rmr_v3_losses(
                 smooth_scale=cfg.curvature_gate_scale,
             )
 
-        loss_curv_y = _compute_curv(y)
-        if cfg.dm_target == "dual":
-            loss_curv_y0 = _compute_curv(y0)
-            loss_curv = 0.5 * loss_curv_y + 0.5 * loss_curv_y0
-        elif cfg.dm_target == "y0":
-            loss_curv = _compute_curv(y0)
-        else:
-            loss_curv = loss_curv_y
+        loss_curv, _ = router.dispatch(_compute_curv, y, y0)
         losses["curvature"] = loss_curv
         losses["total"] = losses["total"] + cfg.lambda_curvature * loss_curv
     else:
-        losses["curvature"] = torch.tensor(0.0, device=y.device)
+        losses["curvature"] = zero_val
 
     # ── RMR-v11 Top-K Hard Background Mining Loss ───────────────────────────
     if cfg.lambda_hard_bg > 0.0:
-        loss_hard_bg_y = topk_hard_background_loss(y, target_float, ratio=cfg.hard_bg_ratio)
-        if cfg.dm_target == "dual":
-            loss_hard_bg_y0 = topk_hard_background_loss(y0, target_float, ratio=cfg.hard_bg_ratio)
-            loss_hard_bg = 0.5 * loss_hard_bg_y + 0.5 * loss_hard_bg_y0
-        elif cfg.dm_target == "y0":
-            loss_hard_bg = topk_hard_background_loss(y0, target_float, ratio=cfg.hard_bg_ratio)
-        else:
-            loss_hard_bg = loss_hard_bg_y
+        def _compute_hard_bg(dmap: torch.Tensor) -> torch.Tensor:
+            return topk_hard_background_loss(dmap, target_float, ratio=cfg.hard_bg_ratio)
+
+        loss_hard_bg, _ = router.dispatch(_compute_hard_bg, y, y0)
         losses["hard_bg"] = loss_hard_bg
         losses["total"] = losses["total"] + cfg.lambda_hard_bg * loss_hard_bg
     else:
-        losses["hard_bg"] = torch.tensor(0.0, device=y.device)
+        losses["hard_bg"] = zero_val
 
     # ── RMR-v11 Decoupled Foreground Gating Loss ─────────────────────────────
     fg_logit = outputs.get("fg_logit", None)
@@ -851,7 +864,7 @@ def compute_rmr_v3_losses(
         losses["fg_bce"] = fg_bce
         losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
     else:
-        losses["fg_bce"] = torch.tensor(0.0, device=y.device)
+        losses["fg_bce"] = zero_val
 
     # ── RMR-v7 Hurdle losses (opt-in; skipped when lambda=0 or logit absent) ──
     hurdle_logit = outputs.get("hurdle_logit", None)
@@ -863,7 +876,7 @@ def compute_rmr_v3_losses(
             )
             losses["total"] = losses["total"] + cfg.lambda_hurdle * losses["hurdle_bce"]
         else:
-            losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
+            losses["hurdle_bce"] = zero_val
 
         if cfg.lambda_trunc_nb > 0.0:
             losses["trunc_nb"] = truncated_nb_nll_loss(
@@ -873,10 +886,10 @@ def compute_rmr_v3_losses(
             )
             losses["total"] = losses["total"] + cfg.lambda_trunc_nb * losses["trunc_nb"]
         else:
-            losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
+            losses["trunc_nb"] = zero_val
     else:
-        losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
-        losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
+        losses["hurdle_bce"] = zero_val
+        losses["trunc_nb"] = zero_val
 
     # ── RMR-v13/v14 Physical Scale Alignment Loss ────────────────────────────
     scale_weights = outputs.get("scale_weights", None)
@@ -891,7 +904,7 @@ def compute_rmr_v3_losses(
         )
         losses["total"] = losses["total"] + cfg.lambda_scale_align * losses["scale_align"]
     else:
-        losses["scale_align"] = torch.tensor(0.0, device=y.device)
+        losses["scale_align"] = zero_val
 
     return losses
 

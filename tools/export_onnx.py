@@ -66,7 +66,7 @@ class _ExportWrapper(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.model(x)
-        if self.is_rmr and isinstance(out, dict):
+        if self.is_rmr and (isinstance(out, dict) or hasattr(out, "__getitem__")):
             return out["y"]
         return out
 

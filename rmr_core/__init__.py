@@ -11,7 +11,7 @@ from .data import (
     resolve_manifest_path,
     train_transform,
 )
-from .evaluation import evaluate_dataset, predict_tiled, save_evaluation_artifacts
+from .evaluation import evaluate_dataset, predict_multiscale_tta, predict_tiled, save_evaluation_artifacts
 from .heads import FineMeasureHead
 from .metrics import (
     bootstrap_ci,
@@ -76,8 +76,11 @@ from .training import (
     save_rng_state,
     seed_everything,
 )
+from .types import MappingMixin, RMRModelOutput
 
 __all__ = [
+    "MappingMixin",
+    "RMRModelOutput",
     "MobileNetV4Backbone",
     "CrowdManifestDataset",
     "collate_eval",
@@ -88,6 +91,7 @@ __all__ = [
     "resolve_manifest_path",
     "train_transform",
     "evaluate_dataset",
+    "predict_multiscale_tta",
     "predict_tiled",
     "save_evaluation_artifacts",
     "FineMeasureHead",

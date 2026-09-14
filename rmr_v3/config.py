@@ -321,10 +321,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             m_gamma = float(m_cfg["morozov_gamma"])
             if m_gamma < 0.0:
                 raise ValueError(f"morozov_gamma must be non-negative, got {m_gamma}")
-            if "reliability_mode" in m_cfg:
-                rmode = str(m_cfg["reliability_mode"])
-                if rmode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
-                    raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
+        if "reliability_mode" in m_cfg:
+            rmode = str(m_cfg["reliability_mode"])
+            if rmode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
+                raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
@@ -565,6 +565,13 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "trust_region_kappa",
         "trust_region_floor",
         "foreground_gate",
+        # RMR-v13 additions
+        "adjoint_mode",
+        "morozov_gamma",
+        # RMR-v14 additions
+        "use_top_down_semantic_gate",
+        "tdsg_floor",
+        "fg_gate_floor",
     ],
     "loss": [
         "lambda_count",
@@ -594,6 +601,18 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "lambda_hard_bg",
         "hard_bg_ratio",
         "lambda_fg_gate",
+        # RMR-v12 loss fields
+        "curvature_gate_threshold",
+        "curvature_gate_kernel",
+        "curvature_gate_mode",
+        "curvature_gate_scale",
+        # RMR-v13 loss fields
+        "lambda_scale_align",
+        "scale_align_tau_dense",
+        "scale_align_tau_sparse",
+        "scale_align_kernel",
+        # RMR-v14 loss fields
+        "scale_align_mask_bg",
     ],
     "train": [
         "lr",

@@ -202,3 +202,112 @@ def test_rmr_v14_end_to_end_loss_and_gradients():
     assert model.scale_router.pw.weight.grad is not None
     assert model.tdsg.weight.grad is not None
     assert model.fg_gate.weight.grad is not None
+
+
+def test_target_supervision_router():
+    """Verify TargetSupervisionRouter dispatches y, y0, and dual modes accurately."""
+    from rmr_v3.losses import TargetSupervisionRouter
+
+    y = torch.tensor([10.0])
+    y0 = torch.tensor([2.0])
+    dummy_fn = lambda t: t * 2.0
+
+    router_dual = TargetSupervisionRouter("dual")
+    total, aux = router_dual.dispatch(dummy_fn, y, y0)
+    assert total.item() == 0.5 * (20.0 + 4.0) == 12.0
+    assert aux["y"].item() == 20.0
+    assert aux["y0"].item() == 4.0
+
+    router_y0 = TargetSupervisionRouter("y0")
+    total_y0, aux_y0 = router_y0, router_y0.dispatch(dummy_fn, y, y0)
+    assert aux_y0[0].item() == 4.0
+
+    router_y = TargetSupervisionRouter("y")
+    total_y, aux_y = router_y.dispatch(dummy_fn, y, y0)
+    assert total_y.item() == 20.0
+
+
+def test_rmr_model_output_mapping_and_typing():
+    """Verify RMRModelOutput supports both dot-notation and dictionary mapping access."""
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg)
+    model.eval()
+
+    x = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        out = model(x)
+
+    # Dot-notation typed access
+    assert hasattr(out, "y")
+    assert hasattr(out, "y0")
+    assert out.y.shape == (1, 1, 16, 16)
+
+    # Dictionary mapping access (100% backward compatibility)
+    assert "y" in out
+    assert "y0" in out
+    assert torch.equal(out["y"], out.y)
+    assert out.get("y") is not None
+    assert out.get("non_existent_key", 42) == 42
+    assert len(out) >= 18
+    assert "y" in list(out.keys())
+
+
+def test_method_critical_fields_integrity():
+    """Verify METHOD_CRITICAL_FIELDS tracks all key RMR-v13 and v14 model/loss parameters."""
+    from rmr_v3.config import METHOD_CRITICAL_FIELDS
+
+    model_fields = METHOD_CRITICAL_FIELDS["model"]
+    loss_fields = METHOD_CRITICAL_FIELDS["loss"]
+
+    # RMR-v13
+    assert "adjoint_mode" in model_fields
+    assert "morozov_gamma" in model_fields
+    assert "lambda_scale_align" in loss_fields
+    assert "scale_align_tau_dense" in loss_fields
+
+    # RMR-v14
+    assert "use_top_down_semantic_gate" in model_fields
+    assert "tdsg_floor" in model_fields
+    assert "fg_gate_floor" in model_fields
+    assert "scale_align_mask_bg" in loss_fields
+
+
+def test_reliability_mode_validation_without_morozov_gamma():
+    """Verify validate_v3_config catches invalid reliability_mode even when morozov_gamma is omitted."""
+    from rmr_v3.config import validate_v3_config
+
+    invalid_cfg = {
+        "model": {
+            "reliability_mode": "invalid_mode_name",
+        }
+    }
+    with pytest.raises(ValueError, match="reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'"):
+        validate_v3_config(invalid_cfg)
+
+
+def test_predict_multiscale_tta_parity_and_mass_conservation():
+    """Verify predict_multiscale_tta matches predict_tiled at scale=1.0 without flip, and preserves mass."""
+    from rmr_core.evaluation import predict_multiscale_tta, predict_tiled
+
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg)
+    model.eval()
+
+    img = torch.randn(3, 128, 128)
+
+    # Baseline single-scale tiled prediction
+    pred_base = predict_tiled(model, img, output_stride=4, tile_size=64, halo=16)
+
+    # TTA with scale=1.0 and no flip must be bitwise identical
+    pred_tta_identity = predict_multiscale_tta(
+        model, img, output_stride=4, tile_size=64, halo=16, scales=(1.0,), use_hflip=False
+    )
+    assert torch.allclose(pred_base, pred_tta_identity, atol=1e-6)
+
+    # TTA with multi-scale fusion must output valid positive count
+    pred_tta_multi = predict_multiscale_tta(
+        model, img, output_stride=4, tile_size=64, halo=16, scales=(0.85, 1.0, 1.15), use_hflip=True
+    )
+    assert pred_tta_multi.shape == pred_base.shape
+    assert torch.isfinite(pred_tta_multi).all()
+

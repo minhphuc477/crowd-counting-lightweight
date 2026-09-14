@@ -12,6 +12,7 @@ from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead
+from rmr_core.types import RMRModelOutput
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
@@ -62,7 +63,7 @@ class RMRv3Config:
     dispersion_min: float = 0.5
     dispersion_max: float = 500.0
 
-    # Reliability
+    # Reliability: "nb_rate_variance" | "snr" | "hybrid_hurdle" (RMR-v14)
     reliability_mode: str = "nb_rate_variance"
     reliability_rate_std_floor: float = 0.01
     reliability_weight_min: float = 0.25
@@ -176,12 +177,6 @@ class RMRv3Config:
     # When > 0, shrinks discrepancy by gamma * sqrt(Var[b]), preventing solver over-fitting
     # to noisy regional measurements on ambiguous regions.
     morozov_gamma: float = 0.0
-
-    # Regional evidence reliability weighting mode:
-    # "nb_rate_variance": classical inverse variance q = 1 / Var[rate].
-    # "snr": Signal-to-Noise Ratio weighting q = r * mu / (r + mu), prioritizing genuine clusters.
-    # "hybrid_hurdle": Hurdle-gated hybrid: (1 - pi_R) * w_var + pi_R * w_snr (RMR-v14).
-    reliability_mode: str = "nb_rate_variance"
 
     # ── RMR-v14 additions ────────────────────────────────────────────────────
     # Top-Down Semantic Context Gating (TDSG):
@@ -658,7 +653,7 @@ class RMRv3(nn.Module):
                 out["hurdle_logit"] = hurdle_logit
             if fg_logit is not None:
                 out["fg_logit"] = fg_logit
-            return out
+            return RMRModelOutput(**out)
 
         solver_res = unrolled_sirt_solver(
             y0=y0,
@@ -728,7 +723,7 @@ class RMRv3(nn.Module):
             out["hurdle_logit"] = hurdle_logit
         if fg_logit is not None:
             out["fg_logit"] = fg_logit
-        return out
+        return RMRModelOutput(**out)
 
     def switch_to_deploy(self) -> None:
         """Switch internal modules (e.g. RepWeightedFPNNeck) to fused deployment mode."""
