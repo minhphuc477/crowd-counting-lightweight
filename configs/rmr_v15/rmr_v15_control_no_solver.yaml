@@ -1,0 +1,175 @@
+seed: 42
+# RMR-v15: Native Dynamic Geometry & Continuous-Discrete Measure Reconstruction
+# Parameter count: exactly 104,580 (strictly <= 105,000 budget, 420 headroom)
+
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest:   data/sha_a_test.jsonl
+  crop_size:      512
+  scale_range:    [0.70, 1.35]
+  hflip_prob:     0.5
+  brightness_jitter:   0.2
+  contrast_jitter:     0.2
+  gamma_jitter:        [0.6, 1.5]
+  random_invert_prob:  0.0
+
+model:
+  output_stride: 4
+  feature_width: 32
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained:    true
+  backbone_lr_scale: 0.1
+  init_m0:       0.015763
+
+  # High Receptive Field Neck with Global Context
+  neck_type:      aspp_lite
+  use_aspp_gap:   true
+  aspp_dilations: [1, 3, 6]
+
+  # Upgrade 1: Micro-Scale Multi-Resolution Geometry [16, 32, 64, 128] px
+  # 16px micro-scale brings dense horizon crowd clusters into near-Poisson regime (1-4 heads/box)
+  # reducing second-order overdispersion variance by 16x (0 added parameters).
+  region_sizes_px:   [16, 32, 64, 128]
+  region_overlap:    0.5
+  include_full_image: false
+
+  # Safe Feature Representation: pure spatial mean eliminates texture false count blowups
+  regional_feature_stats: mean
+  region_head_hidden:     48
+
+  # Dynamic Scale Routing: 4 output scales (516 parameters)
+  dynamic_scale_routing: true
+  scale_router_temperature: 1.0
+
+  # Upgrade 2: Scale-Conditioned Fine Density Prior (8 parameters)
+  # Modulates fine head bias b_eff(u) = b0 + beta^T pi(u) and temperature tau_eff(u) = tau0 * exp(gamma^T pi(u))
+  scale_conditioned_prior: true
+
+  # Upgrade 3: Pre-Solver Scale-Consistency Reliability Gating (0 parameters)
+  # Silences coarse boxes (e.g. 128px) placed over dense clusters using 2D prefix sums
+  pre_solver_scale_gating: true
+  scale_gating_power:      1.0
+
+  # Upgrade 4: Convex Dynamic Trust Gate (33 parameters)
+  # Learns global trust alpha(x) in [0, 1] on GAP(P16) to eliminate the 38.5% solver harm
+  dynamic_trust_gate:   true
+  trust_gate_init_bias: 1.73
+
+  # Decoupled Foreground Gating Sub-Head with Deep Background Suppression Floor: 33 parameters
+  foreground_gate: true
+  fg_gate_floor:   0.10
+
+  # Top-Down Semantic Context Gating (TDSG): 33 parameters
+  use_top_down_semantic_gate: true
+  tdsg_floor:                 0.20
+
+  # Measure Reconstruction Solver with Morozov Trust-Region Bounded Updates
+  enable_solver:   false
+  solver_mode:     additive
+  iterations:      6
+  omega:           1.0
+  residual_clip:   0.0
+  eps:             1.0e-6
+
+  # Radon-Nikodym Measure-Modulated Adjoint Field
+  adjoint_mode:    radon_nikodym
+
+  # Bayesian Morozov Discrepancy Deadband Shrinkage
+  morozov_gamma:   0.75
+
+  # Hurdle-Gated Hybrid Reliability Weighting
+  reliability_mode: hybrid_hurdle
+  reliability_rate_std_floor:      0.01
+  reliability_weight_min:          0.25
+  reliability_weight_max:          4.0
+  normalize_reliability_within_scale: true
+  detach_region_mean_in_solver:    true
+  detach_reliability_in_solver:    true
+
+  # Trust-Region Bounded Relative Adjustments
+  trust_region_kappa: 0.35
+  trust_region_floor: 0.005
+
+  tv_lambda:       0.02
+  tv_type:         laplacian
+
+  # Firm Thresholding (MCP): zero shrinkage on crowd peaks, deadband on background
+  proximal_tau:    0.015
+  proximal_mode:   firm
+  proximal_mu:     3.0
+
+  dispersion_init: 50.0
+  dispersion_min:  0.5
+  dispersion_max:  500.0
+
+  hurdle_head:    true
+  temp_softplus:  true
+  use_coord_attn: false
+
+  ema_decay:      0.999
+
+loss:
+  allocation_loss_type: flat_dm16
+  kappa_flat16:         20.0
+  normalize_flat_dm16:  true
+  # Symmetric Dual Supervision: 0.5 * L(y0) + 0.5 * L(y) across count, cell, and allocation
+  dm_target:        dual
+
+  lambda_count:     1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell:      0.50
+  lambda_region_nb: 0.20
+  lambda_hurdle:    0.10
+  lambda_trunc_nb:  0.20
+
+  # Foreground-Masked Physical Scale Alignment Loss
+  lambda_scale_align:     0.05
+  scale_align_tau_dense:  0.12
+  scale_align_tau_sparse: 0.03
+  scale_align_kernel:     5
+  scale_align_mask_bg:    true
+
+  # Density-Gated High-Density Curvature Power Loss
+  lambda_curvature:         0.50
+  curvature_gate_threshold: 0.08
+  curvature_gate_kernel:    5
+  curvature_gate_mode:      hard
+  curvature_gate_scale:     0.02
+
+  # Top-K Hard Negative Background Texture Mining Loss
+  lambda_hard_bg:   0.15
+  hard_bg_ratio:    0.03
+
+  # Foreground Gate BCE Loss
+  lambda_fg_gate:   0.05
+
+  count_loss_mode:    nb
+  count_nb_dispersion: 50.0
+
+  # Power-Weighted Mass Loss
+  cell_loss_mode:         mass_weighted
+  cell_beta:              1.0
+  cell_mass_weight_eps:   0.001
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.25
+
+train:
+  epochs:          1000
+  batch_size:      8
+  workers:         4
+  pin_memory:      true
+  lr:              1.0e-4
+  backbone_lr_scale: 0.1
+  weight_decay:    1.0e-4
+  warmup_epochs:   5
+  min_lr_ratio:    0.05
+  grad_clip:       10.0
+  amp:             true
+  solver_warmup_epochs: 5
+  solver_ramp_epochs:   20
+  early_stopping:  false
+  patience:        0
+  eval_every:      5
+
+eval:
+  density_bins: [100.0, 500.0]
