@@ -17,8 +17,10 @@ from rmr_core.operators import (
     _canonicalize_region_size,
     fractional_region_average_features,
     fractional_region_mean_std_features,
+    partition_regions_by_scale,
     region_average_features,
     region_mean_std_features,
+    regional_sum,
 )
 
 
@@ -335,3 +337,38 @@ def reliability_from_nb(
         "rate_variance": rate_var,
         "count_variance": count_var,
     }
+
+
+def apply_scale_consistency_gating(
+    weight: torch.Tensor,
+    regions: RegionSet,
+    scale_weights: torch.Tensor,
+    *,
+    power: float = 1.0,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Pre-Solver Scale-Consistency Reliability Gating (RMR-v15).
+
+    Modulates regional reliability weight w_R by the average scale probability of region R:
+        pi_bar_k(R) = (1 / |R|) * sum_{u in R} pi_k(u)
+        w_R <- w_R * (pi_bar_k(R) + eps)^power
+    This silences coarse boxes (e.g. 128px) placed over dense clusters where the scale router
+    predicts micro-scale (pi_128 ~ 0), eliminating pre-solver coarse mass contamination.
+    """
+    b, k_scales = scale_weights.shape[:2]
+    w_out = weight.clone()
+
+    scale_partitions = partition_regions_by_scale(regions, k_scales, device=weight.device)
+    for k, mask_k, boxes_k in scale_partitions:
+        if mask_k is None or boxes_k is None:
+            continue
+        pi_k = scale_weights[:, k:k+1, :, :].float()
+        sum_pi_k = regional_sum(pi_k, boxes_k)  # [B, 1, M_k]
+        area_k = regions.area[mask_k].float().view(1, 1, -1).to(weight.device)
+        mean_pi_k = (sum_pi_k / area_k.clamp_min(1.0)).clamp(0.0, 1.0)
+
+        gate = (mean_pi_k + float(eps)).pow(float(power))
+        w_out[:, :, mask_k] = w_out[:, :, mask_k] * gate
+
+    return w_out
+

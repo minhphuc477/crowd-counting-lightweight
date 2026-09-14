@@ -194,6 +194,21 @@ class RMRv3Config:
     # Decoupled foreground gating safety floor (default 0.70 for backward compatibility, 0.10 for v14)
     fg_gate_floor: float = 0.70
 
+    # ── RMR-v15 Native Dynamic Geometry additions ────────────────────────────
+    # Scale-conditioned fine density prior: modulates FineMeasureHead bias and temperature
+    # via spatial scale routing weights pi(u) (8 learnable parameters).
+    scale_conditioned_prior: bool = False
+
+    # Pre-solver scale-consistency reliability gating: suppresses regional reliability
+    # of coarse boxes overlapping dense clusters using regional_sum(pi_k, boxes_k).
+    pre_solver_scale_gating: bool = False
+    scale_gating_power: float = 1.0
+
+    # Convex Dynamic Trust Gate: learns image-level trust alpha(x) in [0, 1] on GAP(P16)
+    # to eliminate solver harm (33 learnable parameters).
+    dynamic_trust_gate: bool = False
+    trust_gate_init_bias: float = 1.73  # sigmoid(1.73) ≈ 0.85
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -403,6 +418,8 @@ class RMRv3(nn.Module):
             width=cfg.feature_width,
             init_bias=init_bias,
             temp_softplus=cfg.temp_softplus,
+            scale_conditioned=getattr(cfg, "scale_conditioned_prior", False),
+            num_scales=len(cfg.region_sizes_px),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -468,6 +485,15 @@ class RMRv3(nn.Module):
             nn.init.constant_(self.tdsg.bias, 2.0)
         else:
             self.tdsg = None
+
+        # ── Convex Dynamic Trust Gate (RMR-v15) ──────────────────────────────
+        if getattr(cfg, "dynamic_trust_gate", False):
+            self.trust_gate: nn.Linear | None = nn.Linear(cfg.feature_width, 1)
+            nn.init.zeros_(self.trust_gate.weight)
+            init_tb = getattr(cfg, "trust_gate_init_bias", 1.73)
+            nn.init.constant_(self.trust_gate.bias, float(init_tb))
+        else:
+            self.trust_gate = None
 
         self.solver_strength: float = 1.0
 
@@ -553,8 +579,13 @@ class RMRv3(nn.Module):
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
+        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
+        scale_weights = None
+        if self.scale_router is not None:
+            scale_weights = self.scale_router(p4)
+
         z0 = self.fine_head.forward_logits(p4)
-        y0 = self.fine_head.activate(z0)
+        y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
 
         # ── Decoupled Foreground Gating (RMR-v11/v14) ─────────────────────────
         fg_logit = None
@@ -628,13 +659,16 @@ class RMRv3(nn.Module):
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
+        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15) ────────
+        if getattr(self.cfg, "pre_solver_scale_gating", False) and scale_weights is not None:
+            from .regional_head import apply_scale_consistency_gating
+            power = float(getattr(self.cfg, "scale_gating_power", 1.0))
+            weight_solver = apply_scale_consistency_gating(
+                weight_solver, regions, scale_weights, power=power, eps=self.cfg.eps
+            )
+
         # Collect hurdle logit for loss computation (not detached)
         hurdle_logit = regional.get("hurdle_logit", None)  # [B,1,M] or None
-
-        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
-        scale_weights = None
-        if self.scale_router is not None:
-            scale_weights = self.scale_router(p4)
 
         # Bypass solver loop if solver is disabled (direct baseline mode)
         if not self.cfg.enable_solver:
@@ -702,6 +736,13 @@ class RMRv3(nn.Module):
         energy_trace = solver_res["energy_trace"]
         strength = solver_res["effective_omega"] / max(self.cfg.omega, 1e-8)
 
+        # ── Convex Dynamic Trust Gate (RMR-v15) ──────────────────────────────
+        solver_trust_alpha = None
+        if self.trust_gate is not None:
+            feat_global = p16.mean(dim=(-2, -1))  # [B, C]
+            solver_trust_alpha = torch.sigmoid(self.trust_gate(feat_global)).view(-1, 1, 1, 1)
+            y = (1.0 - solver_trust_alpha) * y0 + solver_trust_alpha * y
+
         out = {
             "y": y,
             "y0": y0,
@@ -736,6 +777,8 @@ class RMRv3(nn.Module):
             out["hurdle_logit"] = hurdle_logit
         if fg_logit is not None:
             out["fg_logit"] = fg_logit
+        if solver_trust_alpha is not None:
+            out["solver_trust_alpha"] = solver_trust_alpha
         return RMRModelOutput(**out)
 
     def switch_to_deploy(self) -> None:

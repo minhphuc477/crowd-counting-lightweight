@@ -35,6 +35,8 @@ class FineMeasureHead(nn.Module):
         width: int = 32,
         init_bias: float = _FINE_HEAD_BIAS_INIT,
         temp_softplus: bool = False,
+        scale_conditioned: bool = False,
+        num_scales: int = 4,
     ):
         super().__init__()
         self.body = nn.Sequential(
@@ -51,8 +53,32 @@ class FineMeasureHead(nn.Module):
             # Learnable temperature τ; initialized to 1.0 (identical to vanilla softplus)
             self.tau = nn.Parameter(torch.ones(1))
 
-    def activate(self, z: torch.Tensor) -> torch.Tensor:
+        self.scale_conditioned = bool(scale_conditioned)
+        if self.scale_conditioned:
+            # Learnable scale coupling vectors β and γ for RMR-v15
+            # β modulates effective prior bias b_eff(u) = b0 + β^T π(u)
+            # γ modulates effective temperature τ_eff(u) = τ0 * exp(γ^T π(u))
+            self.scale_beta = nn.Parameter(torch.zeros(int(num_scales)))
+            self.scale_gamma = nn.Parameter(torch.zeros(int(num_scales)))
+
+    def activate(
+        self,
+        z: torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Compute calibrated non-negative measure Y0 from latent logit field z0."""
+        if self.scale_conditioned and scale_weights is not None:
+            if scale_weights.shape[-2:] != z.shape[-2:]:
+                scale_weights = F.interpolate(
+                    scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
+                )
+            k = self.scale_beta.numel()
+            sw = scale_weights[:, :k, :, :]
+            b_eff = (sw * self.scale_beta.view(1, k, 1, 1)).sum(dim=1, keepdim=True)
+            tau_base = self.tau.clamp_min(0.1) if self.temp_softplus else 1.0
+            tau_eff = tau_base * torch.exp((sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True))
+            return tau_eff * F.softplus((z + b_eff) / tau_eff)
+
         if self.temp_softplus:
             tau = self.tau.clamp_min(0.1)
             return tau * F.softplus(z / tau)
@@ -64,7 +90,11 @@ class FineMeasureHead(nn.Module):
             f = f[0]
         return self.body(f)
 
-    def forward(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        f: tuple[torch.Tensor, ...] | torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Return the pre-activation logit field z0 (legacy interface, preserved for rmr_v2).
 
         NOTE: This method intentionally returns a raw logit when temp_softplus=False,
@@ -75,7 +105,7 @@ class FineMeasureHead(nn.Module):
         New code (rmr_v3+) must call forward_logits() + activate() separately.
         """
         z = self.forward_logits(f)
-        if self.temp_softplus:
-            return self.activate(z)
+        if self.temp_softplus or self.scale_conditioned:
+            return self.activate(z, scale_weights=scale_weights)
         return z
 
