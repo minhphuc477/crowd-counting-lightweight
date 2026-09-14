@@ -70,7 +70,7 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "train_total", "train_count", "train_flat_dm16", "train_allocation",
     "train_dm16", "train_dm32", "train_dm64",
     "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
-    "train_curvature", "train_hard_bg", "train_fg_bce",
+    "train_curvature", "train_hard_bg", "train_fg_bce", "train_scale_align",
     "train_kd_total", "train_kd_spatial", "train_kd_count",
     "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
     "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
@@ -592,6 +592,7 @@ def main() -> None:
             "train_curvature": loss_avgs.get("curvature", 0.0),
             "train_hard_bg": loss_avgs.get("hard_bg", 0.0),
             "train_fg_bce": loss_avgs.get("fg_bce", 0.0),
+            "train_scale_align": loss_avgs.get("scale_align", 0.0),
             "train_kd_total": loss_avgs.get("kd_total", 0.0),
             "train_kd_spatial": loss_avgs.get("kd_spatial", 0.0),
             "train_kd_count": loss_avgs.get("kd_count", 0.0),
@@ -680,6 +681,8 @@ def main() -> None:
                 v11_str += f" | h_bg: {loss_avgs.get('hard_bg', 0.0):.4f}"
             if loss_avgs.get("fg_bce", 0.0) > 0:
                 v11_str += f" | fg_bce: {loss_avgs.get('fg_bce', 0.0):.4f}"
+            if loss_avgs.get("scale_align", 0.0) > 0:
+                v11_str += f" | sc_aln: {loss_avgs.get('scale_align', 0.0):.4f}"
 
             print(
                 f"\n{'='*92}\n"
@@ -708,6 +711,8 @@ def main() -> None:
                 v11_str += f" | h_bg: {loss_avgs.get('hard_bg', 0.0):.4f}"
             if loss_avgs.get("fg_bce", 0.0) > 0:
                 v11_str += f" | fg_bce: {loss_avgs.get('fg_bce', 0.0):.4f}"
+            if loss_avgs.get("scale_align", 0.0) > 0:
+                v11_str += f" | sc_aln: {loss_avgs.get('scale_align', 0.0):.4f}"
 
             print(
                 f"[{epoch+1:04d}/{epochs:04d}] "

@@ -45,5 +45,6 @@ Thumbs.db
 
 # Agent skills & local assistant configuration
 .agents/
+.licenses/
 scratch/
 

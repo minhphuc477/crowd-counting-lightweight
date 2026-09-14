@@ -194,7 +194,16 @@ def format_dynamic_training_banner(
             tv_t = getattr(m_cfg, "tv_type", "laplacian").capitalize()
             solver_parts.append(f"{tv_t} TV (lambda={tv_lam})")
 
-        w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else "Negative-Binomial (W=diag(w_R))"
+        adj_m = getattr(m_cfg, "adjoint_mode", "flat")
+        solver_parts.append(f"Adjoint={'Radon-Nikodym' if adj_m == 'radon_nikodym' else 'Flat'}")
+
+        morozov_g = getattr(m_cfg, "morozov_gamma", 0.0)
+        if morozov_g > 0.0:
+            solver_parts.append(f"Morozov(gamma={morozov_g})")
+
+        rel_m = getattr(m_cfg, "reliability_mode", "snr")
+        rel_tag = "SNR" if rel_m == "snr" else "NB-RateVar"
+        w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else f"Weighted({rel_tag})"
         solver_parts.append(f"Weighting={w_mode}")
         if getattr(m_cfg, "dynamic_scale_routing", False):
             k_num = len(getattr(m_cfg, "region_sizes_px", [32, 64, 128]))
@@ -224,6 +233,19 @@ def format_dynamic_training_banner(
         target_desc = "Pre-Solver Y0 (Decoupled Carrier Guidance)"
     loss_type = cfg.get("loss", {}).get("allocation_loss_type", "flat_dm16")
     supervision_desc = f"{target_desc} -> {loss_type.upper()}"
+
+    loss_cfg_dict = cfg.get("loss", {})
+    extra_loss_tags = []
+    if loss_cfg_dict.get("lambda_scale_align", 0.0) > 0.0:
+        extra_loss_tags.append(f"ScaleAln({loss_cfg_dict.get('lambda_scale_align')})")
+    if loss_cfg_dict.get("lambda_curvature", 0.0) > 0.0:
+        extra_loss_tags.append(f"Curv({loss_cfg_dict.get('lambda_curvature')})")
+    if loss_cfg_dict.get("lambda_hard_bg", 0.0) > 0.0:
+        extra_loss_tags.append(f"HardBG({loss_cfg_dict.get('lambda_hard_bg')})")
+    if loss_cfg_dict.get("lambda_fg_gate", 0.0) > 0.0:
+        extra_loss_tags.append(f"FGBce({loss_cfg_dict.get('lambda_fg_gate')})")
+    if extra_loss_tags:
+        supervision_desc += f" + [{', '.join(extra_loss_tags)}]"
 
     budget_pct = (n_params / 105_000) * 100
     headroom = 105_000 - n_params

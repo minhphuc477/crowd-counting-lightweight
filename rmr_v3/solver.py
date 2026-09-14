@@ -101,6 +101,9 @@ def unrolled_sirt_solver(
     scale_routing_weights: torch.Tensor | None = None,
     trust_region_kappa: float = 0.0,
     trust_region_floor: float = 0.005,
+    adjoint_mode: str = "flat",
+    b_variance: torch.Tensor | None = None,
+    morozov_gamma: float = 0.0,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -124,11 +127,18 @@ def unrolled_sirt_solver(
         density_gate_rho: Density gating threshold rho_0 for multiplicative mode.
         density_gate_floor: Minimum gate floor for multiplicative mode.
         proximal_tau: Proximal soft-thresholding parameter tau.
+        proximal_mode: "firm", "soft", or "none".
+        proximal_mu: MCP threshold parameter.
         tv_lambda: Total variation diffusion coefficient.
         tv_type: "laplacian" (isotropic) or "charbonnier" (edge-preserving).
         tv_eps_c: Charbonnier TV smoothness constant.
         laplace_kernel: Optional pre-allocated 3x3 Laplacian convolution kernel.
         scale_routing_weights: Optional spatial scale routing probabilities [B, K, H, W].
+        trust_region_kappa: Morozov trust-region step bounding parameter.
+        trust_region_floor: Minimum floor for trust-region step bounding.
+        adjoint_mode: "flat" (standard Lebesgue adjoint) or "radon_nikodym" (measure-modulated).
+        b_variance: Optional predictive variance of b_solver for Morozov shrinkage [B, 1, M].
+        morozov_gamma: Threshold multiplier for Morozov discrepancy deadband (0.0 = disabled).
 
     Returns:
         Dictionary containing:
@@ -208,6 +218,9 @@ def unrolled_sirt_solver(
             density_gate_floor=float(density_gate_floor),
             scale_routing_weights=scale_routing_weights,
             scale_partitions=scale_partitions,
+            adjoint_mode=adjoint_mode,
+            b_variance=b_variance,
+            morozov_gamma=float(morozov_gamma),
         )
 
         step_delta = effective_omega * field

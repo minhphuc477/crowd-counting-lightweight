@@ -165,6 +165,23 @@ class RMRv3Config:
     # When True, predicts spatial foreground probability map to suppress texture false alarms
     foreground_gate: bool = False
 
+    # ── RMR-v13 additions ────────────────────────────────────────────────────
+    # Adjoint back-projection mode in SIRT solver:
+    # "flat": standard Lebesgue uniform scatter (v10 default).
+    # "radon_nikodym": measure-modulated scatter A_nu^T where mass is back-projected
+    #                  proportionally to y_t(u) / ((Ay_t)_m + eps), eliminating background lift.
+    adjoint_mode: str = "flat"
+
+    # Morozov discrepancy shrinkage threshold gamma.
+    # When > 0, shrinks discrepancy by gamma * sqrt(Var[b]), preventing solver over-fitting
+    # to noisy regional measurements on ambiguous regions.
+    morozov_gamma: float = 0.0
+
+    # Regional evidence reliability weighting mode:
+    # "nb_rate_variance": classical inverse variance q = 1 / Var[rate].
+    # "snr": Signal-to-Noise Ratio weighting q = r * mu / (r + mu), prioritizing genuine clusters.
+    reliability_mode: str = "nb_rate_variance"
+
     def __post_init__(self) -> None:
         if self.use_coord_attn and self.neck_type != "aspp_lite":
             raise ValueError(
@@ -206,6 +223,19 @@ class RMRv3Config:
             raise ValueError(
                 f"trust_region_floor must be strictly positive, got {self.trust_region_floor}"
             )
+        if self.adjoint_mode not in ("flat", "radon_nikodym"):
+            raise ValueError(
+                f"adjoint_mode must be 'flat' or 'radon_nikodym', got '{self.adjoint_mode}'"
+            )
+        if self.morozov_gamma < 0.0:
+            raise ValueError(
+                f"morozov_gamma must be non-negative, got {self.morozov_gamma}"
+            )
+        if self.reliability_mode not in ("nb_rate_variance", "snr"):
+            raise ValueError(
+                f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance' or 'snr'."
+            )
+
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -284,9 +314,9 @@ class RMRv3(nn.Module):
         if cfg.omega <= 0:
             raise ValueError("omega must be > 0")
 
-        if cfg.reliability_mode != "nb_rate_variance":
+        if cfg.reliability_mode not in ("nb_rate_variance", "snr"):
             raise ValueError(
-                f"Unsupported reliability_mode: {cfg.reliability_mode}. Only 'nb_rate_variance' is supported."
+                f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance' or 'snr'."
             )
 
         if len(cfg.region_sizes_px) == 0:
@@ -504,6 +534,7 @@ class RMRv3(nn.Module):
             mu_count,
             dispersion,
             regions,
+            mode=self.cfg.reliability_mode,
             rate_std_floor=self.cfg.reliability_rate_std_floor,
             weight_min=self.cfg.reliability_weight_min,
             weight_max=self.cfg.reliability_weight_max,
@@ -525,11 +556,14 @@ class RMRv3(nn.Module):
         # b_solver_raw is the raw regional NB mean (before hurdle masking).
         b_solver_raw = mu_count.detach() if self.cfg.detach_region_mean_in_solver else mu_count
 
+        b_variance = reliability["count_variance"]
         if self.cfg.hurdle_head and "hurdle_logit" in regional:
             # π_R = sigmoid(z_π_R): probability region is occupied.
             # b_solver = π_R * mu_count  — background regions approach 0 count target.
+            # Variance of scaled variable b_solver: Var[π_R * N] = π_R^2 * Var[N].
             pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
             b_solver = pi_r * b_solver_raw
+            b_variance = pi_r.square() * b_variance
         else:
             b_solver = b_solver_raw
 
@@ -561,6 +595,7 @@ class RMRv3(nn.Module):
                 "region_precision": reliability["precision"],
                 "region_rate_variance": reliability["rate_variance"],
                 "region_count_variance": reliability["count_variance"],
+                "solver_count_variance": b_variance,
                 "iterates": [y0],
                 "residual_fields": [],
                 "energy_trace": [],
@@ -598,6 +633,9 @@ class RMRv3(nn.Module):
             scale_routing_weights=scale_weights,
             trust_region_kappa=self.cfg.trust_region_kappa,
             trust_region_floor=self.cfg.trust_region_floor,
+            adjoint_mode=self.cfg.adjoint_mode,
+            b_variance=b_variance,
+            morozov_gamma=self.cfg.morozov_gamma,
         )
 
         y = solver_res["y"]
@@ -624,6 +662,7 @@ class RMRv3(nn.Module):
             "region_precision": reliability["precision"],
             "region_rate_variance": reliability["rate_variance"],
             "region_count_variance": reliability["count_variance"],
+            "solver_count_variance": b_variance,
 
             "iterates": iterates,
             "residual_fields": residual_fields,

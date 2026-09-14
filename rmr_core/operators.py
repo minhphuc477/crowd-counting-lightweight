@@ -392,13 +392,16 @@ def weighted_normalized_adjoint_field(
     density_gate_floor: float = 0.02,
     scale_routing_weights: torch.Tensor | None = None,
     scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
+    adjoint_mode: str = "flat",
+    b_variance: torch.Tensor | None = None,
+    morozov_gamma: float = 0.0,
 ) -> torch.Tensor:
     """Compute:
 
         r = D_cw^-1 A^T W D_a^-1 (A y - b)
 
-    entirely in float32, with optional spatial scale routing modulation.
-    In multiplicative mode, A^T is replaced with multiplicative_gated_adjoint.
+    entirely in float32, with optional spatial scale routing modulation,
+    Morozov discrepancy shrinkage, and Radon-Nikodym measure modulation.
     """
     _, _, h, w = y.shape
 
@@ -414,8 +417,24 @@ def weighted_normalized_adjoint_field(
 
     delta = q - b32
 
+    # Morozov Discrepancy Shrinkage (Statistical Inverse Problem Regularization):
+    # When |q - b| <= gamma * sigma_b, discrepancy is within the measurement noise floor
+    # of the regional head. Shrinking delta eliminates solver over-fitting on noisy heads.
+    if morozov_gamma > 0.0 and b_variance is not None:
+        sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
+        deadband = float(morozov_gamma) * sigma_b
+        delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
+
     area = regions.area.float().view(1, 1, -1)
-    rate_residual = delta / area.clamp_min(1.0)
+
+    # Radon-Nikodym Measure-Modulated Adjoint vs Standard Flat Lebesgue Adjoint
+    if adjoint_mode == "radon_nikodym":
+        # Discrepancy is scattered proportionally to current measure density y / q_m.
+        # For a uniform field y = c * 1, q = c * area, so y * delta / q = delta / area (Theorem 1).
+        eff_q = q + float(eps) * area.clamp_min(1.0)
+        rate_residual = delta / eff_q.clamp_min(float(eps))
+    else:
+        rate_residual = delta / area.clamp_min(1.0)
 
     weighted_residual = weight32 * rate_residual
 
@@ -474,6 +493,9 @@ def weighted_normalized_adjoint_field(
                 w,
                 out_dtype=torch.float32,
             )
+
+    if adjoint_mode == "radon_nikodym":
+        back = y32 * back
 
     if weighted_cov is None:
         weighted_cov = weighted_coverage(

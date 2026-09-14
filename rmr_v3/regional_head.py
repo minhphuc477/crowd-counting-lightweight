@@ -261,24 +261,19 @@ def reliability_from_nb(
     dispersion: torch.Tensor,
     regions: RegionSet,
     *,
+    mode: str = "nb_rate_variance",
     rate_std_floor: float = 0.01,
     weight_min: float = 0.25,
     weight_max: float = 4.0,
     normalize_within_scale: bool = True,
     eps: float = 1e-6,
 ) -> dict[str, torch.Tensor]:
-    """Derive regional reliability from NB predictive rate variance.
+    """Derive regional reliability from NB predictive rate variance or SNR.
 
-    NB count variance:
-        Var[N] = mu + mu^2 / r
-
-    Rate variance:
-        Var[N / area] = Var[N] / area^2
-
-    Precision:
-        q = 1 / (rate_var + floor^2)
-
-    Main method normalizes q to mean 1 inside each scale family.
+    Modes:
+    - 'nb_rate_variance': q = 1 / (Var[rate] + floor^2), classical inverse variance.
+    - 'snr': q = mu^2 / Var[N] = r * mu / (r + mu), Signal-to-Noise Ratio weighting
+             that prioritizes high-certainty crowd clumps over noisy empty background.
     """
 
     mu = mu_count.float().clamp_min(0.0)
@@ -294,7 +289,12 @@ def reliability_from_nb(
     rate_var = count_var / area.square()
     rate_var = rate_var + floor_var
 
-    precision = 1.0 / rate_var.clamp_min(eps)
+    if mode == "snr":
+        # Signal-to-Noise Ratio: mu^2 / Var[N] = r * mu / (r + mu + eps)
+        # Scales naturally with crowd presence and certainty, prioritizing genuine clusters
+        precision = (r * mu) / (r + mu + float(eps))
+    else:
+        precision = 1.0 / rate_var.clamp_min(eps)
 
     if normalize_within_scale:
         weight = torch.zeros_like(precision)

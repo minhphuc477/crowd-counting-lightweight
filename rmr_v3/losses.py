@@ -89,7 +89,7 @@ def truncated_nb_nll_loss(
 
     occ_mask = (target_region > 0.5)  # [B,1,M]
     if not occ_mask.any():
-        return (mu_count * 0.0).sum()
+        return (mu_count * 0.0 + dispersion * 0.0).sum()
 
     per_region_nll = negative_binomial_nll_mean_dispersion(
         target_region,
@@ -341,6 +341,12 @@ class RMRv3LossConfig:
     curvature_gate_mode: str = "none"      # "none" | "hard" | "soft"
     curvature_gate_scale: float = 0.02     # temperature for soft sigmoid transition
 
+    # ── RMR-v13 Physical Scale Alignment Loss additions ─────────────────────
+    lambda_scale_align: float = 0.0      # weight for physical scale alignment loss (0 = disabled)
+    scale_align_tau_dense: float = 0.12  # local density threshold for fine scale (16x16)
+    scale_align_tau_sparse: float = 0.03 # local density threshold for coarse scale (64x64)
+    scale_align_kernel: int = 5          # kernel size for local density estimation
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
@@ -364,6 +370,16 @@ class RMRv3LossConfig:
             raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {self.hard_bg_ratio}")
         if self.lambda_fg_gate < 0.0:
             raise ValueError(f"lambda_fg_gate must be non-negative, got {self.lambda_fg_gate}")
+        if self.lambda_scale_align < 0.0:
+            raise ValueError(f"lambda_scale_align must be non-negative, got {self.lambda_scale_align}")
+        if self.scale_align_tau_dense <= self.scale_align_tau_sparse:
+            raise ValueError(
+                f"scale_align_tau_dense ({self.scale_align_tau_dense}) must be > scale_align_tau_sparse ({self.scale_align_tau_sparse})"
+            )
+        if self.scale_align_kernel <= 0 or self.scale_align_kernel % 2 == 0:
+            raise ValueError(
+                f"scale_align_kernel must be a positive odd integer, got {self.scale_align_kernel}"
+            )
 
 
     @classmethod
@@ -421,8 +437,9 @@ def curvature_power_loss(
         target = target.unsqueeze(1)
     if y.ndim == 3:
         y = y.unsqueeze(1)
-    y_f = y.float().clamp_min(0.0)
-    t_f = target.float().clamp_min(0.0)
+    work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
+    y_f = y.to(dtype=work_dtype).clamp_min(0.0)
+    t_f = target.to(dtype=work_dtype).clamp_min(0.0)
     diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
     diff_sq = diff.square()
 
@@ -522,8 +539,9 @@ def mass_weighted_cell_loss(
     if y.ndim == 3:
         y = y.unsqueeze(1)
 
-    y_f = y.float()
-    t_f = target.float()
+    work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
+    y_f = y.to(dtype=work_dtype)
+    t_f = target.to(dtype=work_dtype)
 
     # Spatial mass per image: [B, 1, 1, 1]
     total_mass = t_f.sum(dim=(-2, -1), keepdim=True)
@@ -549,6 +567,74 @@ def mass_weighted_cell_loss(
 
     return (weights * per_pixel).mean()
 
+
+def physical_scale_alignment_loss(
+    scale_weights: torch.Tensor,
+    target_y: torch.Tensor,
+    tau_dense: float = 0.12,
+    tau_sparse: float = 0.03,
+    kernel_size: int = 5,
+    eps: float = 1e-7,
+) -> torch.Tensor:
+    """Physical scale alignment cross-entropy / KL loss (RMR-v13).
+
+    Directly supervises the continuous spatial scale distribution pi(u) in Delta^{K-1}
+    predicted by ScaleRoutingHead. Aligns the receptive field scale with the physical
+    head size determined by local crowd density:
+    - High density (d >= tau_dense, head size < 16x16 px) -> Scale 0 (16x16)
+    - Low density (d <= tau_sparse, head size > 32x32 px) -> Scale 2 (64x64)
+    - Moderate density (in-between)                       -> Scale 1 (32x32)
+
+    Target distribution pi*(u) is constructed via continuous piecewise-linear
+    barycentric coordinates on the 2-simplex, ensuring pi*(u) in Delta^2 everywhere.
+    The loss computes the Kullback-Leibler divergence KL(pi* || pi).
+
+    Args:
+        scale_weights: [B, K, H, W] predicted scale probabilities from ScaleRoutingHead.
+        target_y:      [B, 1, H, W] or [B, H, W] GT density map.
+        tau_dense:     Density threshold for dense crowd (Scale 0).
+        tau_sparse:    Density threshold for sparse crowd (Scale 2).
+        kernel_size:   Pooling kernel size for local density computation.
+        eps:           Epsilon for numerical safety in log.
+
+    Returns:
+        Scalar non-negative KL divergence loss.
+    """
+    if target_y.ndim == 3:
+        target_y = target_y.unsqueeze(1)
+
+    b, k, h, w = scale_weights.shape
+    if k != 3:
+        return (scale_weights * 0.0).sum()
+
+    work_dtype = scale_weights.dtype if scale_weights.dtype in (torch.float32, torch.float64) else torch.float32
+    t_f = target_y.to(dtype=work_dtype).clamp_min(0.0)
+    pad = int(kernel_size) // 2
+    local_density = F.avg_pool2d(t_f, kernel_size=int(kernel_size), stride=1, padding=pad)
+
+    delta_tau = max(float(tau_dense) - float(tau_sparse), 1e-6)
+    s = torch.clamp((local_density - float(tau_sparse)) / delta_tau, 0.0, 1.0)
+
+    # Piecewise-linear barycentric coordinates on Delta^2
+    # s in [0, 0.5]: scale 2 (sparse) to scale 1 (moderate)
+    # s in [0.5, 1.0]: scale 1 (moderate) to scale 0 (dense)
+    s_half = s <= 0.5
+    pi_2 = torch.where(s_half, 1.0 - 2.0 * s, torch.zeros_like(s))
+    pi_1 = torch.where(s_half, 2.0 * s, 2.0 * (1.0 - s))
+    pi_0 = torch.where(s_half, torch.zeros_like(s), 2.0 * (s - 0.5))
+
+    target_pi = torch.cat([pi_0, pi_1, pi_2], dim=1).to(dtype=work_dtype)  # [B, 3, H, W]
+
+    pred_pi = scale_weights.to(dtype=work_dtype).clamp(min=float(eps), max=1.0)
+    target_log_target = torch.where(
+        target_pi > 1e-6,
+        target_pi * torch.log(target_pi.clamp_min(1e-6)),
+        torch.zeros_like(target_pi),
+    )
+    target_log_pred = target_pi * torch.log(pred_pi)
+    kl_per_pixel = (target_log_target - target_log_pred).sum(dim=1)
+
+    return kl_per_pixel.mean()
 
 
 def compute_rmr_v3_losses(
@@ -779,6 +865,20 @@ def compute_rmr_v3_losses(
     else:
         losses["hurdle_bce"] = torch.tensor(0.0, device=y.device)
         losses["trunc_nb"] = torch.tensor(0.0, device=y.device)
+
+    # ── RMR-v13 Physical Scale Alignment Loss ────────────────────────────────
+    scale_weights = outputs.get("scale_weights", None)
+    if scale_weights is not None and cfg.lambda_scale_align > 0.0:
+        losses["scale_align"] = physical_scale_alignment_loss(
+            scale_weights=scale_weights,
+            target_y=target_float,
+            tau_dense=cfg.scale_align_tau_dense,
+            tau_sparse=cfg.scale_align_tau_sparse,
+            kernel_size=cfg.scale_align_kernel,
+        )
+        losses["total"] = losses["total"] + cfg.lambda_scale_align * losses["scale_align"]
+    else:
+        losses["scale_align"] = torch.tensor(0.0, device=y.device)
 
     return losses
 
