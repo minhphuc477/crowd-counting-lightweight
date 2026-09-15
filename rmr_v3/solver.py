@@ -217,7 +217,7 @@ def unrolled_sirt_solver(
             b_solver,
             weight_solver,
             regions,
-        )
+        ).detach()
 
         # ── Step 1: Adjoint discrepancy scatter ──────────────────────────────
         field = weighted_normalized_adjoint_field(
@@ -291,7 +291,7 @@ def unrolled_sirt_solver(
             b_solver,
             weight_solver,
             regions,
-        )
+        ).detach()
 
         energy_trace.append({"before": energy_before, "after": energy_after})
         residual_fields.append(field)
