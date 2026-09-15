@@ -32,6 +32,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import yaml
 from torch.utils.data import DataLoader
 
