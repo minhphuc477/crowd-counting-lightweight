@@ -851,5 +851,40 @@ def test_proximal_soft_thresholding_anti_smearing():
     assert len(grads) > 0
 
 
+# ---------------------------------------------------------------------------
+# Test 24: Regional reliability rows memory throttling
+# ---------------------------------------------------------------------------
+def test_regional_reliability_rows_max_regions_throttling():
+    """regional_reliability_rows with max_regions must bound output row count to prevent OOM."""
+    from rmr_v3.diagnostics import regional_reliability_rows
+
+    cfg = RMRv3Config(pretrained=False)
+    model = RMRv3(cfg).eval()
+    x = torch.rand(1, 3, 128, 128)
+    target = torch.rand(1, 1, 32, 32)
+    with torch.no_grad():
+        out = model(x, solver_strength=1.0)
+
+    total_regions = out["b_region"].shape[-1]
+    assert total_regions > 50
+
+    # Unthrottled
+    unthrottled_rows = regional_reliability_rows(out, target, max_regions=None)
+    assert len(unthrottled_rows) == total_regions
+
+    # Throttled to 20
+    throttled_rows = regional_reliability_rows(out, target, max_regions=20)
+    assert len(throttled_rows) <= 25
+    assert len(throttled_rows) > 0
+
+    # Verify all expected keys exist in throttled rows
+    expected_keys = {
+        "batch_index", "region_index", "scale_id", "area", "gt_count",
+        "pred_count", "dispersion", "count_variance", "rate_variance",
+        "weight", "solver_weight", "abs_count_error", "abs_rate_error", "std_residual"
+    }
+    assert expected_keys.issubset(throttled_rows[0].keys())
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

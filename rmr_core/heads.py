@@ -37,6 +37,7 @@ class FineMeasureHead(nn.Module):
         temp_softplus: bool = False,
         scale_conditioned: bool = False,
         num_scales: int = 4,
+        density_curvature: bool = False,
     ):
         super().__init__()
         self.body = nn.Sequential(
@@ -52,6 +53,12 @@ class FineMeasureHead(nn.Module):
         if self.temp_softplus:
             # Learnable temperature τ; initialized to 1.0 (identical to vanilla softplus)
             self.tau = nn.Parameter(torch.ones(1))
+
+        self.density_curvature = bool(density_curvature)
+        if self.density_curvature:
+            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.0003
+            # providing seamless Step 0 identity with vanilla softplus
+            self.curvature_alpha = nn.Parameter(torch.tensor(-8.0))
 
         self.scale_conditioned = bool(scale_conditioned)
         if self.scale_conditioned:
@@ -78,12 +85,20 @@ class FineMeasureHead(nn.Module):
             tau_base = self.tau.clamp_min(0.1) if self.temp_softplus else 1.0
             gamma_shift = (sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True).clamp(-5.0, 5.0)
             tau_eff = (tau_base * torch.exp(gamma_shift)).clamp_min(0.05)
-            return tau_eff * F.softplus((z + b_eff) / tau_eff)
-
-        if self.temp_softplus:
+            y_base = tau_eff * F.softplus((z + b_eff) / tau_eff)
+        elif self.temp_softplus:
             tau = self.tau.clamp_min(0.1)
-            return tau * F.softplus(z / tau)
-        return F.softplus(z)
+            y_base = tau * F.softplus(z / tau)
+        else:
+            y_base = F.softplus(z)
+
+        if self.density_curvature:
+            alpha_eff = F.softplus(self.curvature_alpha)
+            orig_dtype = y_base.dtype
+            y_base_f32 = y_base.float()
+            y_out_f32 = y_base_f32 + alpha_eff.float() * (y_base_f32 ** 2)
+            return y_out_f32.to(orig_dtype)
+        return y_base
 
     def forward_logits(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
         """Compute raw pre-activation logit field z0."""
@@ -106,7 +121,7 @@ class FineMeasureHead(nn.Module):
         New code (rmr_v3+) must call forward_logits() + activate() separately.
         """
         z = self.forward_logits(f)
-        if self.temp_softplus or self.scale_conditioned:
+        if self.temp_softplus or self.scale_conditioned or self.density_curvature:
             return self.activate(z, scale_weights=scale_weights)
         return z
 

@@ -125,7 +125,7 @@ def main() -> None:
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample["target_y"].to(device)
-        d_rows = regional_reliability_rows(out, target.unsqueeze(0))
+        d_rows = regional_reliability_rows(out, target.unsqueeze(0), max_regions=300)
         for r in d_rows:
             r["sample_index"] = row["index"]
             r["sample_id"] = row["id"]

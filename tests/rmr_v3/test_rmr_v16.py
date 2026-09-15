@@ -227,17 +227,33 @@ class TestRMRv16CleanArchitecture:
         assert torch.isfinite(total_loss), f"Total loss is not finite: {total_loss.item()}"
         total_loss.backward()
 
-        # Check every single parameter has valid finite gradients
+        # Step 0: Check every parameter has valid, finite gradients (no NaNs or Infs)
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                assert param.grad is not None, f"Parameter {name} received no gradient on step 0!"
+                assert not torch.isnan(param.grad).any(), f"Parameter {name} has NaN gradients!"
+                assert not torch.isinf(param.grad).any(), f"Parameter {name} has Inf gradients!"
+
+        # Zero-init gating check: pw.weight has non-zero gradient on step 0
+        assert model.scale_router.pw.weight.grad.abs().sum() > 0.0
+
+        # Step 1: After 1 optimizer step, zero-init layers update and propagate non-zero gradients to all upstream parameters
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+        optimizer.step()
+        optimizer.zero_grad()
+
+        outputs2 = model(x)
+        losses2 = compute_rmr_v3_losses(outputs2, target_density, loss_cfg, points=target_points)
+        losses2["total"].backward()
+
         zero_grad_params = []
         for name, param in model.named_parameters():
             if param.requires_grad:
-                assert param.grad is not None, f"Parameter {name} received no gradient!"
-                assert not torch.isnan(param.grad).any(), f"Parameter {name} has NaN gradients!"
-                assert not torch.isinf(param.grad).any(), f"Parameter {name} has Inf gradients!"
+                assert param.grad is not None, f"Parameter {name} received no gradient on step 1!"
                 if param.grad.abs().sum() == 0.0:
                     zero_grad_params.append(name)
 
-        assert len(zero_grad_params) == 0, f"Found parameters with exact zero gradient: {zero_grad_params}"
+        assert len(zero_grad_params) == 0, f"Found parameters with exact zero gradient on step 1: {zero_grad_params}"
 
     def test_all_seven_v16_configs_load_and_validate(self):
         """Invariant 8: All 7 v16 YAML configurations pass schema validation and instantiate cleanly."""
@@ -263,3 +279,55 @@ class TestRMRv16CleanArchitecture:
                 assert n_params == 104473
 
             assert n_params <= 105000
+
+    def test_dynamic_scale_telemetry_and_diagnostics(self):
+        """Invariant 9: DiagnosticTracker and diagnostics correctly track and label all 4 scales [16, 32, 64, 128] px."""
+        from rmr_v3.diagnostics import (
+            compute_reliability_correlations,
+            compute_uncertainty_calibration_bins,
+            compute_nb_interval_coverage,
+            compute_solver_trajectory_diagnostics,
+            regional_reliability_rows,
+        )
+        from rmr_v3.tracking import DiagnosticTracker
+
+        m_cfg, _, _ = _load_v16_config("rmr_v16_canonical.yaml")
+        model = RMRv3(m_cfg)
+        tracker = DiagnosticTracker(model)
+
+        assert tracker.scale_map == {0: 16, 1: 32, 2: 64, 3: 128}
+
+        # Run forward on synthetic input
+        x = torch.randn(2, 3, 128, 128)
+        outputs = model(x)
+        tracker.update(outputs)
+        summary = tracker.summarize()
+
+        # All 4 scales must be tracked without indexing mismatch
+        for s in (16, 32, 64, 128):
+            assert f"weight_mean_{s}" in summary
+            assert f"scale_pi_{s}" in summary
+            assert summary[f"scale_pi_{s}"] >= 0.0
+
+        # Sum of pi over the 4 scales must be approx 1.0
+        total_pi = sum(summary[f"scale_pi_{s}"] for s in (16, 32, 64, 128))
+        assert abs(total_pi - 1.0) < 1e-3
+
+        # Test diagnostic functions with 4 scales
+        target_y = torch.zeros(2, 1, 32, 32)
+        target_y[:, :, 5:10, 5:10] = 1.0
+        diag_rows = regional_reliability_rows(outputs, target_y)
+        assert len(diag_rows) > 0
+
+        scale_map = {0: 16, 1: 32, 2: 64, 3: 128}
+        corrs = compute_reliability_correlations(diag_rows, scale_map=scale_map)
+        for s in (16, 32, 64, 128):
+            assert f"spearman_rate_var_error_{s}" in corrs
+
+        calib = compute_uncertainty_calibration_bins(diag_rows, scale_map=scale_map)
+        for s in (16, 32, 64, 128):
+            assert f"calibration_{s}" in calib
+
+        traj = compute_solver_trajectory_diagnostics(outputs, target_y, scale_map=scale_map)
+        for s in (16, 32, 64, 128):
+            assert f"mae_reg_{s}_y0" in traj

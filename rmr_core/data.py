@@ -267,6 +267,12 @@ class CrowdManifestDataset(Dataset):
                 f"ShanghaiTech Part A test partition must contain exactly 182 images, got {len(self.items)}."
             )
 
+        # Pre-convert coordinate points to contiguous float32 tensors once to avoid
+        # per-epoch Python object creation and Linux Copy-On-Write page duplication across workers.
+        for it in self.items:
+            pts_raw = it.get("points", [])
+            it["points_tensor"] = torch.tensor(pts_raw, dtype=torch.float32).reshape(-1, 2)
+
     def __len__(self) -> int:
         return len(self.items)
 
@@ -277,7 +283,11 @@ class CrowdManifestDataset(Dataset):
             path = self.root / path
         with Image.open(path) as img:
             image = img.convert("RGB")
-        pts = torch.tensor(item.get("points", []), dtype=torch.float32).reshape(-1, 2)
+        pts_tensor = item.get("points_tensor")
+        if pts_tensor is not None:
+            pts = pts_tensor.clone()
+        else:
+            pts = torch.tensor(item.get("points", []), dtype=torch.float32).reshape(-1, 2)
 
         if self.train:
             image_t, pts = train_transform(

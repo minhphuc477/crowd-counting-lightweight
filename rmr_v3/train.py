@@ -77,20 +77,21 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "solver_weight_mean", "solver_weight_std",
     "weight_clip_low_fraction", "weight_clip_high_fraction",
     "solver_energy_before", "solver_energy_after", "solver_energy_reduction",
-    "weight_mean_32", "weight_mean_64", "weight_mean_128",
-    "scale_pi_32", "scale_pi_64", "scale_pi_128",
+    "weight_mean_16", "weight_mean_32", "weight_mean_64", "weight_mean_64_32", "weight_mean_128",
+    "scale_pi_16", "scale_pi_32", "scale_pi_64", "scale_pi_64_32", "scale_pi_128",
     "val_mae", "val_rmse", "val_nae", "val_bias",
     "val_game0", "val_game1", "val_game2", "val_game3",
     "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
     "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
     "spearman_pred_weight_error",
-    "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
+    "spearman_rate_var_error_16", "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
     "mean_std_residual",
     "coverage_50", "coverage_80", "coverage_95",
     "calib_gap_50", "calib_gap_80", "calib_gap_95",
     "dispersion_sat_low_fraction", "dispersion_sat_high_fraction",
     "solver_help_fraction", "solver_harm_fraction", "energy_monotonic_fraction",
     "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
+    "curvature_alpha", "effective_curvature",
 ]
 
 
@@ -135,11 +136,14 @@ def evaluate_v3(
     all_diag_rows = []
     traj_rows = []
 
+    scale_sizes = tuple(getattr(model.cfg, "region_sizes_px", (32, 64, 128)))
+    scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
+
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample["target_y"].to(device)
-        d_rows = regional_reliability_rows(out, target.unsqueeze(0))
+        d_rows = regional_reliability_rows(out, target.unsqueeze(0), max_regions=300)
         all_diag_rows.extend(d_rows)
-        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
+        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0), scale_map=scale_map)
         if t_diag:
             traj_rows.append(t_diag)
         return {}
@@ -156,10 +160,10 @@ def evaluate_v3(
         density_bins=density_bins,
     )
 
-    corrs = compute_reliability_correlations(all_diag_rows)
+    corrs = compute_reliability_correlations(all_diag_rows, scale_map=scale_map)
     summary.update(corrs)
 
-    calib = compute_uncertainty_calibration_bins(all_diag_rows)
+    calib = compute_uncertainty_calibration_bins(all_diag_rows, scale_map=scale_map)
     summary["calibration"] = calib
     summary["mean_std_residual"] = calib["mean_std_residual"]
     summary["p50_std_residual"] = calib["p50_std_residual"]
@@ -170,7 +174,7 @@ def evaluate_v3(
     sat = compute_dispersion_saturation(all_diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
 
-    nb_cov = compute_nb_interval_coverage(all_diag_rows)
+    nb_cov = compute_nb_interval_coverage(all_diag_rows, scale_map=scale_map)
     summary.update(nb_cov)
 
     if traj_rows:
@@ -267,6 +271,7 @@ def main() -> None:
     ap.add_argument("--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
+    ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8-sig"))
@@ -280,6 +285,8 @@ def main() -> None:
         cfg.setdefault("train", {})["eval_every"] = args.eval_every
     if args.patience is not None:
         cfg.setdefault("train", {})["patience"] = args.patience
+    if args.workers is not None:
+        cfg.setdefault("train", {})["workers"] = args.workers
     if args.disable_early_stopping:
         cfg.setdefault("train", {})["early_stopping"] = False
         cfg.setdefault("train", {})["patience"] = 0
@@ -625,6 +632,7 @@ def main() -> None:
                 "spearman_rate_var_error": float(val_metrics.get("spearman_rate_var_error", 0.0)),
                 "spearman_weight_error": float(val_metrics.get("spearman_weight_error", 0.0)),
                 "spearman_pred_weight_error": float(val_metrics.get("spearman_pred_weight_error", 0.0)),
+                "spearman_rate_var_error_16": float(val_metrics.get("spearman_rate_var_error_16", 0.0)),
                 "spearman_rate_var_error_32": float(val_metrics.get("spearman_rate_var_error_32", 0.0)),
                 "spearman_rate_var_error_64": float(val_metrics.get("spearman_rate_var_error_64", 0.0)),
                 "spearman_rate_var_error_128": float(val_metrics.get("spearman_rate_var_error_128", 0.0)),
@@ -643,6 +651,8 @@ def main() -> None:
                 "mae_reg_y0": float(val_metrics.get("mae_reg_y0", 0.0)),
                 "mae_reg_y1": float(val_metrics.get("mae_reg_y1", 0.0)),
                 "mae_reg_y2": float(val_metrics.get("mae_reg_y2", 0.0)),
+                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if getattr(model.fine_head, "density_curvature", False) else 0.0,
+                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if getattr(model.fine_head, "density_curvature", False) else 0.0,
             })
 
             cur_mae = float(val_metrics["MAE"])

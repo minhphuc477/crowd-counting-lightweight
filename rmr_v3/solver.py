@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -104,6 +105,8 @@ def unrolled_sirt_solver(
     adjoint_mode: str = "flat",
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
+    use_barzilai_borwein: bool = False,
+    use_scale_entropy_trust: bool = False,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -191,10 +194,22 @@ def unrolled_sirt_solver(
         scale_partitions=scale_partitions,
     )
 
+    scale_confidence = None
+    if use_scale_entropy_trust and scale_routing_weights is not None:
+        k_scales = scale_routing_weights.shape[1]
+        if k_scales > 1:
+            pi_safe = scale_routing_weights.clamp_min(1e-7)
+            entropy = -(pi_safe * torch.log(pi_safe)).sum(dim=1, keepdim=True)
+            max_entropy = math.log(float(k_scales))
+            scale_confidence = (1.0 - (entropy / max_entropy)).clamp(0.0, 1.0)
+
     y = y0
     iterates: list[torch.Tensor] = [y0]
     residual_fields: list[torch.Tensor] = []
     energy_trace: list[dict[str, torch.Tensor]] = []
+
+    prev_y: torch.Tensor | None = None
+    prev_field: torch.Tensor | None = None
 
     for _ in range(iterations):
         energy_before = weighted_regional_energy(
@@ -223,10 +238,30 @@ def unrolled_sirt_solver(
             morozov_gamma=float(morozov_gamma),
         )
 
-        step_delta = effective_omega * field
+        # Adaptive Barzilai-Borwein step size
+        current_omega: float | torch.Tensor = effective_omega
+        if use_barzilai_borwein and prev_y is not None and prev_field is not None and effective_omega > 0.0:
+            s_diff = (y - prev_y).float()
+            r_diff = (field - prev_field).float()
+            dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
+            norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
+            omega_candidate = torch.where(
+                dot_sr > 0.0,
+                dot_sr / norm_r_sq,
+                torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+            ).detach()
+            current_omega = torch.clamp(omega_candidate, min=0.2 * effective_omega, max=2.0 * effective_omega)
+
+        step_delta = current_omega * field
         if trust_region_kappa > 0.0:
             bound = float(trust_region_kappa) * torch.clamp_min(y.float(), float(trust_region_floor))
+            if scale_confidence is not None:
+                # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
+                bound = bound * (0.25 + 0.75 * scale_confidence)
             step_delta = torch.clamp(step_delta, min=-bound, max=bound)
+
+        prev_y = y.detach()
+        prev_field = field.detach()
 
         y_step = y.float() - step_delta
 

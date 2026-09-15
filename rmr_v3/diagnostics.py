@@ -12,8 +12,21 @@ from rmr_core.operators import regional_sum
 def regional_reliability_rows(
     outputs: dict,
     target_y: torch.Tensor,
+    max_regions: int | None = None,
 ) -> list[dict]:
-    """Extract fine-grained regional reliability and prediction diagnostics."""
+    """Extract fine-grained regional reliability and prediction diagnostics.
+
+    Parameters
+    ----------
+    outputs : dict
+        Model forward output dictionary containing regions, b_region, etc.
+    target_y : torch.Tensor
+        Ground truth density map (B, 1, H, W).
+    max_regions : int | None, default=None
+        If specified and total regions per sample exceeds this threshold,
+        uniformly steps across regions to bound Python heap memory allocation
+        while preserving statistical distribution properties (e.g. Pearson/Spearman).
+    """
     regions = outputs["regions"]
 
     mu = outputs["b_region"].float()
@@ -40,9 +53,14 @@ def regional_reliability_rows(
 
     rows = []
     bsz = mu.shape[0]
+    num_total_regions = mu.shape[-1]
+    if max_regions is not None and num_total_regions > max_regions:
+        region_indices = np.linspace(0, num_total_regions - 1, max_regions, dtype=int).tolist()
+    else:
+        region_indices = list(range(num_total_regions))
 
     for bi in range(bsz):
-        for ri in range(mu.shape[-1]):
+        for ri in region_indices:
             rows.append(
                 {
                     "batch_index": bi,
@@ -80,13 +98,39 @@ def _safe_spearman(x: np.ndarray, y: np.ndarray, eps: float = 1e-8) -> float:
     return float(stat) if np.isfinite(stat) else 0.0
 
 
+def resolve_scale_map(
+    scale_ids: np.ndarray | torch.Tensor | None = None,
+    scale_map: dict[int, int | str] | None = None,
+) -> dict[int, int | str]:
+    """Resolve mapping from integer scale_id to physical pixel scale label (e.g. 16, 32, 64, 128)."""
+    if scale_map is not None:
+        return scale_map
+    if scale_ids is None:
+        return {0: 32, 1: 64, 2: 128}
+    if isinstance(scale_ids, torch.Tensor):
+        sids = scale_ids.detach().cpu().numpy()
+    else:
+        sids = np.asarray(scale_ids)
+    unique_sids = sorted([int(s) for s in np.unique(sids) if s >= 0])
+    if unique_sids == [0, 1, 2, 3, 4]:
+        return {0: 16, 1: 32, 2: 64, 3: "64_32", 4: 128}
+    if unique_sids == [0, 1, 2, 3]:
+        return {0: 16, 1: 32, 2: 64, 3: 128}
+    if unique_sids == [0, 1, 2]:
+        return {0: 32, 1: 64, 2: 128}
+    if not unique_sids:
+        return {0: 32, 1: 64, 2: 128}
+    return {sid: sid for sid in unique_sids}
+
+
 def compute_reliability_correlations(
     rows: list[dict],
     eps: float = 1e-8,
+    scale_map: dict[int, int | str] | None = None,
 ) -> dict[str, float]:
     """Compute Pearson and Spearman correlations between uncertainty and error.
 
-    Includes global correlations and per-scale correlations (32px, 64px, 128px),
+    Includes global correlations and per-scale correlations (16px, 32px, 64px, 128px),
     as well as disentangled solver weight vs predicted weight correlations.
     """
     if not rows:
@@ -96,7 +140,7 @@ def compute_reliability_correlations(
             "spearman_weight_error": 0.0,
             "spearman_pred_weight_error": 0.0,
         }
-        for s in (32, 64, 128):
+        for s in (16, 32, 64, 128):
             out[f"pearson_rate_var_error_{s}"] = 0.0
             out[f"spearman_rate_var_error_{s}"] = 0.0
             out[f"spearman_weight_error_{s}"] = 0.0
@@ -116,8 +160,8 @@ def compute_reliability_correlations(
         "spearman_pred_weight_error": _safe_spearman(pred_weights, errors, eps),
     }
 
-    scale_map = {0: 32, 1: 64, 2: 128}
-    for sid, s_px in scale_map.items():
+    resolved_scale_map = resolve_scale_map(scale_ids, scale_map)
+    for sid, s_px in resolved_scale_map.items():
         mask = scale_ids == sid
         if np.any(mask):
             rv_s = rate_vars[mask]
@@ -197,11 +241,12 @@ def _bin_subset(
 def compute_uncertainty_calibration_bins(
     rows: list[dict],
     num_bins: int = 4,
+    scale_map: dict[int, int | str] | None = None,
 ) -> dict[str, Any]:
     """Bin predicted rate variance into quantiles and report error and standardized residual.
 
-    Reports pooled calibration bins as well as per-scale bins (calibration_32, calibration_64,
-    calibration_128) to eliminate scale confounding.
+    Reports pooled calibration bins as well as per-scale bins (calibration_16, calibration_32,
+    calibration_64, calibration_128) to eliminate scale confounding.
     """
     if not rows:
         empty: dict[str, Any] = {
@@ -210,9 +255,11 @@ def compute_uncertainty_calibration_bins(
             "p90_std_residual": 0.0,
             "bins": [],
             "calibration_pooled": [],
+            "calibration_16": [],
             "calibration_32": [],
             "calibration_64": [],
             "calibration_128": [],
+            "mean_std_residual_16": 0.0,
             "mean_std_residual_32": 0.0,
             "mean_std_residual_64": 0.0,
             "mean_std_residual_128": 0.0,
@@ -235,8 +282,8 @@ def compute_uncertainty_calibration_bins(
         "calibration_pooled": pooled_bins,
     }
 
-    scale_map = {0: 32, 1: 64, 2: 128}
-    for sid, s_px in scale_map.items():
+    resolved_scale_map = resolve_scale_map(scale_ids, scale_map)
+    for sid, s_px in resolved_scale_map.items():
         mask = scale_ids == sid
         if np.any(mask):
             s_sum, s_bins = _bin_subset(
@@ -259,6 +306,7 @@ def compute_nb_interval_coverage(
     rows: list[dict],
     nominal_levels: Sequence[float] = (0.50, 0.80, 0.95),
     eps: float = 1e-6,
+    scale_map: dict[int, int | str] | None = None,
 ) -> dict[str, float]:
     """Compute empirical coverage and calibration gaps for theoretical Negative Binomial predictive intervals.
 
@@ -271,14 +319,14 @@ def compute_nb_interval_coverage(
     Empirical hit condition:
       q_low <= gt_count <= q_high
     Reports overall empirical coverage and calibration gap (empirical - nominal)
-    both pooled and per-scale (32px, 64px, 128px).
+    both pooled and per-scale (16px, 32px, 64px, 128px).
     """
     levels_pct = [int(round(a * 100)) for a in nominal_levels]
     empty_out: dict[str, float] = {}
     for pct in levels_pct:
         empty_out[f"coverage_{pct}"] = 0.0
         empty_out[f"calib_gap_{pct}"] = 0.0
-        for s in (32, 64, 128):
+        for s in (16, 32, 64, 128):
             empty_out[f"coverage_{pct}_{s}"] = 0.0
             empty_out[f"calib_gap_{pct}_{s}"] = 0.0
     if not rows:
@@ -294,7 +342,7 @@ def compute_nb_interval_coverage(
     p = np.clip(disp_pos / (disp_pos + mu_pos), 1e-8, 1.0)
 
     out: dict[str, float] = {}
-    scale_map = {0: 32, 1: 64, 2: 128}
+    resolved_scale_map = resolve_scale_map(scale_ids, scale_map)
 
     for pct, alpha in zip(levels_pct, nominal_levels):
         alpha_val = float(alpha)
@@ -306,7 +354,7 @@ def compute_nb_interval_coverage(
         out[f"coverage_{pct}"] = cov_all
         out[f"calib_gap_{pct}"] = float(cov_all - alpha_val)
 
-        for sid, s_px in scale_map.items():
+        for sid, s_px in resolved_scale_map.items():
             mask = scale_ids == sid
             if np.any(mask):
                 cov_s = float(np.mean(hits[mask]))
@@ -342,6 +390,7 @@ def compute_dispersion_saturation(
 def compute_solver_trajectory_diagnostics(
     outputs: dict,
     target_y: torch.Tensor,
+    scale_map: dict[int, int | str] | None = None,
 ) -> dict[str, Any]:
     """Compute trajectory MAE over iterates Y_0 -> Y_1 -> Y_2, regional disagreement,
 
@@ -359,7 +408,7 @@ def compute_solver_trajectory_diagnostics(
     gt_reg = regional_sum(target_float, boxes, out_dtype=torch.float32)
 
     scale_ids = regions.scale_id
-    scale_map = {0: 32, 1: 64, 2: 128}
+    resolved_scale_map = resolve_scale_map(scale_ids, scale_map)
 
     results: dict[str, Any] = {}
 
@@ -368,7 +417,7 @@ def compute_solver_trajectory_diagnostics(
         abs_err = (reg_t - gt_reg).abs()
         results[f"mae_reg_y{t_idx}"] = float(abs_err.mean().item())
 
-        for sid, s_px in scale_map.items():
+        for sid, s_px in resolved_scale_map.items():
             mask = scale_ids == sid
             if mask.any():
                 results[f"mae_reg_{s_px}_y{t_idx}"] = float(abs_err[..., mask].mean().item())

@@ -104,6 +104,14 @@ ALLOWED_MODEL_KEYS = {
     "scale_gating_power",
     "dynamic_trust_gate",
     "trust_gate_init_bias",
+    # RMR-v17 additions
+    "density_curvature",
+    "use_barzilai_borwein",
+    "use_scale_entropy_trust",
+    # RMR-v18 additions
+    "perspective_scale_bias",
+    "perspective_horizon_gate",
+    "horizon_cutoff",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -199,10 +207,13 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         raise ValueError(f"Configuration must be a dictionary, got {type(cfg).__name__}")
 
     # Check top-level keys
-    for k in cfg:
-        if k not in ALLOWED_TOP_LEVEL:
+    for k in list(cfg.keys()):
+        clean_k = k.lstrip("\ufeff") if isinstance(k, str) else k
+        if clean_k != k:
+            cfg[clean_k] = cfg.pop(k)
+        if clean_k not in ALLOWED_TOP_LEVEL:
             raise ValueError(
-                f"Unknown top-level config key '{k}'. Allowed keys: {sorted(ALLOWED_TOP_LEVEL)}"
+                f"Unknown top-level config key '{clean_k}'. Allowed keys: {sorted(ALLOWED_TOP_LEVEL)}"
             )
 
     # Check sections

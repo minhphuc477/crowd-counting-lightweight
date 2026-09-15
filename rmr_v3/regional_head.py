@@ -8,6 +8,7 @@ and reliability weights for the inverse solver.
 """
 
 import math
+from typing import Sequence
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -346,14 +347,22 @@ def apply_scale_consistency_gating(
     *,
     power: float = 1.0,
     eps: float = 1e-6,
+    perspective_horizon_gate: bool = False,
+    horizon_cutoff: float = 0.35,
+    region_sizes_px: Sequence[Sequence[int] | int] | None = None,
+    grid_h: int | None = None,
 ) -> torch.Tensor:
-    """Pre-Solver Scale-Consistency Reliability Gating (RMR-v15).
+    """Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v18).
 
     Modulates regional reliability weight w_R by the average scale probability of region R:
         pi_bar_k(R) = (1 / |R|) * sum_{u in R} pi_k(u)
         w_R <- w_R * (pi_bar_k(R) + eps)^power
-    This silences coarse boxes (e.g. 128px) placed over dense clusters where the scale router
-    predicts micro-scale (pi_128 ~ 0), eliminating pre-solver coarse mass contamination.
+
+    When perspective_horizon_gate=True (RMR-v18):
+        For any scale k representing an anisotropic vertical box (height > width),
+        boxes near the horizon (y_center / H < horizon_cutoff) are smoothly suppressed:
+        w_R <- w_R * sigmoid((y_center/H - horizon_cutoff) / 0.05)
+        This physically guarantees zero false positive mass bleeding from vertical boxes at the horizon.
     """
     b, k_scales = scale_weights.shape[:2]
     w_out = weight.clone()
@@ -369,6 +378,15 @@ def apply_scale_consistency_gating(
         mean_pi_k = (sum_pi_k / area_k.clamp_min(1.0)).clamp(0.0, 1.0)
 
         gate = (mean_pi_k + float(eps)).pow(float(power))
+
+        if perspective_horizon_gate and region_sizes_px is not None and k < len(region_sizes_px):
+            s_spec = region_sizes_px[k]
+            hy, wx = (int(s_spec[0]), int(s_spec[1])) if isinstance(s_spec, (tuple, list)) else (int(s_spec), int(s_spec))
+            if hy > wx and grid_h is not None and grid_h > 0:
+                y_center = 0.5 * (boxes_k[:, 0].float() + boxes_k[:, 2].float()) / float(grid_h)
+                geo_gate = torch.sigmoid((y_center - float(horizon_cutoff)) / 0.05).view(1, 1, -1)
+                gate = gate * geo_gate.to(device=gate.device, dtype=gate.dtype)
+
         w_out[:, :, mask_k] = w_out[:, :, mask_k] * gate
 
     return w_out

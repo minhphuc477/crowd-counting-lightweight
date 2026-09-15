@@ -213,6 +213,27 @@ class RMRv3Config:
     dynamic_trust_gate: bool = False
     trust_gate_init_bias: float = 1.73  # sigmoid(1.73) ≈ 0.85
 
+    # ── RMR-v17 Multi-Scale Adaptive Measure Reconstruction additions ───────
+    # Quadratic density curvature warping in FineMeasureHead (1 parameter).
+    # Expands dynamic range on extreme crowd clumps (>1200 people) without feature saturation.
+    density_curvature: bool = False
+
+    # Barzilai-Borwein dynamic adaptive step size in unrolled SIRT solver (0 parameters).
+    # Adapts omega_t per iteration to local energy curvature, eliminating Dirac oscillations.
+    use_barzilai_borwein: bool = False
+
+    # Scale-entropy modulated trust region bound in unrolled SIRT solver (0 parameters).
+    # Scales trust bound by local scale router confidence map C(u) = 1 - H(pi) / log(K).
+    use_scale_entropy_trust: bool = False
+
+    # ── RMR-v18 Perspective Hybrid Window Dictionary additions ───────────────
+    # Learnable vertical linear perspective bias in ScaleRoutingHead (num_scales parameters).
+    perspective_scale_bias: bool = False
+
+    # Geometric horizon suppression for anisotropic vertical boxes in pre-solver gating (0 parameters).
+    perspective_horizon_gate: bool = False
+    horizon_cutoff: float = 0.35
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -424,6 +445,7 @@ class RMRv3(nn.Module):
             temp_softplus=cfg.temp_softplus,
             scale_conditioned=cfg.scale_conditioned_prior,
             num_scales=len(cfg.region_sizes_px),
+            density_curvature=getattr(cfg, "density_curvature", False),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -452,12 +474,13 @@ class RMRv3(nn.Module):
         else:
             self.coord_attn = None
 
-        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
+        # ── Dynamic Scale Routing (RMR-v10/v18) ──────────────────────────────
         if cfg.dynamic_scale_routing:
             self.scale_router: ScaleRoutingHead | None = ScaleRoutingHead(
                 in_channels=cfg.feature_width,
                 num_scales=len(cfg.region_sizes_px),
                 temperature=cfg.scale_router_temperature,
+                perspective_bias=getattr(cfg, "perspective_scale_bias", False),
             )
         else:
             self.scale_router = None
@@ -663,11 +686,19 @@ class RMRv3(nn.Module):
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
-        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v16) ────
+        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v16/v18) ────
         if self.cfg.pre_solver_scale_gating and scale_weights is not None:
             power = float(self.cfg.scale_gating_power)
             weight_solver = apply_scale_consistency_gating(
-                weight_solver, regions, scale_weights, power=power, eps=self.cfg.eps
+                weight_solver,
+                regions,
+                scale_weights,
+                power=power,
+                eps=self.cfg.eps,
+                perspective_horizon_gate=getattr(self.cfg, "perspective_horizon_gate", False),
+                horizon_cutoff=float(getattr(self.cfg, "horizon_cutoff", 0.35)),
+                region_sizes_px=self.cfg.region_sizes_px,
+                grid_h=h,
             )
 
         # Collect hurdle logit for loss computation (not detached)
@@ -731,6 +762,8 @@ class RMRv3(nn.Module):
             adjoint_mode=self.cfg.adjoint_mode,
             b_variance=b_variance,
             morozov_gamma=self.cfg.morozov_gamma,
+            use_barzilai_borwein=getattr(self.cfg, "use_barzilai_borwein", False),
+            use_scale_entropy_trust=getattr(self.cfg, "use_scale_entropy_trust", False),
         )
 
         y = solver_res["y"]

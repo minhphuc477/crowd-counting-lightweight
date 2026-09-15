@@ -50,12 +50,46 @@ class DiagnosticTracker:
         self.all_solver_weights: list[torch.Tensor] = []
         self.e_befores: list[float] = []
         self.e_afters: list[float] = []
-        self.w_scale_32: list[float] = []
-        self.w_scale_64: list[float] = []
-        self.w_scale_128: list[float] = []
-        self.scale_pi_32: list[float] = []
-        self.scale_pi_64: list[float] = []
-        self.scale_pi_128: list[float] = []
+
+        scale_sizes = tuple(getattr(model.cfg, "region_sizes_px", (32, 64, 128)))
+        self.scale_map: dict[int, int | str] = {
+            sid: (f"{s[0]}_{s[1]}" if isinstance(s, (tuple, list)) else int(s))
+            for sid, s in enumerate(scale_sizes)
+        }
+        self.w_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
+        self.pi_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
+
+    @property
+    def w_scale_32(self) -> list[float]:
+        return self.w_scales.get(32, [])
+
+    @property
+    def w_scale_64(self) -> list[float]:
+        return self.w_scales.get(64, [])
+
+    @property
+    def w_scale_128(self) -> list[float]:
+        return self.w_scales.get(128, [])
+
+    @property
+    def w_scale_64_32(self) -> list[float]:
+        return self.w_scales.get("64_32", [])
+
+    @property
+    def scale_pi_32(self) -> list[float]:
+        return self.pi_scales.get(32, [])
+
+    @property
+    def scale_pi_64(self) -> list[float]:
+        return self.pi_scales.get(64, [])
+
+    @property
+    def scale_pi_128(self) -> list[float]:
+        return self.pi_scales.get(128, [])
+
+    @property
+    def scale_pi_64_32(self) -> list[float]:
+        return self.pi_scales.get("64_32", [])
 
     @torch.no_grad()
     def update(self, outputs: dict[str, Any]) -> None:
@@ -72,21 +106,14 @@ class DiagnosticTracker:
 
         regions = outputs["regions"]
         w = outputs["solver_region_weight"]
-        m32 = regions.scale_id == 0
-        m64 = regions.scale_id == 1
-        m128 = regions.scale_id == 2
-        if m32.any():
-            self.w_scale_32.append(float(w[..., m32].mean().item()))
-        if m64.any():
-            self.w_scale_64.append(float(w[..., m64].mean().item()))
-        if m128.any():
-            self.w_scale_128.append(float(w[..., m128].mean().item()))
-
         scale_w = outputs.get("scale_weights", None)
-        if scale_w is not None and scale_w.shape[1] >= 3:
-            self.scale_pi_32.append(float(scale_w[:, 0].mean().item()))
-            self.scale_pi_64.append(float(scale_w[:, 1].mean().item()))
-            self.scale_pi_128.append(float(scale_w[:, 2].mean().item()))
+
+        for sid, s_val in self.scale_map.items():
+            mask = regions.scale_id == sid
+            if mask.any():
+                self.w_scales[s_val].append(float(w[..., mask].mean().item()))
+            if scale_w is not None and scale_w.shape[1] > sid:
+                self.pi_scales[s_val].append(float(scale_w[:, sid].mean().item()))
 
     def summarize(self) -> dict[str, float]:
         disps_np = torch.cat(self.all_disps).cpu().numpy() if self.all_disps else np.array([50.0])
@@ -119,12 +146,16 @@ class DiagnosticTracker:
             "solver_energy_before": e_b,
             "solver_energy_after": e_a,
             "solver_energy_reduction": e_red,
-            "weight_mean_32": float(np.mean(self.w_scale_32)) if self.w_scale_32 else 1.0,
-            "weight_mean_64": float(np.mean(self.w_scale_64)) if self.w_scale_64 else 1.0,
-            "weight_mean_128": float(np.mean(self.w_scale_128)) if self.w_scale_128 else 1.0,
-            "scale_pi_32": float(np.mean(self.scale_pi_32)) if self.scale_pi_32 else 0.0,
-            "scale_pi_64": float(np.mean(self.scale_pi_64)) if self.scale_pi_64 else 0.0,
-            "scale_pi_128": float(np.mean(self.scale_pi_128)) if self.scale_pi_128 else 0.0,
+            "weight_mean_16": float(np.mean(self.w_scales[16])) if self.w_scales.get(16) else 1.0,
+            "weight_mean_32": float(np.mean(self.w_scales[32])) if self.w_scales.get(32) else 1.0,
+            "weight_mean_64": float(np.mean(self.w_scales[64])) if self.w_scales.get(64) else 1.0,
+            "weight_mean_128": float(np.mean(self.w_scales[128])) if self.w_scales.get(128) else 1.0,
+            "scale_pi_16": float(np.mean(self.pi_scales[16])) if self.pi_scales.get(16) else 0.0,
+            "scale_pi_32": float(np.mean(self.pi_scales[32])) if self.pi_scales.get(32) else 0.0,
+            "scale_pi_64": float(np.mean(self.pi_scales[64])) if self.pi_scales.get(64) else 0.0,
+            "scale_pi_128": float(np.mean(self.pi_scales[128])) if self.pi_scales.get(128) else 0.0,
+            "weight_mean_64_32": float(np.mean(self.w_scales["64_32"])) if self.w_scales.get("64_32") else 1.0,
+            "scale_pi_64_32": float(np.mean(self.pi_scales["64_32"])) if self.pi_scales.get("64_32") else 0.0,
         }
 
 

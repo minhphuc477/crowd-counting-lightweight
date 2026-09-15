@@ -26,10 +26,12 @@ class ScaleRoutingHead(nn.Module):
         in_channels: int = 32,
         num_scales: int = 3,
         temperature: float = 1.0,
+        perspective_bias: bool = False,
     ) -> None:
         super().__init__()
         self.num_scales = int(num_scales)
         self.temperature = float(max(temperature, 0.1))
+        self.perspective_bias = bool(perspective_bias)
 
         self.dw = nn.Conv2d(
             in_channels,
@@ -48,11 +50,15 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        # Initialize pointwise conv: small normal weights ensure clean gradient flow
-        # through depthwise and norm layers from step 0, while zero bias preserves
-        # near-uniform scale prior Softmax(0, 0, ...) ≈ (1/K, 1/K, ...).
-        nn.init.normal_(self.pw.weight, std=0.01)
+        # Initialize pointwise conv to zeros ensuring exact uniform scale prior:
+        # Softmax(0, 0, ...) = (1/K, 1/K, ...) so the model starts with unbiased isotropic multi-scale observation.
+        nn.init.zeros_(self.pw.weight)
         nn.init.zeros_(self.pw.bias)
+
+        if self.perspective_bias:
+            # Learnable linear vertical perspective bias (initialized to 0)
+            # Modulates scale logits based on normalized vertical coordinate v = y/H in [-0.5, 0.5]
+            self.persp_weight = nn.Parameter(torch.zeros(self.num_scales))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
@@ -65,6 +71,10 @@ class ScaleRoutingHead(nn.Module):
         """
         feats = self.act(self.norm(self.dw(x)))
         logits = self.pw(feats)  # [B, num_scales, H, W]
+        if self.perspective_bias:
+            h = x.shape[-2]
+            v_grid = torch.linspace(-0.5, 0.5, h, device=x.device, dtype=logits.dtype).view(1, 1, h, 1)
+            logits = logits + self.persp_weight.view(1, self.num_scales, 1, 1).to(dtype=logits.dtype) * v_grid
         temp = float(self.temperature)
         pi = F.softmax(logits / temp, dim=1)
         return pi
