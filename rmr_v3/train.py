@@ -317,10 +317,20 @@ def main() -> None:
 
     resume_ckpt = None
     if args.resume:
+        resume_path = Path(args.resume)
+        if resume_path.is_dir():
+            for cand in ["last.pt", "best_val_mae.pt"]:
+                if (resume_path / cand).is_file():
+                    resume_path = resume_path / cand
+                    break
+            else:
+                raise FileNotFoundError(
+                    f"--resume was given directory '{args.resume}', but neither 'last.pt' nor 'best_val_mae.pt' was found inside it."
+                )
         try:
-            resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+            resume_ckpt = torch.load(resume_path, map_location="cpu", weights_only=False)
         except TypeError:
-            resume_ckpt = torch.load(args.resume, map_location="cpu")
+            resume_ckpt = torch.load(resume_path, map_location="cpu")
         current_commit, _ = get_git_info()
         ckpt_commit = str(resume_ckpt.get("git_commit", resume_ckpt.get("provenance", {}).get("git_commit", "unknown")))
         validate_resume_compatibility(
