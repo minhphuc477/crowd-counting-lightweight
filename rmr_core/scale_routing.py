@@ -48,9 +48,10 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        # Initialize to uniform scale prior: Softmax(0, 0, ...) = (1/K, 1/K, ...)
-        # ensuring the model begins with exact isotropic multi-scale observation at step 0.
-        nn.init.zeros_(self.pw.weight)
+        # Initialize pointwise conv: small normal weights ensure clean gradient flow
+        # through depthwise and norm layers from step 0, while zero bias preserves
+        # near-uniform scale prior Softmax(0, 0, ...) ≈ (1/K, 1/K, ...).
+        nn.init.normal_(self.pw.weight, std=0.01)
         nn.init.zeros_(self.pw.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

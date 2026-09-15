@@ -21,7 +21,11 @@ from rmr_core.operators import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
-from .regional_head import ProbabilisticRegionalEvidenceHead, reliability_from_nb
+from .regional_head import (
+    ProbabilisticRegionalEvidenceHead,
+    apply_scale_consistency_gating,
+    reliability_from_nb,
+)
 from .solver import unrolled_sirt_solver
 
 
@@ -265,7 +269,7 @@ class RMRv3Config:
             raise ValueError(
                 f"morozov_gamma must be non-negative, got {self.morozov_gamma}"
             )
-        if self.reliability_mode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
+        if self.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
                 f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
             )
@@ -356,7 +360,7 @@ class RMRv3(nn.Module):
         if cfg.omega <= 0:
             raise ValueError("omega must be > 0")
 
-        if cfg.reliability_mode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
+        if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
                 f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
             )
@@ -418,7 +422,7 @@ class RMRv3(nn.Module):
             width=cfg.feature_width,
             init_bias=init_bias,
             temp_softplus=cfg.temp_softplus,
-            scale_conditioned=getattr(cfg, "scale_conditioned_prior", False),
+            scale_conditioned=cfg.scale_conditioned_prior,
             num_scales=len(cfg.region_sizes_px),
         )
 
@@ -487,10 +491,10 @@ class RMRv3(nn.Module):
             self.tdsg = None
 
         # ── Convex Dynamic Trust Gate (RMR-v15) ──────────────────────────────
-        if getattr(cfg, "dynamic_trust_gate", False):
+        if cfg.dynamic_trust_gate:
             self.trust_gate: nn.Linear | None = nn.Linear(cfg.feature_width, 1)
             nn.init.zeros_(self.trust_gate.weight)
-            init_tb = getattr(cfg, "trust_gate_init_bias", 1.73)
+            init_tb = cfg.trust_gate_init_bias
             nn.init.constant_(self.trust_gate.bias, float(init_tb))
         else:
             self.trust_gate = None
@@ -659,10 +663,9 @@ class RMRv3(nn.Module):
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
-        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15) ────────
-        if getattr(self.cfg, "pre_solver_scale_gating", False) and scale_weights is not None:
-            from .regional_head import apply_scale_consistency_gating
-            power = float(getattr(self.cfg, "scale_gating_power", 1.0))
+        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v16) ────
+        if self.cfg.pre_solver_scale_gating and scale_weights is not None:
+            power = float(self.cfg.scale_gating_power)
             weight_solver = apply_scale_consistency_gating(
                 weight_solver, regions, scale_weights, power=power, eps=self.cfg.eps
             )

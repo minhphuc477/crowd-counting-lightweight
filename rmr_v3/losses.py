@@ -609,7 +609,7 @@ def physical_scale_alignment_loss(
         target_y = target_y.unsqueeze(1)
 
     b, k, h, w = scale_weights.shape
-    if k != 3:
+    if k < 2:
         return (scale_weights * 0.0).sum()
 
     work_dtype = scale_weights.dtype if scale_weights.dtype in (torch.float32, torch.float64) else torch.float32
@@ -620,15 +620,15 @@ def physical_scale_alignment_loss(
     delta_tau = max(float(tau_dense) - float(tau_sparse), 1e-6)
     s = torch.clamp((local_density - float(tau_sparse)) / delta_tau, 0.0, 1.0)
 
-    # Piecewise-linear barycentric coordinates on Delta^2
-    # s in [0, 0.5]: scale 2 (sparse) to scale 1 (moderate)
-    # s in [0.5, 1.0]: scale 1 (moderate) to scale 0 (dense)
-    s_half = s <= 0.5
-    pi_2 = torch.where(s_half, 1.0 - 2.0 * s, torch.zeros_like(s))
-    pi_1 = torch.where(s_half, 2.0 * s, 2.0 * (1.0 - s))
-    pi_0 = torch.where(s_half, torch.zeros_like(s), 2.0 * (s - 0.5))
-
-    target_pi = torch.cat([pi_0, pi_1, pi_2], dim=1).to(dtype=work_dtype)  # [B, 3, H, W]
+    # General piece-wise linear barycentric target on Delta^{K-1}
+    # Density s in [0, 1] maps from coarsest scale (K-1) at s=0 to finest scale (0) at s=1
+    u = s * float(k - 1)  # [B, 1, H, W] in [0, K-1]
+    target_pi_list = []
+    for scale_idx in range(k):
+        center = float(k - 1 - scale_idx)
+        weight_k = torch.clamp(1.0 - torch.abs(u - center), min=0.0)
+        target_pi_list.append(weight_k)
+    target_pi = torch.cat(target_pi_list, dim=1).to(dtype=work_dtype)  # [B, K, H, W]
 
     pred_pi = scale_weights.to(dtype=work_dtype).clamp(min=float(eps), max=1.0)
     target_log_target = torch.where(

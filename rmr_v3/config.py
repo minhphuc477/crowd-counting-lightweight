@@ -329,7 +329,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"morozov_gamma must be non-negative, got {m_gamma}")
         if "reliability_mode" in m_cfg:
             rmode = str(m_cfg["reliability_mode"])
-            if rmode not in ("nb_rate_variance", "snr", "hybrid_hurdle"):
+            if rmode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
                 raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
 
     # Validate loss section — Stage 2 extensions
