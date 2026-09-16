@@ -20,6 +20,7 @@ import yaml
 from rmr_v3.model import RMRv3, RMRv3Config, MicroCoordAttn
 from rmr_v3.solver import unrolled_sirt_solver
 from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
+from rmr_v3.config import validate_v3_config
 from rmr_core.operators import build_multiscale_regions, regional_sum
 
 
@@ -32,6 +33,7 @@ class TestRMRv20ParameterBudget:
         with open(cfg_path, "r", encoding="utf-8") as f:
             raw_cfg = yaml.safe_load(f)
 
+        validate_v3_config(raw_cfg)
         m_cfg = raw_cfg["model"]
         config = RMRv3Config.from_dict(m_cfg, pretrained=False)
         model = RMRv3(config)
@@ -256,6 +258,7 @@ class TestRMRv20SuiteIntegration:
         with open(cfg_path, "r", encoding="utf-8") as f:
             raw_cfg = yaml.safe_load(f)
 
+        validate_v3_config(raw_cfg)
         m_cfg = raw_cfg["model"]
         config = RMRv3Config.from_dict(m_cfg, pretrained=False)
         model = RMRv3(config)

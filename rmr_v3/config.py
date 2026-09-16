@@ -120,6 +120,15 @@ ALLOWED_MODEL_KEYS = {
     "curvature_dense_threshold",
     "curvature_gate_beta",
     "curvature_pool_kernel",
+    # RMR-v20 additions
+    "use_micro_coord_attn",
+    "micro_coord_reduction",
+    "use_nesterov_momentum",
+    "adaptive_relaxation",
+    "adaptive_relax_sparse",
+    "adaptive_relax_dense_boost",
+    "adaptive_relax_threshold",
+    "adaptive_relax_scale",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -171,6 +180,12 @@ ALLOWED_LOSS_KEYS = {
     "scale_align_kernel",
     # RMR-v14 additions
     "scale_align_mask_bg",
+    # RMR-v20 additions
+    "density_loss_scaling",
+    "dense_loss_thresh",
+    "dense_loss_norm",
+    "dense_loss_alpha",
+    "dense_loss_max_boost",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -350,6 +365,26 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             rmode = str(m_cfg["reliability_mode"])
             if rmode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
                 raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
+        if "micro_coord_reduction" in m_cfg:
+            mcr = int(m_cfg["micro_coord_reduction"])
+            if mcr <= 0:
+                raise ValueError(f"micro_coord_reduction must be positive, got {mcr}")
+        if "adaptive_relax_sparse" in m_cfg:
+            ars = float(m_cfg["adaptive_relax_sparse"])
+            if ars <= 0.0:
+                raise ValueError(f"adaptive_relax_sparse must be strictly positive, got {ars}")
+        if "adaptive_relax_dense_boost" in m_cfg:
+            ardb = float(m_cfg["adaptive_relax_dense_boost"])
+            if ardb < 0.0:
+                raise ValueError(f"adaptive_relax_dense_boost must be non-negative, got {ardb}")
+        if "adaptive_relax_threshold" in m_cfg:
+            art = float(m_cfg["adaptive_relax_threshold"])
+            if art <= 0.0:
+                raise ValueError(f"adaptive_relax_threshold must be strictly positive, got {art}")
+        if "adaptive_relax_scale" in m_cfg:
+            arsc = float(m_cfg["adaptive_relax_scale"])
+            if arsc <= 0.0:
+                raise ValueError(f"adaptive_relax_scale must be strictly positive, got {arsc}")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
@@ -428,6 +463,22 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             sak = int(l_cfg_pre["scale_align_kernel"])
             if sak <= 0 or sak % 2 == 0:
                 raise ValueError(f"scale_align_kernel must be a positive odd integer, got {sak}")
+        if "dense_loss_thresh" in l_cfg_pre:
+            dlt = float(l_cfg_pre["dense_loss_thresh"])
+            if dlt <= 0.0:
+                raise ValueError(f"dense_loss_thresh must be strictly positive, got {dlt}")
+        if "dense_loss_norm" in l_cfg_pre:
+            dln = float(l_cfg_pre["dense_loss_norm"])
+            if dln <= 0.0:
+                raise ValueError(f"dense_loss_norm must be strictly positive, got {dln}")
+        if "dense_loss_alpha" in l_cfg_pre:
+            dla = float(l_cfg_pre["dense_loss_alpha"])
+            if dla < 0.0:
+                raise ValueError(f"dense_loss_alpha must be non-negative, got {dla}")
+        if "dense_loss_max_boost" in l_cfg_pre:
+            dlmb = float(l_cfg_pre["dense_loss_max_boost"])
+            if dlmb < 0.0:
+                raise ValueError(f"dense_loss_max_boost must be non-negative, got {dlmb}")
 
 
     l_cfg = cfg.get("loss", {})
