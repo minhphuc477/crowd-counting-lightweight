@@ -892,8 +892,10 @@ def compute_rmr_v3_losses(
         losses["hurdle_bce"] = zero_val
         losses["trunc_nb"] = zero_val
 
-    # ── RMR-v13/v14 Physical Scale Alignment Loss ────────────────────────────
-    scale_weights = outputs.get("scale_weights", None)
+    # ── RMR-v13/v14/v19 Physical Scale Alignment Loss ────────────────────────
+    # In RMR-v19 with FactorizedRoutingHead, pi_scale contains the 3-scale marginal distribution
+    # (areas 1024 < 4096 < 16384), preserving 100% strict monotonicity and preventing scale starvation.
+    scale_weights = outputs.get("pi_scale", outputs.get("scale_weights", None))
     if scale_weights is not None and cfg.lambda_scale_align > 0.0:
         losses["scale_align"] = physical_scale_alignment_loss(
             scale_weights=scale_weights,

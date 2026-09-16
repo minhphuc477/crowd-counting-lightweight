@@ -54,7 +54,7 @@ from .operators import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
-from .scale_routing import ScaleRoutingHead
+from .scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from .losses import (
     balanced_smooth_l1,
     block_sum_2d,
@@ -128,6 +128,7 @@ __all__ = [
     "regional_adjoint",
     "regional_sum",
     "ScaleRoutingHead",
+    "FactorizedRoutingHead",
     "weighted_coverage",
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",

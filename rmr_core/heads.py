@@ -38,6 +38,10 @@ class FineMeasureHead(nn.Module):
         scale_conditioned: bool = False,
         num_scales: int = 4,
         density_curvature: bool = False,
+        gated_density_curvature: bool = False,
+        curvature_dense_threshold: float = 0.15,
+        curvature_gate_beta: float = 0.03,
+        curvature_pool_kernel: int = 8,
     ):
         super().__init__()
         self.body = nn.Sequential(
@@ -55,6 +59,10 @@ class FineMeasureHead(nn.Module):
             self.tau = nn.Parameter(torch.ones(1))
 
         self.density_curvature = bool(density_curvature)
+        self.gated_density_curvature = bool(gated_density_curvature)
+        self.curvature_dense_threshold = float(curvature_dense_threshold)
+        self.curvature_gate_beta = float(curvature_gate_beta)
+        self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
             # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.0003
             # providing seamless Step 0 identity with vanilla softplus
@@ -96,7 +104,30 @@ class FineMeasureHead(nn.Module):
             alpha_eff = F.softplus(self.curvature_alpha)
             orig_dtype = y_base.dtype
             y_base_f32 = y_base.float()
-            y_out_f32 = y_base_f32 + alpha_eff.float() * (y_base_f32 ** 2)
+            if self.gated_density_curvature:
+                # Spatially-conditioned density gate:
+                # Computes local average density in a 32px window (8 cells at stride 4)
+                k_pool = int(self.curvature_pool_kernel)
+                pad = k_pool // 2
+                y_local = F.avg_pool2d(
+                    y_base_f32,
+                    kernel_size=k_pool,
+                    stride=1,
+                    padding=pad,
+                    count_include_pad=False,
+                )
+                if y_local.shape[-2:] != y_base_f32.shape[-2:]:
+                    y_local = y_local[..., :y_base_f32.shape[-2], :y_base_f32.shape[-1]]
+                # Smooth Sigmoid gating:
+                # When y_local < tau_dense (cobblestone, pavement, facades), gate -> 0, eliminating noise squaring
+                # When y_local >= tau_dense (dense crowd clusters), gate -> 1, providing full quadratic expansion
+                tau_dense = float(self.curvature_dense_threshold)
+                beta = float(max(self.curvature_gate_beta, 1e-4))
+                gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
+                curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+            else:
+                curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+            y_out_f32 = y_base_f32 + curv_term
             return y_out_f32.to(orig_dtype)
         return y_base
 

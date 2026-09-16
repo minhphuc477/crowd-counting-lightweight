@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from rmr_core.backbones import MobileNetV4Backbone
 from rmr_core.heads import FineMeasureHead
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
-from rmr_core.scale_routing import ScaleRoutingHead
+from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput
 from rmr_core.operators import (
     RegionSet,
@@ -234,6 +234,21 @@ class RMRv3Config:
     perspective_horizon_gate: bool = False
     horizon_cutoff: float = 0.35
 
+    # ── RMR-v19 Decoupled 2D Factorized Routing & Density-Gated Curvature ─────
+    # Decouples scale (S=3) and aspect ratio (A=2) via FactorizedRoutingHead (+68 params).
+    # Eliminates scale starvation and preserves strict monotonicity in scale alignment loss.
+    factorized_scale_routing: bool = False
+    num_marginal_scales: int = 3
+    num_aspect_ratios: int = 2
+
+    # Spatially-conditioned density gate on quadratic curvature (0 parameters).
+    # Shuts down curvature on low-density pavement/facades (IMG_113) while preserving
+    # dynamic range expansion in dense crowd clusters.
+    gated_density_curvature: bool = False
+    curvature_dense_threshold: float = 0.15
+    curvature_gate_beta: float = 0.03
+    curvature_pool_kernel: int = 8
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -375,11 +390,11 @@ class RMRv3(nn.Module):
                 "RMR-v3 registered method requires include_full_image=False"
             )
 
-        if cfg.iterations < 1:
-            raise ValueError("iterations must be >= 1")
+        if cfg.enable_solver and cfg.iterations < 1:
+            raise ValueError("iterations must be >= 1 when enable_solver=True")
 
-        if cfg.omega <= 0:
-            raise ValueError("omega must be > 0")
+        if cfg.enable_solver and cfg.omega <= 0:
+            raise ValueError("omega must be > 0 when enable_solver=True")
 
         if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
@@ -446,6 +461,10 @@ class RMRv3(nn.Module):
             scale_conditioned=cfg.scale_conditioned_prior,
             num_scales=len(cfg.region_sizes_px),
             density_curvature=getattr(cfg, "density_curvature", False),
+            gated_density_curvature=getattr(cfg, "gated_density_curvature", False),
+            curvature_dense_threshold=getattr(cfg, "curvature_dense_threshold", 0.15),
+            curvature_gate_beta=getattr(cfg, "curvature_gate_beta", 0.03),
+            curvature_pool_kernel=getattr(cfg, "curvature_pool_kernel", 8),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -474,9 +493,17 @@ class RMRv3(nn.Module):
         else:
             self.coord_attn = None
 
-        # ── Dynamic Scale Routing (RMR-v10/v18) ──────────────────────────────
-        if cfg.dynamic_scale_routing:
-            self.scale_router: ScaleRoutingHead | None = ScaleRoutingHead(
+        # ── Dynamic Scale Routing (RMR-v10/v18/v19) ──────────────────────────
+        if getattr(cfg, "factorized_scale_routing", False):
+            self.scale_router: FactorizedRoutingHead | ScaleRoutingHead | None = FactorizedRoutingHead(
+                in_channels=cfg.feature_width,
+                num_scales=getattr(cfg, "num_marginal_scales", 3),
+                num_aspect_ratios=getattr(cfg, "num_aspect_ratios", 2),
+                temperature=cfg.scale_router_temperature,
+                perspective_bias=getattr(cfg, "perspective_scale_bias", True),
+            )
+        elif cfg.dynamic_scale_routing:
+            self.scale_router = ScaleRoutingHead(
                 in_channels=cfg.feature_width,
                 num_scales=len(cfg.region_sizes_px),
                 temperature=cfg.scale_router_temperature,
@@ -606,10 +633,16 @@ class RMRv3(nn.Module):
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
-        # ── Dynamic Scale Routing (RMR-v10) ──────────────────────────────────
+        # ── Dynamic Scale Routing (RMR-v10/v19) ──────────────────────────────
         scale_weights = None
+        pi_scale = None
+        pi_aspect = None
         if self.scale_router is not None:
-            scale_weights = self.scale_router(p4)
+            router_out = self.scale_router(p4)
+            if isinstance(router_out, tuple):
+                scale_weights, pi_scale, pi_aspect = router_out
+            else:
+                scale_weights = router_out
 
         z0 = self.fine_head.forward_logits(p4)
         y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
@@ -730,6 +763,10 @@ class RMRv3(nn.Module):
             }
             if scale_weights is not None:
                 out["scale_weights"] = scale_weights
+            if pi_scale is not None:
+                out["pi_scale"] = pi_scale
+            if pi_aspect is not None:
+                out["pi_aspect"] = pi_aspect
             if hurdle_logit is not None:
                 out["hurdle_logit"] = hurdle_logit
             if fg_logit is not None:
@@ -809,6 +846,10 @@ class RMRv3(nn.Module):
 
         if scale_weights is not None:
             out["scale_weights"] = scale_weights
+        if pi_scale is not None:
+            out["pi_scale"] = pi_scale
+        if pi_aspect is not None:
+            out["pi_aspect"] = pi_aspect
         if hurdle_logit is not None:
             out["hurdle_logit"] = hurdle_logit
         if fg_logit is not None:

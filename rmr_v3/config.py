@@ -112,6 +112,14 @@ ALLOWED_MODEL_KEYS = {
     "perspective_scale_bias",
     "perspective_horizon_gate",
     "horizon_cutoff",
+    # RMR-v19 additions
+    "factorized_scale_routing",
+    "num_marginal_scales",
+    "num_aspect_ratios",
+    "gated_density_curvature",
+    "curvature_dense_threshold",
+    "curvature_gate_beta",
+    "curvature_pool_kernel",
 }
 
 ALLOWED_LOSS_KEYS = {

@@ -78,3 +78,132 @@ class ScaleRoutingHead(nn.Module):
         temp = float(self.temperature)
         pi = F.softmax(logits / temp, dim=1)
         return pi
+
+
+class FactorizedRoutingHead(nn.Module):
+    """Decoupled 2D Spatial Scale and Aspect Ratio Routing Head for RMR (RMR-v19).
+
+    Decouples the observation dictionary into:
+      1. Marginal Scale Distribution pi_scale(s | u) in Delta^{S-1} over S strictly
+         monotonic isotropic scales (e.g. S=3: [32, 64, 128] px).
+      2. Aspect Ratio Distribution pi_aspect(rho | u) in Delta^{A-1} over A aspect ratios
+         (e.g. A=2: [1:1 (square), 2:1 (vertical rectangle)]).
+
+    Joint probability distribution for the 4-window dictionary [32x32, 64x64, 64x32, 128x128]:
+      - pi_0 = pi_scale[0]                       (32x32 square)
+      - pi_1 = pi_scale[1] * pi_aspect[0]        (64x64 square)
+      - pi_2 = pi_scale[1] * pi_aspect[1]        (64x32 vertical rectangle)
+      - pi_3 = pi_scale[2]                       (128x128 square)
+
+    Properties:
+      - Exact Partition of Unity: sum_{k=0}^3 pi_k(u) = 1.0 identically.
+      - Marginal Scale Conservation: pi_1 + pi_2 = pi_scale[1], mathematically preventing
+        scale starvation of moderate crowds.
+      - Strict Monotonicity: physical_scale_alignment_loss operates exclusively on pi_scale
+        whose areas [1024, 4096, 16384] are strictly monotonic.
+      - Perspective Modulation: pi_aspect is modulated by normalized vertical elevation
+        v = y/H in [-0.5, 0.5] via learnable persp_weight_aspect.
+
+    Parameter budget:
+      - Shared Depthwise 3x3: in_channels * 1 * 9 + in_channels = 320 params.
+      - Shared GroupNorm(8, in_channels): 2 * in_channels = 64 params.
+      - Pointwise Conv for Scale (S=3): in_channels * 3 + 3 = 99 params.
+      - Pointwise Conv for Aspect (A=2): in_channels * 2 + 2 = 66 params.
+      - Perspective bias for Aspect: 2 params.
+      Total trainable parameters: 551 params (< 600 budget, +68 over standard router).
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 32,
+        num_scales: int = 3,
+        num_aspects: int = 2,
+        temperature: float = 1.0,
+        perspective_bias: bool = True,
+        num_aspect_ratios: int | None = None,
+    ) -> None:
+        super().__init__()
+        if num_aspect_ratios is not None:
+            num_aspects = num_aspect_ratios
+        self.num_scales = int(num_scales)
+        self.num_aspects = int(num_aspects)
+        self.temperature = float(max(temperature, 0.1))
+        self.perspective_bias = bool(perspective_bias)
+
+        # Shared feature extraction carrier
+        self.dw = nn.Conv2d(
+            in_channels,
+            in_channels,
+            kernel_size=3,
+            padding=1,
+            groups=in_channels,
+            bias=True,
+        )
+        self.norm = nn.GroupNorm(8, in_channels)
+        self.act = nn.ReLU(inplace=True)
+
+        # Branch 1: Marginal Scale Head (S=3: 32, 64, 128)
+        self.pw_scale = nn.Conv2d(
+            in_channels,
+            self.num_scales,
+            kernel_size=1,
+            bias=True,
+        )
+        nn.init.zeros_(self.pw_scale.weight)
+        nn.init.zeros_(self.pw_scale.bias)
+
+        # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
+        self.pw_aspect = nn.Conv2d(
+            in_channels,
+            self.num_aspects,
+            kernel_size=1,
+            bias=True,
+        )
+        nn.init.zeros_(self.pw_aspect.weight)
+        nn.init.zeros_(self.pw_aspect.bias)
+
+        if self.perspective_bias:
+            # Aspect-specific vertical perspective bias
+            # Positive weight on aspect 1 (2:1 vertical) increases vertical probability in foreground (v > 0)
+            self.persp_weight_aspect = nn.Parameter(torch.zeros(self.num_aspects))
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass.
+
+        Args:
+            x: Feature map [B, C, H, W] from carrier neck.
+
+        Returns:
+            joint_pi:  Joint probability map [B, 4, H, W] summing to 1.0 across dim 1.
+            pi_scale:  Marginal scale probability map [B, 3, H, W] summing to 1.0 across dim 1.
+            pi_aspect: Aspect ratio probability map [B, 2, H, W] summing to 1.0 across dim 1.
+        """
+        feats = self.act(self.norm(self.dw(x)))
+        logits_scale = self.pw_scale(feats)   # [B, 3, H, W]
+        logits_aspect = self.pw_aspect(feats) # [B, 2, H, W]
+
+        if self.perspective_bias:
+            h = x.shape[-2]
+            # Normalized vertical coordinate v in [-0.5, 0.5]: top is -0.5 (horizon), bottom is +0.5 (foreground)
+            v_grid = torch.linspace(-0.5, 0.5, h, device=x.device, dtype=logits_aspect.dtype).view(1, 1, h, 1)
+            logits_aspect = logits_aspect + self.persp_weight_aspect.view(1, self.num_aspects, 1, 1).to(dtype=logits_aspect.dtype) * v_grid
+
+        temp = float(self.temperature)
+        pi_scale = F.softmax(logits_scale / temp, dim=1)   # [B, 3, H, W]
+        pi_aspect = F.softmax(logits_aspect / temp, dim=1) # [B, 2, H, W]
+
+        # Construct 4-window joint probability tensor:
+        # Scale 0: 32x32 square -> pi_scale[:, 0:1]
+        # Scale 1: 64x64 square -> pi_scale[:, 1:2] * pi_aspect[:, 0:1]
+        # Scale 1: 64x32 vertical -> pi_scale[:, 1:2] * pi_aspect[:, 1:2]
+        # Scale 2: 128x128 square -> pi_scale[:, 2:3]
+        pi_0 = pi_scale[:, 0:1]
+        pi_1 = pi_scale[:, 1:2] * pi_aspect[:, 0:1]
+        pi_2 = pi_scale[:, 1:2] * pi_aspect[:, 1:2]
+        pi_3 = pi_scale[:, 2:3]
+
+        joint_pi = torch.cat([pi_0, pi_1, pi_2, pi_3], dim=1)  # [B, 4, H, W]
+        return joint_pi, pi_scale, pi_aspect
+

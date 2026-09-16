@@ -236,7 +236,11 @@ def format_dynamic_training_banner(
         rel_tag = "SNR" if rel_m == "snr" else "NB-RateVar"
         w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else f"Weighted({rel_tag})"
         solver_parts.append(f"Weighting={w_mode}")
-        if getattr(m_cfg, "dynamic_scale_routing", False):
+        if getattr(m_cfg, "factorized_scale_routing", False):
+            s_num = getattr(m_cfg, "num_marginal_scales", 3)
+            a_num = getattr(m_cfg, "num_aspect_ratios", 2)
+            solver_parts.append(f"ScaleRouting=Factorized2D(S={s_num}, A={a_num})")
+        elif getattr(m_cfg, "dynamic_scale_routing", False):
             k_num = len(getattr(m_cfg, "region_sizes_px", [32, 64, 128]))
             solver_parts.append(f"ScaleRouting=Dynamic(K={k_num})")
         else:
@@ -251,6 +255,10 @@ def format_dynamic_training_banner(
         density_head = "FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])"
     else:
         density_head = "FineMeasureHead (Calibrated Log-Space Softplus)"
+    if getattr(m_cfg, "gated_density_curvature", False):
+        density_head += " + GatedCurvature"
+    elif getattr(m_cfg, "density_curvature", False):
+        density_head += " + QuadraticCurvature"
     if getattr(m_cfg, "foreground_gate", False):
         density_head += " + FG-Gate(33p)"
 
