@@ -50,8 +50,9 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        # Initialize pointwise conv to zeros ensuring exact uniform scale prior:
-        # Softmax(0, 0, ...) = (1/K, 1/K, ...) so the model starts with unbiased isotropic multi-scale observation.
+        # Zero-initialization: ensures exact uniform scale prior Softmax(0, 0, ...) = (1/K, 1/K, ...)
+        # at step 0 (satisfying Theorem 1). At step 0, pw receives active gradients; at step 1+,
+        # non-zero pw weights seamlessly unmask active gradient flow to the upstream depthwise conv and GroupNorm.
         nn.init.zeros_(self.pw.weight)
         nn.init.zeros_(self.pw.bias)
 

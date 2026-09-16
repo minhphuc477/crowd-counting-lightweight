@@ -476,10 +476,7 @@ def curvature_power_loss(
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
     gate_sum = gate.sum()
-    if gate_sum > 0:
-        return (gate * diff_sq).sum() / gate_sum
-    else:
-        return (y_f * 0.0).sum()  # Maintain autograd computational graph
+    return (gate * diff_sq).sum() / gate_sum.clamp_min(1.0)
 
 
 def topk_hard_background_loss(
@@ -506,7 +503,7 @@ def topk_hard_background_loss(
 
     bg_preds = torch.clamp_min(y_f[bg_mask], 0.0)
     num_bg = bg_preds.numel()
-    k = max(1, int(float(ratio) * num_bg))
+    k = min(num_bg, max(1, int(float(ratio) * num_bg)))
 
     topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
     return torch.mean(topk_vals.square())
@@ -658,10 +655,8 @@ def physical_scale_alignment_loss(
 
     if mask_background:
         fg_mask = (local_density >= float(tau_sparse)).float().squeeze(1)  # [B, H, W]
-        if fg_mask.sum() > 0:
-            return (kl_per_pixel * fg_mask).sum() / fg_mask.sum().clamp_min(1.0)
-        else:
-            return (kl_per_pixel * 0.0).sum()
+        fg_sum = fg_mask.sum().clamp_min(1.0)
+        return (kl_per_pixel * fg_mask).sum() / fg_sum
 
     return kl_per_pixel.mean()
 
@@ -706,6 +701,9 @@ def compute_rmr_v3_losses(
 ) -> dict[str, torch.Tensor]:
     if cfg is None:
         cfg = RMRv3LossConfig()
+
+    if target_y.ndim == 3:
+        target_y = target_y.unsqueeze(1)
 
     # ── RMR-v21 Elementwise High-Density Sample-Level Loss Scaling (0 params) ──
     # Isolates each sample in the batch: computes L_i per crop and weights by w_i

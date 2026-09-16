@@ -137,10 +137,18 @@ def regional_sum(
 ) -> torch.Tensor:
     """Linear regional-count operator A: [B,C,H,W] -> [B,C,M].
 
+    Accepts [B,C,H,W], [B,H,W], or [H,W] inputs.
     Always evaluates prefix accumulation and 4-point rectangle difference in FP32
     before converting to out_dtype (defaults to x.dtype).
     """
     orig_dtype = x.dtype if out_dtype is None else out_dtype
+    if x.ndim == 3:
+        x = x.unsqueeze(1)
+    elif x.ndim == 2:
+        x = x.unsqueeze(0).unsqueeze(0)
+    elif x.ndim != 4:
+        raise ValueError(f"regional_sum expects 2D, 3D, or 4D tensor, got shape {tuple(x.shape)}")
+
     pref = prefix2d(x, preserve_fp32=True)
     res = rectangle_sum_from_prefix(pref, boxes)
     return res.to(orig_dtype) if res.dtype != orig_dtype else res
@@ -155,15 +163,17 @@ def regional_adjoint(
 ) -> torch.Tensor:
     """Exact adjoint A^T of rectangular summation.
 
-    values: [B,C,M]
+    values: [B,C,M] or [B,M]
     boxes:  [M,4]
     returns [B,C,H,W]
 
     Uses a 2-D difference buffer followed by cumulative sums.
     Forces FP32 accumulation during autocast to maintain exact precision.
     """
-    if values.ndim != 3:
-        raise ValueError(f"values must be [B,C,M], got {tuple(values.shape)}")
+    if values.ndim == 2:
+        values = values.unsqueeze(1)
+    elif values.ndim != 3:
+        raise ValueError(f"values must be [B,C,M] or [B,M], got {tuple(values.shape)}")
     b, c, m = values.shape
     if boxes.shape != (m, 4):
         raise ValueError(f"boxes must be [{m},4], got {tuple(boxes.shape)}")
@@ -624,8 +634,8 @@ def _build_multiscale_regions_cached(
             boxes.append(full)
             scale_ids.append(-1)
 
-    box_t = torch.tensor(boxes, dtype=torch.long)
-    scale_t = torch.tensor(scale_ids, dtype=torch.long)
+    box_t = torch.tensor(boxes, dtype=torch.long).reshape(-1, 4)
+    scale_t = torch.tensor(scale_ids, dtype=torch.long).reshape(-1)
     area_t = ((box_t[:, 2] - box_t[:, 0]) * (box_t[:, 3] - box_t[:, 1])).float()
     return box_t.clone(), scale_t.clone(), area_t.clone(), list(boxes)
 
