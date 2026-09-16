@@ -129,6 +129,8 @@ ALLOWED_MODEL_KEYS = {
     "adaptive_relax_dense_boost",
     "adaptive_relax_threshold",
     "adaptive_relax_scale",
+    # RMR-v21 additions
+    "hybrid_recovery_alpha",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -186,6 +188,8 @@ ALLOWED_LOSS_KEYS = {
     "dense_loss_norm",
     "dense_loss_alpha",
     "dense_loss_max_boost",
+    # RMR-v21 additions
+    "elementwise_dense_scaling",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -385,6 +389,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             arsc = float(m_cfg["adaptive_relax_scale"])
             if arsc <= 0.0:
                 raise ValueError(f"adaptive_relax_scale must be strictly positive, got {arsc}")
+        if "hybrid_recovery_alpha" in m_cfg:
+            hra = float(m_cfg["hybrid_recovery_alpha"])
+            if hra < 0.0 or hra > 1.0:
+                raise ValueError(f"hybrid_recovery_alpha must be in [0.0, 1.0], got {hra}")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
@@ -479,6 +487,11 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             dlmb = float(l_cfg_pre["dense_loss_max_boost"])
             if dlmb < 0.0:
                 raise ValueError(f"dense_loss_max_boost must be non-negative, got {dlmb}")
+        if "elementwise_dense_scaling" in l_cfg_pre:
+            if not isinstance(l_cfg_pre["elementwise_dense_scaling"], bool):
+                raise ValueError(
+                    f"elementwise_dense_scaling must be a boolean, got {type(l_cfg_pre['elementwise_dense_scaling']).__name__}"
+                )
 
 
     l_cfg = cfg.get("loss", {})
@@ -648,6 +661,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "use_top_down_semantic_gate",
         "tdsg_floor",
         "fg_gate_floor",
+        # RMR-v21 additions
+        "hybrid_recovery_alpha",
     ],
     "loss": [
         "lambda_count",
@@ -689,6 +704,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "scale_align_kernel",
         # RMR-v14 loss fields
         "scale_align_mask_bg",
+        # RMR-v21 loss fields
+        "elementwise_dense_scaling",
     ],
     "train": [
         "lr",

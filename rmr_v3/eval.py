@@ -94,6 +94,7 @@ def main() -> None:
     ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Force weighted reliability (W=diag(w_R))")
     ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
+    ap.add_argument("--tta", dest="tta", action="store_true", default=False, help="Enable Horizontal Flip Test-Time Augmentation (TTA)")
     ap.add_argument("--use-live-weights", dest="use_ema", action="store_false", default=True, help="Evaluate live checkpoint weights instead of EMA weights")
     args = ap.parse_args()
 
@@ -107,7 +108,8 @@ def main() -> None:
     manifest_path = Path(manifest)
     mode_tag = "uniform" if uniform_reliability else "weighted"
     tiling_tag = "" if args.tiling else "_notiling"
-    default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}"
+    tta_tag = "_tta" if args.tta else ""
+    default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}{tta_tag}"
     out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -163,6 +165,7 @@ def main() -> None:
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,
         density_bins=density_bins,
+        use_tta=args.tta,
     )
 
     corrs = compute_reliability_correlations(diag_rows)

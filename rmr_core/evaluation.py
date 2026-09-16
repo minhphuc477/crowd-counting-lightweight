@@ -184,6 +184,7 @@ def evaluate_dataset(
     extra_sample_callback: Callable[[dict, dict, torch.Tensor, dict], dict] | None = None,
     enforce_gt_consistency: bool = False,
     density_bins: tuple[float, float] = (100.0, 500.0),
+    use_tta: bool = False,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Canonical unified evaluation loop over a dataset loader.
 
@@ -199,6 +200,7 @@ def evaluate_dataset(
         extra_sample_callback: Optional hook (sample, out, y, row) -> dict to record extra sample metrics.
         enforce_gt_consistency: Whether to enforce sum(target_y) == valid_raw_points.
         density_bins: Tuple of (sparse_threshold, dense_threshold) for density stratification.
+        use_tta: Whether to apply Horizontal Flip Test-Time Augmentation (TTA).
 
     Returns:
         rows: List of per-sample prediction records.
@@ -216,7 +218,15 @@ def evaluate_dataset(
             target = sample["target_y"].to(device)
 
             out = model(image, **forward_kwargs)
-            y = out["y"][0]
+            if use_tta:
+                image_flip = torch.flip(image, dims=[-1])
+                out_flip = model(image_flip, **forward_kwargs)
+                y_flip = torch.flip(out_flip["y"], dims=[-1])
+                y_tta = 0.5 * (out["y"] + y_flip)
+                out["y"] = y_tta
+                y = y_tta[0]
+            else:
+                y = out["y"][0]
 
             gt = float(target.sum().item())
             pred = float(y.sum().item())
@@ -252,16 +262,30 @@ def evaluate_dataset(
 
             # Tiled prediction comparison
             if run_tiling:
-                y_t0 = predict_tiled(
-                    model, sample["image"].to(device),
-                    output_stride=output_stride, tile_size=tile_size, halo=0,
-                    forward_kwargs=forward_kwargs,
-                )
-                y_th = predict_tiled(
-                    model, sample["image"].to(device),
-                    output_stride=output_stride, tile_size=tile_size, halo=practical_halo,
-                    forward_kwargs=forward_kwargs,
-                )
+                if use_tta:
+                    y_t0 = predict_multiscale_tta(
+                        model, sample["image"].to(device),
+                        output_stride=output_stride, tile_size=tile_size, halo=0,
+                        use_hflip=True,
+                        forward_kwargs=forward_kwargs,
+                    )
+                    y_th = predict_multiscale_tta(
+                        model, sample["image"].to(device),
+                        output_stride=output_stride, tile_size=tile_size, halo=practical_halo,
+                        use_hflip=True,
+                        forward_kwargs=forward_kwargs,
+                    )
+                else:
+                    y_t0 = predict_tiled(
+                        model, sample["image"].to(device),
+                        output_stride=output_stride, tile_size=tile_size, halo=0,
+                        forward_kwargs=forward_kwargs,
+                    )
+                    y_th = predict_tiled(
+                        model, sample["image"].to(device),
+                        output_stride=output_stride, tile_size=tile_size, halo=practical_halo,
+                        forward_kwargs=forward_kwargs,
+                    )
                 pred_t0 = float(y_t0.sum().item())
                 pred_th = float(y_th.sum().item())
                 row["pred_tiled_h0"] = pred_t0

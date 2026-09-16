@@ -113,6 +113,7 @@ def unrolled_sirt_solver(
     adaptive_relax_dense_boost: float = 0.50,
     adaptive_relax_threshold: float = 0.05,
     adaptive_relax_scale: float = 0.02,
+    hybrid_recovery_alpha: float = 0.0,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -254,6 +255,7 @@ def unrolled_sirt_solver(
             adjoint_mode=adjoint_mode,
             b_variance=b_variance,
             morozov_gamma=float(morozov_gamma),
+            hybrid_recovery_alpha=float(hybrid_recovery_alpha),
         )
 
         # Adaptive Barzilai-Borwein step size

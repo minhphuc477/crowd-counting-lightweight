@@ -269,6 +269,11 @@ class RMRv3Config:
     adaptive_relax_threshold: float = 0.05
     adaptive_relax_scale: float = 0.02
 
+    # Hybrid Radon-Nikodym / Lebesgue Recovery Flux (RMR-v21)
+    # alpha_recov in [0.0, 1.0] breaks the zero-absorbing barrier by injecting
+    # an additive discovery seed when y_0 = 0 in occluded dense crowd clumps.
+    hybrid_recovery_alpha: float = 0.0
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -336,6 +341,10 @@ class RMRv3Config:
         if not (0.0 <= self.fg_gate_floor <= 1.0):
             raise ValueError(
                 f"fg_gate_floor must be in [0.0, 1.0], got {self.fg_gate_floor}"
+            )
+        if not (0.0 <= self.hybrid_recovery_alpha <= 1.0):
+            raise ValueError(
+                f"hybrid_recovery_alpha must be in [0.0, 1.0], got {self.hybrid_recovery_alpha}"
             )
 
 
@@ -883,6 +892,7 @@ class RMRv3(nn.Module):
             adaptive_relax_dense_boost=getattr(self.cfg, "adaptive_relax_dense_boost", 0.50),
             adaptive_relax_threshold=getattr(self.cfg, "adaptive_relax_threshold", 0.10),
             adaptive_relax_scale=getattr(self.cfg, "adaptive_relax_scale", 0.03),
+            hybrid_recovery_alpha=getattr(self.cfg, "hybrid_recovery_alpha", 0.0),
         )
 
         y = solver_res["y"]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Any, Callable
 
@@ -359,6 +359,12 @@ class RMRv3LossConfig:
     dense_loss_alpha: float = 1.0
     dense_loss_max_boost: float = 2.0
 
+    # ── RMR-v21 Elementwise Sample-Level Loss Scaling (0 params) ─────────────
+    # True sample-level importance weighting without batch cross-talk leakage:
+    # weights each crop's loss L_i by w_i = 1.0 + dense_boost_i BEFORE taking
+    # the batch mean, completely isolating background crops from stadium crops.
+    elementwise_dense_scaling: bool = False
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
@@ -701,6 +707,52 @@ def compute_rmr_v3_losses(
     if cfg is None:
         cfg = RMRv3LossConfig()
 
+    # ── RMR-v21 Elementwise High-Density Sample-Level Loss Scaling (0 params) ──
+    # Isolates each sample in the batch: computes L_i per crop and weights by w_i
+    # before taking the batch mean, completely eliminating batch cross-talk leakage.
+    if getattr(cfg, "elementwise_dense_scaling", False) and target_y.shape[0] > 1:
+        b_sz = target_y.shape[0]
+        cfg_single = replace(cfg, elementwise_dense_scaling=False, density_loss_scaling=False)
+
+        total_gt = target_y.float().sum(dim=(-2, -1)).view(-1)  # [B]
+        dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
+            (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
+            min=0.0,
+            max=float(cfg.dense_loss_max_boost),
+        )
+        sample_weights = (1.0 + dense_boost).detach()  # [B]
+
+        sample_losses = []
+        for i in range(b_sz):
+            out_i = {}
+            for k, v in outputs.items():
+                if isinstance(v, torch.Tensor) and v.ndim > 0 and v.shape[0] == b_sz:
+                    out_i[k] = v[i : i + 1]
+                elif isinstance(v, list):
+                    out_i[k] = [
+                        item[i : i + 1] if isinstance(item, torch.Tensor) and item.ndim > 0 and item.shape[0] == b_sz else item
+                        for item in v
+                    ]
+                else:
+                    out_i[k] = v
+            tgt_i = target_y[i : i + 1]
+            pts_i = [points[i]] if points is not None and i < len(points) else None
+            l_i = compute_rmr_v3_losses(out_i, tgt_i, cfg_single, points=pts_i)
+            sample_losses.append(l_i)
+
+        aggregated = {}
+        for k in sample_losses[0].keys():
+            tensors = [sl[k] for sl in sample_losses]
+            stacked = torch.stack(tensors)
+            if k == "total":
+                # True elementwise weighted mean: (1 / B) * sum(w_i * L_i)
+                aggregated[k] = (sample_weights * stacked).mean()
+            else:
+                aggregated[k] = stacked.mean()
+
+        aggregated["dense_loss_scale"] = sample_weights.mean()
+        return aggregated
+
     y = outputs["y"].float()
     y0 = outputs["y0"].float()
     target_float = target_y.float()
@@ -924,7 +976,7 @@ def compute_rmr_v3_losses(
     # True sample-level importance weighting: scales the entire composite loss
     # (cell, count, allocation, region_nb, scale_align) proportionally so no single
     # head starves or overpowers multi-task balance.
-    if getattr(cfg, "density_loss_scaling", False):
+    if getattr(cfg, "density_loss_scaling", False) or getattr(cfg, "elementwise_dense_scaling", False):
         total_gt = target_float.sum(dim=(-2, -1))
         dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
             (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),

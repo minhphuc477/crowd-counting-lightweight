@@ -396,6 +396,7 @@ def weighted_normalized_adjoint_field(
     adjoint_mode: str = "flat",
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
+    hybrid_recovery_alpha: float = 0.0,
 ) -> torch.Tensor:
     """Compute:
 
@@ -403,6 +404,8 @@ def weighted_normalized_adjoint_field(
 
     entirely in float32, with optional spatial scale routing modulation,
     Morozov discrepancy shrinkage, and Radon-Nikodym measure modulation.
+    In RMR-v21, hybrid_recovery_alpha > 0 interpolates the Radon-Nikodym adjoint
+    with a faint Lebesgue discovery flux to break the zero-absorbing barrier.
     """
     _, _, h, w = y.shape
 
@@ -428,6 +431,9 @@ def weighted_normalized_adjoint_field(
 
     area = regions.area.float().view(1, 1, -1)
 
+    alpha_recov = float(max(0.0, min(1.0, hybrid_recovery_alpha)))
+    use_hybrid = (adjoint_mode == "radon_nikodym" and alpha_recov > 0.0)
+
     # Radon-Nikodym Measure-Modulated Adjoint vs Standard Flat Lebesgue Adjoint
     if adjoint_mode == "radon_nikodym":
         # Discrepancy is scattered proportionally to current measure density y / q_m.
@@ -438,24 +444,51 @@ def weighted_normalized_adjoint_field(
         rate_residual = delta / area.clamp_min(1.0)
 
     weighted_residual = weight32 * rate_residual
+    weighted_residual_leb = (weight32 * (delta / area.clamp_min(1.0))) if use_hybrid else None
 
-    if scale_routing_weights is not None:
-        b, k_scales = scale_routing_weights.shape[:2]
-        if scale_routing_weights.shape[-2:] != (h, w):
-            scale_routing_weights = F.interpolate(
-                scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
-            )
-        back_total = torch.zeros((b, 1, h, w), device=y.device, dtype=torch.float32)
-        if scale_partitions is None:
-            scale_partitions = partition_regions_by_scale(regions, k_scales, device=y.device)
-        for k, mask_k, boxes_k in scale_partitions:
-            if mask_k is None or boxes_k is None:
-                continue
-            residual_k = weighted_residual[:, :, mask_k]
+    def _scatter_residual(w_res: torch.Tensor) -> torch.Tensor:
+        if scale_routing_weights is not None:
+            b_sz, k_scales = scale_routing_weights.shape[:2]
+            sc_weights = scale_routing_weights
+            if sc_weights.shape[-2:] != (h, w):
+                sc_weights = F.interpolate(
+                    sc_weights, size=(h, w), mode="bilinear", align_corners=False
+                )
+            back_tot = torch.zeros((b_sz, 1, h, w), device=y.device, dtype=torch.float32)
+            partitions = scale_partitions
+            if partitions is None:
+                partitions = partition_regions_by_scale(regions, k_scales, device=y.device)
+            for k, mask_k, boxes_k in partitions:
+                if mask_k is None or boxes_k is None:
+                    continue
+                res_k = w_res[:, :, mask_k]
+                if solver_mode == "multiplicative":
+                    bk_k = multiplicative_gated_adjoint(
+                        res_k,
+                        boxes_k,
+                        y32,
+                        h,
+                        w,
+                        rho0=density_gate_rho,
+                        gate_floor=density_gate_floor,
+                        out_dtype=torch.float32,
+                    )
+                else:
+                    bk_k = regional_adjoint(
+                        res_k,
+                        boxes_k,
+                        h,
+                        w,
+                        out_dtype=torch.float32,
+                    )
+                pi_k = sc_weights[:, k:k+1, :, :].float()
+                back_tot = back_tot + pi_k * bk_k
+            return back_tot
+        else:
             if solver_mode == "multiplicative":
-                back_k = multiplicative_gated_adjoint(
-                    residual_k,
-                    boxes_k,
+                return multiplicative_gated_adjoint(
+                    w_res,
+                    regions.boxes,
                     y32,
                     h,
                     w,
@@ -464,39 +497,24 @@ def weighted_normalized_adjoint_field(
                     out_dtype=torch.float32,
                 )
             else:
-                back_k = regional_adjoint(
-                    residual_k,
-                    boxes_k,
+                return regional_adjoint(
+                    w_res,
+                    regions.boxes,
                     h,
                     w,
                     out_dtype=torch.float32,
                 )
-            pi_k = scale_routing_weights[:, k:k+1, :, :].float()
-            back_total = back_total + pi_k * back_k
-        back = back_total
-    else:
-        if solver_mode == "multiplicative":
-            back = multiplicative_gated_adjoint(
-                weighted_residual,
-                regions.boxes,
-                y32,
-                h,
-                w,
-                rho0=density_gate_rho,
-                gate_floor=density_gate_floor,
-                out_dtype=torch.float32,
-            )
-        else:
-            back = regional_adjoint(
-                weighted_residual,
-                regions.boxes,
-                h,
-                w,
-                out_dtype=torch.float32,
-            )
+
+    back = _scatter_residual(weighted_residual)
 
     if adjoint_mode == "radon_nikodym":
-        back = y32 * back
+        if use_hybrid and weighted_residual_leb is not None:
+            back_leb = _scatter_residual(weighted_residual_leb)
+            # Interpolate: (1 - alpha) * (y * back_rn) + alpha * back_leb
+            # Breaks the zero-absorbing barrier when y=0 at an uncounted head (b > q)
+            back = (1.0 - alpha_recov) * (y32 * back) + alpha_recov * back_leb
+        else:
+            back = y32 * back
 
     if weighted_cov is None:
         weighted_cov = weighted_coverage(
