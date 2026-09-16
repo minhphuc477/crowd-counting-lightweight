@@ -705,72 +705,73 @@ def compute_rmr_v3_losses(
     if target_y.ndim == 3:
         target_y = target_y.unsqueeze(1)
 
-    # ── RMR-v21 Elementwise High-Density Sample-Level Loss Scaling (0 params) ──
-    # Isolates each sample in the batch: computes L_i per crop and weights by w_i
-    # before taking the batch mean, completely eliminating batch cross-talk leakage.
-    if getattr(cfg, "elementwise_dense_scaling", False) and target_y.shape[0] > 1:
-        b_sz = target_y.shape[0]
-        cfg_single = replace(cfg, elementwise_dense_scaling=False, density_loss_scaling=False)
+def _compute_elementwise_dense_scaling(
+    outputs: dict[str, Any],
+    target_y: torch.Tensor,
+    cfg: RMRv3LossConfig,
+    points: list[torch.Tensor] | None = None,
+) -> dict[str, torch.Tensor]:
+    """Elementwise sample-level importance weighting without batch cross-talk leakage."""
+    b_sz = target_y.shape[0]
+    cfg_single = replace(cfg, elementwise_dense_scaling=False, density_loss_scaling=False)
 
-        total_gt = target_y.float().sum(dim=(-2, -1)).view(-1)  # [B]
-        dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
-            (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
-            min=0.0,
-            max=float(cfg.dense_loss_max_boost),
-        )
-        sample_weights = (1.0 + dense_boost).detach()  # [B]
-
-        sample_losses = []
-        for i in range(b_sz):
-            out_i = {}
-            for k, v in outputs.items():
-                if isinstance(v, torch.Tensor) and v.ndim > 0 and v.shape[0] == b_sz:
-                    out_i[k] = v[i : i + 1]
-                elif isinstance(v, list):
-                    out_i[k] = [
-                        item[i : i + 1] if isinstance(item, torch.Tensor) and item.ndim > 0 and item.shape[0] == b_sz else item
-                        for item in v
-                    ]
-                else:
-                    out_i[k] = v
-            tgt_i = target_y[i : i + 1]
-            pts_i = [points[i]] if points is not None and i < len(points) else None
-            l_i = compute_rmr_v3_losses(out_i, tgt_i, cfg_single, points=pts_i)
-            sample_losses.append(l_i)
-
-        aggregated = {}
-        for k in sample_losses[0].keys():
-            tensors = [sl[k] for sl in sample_losses]
-            stacked = torch.stack(tensors)
-            if k == "total":
-                # True elementwise weighted mean: (1 / B) * sum(w_i * L_i)
-                aggregated[k] = (sample_weights * stacked).mean()
-            else:
-                aggregated[k] = stacked.mean()
-
-        aggregated["dense_loss_scale"] = sample_weights.mean()
-        return aggregated
-
-    y = outputs["y"].float()
-    y0 = outputs["y0"].float()
-    target_float = target_y.float()
-    zero_val = y.sum() * 0.0
-
-    regions: RegionSet = outputs["regions"]
-
-    mean_region = outputs["b_region"].float()
-    dispersion_region = outputs["region_dispersion"].float()
-
-    target_region = regional_sum(
-        target_float,
-        regions.boxes,
-        out_dtype=torch.float32,
+    total_gt = target_y.float().sum(dim=(-2, -1)).view(-1)  # [B]
+    dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
+        (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
+        min=0.0,
+        max=float(cfg.dense_loss_max_boost),
     )
+    sample_weights = (1.0 + dense_boost).detach()  # [B]
 
+    sample_losses = []
+    for i in range(b_sz):
+        out_i = {}
+        for k, v in outputs.items():
+            if isinstance(v, torch.Tensor) and v.ndim > 0 and v.shape[0] == b_sz:
+                out_i[k] = v[i : i + 1]
+            elif isinstance(v, list):
+                out_i[k] = [
+                    item[i : i + 1]
+                    if isinstance(item, torch.Tensor) and item.ndim > 0 and item.shape[0] == b_sz
+                    else item
+                    for item in v
+                ]
+            else:
+                out_i[k] = v
+        tgt_i = target_y[i : i + 1]
+        pts_i = [points[i]] if points is not None and i < len(points) else None
+        l_i = compute_rmr_v3_losses(out_i, tgt_i, cfg_single, points=pts_i)
+        sample_losses.append(l_i)
+
+    aggregated = {}
+    for k in sample_losses[0].keys():
+        tensors = [sl[k] for sl in sample_losses]
+        stacked = torch.stack(tensors)
+        if k == "total":
+            # True elementwise weighted mean: (1 / B) * sum(w_i * L_i)
+            aggregated[k] = (sample_weights * stacked).mean()
+        else:
+            aggregated[k] = stacked.mean()
+
+    aggregated["dense_loss_scale"] = sample_weights.mean()
+    return aggregated
+
+
+def _compute_core_losses(
+    target_float: torch.Tensor,
+    target_region: torch.Tensor,
+    y: torch.Tensor,
+    y0: torch.Tensor,
+    regions: RegionSet,
+    mean_region: torch.Tensor,
+    dispersion_region: torch.Tensor,
+    cfg: RMRv3LossConfig,
+    points: list[torch.Tensor] | None,
+    router: TargetSupervisionRouter,
+) -> dict[str, torch.Tensor]:
+    """Compute primary losses: Count loss, Allocation loss, Cell loss, and Regional NB loss."""
     losses: dict[str, torch.Tensor] = {}
-    router = TargetSupervisionRouter(cfg.dm_target)
 
-    # Helper to compute count loss on an arbitrary density map
     def _compute_count_loss(density_map: torch.Tensor) -> torch.Tensor:
         return count_magnitude_loss(
             density_map,
@@ -779,7 +780,6 @@ def compute_rmr_v3_losses(
             dispersion=cfg.count_nb_dispersion,
         )
 
-    # Helper to compute cell loss on an arbitrary density map
     def _compute_cell_loss(density_map: torch.Tensor) -> torch.Tensor:
         if cfg.cell_loss_mode == "mass_weighted":
             return mass_weighted_cell_loss(
@@ -790,27 +790,27 @@ def compute_rmr_v3_losses(
                 alpha=float(cfg.cell_mass_weight_alpha),
                 gamma=float(cfg.cell_mass_weight_gamma),
             )
-        else:
-            return balanced_smooth_l1(
-                density_map,
-                target_float,
-                beta=cfg.cell_beta,
-            )
+        return balanced_smooth_l1(
+            density_map,
+            target_float,
+            beta=cfg.cell_beta,
+        )
 
-    # ── Target supervision selection for count and cell (RMR-v10 Symmetric Dual) ──
+    # Count loss supervision
     loss_count, aux_count = router.dispatch(_compute_count_loss, y, y0)
     losses["count"] = loss_count
     if "y" in aux_count and "y0" in aux_count:
         losses["count_y"] = aux_count["y"]
         losses["count_y0"] = aux_count["y0"]
 
+    # Cell loss supervision
     loss_cell, aux_cell = router.dispatch(_compute_cell_loss, y, y0)
     losses["cell"] = loss_cell
     if "y" in aux_cell and "y0" in aux_cell:
         losses["cell_y"] = aux_cell["y"]
         losses["cell_y0"] = aux_cell["y0"]
 
-    # ── Allocation loss target selection (RMR-v9/v10) ──
+    # Allocation loss supervision (DM16 / Bayesian / OT)
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
         if cfg.allocation_loss_type == "bayesian":
@@ -876,15 +876,30 @@ def compute_rmr_v3_losses(
         regions,
     )
 
-
     losses["total"] = (
         cfg.lambda_count * losses["count"]
         + cfg.lambda_flat_dm16 * loss_allocation
         + cfg.lambda_cell * losses["cell"]
         + cfg.lambda_region_nb * losses["region_nb"]
     )
+    return losses
 
-    # ── RMR-v11/v12 Curvature Power Loss ─────────────────────────────────────
+
+def _compute_auxiliary_losses(
+    losses: dict[str, torch.Tensor],
+    outputs: dict[str, Any],
+    target_float: torch.Tensor,
+    target_region: torch.Tensor,
+    mean_region: torch.Tensor,
+    dispersion_region: torch.Tensor,
+    y: torch.Tensor,
+    y0: torch.Tensor,
+    cfg: RMRv3LossConfig,
+    zero_val: torch.Tensor,
+    router: TargetSupervisionRouter,
+) -> dict[str, torch.Tensor]:
+    """Compute auxiliary losses: Curvature, Hard Background, FG Gate, Hurdle, and Scale Alignment."""
+    # Curvature Power Loss (RMR-v11/v12)
     if cfg.lambda_curvature > 0.0:
         def _compute_curv(dmap: torch.Tensor) -> torch.Tensor:
             return curvature_power_loss(
@@ -902,7 +917,7 @@ def compute_rmr_v3_losses(
     else:
         losses["curvature"] = zero_val
 
-    # ── RMR-v11 Top-K Hard Background Mining Loss ───────────────────────────
+    # Top-K Hard Background Mining Loss (RMR-v11)
     if cfg.lambda_hard_bg > 0.0:
         def _compute_hard_bg(dmap: torch.Tensor) -> torch.Tensor:
             return topk_hard_background_loss(dmap, target_float, ratio=cfg.hard_bg_ratio)
@@ -913,14 +928,12 @@ def compute_rmr_v3_losses(
     else:
         losses["hard_bg"] = zero_val
 
-    # ── RMR-v11 Decoupled Foreground Gating Loss ─────────────────────────────
+    # Decoupled Foreground Gating Loss (RMR-v11)
     fg_logit = outputs.get("fg_logit", None)
     if fg_logit is not None and cfg.lambda_fg_gate > 0.0:
         t_bin = (target_float > 0.0).float()
         if t_bin.ndim == 3:
             t_bin = t_bin.unsqueeze(1)
-        # Dilate point impulses with 3x3 max-pooling (covers ~12x12 px at stride 4)
-        # to match human head physical extent and prevent point-target collapse
         t_dilated = F.max_pool2d(t_bin, kernel_size=3, stride=1, padding=1)
         fg_bce = F.binary_cross_entropy_with_logits(fg_logit.float(), t_dilated)
         losses["fg_bce"] = fg_bce
@@ -928,7 +941,7 @@ def compute_rmr_v3_losses(
     else:
         losses["fg_bce"] = zero_val
 
-    # ── RMR-v7 Hurdle losses (opt-in; skipped when lambda=0 or logit absent) ──
+    # Hurdle losses (RMR-v7)
     hurdle_logit = outputs.get("hurdle_logit", None)
     if hurdle_logit is not None:
         if cfg.lambda_hurdle > 0.0:
@@ -953,9 +966,7 @@ def compute_rmr_v3_losses(
         losses["hurdle_bce"] = zero_val
         losses["trunc_nb"] = zero_val
 
-    # ── RMR-v13/v14/v19 Physical Scale Alignment Loss ────────────────────────
-    # In RMR-v19 with FactorizedRoutingHead, pi_scale contains the 3-scale marginal distribution
-    # (areas 1024 < 4096 < 16384), preserving 100% strict monotonicity and preventing scale starvation.
+    # Physical Scale Alignment Loss (RMR-v13/v14/v19)
     scale_weights = outputs.get("pi_scale", outputs.get("scale_weights", None))
     if scale_weights is not None and cfg.lambda_scale_align > 0.0:
         losses["scale_align"] = physical_scale_alignment_loss(
@@ -970,11 +981,8 @@ def compute_rmr_v3_losses(
     else:
         losses["scale_align"] = zero_val
 
-    # ── RMR-v20 Sample-Level High-Density Loss Rescaling (0 params) ──────────
-    # True sample-level importance weighting: scales the entire composite loss
-    # (cell, count, allocation, region_nb, scale_align) proportionally so no single
-    # head starves or overpowers multi-task balance.
-    if getattr(cfg, "density_loss_scaling", False) or getattr(cfg, "elementwise_dense_scaling", False):
+    # High-Density Sample-Level Loss Rescaling (RMR-v20)
+    if cfg.density_loss_scaling or cfg.elementwise_dense_scaling:
         total_gt = target_float.sum(dim=(-2, -1))
         dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
             (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
@@ -986,4 +994,65 @@ def compute_rmr_v3_losses(
         losses["dense_loss_scale"] = sample_scale
 
     return losses
+
+
+def compute_rmr_v3_losses(
+    outputs: dict[str, Any],
+    target_y: torch.Tensor,
+    cfg: RMRv3LossConfig | None = None,
+    points: list[torch.Tensor] | None = None,
+) -> dict[str, torch.Tensor]:
+    """Compute composite multi-task loss for RMRv3 model predictions."""
+    if cfg is None:
+        cfg = RMRv3LossConfig()
+
+    if target_y.ndim == 3:
+        target_y = target_y.unsqueeze(1)
+
+    # Elementwise High-Density Sample-Level Loss Scaling (RMR-v21)
+    if cfg.elementwise_dense_scaling and target_y.shape[0] > 1:
+        return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)
+
+    y = outputs["y"].float()
+    y0 = outputs["y0"].float()
+    target_float = target_y.float()
+    zero_val = y.sum() * 0.0
+
+    regions: RegionSet = outputs["regions"]
+    mean_region = outputs["b_region"].float()
+    dispersion_region = outputs["region_dispersion"].float()
+
+    target_region = regional_sum(
+        target_float,
+        regions.boxes,
+        out_dtype=torch.float32,
+    )
+
+    router = TargetSupervisionRouter(cfg.dm_target)
+    losses = _compute_core_losses(
+        target_float=target_float,
+        target_region=target_region,
+        y=y,
+        y0=y0,
+        regions=regions,
+        mean_region=mean_region,
+        dispersion_region=dispersion_region,
+        cfg=cfg,
+        points=points,
+        router=router,
+    )
+
+    return _compute_auxiliary_losses(
+        losses=losses,
+        outputs=outputs,
+        target_float=target_float,
+        target_region=target_region,
+        mean_region=mean_region,
+        dispersion_region=dispersion_region,
+        y=y,
+        y0=y0,
+        cfg=cfg,
+        zero_val=zero_val,
+        router=router,
+    )
 

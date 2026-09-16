@@ -532,11 +532,11 @@ class RMRv3(nn.Module):
             temp_softplus=cfg.temp_softplus,
             scale_conditioned=cfg.scale_conditioned_prior,
             num_scales=len(cfg.region_sizes_px),
-            density_curvature=getattr(cfg, "density_curvature", False),
-            gated_density_curvature=getattr(cfg, "gated_density_curvature", False),
-            curvature_dense_threshold=getattr(cfg, "curvature_dense_threshold", 0.15),
-            curvature_gate_beta=getattr(cfg, "curvature_gate_beta", 0.03),
-            curvature_pool_kernel=getattr(cfg, "curvature_pool_kernel", 8),
+            density_curvature=cfg.density_curvature,
+            gated_density_curvature=cfg.gated_density_curvature,
+            curvature_dense_threshold=cfg.curvature_dense_threshold,
+            curvature_gate_beta=cfg.curvature_gate_beta,
+            curvature_pool_kernel=cfg.curvature_pool_kernel,
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -566,29 +566,29 @@ class RMRv3(nn.Module):
             self.coord_attn = None
 
         # ── RMR-v20: Micro Perspective Coordinate Attention on P4 (+456 params) ──
-        if getattr(cfg, "use_micro_coord_attn", False):
+        if cfg.use_micro_coord_attn:
             self.micro_coord_attn: MicroCoordAttn | None = MicroCoordAttn(
                 channels=cfg.feature_width,
-                reduction=getattr(cfg, "micro_coord_reduction", 8),
+                reduction=cfg.micro_coord_reduction,
             )
         else:
             self.micro_coord_attn = None
 
         # ── Dynamic Scale Routing (RMR-v10/v18/v19) ──────────────────────────
-        if getattr(cfg, "factorized_scale_routing", False):
+        if cfg.factorized_scale_routing:
             self.scale_router: FactorizedRoutingHead | ScaleRoutingHead | None = FactorizedRoutingHead(
                 in_channels=cfg.feature_width,
-                num_scales=getattr(cfg, "num_marginal_scales", 3),
-                num_aspect_ratios=getattr(cfg, "num_aspect_ratios", 2),
+                num_scales=cfg.num_marginal_scales,
+                num_aspect_ratios=cfg.num_aspect_ratios,
                 temperature=cfg.scale_router_temperature,
-                perspective_bias=getattr(cfg, "perspective_scale_bias", True),
+                perspective_bias=cfg.perspective_scale_bias,
             )
         elif cfg.dynamic_scale_routing:
             self.scale_router = ScaleRoutingHead(
                 in_channels=cfg.feature_width,
                 num_scales=len(cfg.region_sizes_px),
                 temperature=cfg.scale_router_temperature,
-                perspective_bias=getattr(cfg, "perspective_scale_bias", False),
+                perspective_bias=cfg.perspective_scale_bias,
             )
         else:
             self.scale_router = None
@@ -685,22 +685,14 @@ class RMRv3(nn.Module):
         self._region_cache[key] = region_set
         return region_set
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        *,
-        uniform_reliability: bool = False,
-        solver_strength: float | None = None,
-    ) -> dict:
+    def _extract_carrier_features(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Extract multi-scale carrier features from backbone and neck with optional context attention."""
         c4, c8, c16 = self.encoder(x)
+        p4, p8, p16 = self.fusion(c4, c8, c16)
 
-        p4, p8, p16 = self.fusion(
-            c4,
-            c8,
-            c16,
-        )
-
-        # ── Top-Down Semantic Context Gating (RMR-v14) ────────────────────────
+        # Top-Down Semantic Context Gating (RMR-v14)
         if self.tdsg is not None:
             sem_logit = self.tdsg(p16)
             sem_gate = F.interpolate(
@@ -710,51 +702,57 @@ class RMRv3(nn.Module):
             sem_mask = sem_floor + (1.0 - sem_floor) * torch.sigmoid(sem_gate)
             p4 = p4 * sem_mask
 
-        # ── Stage 3: Coordinate Attention on P4 (optional) ────────────────────
+        # Coordinate Attention on P4 (RMR-v8 Stage 3)
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
-        # ── RMR-v20: Micro Perspective Coordinate Attention on P4 ────────────
+        # Micro Perspective Coordinate Attention on P4 (RMR-v20)
         if self.micro_coord_attn is not None:
             p4 = self.micro_coord_attn(p4)
 
-        # ── Dynamic Scale Routing (RMR-v10/v19) ──────────────────────────────
-        scale_weights = None
-        pi_scale = None
-        pi_aspect = None
-        if self.scale_router is not None:
-            router_out = self.scale_router(p4)
-            if isinstance(router_out, tuple):
-                scale_weights, pi_scale, pi_aspect = router_out
-            else:
-                scale_weights = router_out
+        return p4, p8, p16
 
+    def _route_scales(
+        self, p4: torch.Tensor
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        """Predict continuous spatial scale and aspect ratio probability fields."""
+        if self.scale_router is None:
+            return None, None, None
+
+        router_out = self.scale_router(p4)
+        if isinstance(router_out, tuple):
+            scale_weights, pi_scale, pi_aspect = router_out
+            return scale_weights, pi_scale, pi_aspect
+        return router_out, None, None
+
+    def _predict_fine_density(
+        self, p4: torch.Tensor, scale_weights: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Predict pre-solver fine density logits z0 and non-negative density y0 with optional foreground gating."""
         z0 = self.fine_head.forward_logits(p4)
         y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
 
-        # ── Decoupled Foreground Gating (RMR-v11/v14) ─────────────────────────
         fg_logit = None
         if self.fg_gate is not None:
             fg_logit = self.fg_gate(p4)
-            # Dynamic safety floor (fg_gate_floor + (1 - fg_gate_floor) * sigmoid):
-            # Allows deep background suppression down to fg_gate_floor (0.10 in v14 vs 0.70 in v11)
-            # while guaranteeing non-zero gradient flow.
             floor = float(self.cfg.fg_gate_floor)
             fg_mask = floor + (1.0 - floor) * torch.sigmoid(fg_logit)
             y0 = y0 * fg_mask
 
-        h, w = y0.shape[-2:]
+        return z0, y0, fg_logit
 
-        regions = self._regions(
-            h,
-            w,
-            x.device,
-        )
-
-        regional = self.region_head(
-            (p4, p8, p16),
-            regions,
-        )
+    def _extract_regional_evidence(
+        self,
+        p4: torch.Tensor,
+        p8: torch.Tensor,
+        p16: torch.Tensor,
+        regions: RegionSet,
+        scale_weights: torch.Tensor | None,
+        uniform_reliability: bool,
+        grid_h: int,
+    ) -> dict[str, Any]:
+        """Extract regional count evidence, predictive uncertainty, and reliability weights."""
+        regional = self.region_head((p4, p8, p16), regions)
 
         mu_count = regional["mu_count"]
         dispersion = regional["dispersion"]
@@ -772,29 +770,17 @@ class RMRv3(nn.Module):
             rate_std_floor=self.cfg.reliability_rate_std_floor,
             weight_min=self.cfg.reliability_weight_min,
             weight_max=self.cfg.reliability_weight_max,
-            normalize_within_scale=(
-                self.cfg.normalize_reliability_within_scale
-            ),
+            normalize_within_scale=self.cfg.normalize_reliability_within_scale,
             eps=self.cfg.eps,
         )
 
         weight = reliability["weight"]
+        weight_solver = torch.ones_like(weight) if uniform_reliability else weight
 
-        # V3-A control: probabilistic head, uniform solver.
-        if uniform_reliability:
-            weight_solver = torch.ones_like(weight)
-        else:
-            weight_solver = weight
-
-        # ── Hurdle head: modulate solver target by occupancy probability ──────
-        # b_solver_raw is the raw regional NB mean (before hurdle masking).
         b_solver_raw = mu_count.detach() if self.cfg.detach_region_mean_in_solver else mu_count
-
         b_variance = reliability["count_variance"]
+
         if self.cfg.hurdle_head and "hurdle_logit" in regional:
-            # π_R = sigmoid(z_π_R): probability region is occupied.
-            # b_solver = π_R * mu_count  — background regions approach 0 count target.
-            # Variance of scaled variable b_solver: Var[π_R * N] = π_R^2 * Var[N].
             pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
             b_solver = pi_r * b_solver_raw
             b_variance = pi_r.square() * b_variance
@@ -804,7 +790,7 @@ class RMRv3(nn.Module):
         if self.cfg.detach_reliability_in_solver:
             weight_solver = weight_solver.detach()
 
-        # ── Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v16/v18) ────
+        # Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v16/v18)
         if self.cfg.pre_solver_scale_gating and scale_weights is not None:
             power = float(self.cfg.scale_gating_power)
             weight_solver = apply_scale_consistency_gating(
@@ -813,50 +799,91 @@ class RMRv3(nn.Module):
                 scale_weights,
                 power=power,
                 eps=self.cfg.eps,
-                perspective_horizon_gate=getattr(self.cfg, "perspective_horizon_gate", False),
-                horizon_cutoff=float(getattr(self.cfg, "horizon_cutoff", 0.35)),
+                perspective_horizon_gate=self.cfg.perspective_horizon_gate,
+                horizon_cutoff=float(self.cfg.horizon_cutoff),
                 region_sizes_px=self.cfg.region_sizes_px,
-                grid_h=h,
+                grid_h=grid_h,
             )
 
-        # Collect hurdle logit for loss computation (not detached)
-        hurdle_logit = regional.get("hurdle_logit", None)  # [B,1,M] or None
+        return {
+            "mu_count": mu_count,
+            "dispersion": dispersion,
+            "log_dispersion": regional["log_dispersion"],
+            "rate": regional["rate"],
+            "b_solver": b_solver,
+            "b_variance": b_variance,
+            "weight": weight,
+            "weight_solver": weight_solver,
+            "precision": reliability["precision"],
+            "rate_variance": reliability["rate_variance"],
+            "count_variance": reliability["count_variance"],
+            "hurdle_logit": regional.get("hurdle_logit", None),
+        }
 
-        # Bypass solver loop if solver is disabled (direct baseline mode)
+    def _solve_inverse_measure(
+        self,
+        y0: torch.Tensor,
+        z0: torch.Tensor,
+        regional_evidence: dict[str, Any],
+        regions: RegionSet,
+        scale_weights: torch.Tensor | None,
+        solver_strength: float | None,
+        uniform_reliability: bool,
+        p16: torch.Tensor,
+        fg_logit: torch.Tensor | None,
+        pi_scale: torch.Tensor | None,
+        pi_aspect: torch.Tensor | None,
+    ) -> RMRModelOutput:
+        """Execute unrolled SIRT inverse measure reconstruction or return pre-solver baseline."""
+        mu_count = regional_evidence["mu_count"]
+        dispersion = regional_evidence["dispersion"]
+        b_solver = regional_evidence["b_solver"]
+        b_variance = regional_evidence["b_variance"]
+        weight = regional_evidence["weight"]
+        weight_solver = regional_evidence["weight_solver"]
+        hurdle_logit = regional_evidence["hurdle_logit"]
+
+        base_out: dict[str, Any] = {
+            "y0": y0,
+            "z0": z0,
+            "regions": regions,
+            "b_region": mu_count,
+            "b_solver": b_solver,
+            "region_rate": regional_evidence["rate"],
+            "region_dispersion": dispersion,
+            "region_log_dispersion": regional_evidence["log_dispersion"],
+            "region_weight": weight,
+            "solver_region_weight": weight_solver,
+            "region_precision": regional_evidence["precision"],
+            "region_rate_variance": regional_evidence["rate_variance"],
+            "region_count_variance": regional_evidence["count_variance"],
+            "solver_count_variance": b_variance,
+            "uniform_reliability": uniform_reliability,
+        }
+
+        if scale_weights is not None:
+            base_out["scale_weights"] = scale_weights
+        if pi_scale is not None:
+            base_out["pi_scale"] = pi_scale
+        if pi_aspect is not None:
+            base_out["pi_aspect"] = pi_aspect
+        if hurdle_logit is not None:
+            base_out["hurdle_logit"] = hurdle_logit
+        if fg_logit is not None:
+            base_out["fg_logit"] = fg_logit
+
+        # Bypass solver loop if solver is disabled
         if not self.cfg.enable_solver:
-            out = {
+            base_out.update({
                 "y": y0,
-                "y0": y0,
-                "z0": z0,
-                "regions": regions,
-                "b_region": mu_count,
-                "b_solver": b_solver,
-                "region_rate": regional["rate"],
-                "region_dispersion": dispersion,
-                "region_log_dispersion": regional["log_dispersion"],
-                "region_weight": weight,
-                "solver_region_weight": weight_solver,
-                "region_precision": reliability["precision"],
-                "region_rate_variance": reliability["rate_variance"],
-                "region_count_variance": reliability["count_variance"],
-                "solver_count_variance": b_variance,
                 "iterates": [y0],
                 "residual_fields": [],
                 "energy_trace": [],
-                "uniform_reliability": uniform_reliability,
                 "solver_strength": 0.0,
-            }
-            if scale_weights is not None:
-                out["scale_weights"] = scale_weights
-            if pi_scale is not None:
-                out["pi_scale"] = pi_scale
-            if pi_aspect is not None:
-                out["pi_aspect"] = pi_aspect
-            if hurdle_logit is not None:
-                out["hurdle_logit"] = hurdle_logit
-            if fg_logit is not None:
-                out["fg_logit"] = fg_logit
-            return RMRModelOutput(**out)
+            })
+            return RMRModelOutput(**base_out)
+
+        effective_strength = self.solver_strength if solver_strength is None else solver_strength
 
         solver_res = unrolled_sirt_solver(
             y0=y0,
@@ -865,7 +892,7 @@ class RMRv3(nn.Module):
             regions=regions,
             iterations=self.cfg.iterations,
             omega=self.cfg.omega,
-            solver_strength=self.solver_strength if solver_strength is None else solver_strength,
+            solver_strength=effective_strength,
             residual_clip=self.cfg.residual_clip,
             eps=self.cfg.eps,
             solver_mode=self.cfg.solver_mode,
@@ -884,71 +911,75 @@ class RMRv3(nn.Module):
             adjoint_mode=self.cfg.adjoint_mode,
             b_variance=b_variance,
             morozov_gamma=self.cfg.morozov_gamma,
-            use_barzilai_borwein=getattr(self.cfg, "use_barzilai_borwein", False),
-            use_scale_entropy_trust=getattr(self.cfg, "use_scale_entropy_trust", False),
-            use_nesterov_momentum=getattr(self.cfg, "use_nesterov_momentum", False),
-            adaptive_relaxation=getattr(self.cfg, "adaptive_relaxation", False),
-            adaptive_relax_sparse=getattr(self.cfg, "adaptive_relax_sparse", 0.70),
-            adaptive_relax_dense_boost=getattr(self.cfg, "adaptive_relax_dense_boost", 0.50),
-            adaptive_relax_threshold=getattr(self.cfg, "adaptive_relax_threshold", 0.10),
-            adaptive_relax_scale=getattr(self.cfg, "adaptive_relax_scale", 0.03),
-            hybrid_recovery_alpha=getattr(self.cfg, "hybrid_recovery_alpha", 0.0),
+            use_barzilai_borwein=self.cfg.use_barzilai_borwein,
+            use_scale_entropy_trust=self.cfg.use_scale_entropy_trust,
+            use_nesterov_momentum=self.cfg.use_nesterov_momentum,
+            adaptive_relaxation=self.cfg.adaptive_relaxation,
+            adaptive_relax_sparse=self.cfg.adaptive_relax_sparse,
+            adaptive_relax_dense_boost=self.cfg.adaptive_relax_dense_boost,
+            adaptive_relax_threshold=self.cfg.adaptive_relax_threshold,
+            adaptive_relax_scale=self.cfg.adaptive_relax_scale,
+            hybrid_recovery_alpha=self.cfg.hybrid_recovery_alpha,
         )
 
         y = solver_res["y"]
-        iterates = solver_res["iterates"]
-        residual_fields = solver_res["residual_fields"]
-        energy_trace = solver_res["energy_trace"]
         strength = solver_res["effective_omega"] / max(self.cfg.omega, 1e-8)
 
-        # ── Convex Dynamic Trust Gate (RMR-v15) ──────────────────────────────
+        # Convex Dynamic Trust Gate (RMR-v15)
         solver_trust_alpha = None
         if self.trust_gate is not None:
-            feat_global = p16.mean(dim=(-2, -1))  # [B, C]
+            feat_global = p16.mean(dim=(-2, -1))
             solver_trust_alpha = torch.sigmoid(self.trust_gate(feat_global)).view(-1, 1, 1, 1)
             y = (1.0 - solver_trust_alpha) * y0 + solver_trust_alpha * y
+            base_out["solver_trust_alpha"] = solver_trust_alpha
 
-        out = {
+        base_out.update({
             "y": y,
-            "y0": y0,
-            "z0": z0,
-
-            "regions": regions,
-
-            "b_region": mu_count,
-            "b_solver": b_solver,
-            "region_rate": regional["rate"],
-            "region_dispersion": dispersion,
-            "region_log_dispersion": regional["log_dispersion"],
-
-            "region_weight": weight,
-            "solver_region_weight": weight_solver,
-            "region_precision": reliability["precision"],
-            "region_rate_variance": reliability["rate_variance"],
-            "region_count_variance": reliability["count_variance"],
-            "solver_count_variance": b_variance,
-
-            "iterates": iterates,
-            "residual_fields": residual_fields,
-            "energy_trace": energy_trace,
-
-            "uniform_reliability": uniform_reliability,
+            "iterates": solver_res["iterates"],
+            "residual_fields": solver_res["residual_fields"],
+            "energy_trace": solver_res["energy_trace"],
             "solver_strength": strength,
-        }
+        })
+        return RMRModelOutput(**base_out)
 
-        if scale_weights is not None:
-            out["scale_weights"] = scale_weights
-        if pi_scale is not None:
-            out["pi_scale"] = pi_scale
-        if pi_aspect is not None:
-            out["pi_aspect"] = pi_aspect
-        if hurdle_logit is not None:
-            out["hurdle_logit"] = hurdle_logit
-        if fg_logit is not None:
-            out["fg_logit"] = fg_logit
-        if solver_trust_alpha is not None:
-            out["solver_trust_alpha"] = solver_trust_alpha
-        return RMRModelOutput(**out)
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        uniform_reliability: bool = False,
+        solver_strength: float | None = None,
+    ) -> RMRModelOutput:
+        """Forward pass orchestrating carrier extraction, scale routing, regional evidence, and inverse solving."""
+        p4, p8, p16 = self._extract_carrier_features(x)
+        scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
+        z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
+
+        h, w = y0.shape[-2:]
+        regions = self._regions(h, w, x.device)
+
+        regional_evidence = self._extract_regional_evidence(
+            p4=p4,
+            p8=p8,
+            p16=p16,
+            regions=regions,
+            scale_weights=scale_weights,
+            uniform_reliability=uniform_reliability,
+            grid_h=h,
+        )
+
+        return self._solve_inverse_measure(
+            y0=y0,
+            z0=z0,
+            regional_evidence=regional_evidence,
+            regions=regions,
+            scale_weights=scale_weights,
+            solver_strength=solver_strength,
+            uniform_reliability=uniform_reliability,
+            p16=p16,
+            fg_logit=fg_logit,
+            pi_scale=pi_scale,
+            pi_aspect=pi_aspect,
+        )
 
     def switch_to_deploy(self) -> None:
         """Switch internal modules (e.g. RepWeightedFPNNeck) to fused deployment mode."""

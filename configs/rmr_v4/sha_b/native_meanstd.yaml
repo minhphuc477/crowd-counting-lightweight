@@ -20,7 +20,7 @@ model:
   output_stride: 4
   feature_width: 32
 
-  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
 
@@ -59,42 +59,27 @@ loss:
   lambda_cell: 0.25
   lambda_region_nb: 0.20
 
-  cell_loss_type: bce
-  region_loss_type: log_gamma
+  cell_loss_mode: balanced
+  allocation_loss_type: flat_dm16
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+  cell_beta: 1.0
 
-  # Stage 2: Multiscale DM Loss (P4, P8, P16)
-  multiscale_dm: false
-  multiscale_dm_strides: [4, 8, 16]
-  multiscale_dm_weights: [0.5, 0.25, 0.25]
-
-solver:
-  type: stationary_richardson
-  inner_iterations: 1
-  inner_omega: 1.0
-  regularization: 1.0e-4
-
-optimizer:
-  name: adamw
-  lr: 2.0e-4
-  weight_decay: 1.0e-4
-  betas:
-    - 0.9
-    - 0.999
-
-scheduler:
-  name: cosine
-  warmup_epochs: 10
-  min_lr: 1.0e-6
-
-training:
-  epochs: 300
+train:
   batch_size: 8
-  gradient_accumulation_steps: 1
-  grad_clip_norm: 5.0
-  val_interval: 5
-  eval_crop_size: null
-  num_workers: 4
-  pin_memory: true
-  mixed_precision: fp16
-  early_stopping_patience: 40
-  early_stopping_metric: val/mae
+  workers: 4
+  lr: 0.0002
+  backbone_lr_scale: 0.1
+  weight_decay: 0.0001
+  epochs: 300
+  warmup_epochs: 10
+  eval_every: 5
+  grad_clip: 5.0
+  amp: true
+  early_stopping: true
+  patience: 40
+
+eval:
+  density_bins:
+    - 100.0
+    - 500.0
