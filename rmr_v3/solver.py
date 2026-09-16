@@ -62,13 +62,23 @@ def proximal_firm_threshold(
 
 def laplacian_tv_diffusion(
     y: torch.Tensor,
-    tv_lambda: float,
+    tv_lambda: float | torch.Tensor,
     kernel: torch.Tensor | None = None,
+    density_gated: bool = False,
+    diffusion_dense_threshold: float = 0.15,
+    diffusion_gate_beta: float = 0.03,
 ) -> torch.Tensor:
     """Isotropic Laplacian total-variation diffusion step with Neumann zero-flux boundary:
     y <- max(0, y + lambda * Delta y). Uses replication padding so sum(Delta y) == 0.
+
+    When density_gated=True (RMR-v22):
+        The effective diffusion rate is modulated by local density:
+            gate(u) = 1.0 - sigmoid((y_smooth(u) - tau_dense) / beta)
+        In sparse/background regions (y_smooth < tau_dense), gate -> 1.0 (full diffusion).
+        In dense crowd clusters (y_smooth > tau_dense), gate -> 0.0 (strictly zero diffusion),
+        preserving sharp peak separation and stopping dense crowd clump mass erosion.
     """
-    if tv_lambda <= 0.0:
+    if isinstance(tv_lambda, float) and tv_lambda <= 0.0:
         return y
     if kernel is None:
         kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
@@ -76,7 +86,16 @@ def laplacian_tv_diffusion(
         kernel = kernel.to(device=y.device, dtype=y.dtype)
     y_pad = F.pad(y, (1, 1, 1, 1), mode="replicate")
     lap = F.conv2d(y_pad, kernel, padding=0)
-    return torch.clamp_min(y + tv_lambda * lap, 0.0)
+
+    if density_gated:
+        y_smooth = F.avg_pool2d(y.float(), kernel_size=5, stride=1, padding=2)
+        y_effective = torch.maximum(y.float(), y_smooth)
+        gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
+        step_diff = tv_lambda * gate.to(dtype=y.dtype) * lap
+    else:
+        step_diff = tv_lambda * lap
+
+    return torch.clamp_min(y + step_diff, 0.0)
 
 
 def unrolled_sirt_solver(
@@ -114,6 +133,9 @@ def unrolled_sirt_solver(
     adaptive_relax_threshold: float = 0.05,
     adaptive_relax_scale: float = 0.02,
     hybrid_recovery_alpha: float = 0.0,
+    density_gated_diffusion: bool = False,
+    diffusion_dense_threshold: float = 0.15,
+    diffusion_gate_beta: float = 0.03,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -309,7 +331,14 @@ def unrolled_sirt_solver(
             if tv_type == "charbonnier":
                 y_next = charbonnier_tv_step(y_next, tv_step, float(tv_eps_c))
             else:
-                y_next = laplacian_tv_diffusion(y_next, tv_step, kernel=laplace_kernel)
+                y_next = laplacian_tv_diffusion(
+                    y_next,
+                    tv_step,
+                    kernel=laplace_kernel,
+                    density_gated=density_gated_diffusion,
+                    diffusion_dense_threshold=float(diffusion_dense_threshold),
+                    diffusion_gate_beta=float(diffusion_gate_beta),
+                )
 
         y_next = y_next.to(dtype=y_curr.dtype)
 

@@ -131,6 +131,11 @@ ALLOWED_MODEL_KEYS = {
     "adaptive_relax_scale",
     # RMR-v21 additions
     "hybrid_recovery_alpha",
+    # RMR-v22 additions
+    "scale_conditioned_fine_head",
+    "density_gated_diffusion",
+    "diffusion_dense_threshold",
+    "diffusion_gate_beta",
 }
 
 ALLOWED_LOSS_KEYS = {

@@ -156,3 +156,132 @@ class FineMeasureHead(nn.Module):
             return self.activate(z, scale_weights=scale_weights)
         return z
 
+
+class ScaleConditionedFineHead(nn.Module):
+    """Scale-Conditioned Dynamic Fine Density Head (RMR-v22).
+
+    Upgrades the static 1x1 projection into a content-adaptive head:
+    1. Local Depthwise Context: 3x3 depthwise conv with groups=width.
+       Provides a 12x12 px receptive field on the input image to perceive head contours.
+    2. Continuous Scale Simplex Modulation (FiLM):
+       Scale routing probabilities pi(u) in Delta^{K-1} predict channel-wise scaling:
+           gamma(u) = 1.0 + W_s * pi(u)  (K * width params, zero-initialized)
+           h_mod = h * gamma(u)
+    3. Pointwise Joint Density Projection:
+       Projects concatenated [h_mod, pi] (width + K ch) -> 1 ch.
+    4. Calibrated Bias Initialization & Gated Curvature Power:
+       Zero init on pi weights ensures exact Step-0 identity with calibrated prior b0.
+       Includes learnable temperature tau and gated quadratic curvature expansion.
+    """
+
+    def __init__(
+        self,
+        width: int = 32,
+        num_scales: int = 3,
+        init_bias: float = _FINE_HEAD_BIAS_INIT,
+        temp_softplus: bool = True,
+        density_curvature: bool = True,
+        gated_density_curvature: bool = True,
+        curvature_dense_threshold: float = 0.15,
+        curvature_gate_beta: float = 0.03,
+        curvature_pool_kernel: int = 8,
+    ):
+        super().__init__()
+        self.dw = ConvGNAct(width, width, 3, groups=width)
+        self.pw = ConvGNAct(width, width, 1)
+
+        self.num_scales = int(num_scales)
+        self.scale_film = nn.Conv2d(self.num_scales, width, kernel_size=1, bias=False)
+        nn.init.zeros_(self.scale_film.weight)
+
+        self.out_conv = nn.Conv2d(width + self.num_scales, 1, kernel_size=1)
+        nn.init.normal_(self.out_conv.weight, std=0.01)
+        nn.init.constant_(self.out_conv.bias, init_bias)  # type: ignore[arg-type]
+
+        self.temp_softplus = bool(temp_softplus)
+        if self.temp_softplus:
+            self.tau = nn.Parameter(torch.ones(1))
+
+        self.density_curvature = bool(density_curvature)
+        self.gated_density_curvature = bool(gated_density_curvature)
+        self.curvature_dense_threshold = float(curvature_dense_threshold)
+        self.curvature_gate_beta = float(curvature_gate_beta)
+        self.curvature_pool_kernel = int(curvature_pool_kernel)
+        if self.density_curvature:
+            self.curvature_alpha = nn.Parameter(torch.tensor(-8.0))
+
+    def activate(self, z: torch.Tensor) -> torch.Tensor:
+        """Compute calibrated non-negative measure Y0 from latent logit field z0."""
+        if self.temp_softplus:
+            tau = self.tau.clamp_min(0.1)
+            y_base = tau * F.softplus(z / tau)
+        else:
+            y_base = F.softplus(z)
+
+        if self.density_curvature:
+            alpha_eff = F.softplus(self.curvature_alpha)
+            orig_dtype = y_base.dtype
+            y_base_f32 = y_base.float()
+            if self.gated_density_curvature:
+                k_pool = int(self.curvature_pool_kernel)
+                pad = k_pool // 2
+                y_local = F.avg_pool2d(
+                    y_base_f32,
+                    kernel_size=k_pool,
+                    stride=1,
+                    padding=pad,
+                    count_include_pad=False,
+                )
+                if y_local.shape[-2:] != y_base_f32.shape[-2:]:
+                    y_local = y_local[..., :y_base_f32.shape[-2], :y_base_f32.shape[-1]]
+                tau_dense = float(self.curvature_dense_threshold)
+                beta = float(max(self.curvature_gate_beta, 1e-4))
+                gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
+                curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+            else:
+                curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+            y_out_f32 = y_base_f32 + curv_term
+            return y_out_f32.to(orig_dtype)
+        return y_base
+
+    def forward_logits(
+        self,
+        f: tuple[torch.Tensor, ...] | torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute raw pre-activation logit field z0 modulated by scale routing probabilities."""
+        if isinstance(f, tuple):
+            f = f[0]
+        h = self.pw(self.dw(f))
+        if scale_weights is not None:
+            if scale_weights.shape[-2:] != h.shape[-2:]:
+                scale_weights = F.interpolate(
+                    scale_weights, size=h.shape[-2:], mode="bilinear", align_corners=False
+                )
+            if scale_weights.shape[1] != self.num_scales:
+                if scale_weights.shape[1] > self.num_scales:
+                    sw = scale_weights[:, :self.num_scales, :, :]
+                else:
+                    pad_k = self.num_scales - scale_weights.shape[1]
+                    sw = F.pad(scale_weights, (0, 0, 0, 0, 0, pad_k), mode="constant", value=0.0)
+            else:
+                sw = scale_weights
+            gamma = 1.0 + self.scale_film(sw)
+            h_mod = h * gamma
+            h_joint = torch.cat([h_mod, sw], dim=1)
+        else:
+            pi_zeros = torch.zeros(
+                h.shape[0], self.num_scales, h.shape[2], h.shape[3], device=h.device, dtype=h.dtype
+            )
+            h_joint = torch.cat([h, pi_zeros], dim=1)
+        return self.out_conv(h_joint)
+
+    def forward(
+        self,
+        f: tuple[torch.Tensor, ...] | torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        z = self.forward_logits(f, scale_weights=scale_weights)
+        return self.activate(z)
+
+

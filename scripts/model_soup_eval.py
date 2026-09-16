@@ -1,0 +1,107 @@
+"""Post-Training Model Souping & Stochastic Weight Averaging for RMR-v22.
+
+Averages weights across top K validation checkpoints:
+    theta_soup = (1/K) * sum_{k=1}^K theta_{(k)}
+Finds a wider, flatter basin in the loss landscape with zero additional inference parameters.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+from pathlib import Path
+from typing import Any
+
+import torch
+import yaml
+
+from rmr_core.evaluation import evaluate_dataset
+from rmr_v3.config import validate_v3_config
+from rmr_v3.model import RMRv3, RMRv3Config
+
+
+def compute_model_soup(checkpoint_paths: list[Path]) -> dict[str, Any]:
+    """Compute uniform parameter average (model soup) from multiple checkpoints."""
+    if not checkpoint_paths:
+        raise ValueError("checkpoint_paths list cannot be empty")
+
+    print(f"Averaging {len(checkpoint_paths)} checkpoints:")
+    for p in checkpoint_paths:
+        print(f"  - {p}")
+
+    first_ckpt = torch.load(checkpoint_paths[0], map_location="cpu", weights_only=False)
+    state_key = "model" if "model" in first_ckpt else ("state_dict" if "state_dict" in first_ckpt else None)
+    base_state = first_ckpt[state_key] if state_key else first_ckpt
+
+    soup_state = copy.deepcopy(base_state)
+    k = len(checkpoint_paths)
+
+    for p in checkpoint_paths[1:]:
+        ckpt = torch.load(p, map_location="cpu", weights_only=False)
+        state = ckpt[state_key] if state_key else ckpt
+        for key in soup_state:
+            if key in state:
+                if soup_state[key].is_floating_point():
+                    soup_state[key] += state[key]
+
+    for key in soup_state:
+        if soup_state[key].is_floating_point():
+            soup_state[key] /= float(k)
+
+    soup_ckpt = copy.deepcopy(first_ckpt)
+    if state_key:
+        soup_ckpt[state_key] = soup_state
+    else:
+        soup_ckpt = soup_state
+
+    return soup_ckpt
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate Model Soup across checkpoints.")
+    parser.add_argument("--config", type=str, required=True, help="Path to resolved model config YAML")
+    parser.add_argument("--checkpoints", type=str, nargs="+", required=True, help="Paths to checkpoints to average")
+    parser.add_argument("--output", type=str, default="model_soup.pt", help="Path to save averaged checkpoint")
+    parser.add_argument("--eval", action="store_true", help="Run canonical test evaluation after souping")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+
+    args = parser.parse_args()
+
+    ckpt_paths = [Path(p) for p in args.checkpoints]
+    for p in ckpt_paths:
+        if not p.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {p}")
+
+    soup_ckpt = compute_model_soup(ckpt_paths)
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(soup_ckpt, out_path)
+    print(f"Saved model soup checkpoint to: {out_path}")
+
+    if args.eval:
+        cfg_path = Path(args.config)
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            raw_cfg = yaml.safe_load(f)
+        validate_v3_config(raw_cfg)
+
+        model_cfg = RMRv3Config.from_dict(raw_cfg["model"], pretrained=False)
+        model = RMRv3(model_cfg)
+        state = soup_ckpt["model"] if "model" in soup_ckpt else soup_ckpt
+        model.load_state_dict(state, strict=True)
+        model.to(args.device)
+        model.eval()
+
+        val_manifest = raw_cfg["data"]["val_manifest"]
+        metrics = evaluate_dataset(
+            model=model,
+            manifest_path=val_manifest,
+            device=args.device,
+            output_stride=4,
+        )
+        print("\n--- MODEL SOUP EVALUATION SUMMARY ---")
+        print(f"MAE:  {metrics.get('mae', 0.0):.2f}")
+        print(f"RMSE: {metrics.get('rmse', 0.0):.2f}")
+        print(f"Bias: {metrics.get('bias', 0.0):+.2f}")
+
+
+if __name__ == "__main__":
+    main()

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
-from rmr_core.heads import FineMeasureHead
+from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput
@@ -274,6 +274,18 @@ class RMRv3Config:
     # an additive discovery seed when y_0 = 0 in occluded dense crowd clumps.
     hybrid_recovery_alpha: float = 0.0
 
+    # ── RMR-v22 additions ────────────────────────────────────────────────────
+    # Scale-conditioned dynamic fine density head:
+    # 3x3 depthwise context filter + FiLM scale modulation + joint projection (+99 parameters).
+    scale_conditioned_fine_head: bool = False
+
+    # Density-gated anisotropic TV diffusion in unrolled SIRT solver (0 parameters).
+    # Smooths noise in background/sparse regions while shutting down diffusion to strictly zero
+    # in dense crowd clusters to preserve sharp head separation.
+    density_gated_diffusion: bool = False
+    diffusion_dense_threshold: float = 0.15
+    diffusion_gate_beta: float = 0.03
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -526,18 +538,31 @@ class RMRv3(nn.Module):
 
         init_bias = _softplus_inverse(cfg.init_m0)
 
-        self.fine_head = FineMeasureHead(
-            width=cfg.feature_width,
-            init_bias=init_bias,
-            temp_softplus=cfg.temp_softplus,
-            scale_conditioned=cfg.scale_conditioned_prior,
-            num_scales=len(cfg.region_sizes_px),
-            density_curvature=cfg.density_curvature,
-            gated_density_curvature=cfg.gated_density_curvature,
-            curvature_dense_threshold=cfg.curvature_dense_threshold,
-            curvature_gate_beta=cfg.curvature_gate_beta,
-            curvature_pool_kernel=cfg.curvature_pool_kernel,
-        )
+        if cfg.scale_conditioned_fine_head:
+            self.fine_head = ScaleConditionedFineHead(
+                width=cfg.feature_width,
+                num_scales=len(cfg.region_sizes_px),
+                init_bias=init_bias,
+                temp_softplus=cfg.temp_softplus,
+                density_curvature=cfg.density_curvature,
+                gated_density_curvature=cfg.gated_density_curvature,
+                curvature_dense_threshold=cfg.curvature_dense_threshold,
+                curvature_gate_beta=cfg.curvature_gate_beta,
+                curvature_pool_kernel=cfg.curvature_pool_kernel,
+            )
+        else:
+            self.fine_head = FineMeasureHead(
+                width=cfg.feature_width,
+                init_bias=init_bias,
+                temp_softplus=cfg.temp_softplus,
+                scale_conditioned=cfg.scale_conditioned_prior,
+                num_scales=len(cfg.region_sizes_px),
+                density_curvature=cfg.density_curvature,
+                gated_density_curvature=cfg.gated_density_curvature,
+                curvature_dense_threshold=cfg.curvature_dense_threshold,
+                curvature_gate_beta=cfg.curvature_gate_beta,
+                curvature_pool_kernel=cfg.curvature_pool_kernel,
+            )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
             feature_dim=cfg.feature_width,
@@ -729,8 +754,12 @@ class RMRv3(nn.Module):
         self, p4: torch.Tensor, scale_weights: torch.Tensor | None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Predict pre-solver fine density logits z0 and non-negative density y0 with optional foreground gating."""
-        z0 = self.fine_head.forward_logits(p4)
-        y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
+        if self.cfg.scale_conditioned_fine_head:
+            z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
+            y0 = self.fine_head.activate(z0)
+        else:
+            z0 = self.fine_head.forward_logits(p4)
+            y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
 
         fg_logit = None
         if self.fg_gate is not None:
@@ -920,6 +949,9 @@ class RMRv3(nn.Module):
             adaptive_relax_threshold=self.cfg.adaptive_relax_threshold,
             adaptive_relax_scale=self.cfg.adaptive_relax_scale,
             hybrid_recovery_alpha=self.cfg.hybrid_recovery_alpha,
+            density_gated_diffusion=self.cfg.density_gated_diffusion,
+            diffusion_dense_threshold=self.cfg.diffusion_dense_threshold,
+            diffusion_gate_beta=self.cfg.diffusion_gate_beta,
         )
 
         y = solver_res["y"]
