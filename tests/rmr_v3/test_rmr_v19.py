@@ -360,6 +360,8 @@ def test_rmr_v19_all_suite_configs_load_and_parameter_check():
         "configs/rmr_v19/rmr_v19_canonical_isotropic.yaml": 104441,
         "configs/rmr_v19/rmr_v19_ablation_no_gated_curv.yaml": 104509,
         "configs/rmr_v19/rmr_v19_ablation_no_curvature.yaml": 104508,
+        "configs/rmr_v19/rmr_v19_ablation_no_persp.yaml": 104507,
+        "configs/rmr_v19/rmr_v19_ablation_no_scale_align.yaml": 104509,
         "configs/rmr_v19/rmr_v19_control_no_solver.yaml": 104509,
     }
 

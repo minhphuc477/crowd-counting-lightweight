@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # RMR-v19 Comprehensive Multi-Model Experiment Suite for Linux / Bash
 # ==============================================================================
@@ -30,6 +30,8 @@ declare -A RUN_CONFIGS=(
     ["rmr_v19_canonical_isotropic"]="configs/rmr_v19/rmr_v19_canonical_isotropic.yaml"
     ["rmr_v19_ablation_no_gated_curv"]="configs/rmr_v19/rmr_v19_ablation_no_gated_curv.yaml"
     ["rmr_v19_ablation_no_curvature"]="configs/rmr_v19/rmr_v19_ablation_no_curvature.yaml"
+    ["rmr_v19_ablation_no_persp"]="configs/rmr_v19/rmr_v19_ablation_no_persp.yaml"
+    ["rmr_v19_ablation_no_scale_align"]="configs/rmr_v19/rmr_v19_ablation_no_scale_align.yaml"
     ["rmr_v19_control_no_solver"]="configs/rmr_v19/rmr_v19_control_no_solver.yaml"
 )
 
@@ -38,6 +40,8 @@ ORDERED_RUNS=(
     "rmr_v19_canonical_isotropic"
     "rmr_v19_ablation_no_gated_curv"
     "rmr_v19_ablation_no_curvature"
+    "rmr_v19_ablation_no_persp"
+    "rmr_v19_ablation_no_scale_align"
     "rmr_v19_control_no_solver"
 )
 
