@@ -107,6 +107,12 @@ def unrolled_sirt_solver(
     morozov_gamma: float = 0.0,
     use_barzilai_borwein: bool = False,
     use_scale_entropy_trust: bool = False,
+    use_nesterov_momentum: bool = False,
+    adaptive_relaxation: bool = False,
+    adaptive_relax_sparse: float = 0.70,
+    adaptive_relax_dense_boost: float = 0.50,
+    adaptive_relax_threshold: float = 0.05,
+    adaptive_relax_scale: float = 0.02,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -203,7 +209,9 @@ def unrolled_sirt_solver(
             max_entropy = math.log(float(k_scales))
             scale_confidence = (1.0 - (entropy / max_entropy)).clamp(0.0, 1.0)
 
-    y = y0
+    y_curr = y0
+    y_prev = y0
+    theta_curr = 1.0
     iterates: list[torch.Tensor] = [y0]
     residual_fields: list[torch.Tensor] = []
     energy_trace: list[dict[str, torch.Tensor]] = []
@@ -211,17 +219,27 @@ def unrolled_sirt_solver(
     prev_y: torch.Tensor | None = None
     prev_field: torch.Tensor | None = None
 
-    for _ in range(iterations):
+    for iter_idx in range(iterations):
+        # Nesterov momentum extrapolation
+        if use_nesterov_momentum and iter_idx > 0:
+            theta_next = (1.0 + math.sqrt(1.0 + 4.0 * (theta_curr ** 2))) / 2.0
+            beta = (theta_curr - 1.0) / theta_next
+            z_state = y_curr + beta * (y_curr - y_prev)
+            z_state = torch.clamp_min(z_state, 0.0)
+            theta_curr = theta_next
+        else:
+            z_state = y_curr
+
         energy_before = weighted_regional_energy(
-            y,
+            y_curr,
             b_solver,
             weight_solver,
             regions,
         ).detach()
 
-        # ── Step 1: Adjoint discrepancy scatter ──────────────────────────────
+        # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
         field = weighted_normalized_adjoint_field(
-            y,
+            z_state,
             b_solver,
             weight_solver,
             regions,
@@ -241,7 +259,7 @@ def unrolled_sirt_solver(
         # Adaptive Barzilai-Borwein step size
         current_omega: float | torch.Tensor = effective_omega
         if use_barzilai_borwein and prev_y is not None and prev_field is not None and effective_omega > 0.0:
-            s_diff = (y - prev_y).float()
+            s_diff = (z_state - prev_y).float()
             r_diff = (field - prev_field).float()
             dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
             norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
@@ -252,18 +270,25 @@ def unrolled_sirt_solver(
             ).detach()
             current_omega = torch.clamp(omega_candidate, min=0.2 * effective_omega, max=2.0 * effective_omega)
 
+        # Density-Adaptive Over-Relaxation (RMR-v20)
+        if adaptive_relaxation:
+            z_smooth = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2)
+            gate_dense = torch.sigmoid((z_smooth - float(adaptive_relax_threshold)) / float(adaptive_relax_scale))
+            omega_mod = float(adaptive_relax_sparse) + (1.0 - float(adaptive_relax_sparse) + float(adaptive_relax_dense_boost)) * gate_dense
+            current_omega = current_omega * omega_mod
+
         step_delta = current_omega * field
         if trust_region_kappa > 0.0:
-            bound = float(trust_region_kappa) * torch.clamp_min(y.float(), float(trust_region_floor))
+            bound = float(trust_region_kappa) * torch.clamp_min(z_state.float(), float(trust_region_floor))
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 bound = bound * (0.25 + 0.75 * scale_confidence)
             step_delta = torch.clamp(step_delta, min=-bound, max=bound)
 
-        prev_y = y.detach()
+        prev_y = z_state.detach()
         prev_field = field.detach()
 
-        y_step = y.float() - step_delta
+        y_step = z_state.float() - step_delta
 
         # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
         if proximal_mode == "firm":
@@ -284,7 +309,7 @@ def unrolled_sirt_solver(
             else:
                 y_next = laplacian_tv_diffusion(y_next, tv_step, kernel=laplace_kernel)
 
-        y_next = y_next.to(dtype=y.dtype)
+        y_next = y_next.to(dtype=y_curr.dtype)
 
         energy_after = weighted_regional_energy(
             y_next,
@@ -296,7 +321,10 @@ def unrolled_sirt_solver(
         energy_trace.append({"before": energy_before, "after": energy_after})
         residual_fields.append(field)
         iterates.append(y_next)
-        y = y_next
+        y_prev = y_curr
+        y_curr = y_next
+
+    y = y_curr
 
     return {
         "y": y,

@@ -249,6 +249,26 @@ class RMRv3Config:
     curvature_gate_beta: float = 0.03
     curvature_pool_kernel: int = 8
 
+    # ── RMR-v20 Sub-60 Mathematical Breakthrough additions ───────────────────
+    # Micro Perspective Coordinate Attention on carrier P4 (+456 parameters).
+    # Factorizes 1D horizontal and 1D vertical spatial pooling to condition features
+    # directly on camera perspective elevation gradients.
+    use_micro_coord_attn: bool = False
+    micro_coord_reduction: int = 8
+
+    # Nesterov momentum extrapolation in unrolled SIRT solver (0 parameters).
+    # Accelerates convergence to Dirac fixed-point y* from O(1/T) to O(1/T^2).
+    use_nesterov_momentum: bool = False
+
+    # Density-adaptive solver over-relaxation Omega(u) (0 parameters).
+    # Dynamically scales step size omega in [0.70, 1.50] based on smoothed density,
+    # boosting recovery on dense clumps while preventing background noise lift.
+    adaptive_relaxation: bool = False
+    adaptive_relax_sparse: float = 0.70
+    adaptive_relax_dense_boost: float = 0.50
+    adaptive_relax_threshold: float = 0.05
+    adaptive_relax_scale: float = 0.02
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -359,6 +379,7 @@ class RMRv3Config:
 __all__ = [
     "RMRv3Config",
     "RMRv3",
+    "MicroCoordAttn",
     "ProbabilisticRegionalEvidenceHead",
     "reliability_from_nb",
     "region_mean_std_features",
@@ -366,6 +387,48 @@ __all__ = [
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
 ]
+
+
+class MicroCoordAttn(nn.Module):
+    """Micro Perspective Coordinate Attention for P4 carrier features (C=32).
+
+    Factorizes spatial context into 1D horizontal and 1D vertical pooling
+    to natively capture camera perspective elevation gradients with exactly 456 parameters.
+    """
+
+    def __init__(self, channels: int = 32, reduction: int = 8) -> None:
+        super().__init__()
+        mid_channels = max(4, channels // reduction)  # 32 // 8 = 4
+        self.conv_shared = nn.Conv2d(channels, mid_channels, kernel_size=1, bias=False)
+        self.gn = nn.GroupNorm(1, mid_channels)
+        self.act = nn.SiLU(inplace=True)
+        self.conv_h = nn.Conv2d(mid_channels, channels, kernel_size=1, bias=True)
+        self.conv_w = nn.Conv2d(mid_channels, channels, kernel_size=1, bias=True)
+
+        # Near-identity warm-start initialization:
+        # Small weights (std=1e-3) and +3.5 bias ensure sigmoid(3.5)*sigmoid(3.5) ≈ 0.942,
+        # preventing the catastrophic 75% carrier feature attenuation at epoch 0 while
+        # preserving non-zero backpropagation gradients to shared conv and groupnorm.
+        nn.init.normal_(self.conv_h.weight, std=1e-3)
+        nn.init.constant_(self.conv_h.bias, 3.5)
+        nn.init.normal_(self.conv_w.weight, std=1e-3)
+        nn.init.constant_(self.conv_w.bias, 3.5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        x_h = x.mean(dim=-1, keepdim=True)  # [B, C, H, 1]
+        x_w = x.mean(dim=-2, keepdim=True).permute(0, 1, 3, 2)  # [B, C, W, 1]
+
+        y = torch.cat([x_h, x_w], dim=2)  # [B, C, H+W, 1]
+        y = self.act(self.gn(self.conv_shared(y)))
+
+        y_h, y_w = torch.split(y, [h, w], dim=2)
+        y_w = y_w.permute(0, 1, 3, 2)  # [B, mid_channels, 1, W]
+
+        a_h = torch.sigmoid(self.conv_h(y_h))
+        a_w = torch.sigmoid(self.conv_w(y_w))
+
+        return x * a_h * a_w
 
 
 class RMRv3(nn.Module):
@@ -492,6 +555,15 @@ class RMRv3(nn.Module):
             )
         else:
             self.coord_attn = None
+
+        # ── RMR-v20: Micro Perspective Coordinate Attention on P4 (+456 params) ──
+        if getattr(cfg, "use_micro_coord_attn", False):
+            self.micro_coord_attn: MicroCoordAttn | None = MicroCoordAttn(
+                channels=cfg.feature_width,
+                reduction=getattr(cfg, "micro_coord_reduction", 8),
+            )
+        else:
+            self.micro_coord_attn = None
 
         # ── Dynamic Scale Routing (RMR-v10/v18/v19) ──────────────────────────
         if getattr(cfg, "factorized_scale_routing", False):
@@ -632,6 +704,10 @@ class RMRv3(nn.Module):
         # ── Stage 3: Coordinate Attention on P4 (optional) ────────────────────
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
+
+        # ── RMR-v20: Micro Perspective Coordinate Attention on P4 ────────────
+        if self.micro_coord_attn is not None:
+            p4 = self.micro_coord_attn(p4)
 
         # ── Dynamic Scale Routing (RMR-v10/v19) ──────────────────────────────
         scale_weights = None
@@ -801,6 +877,12 @@ class RMRv3(nn.Module):
             morozov_gamma=self.cfg.morozov_gamma,
             use_barzilai_borwein=getattr(self.cfg, "use_barzilai_borwein", False),
             use_scale_entropy_trust=getattr(self.cfg, "use_scale_entropy_trust", False),
+            use_nesterov_momentum=getattr(self.cfg, "use_nesterov_momentum", False),
+            adaptive_relaxation=getattr(self.cfg, "adaptive_relaxation", False),
+            adaptive_relax_sparse=getattr(self.cfg, "adaptive_relax_sparse", 0.70),
+            adaptive_relax_dense_boost=getattr(self.cfg, "adaptive_relax_dense_boost", 0.50),
+            adaptive_relax_threshold=getattr(self.cfg, "adaptive_relax_threshold", 0.10),
+            adaptive_relax_scale=getattr(self.cfg, "adaptive_relax_scale", 0.03),
         )
 
         y = solver_res["y"]

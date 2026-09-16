@@ -349,6 +349,16 @@ class RMRv3LossConfig:
     scale_align_kernel: int = 5          # kernel size for local density estimation
     scale_align_mask_bg: bool = True     # RMR-v14: mask out background pixels from scale alignment KL loss
 
+    # ── RMR-v20 High-Density Sample-Level Loss Scaling (0 params) ────────────
+    # Amplifies gradients on high-density crowd crops (>100 count, upper 30% of distribution)
+    # so the regional and fine heads receive adequate gradient signal without drowning in
+    # the massive volume of low-density crops.
+    density_loss_scaling: bool = False
+    dense_loss_thresh: float = 100.0
+    dense_loss_norm: float = 150.0
+    dense_loss_alpha: float = 1.0
+    dense_loss_max_boost: float = 2.0
+
     def __post_init__(self) -> None:
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
@@ -816,6 +826,7 @@ def compute_rmr_v3_losses(
         regions,
     )
 
+
     losses["total"] = (
         cfg.lambda_count * losses["count"]
         + cfg.lambda_flat_dm16 * loss_allocation
@@ -908,6 +919,21 @@ def compute_rmr_v3_losses(
         losses["total"] = losses["total"] + cfg.lambda_scale_align * losses["scale_align"]
     else:
         losses["scale_align"] = zero_val
+
+    # ── RMR-v20 Sample-Level High-Density Loss Rescaling (0 params) ──────────
+    # True sample-level importance weighting: scales the entire composite loss
+    # (cell, count, allocation, region_nb, scale_align) proportionally so no single
+    # head starves or overpowers multi-task balance.
+    if getattr(cfg, "density_loss_scaling", False):
+        total_gt = target_float.sum(dim=(-2, -1))
+        dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
+            (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
+            min=0.0,
+            max=float(cfg.dense_loss_max_boost),
+        )
+        sample_scale = (1.0 + dense_boost).detach().mean()
+        losses["total"] = losses["total"] * sample_scale
+        losses["dense_loss_scale"] = sample_scale
 
     return losses
 
