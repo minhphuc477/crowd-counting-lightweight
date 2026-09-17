@@ -21,20 +21,22 @@ Write-Host "====================================================================
 Write-Host "  RMR-v21 SUB-60 EXPERIMENT SUITE (PowerShell)" -ForegroundColor Cyan
 Write-Host "================================================================================" -ForegroundColor Cyan
 
+$py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } else { "python" }
+
 foreach ($m in $models) {
     $runId = $m.RunId
     $cfg = $m.Config
     $log = "$logDir/$runId.log"
 
     Write-Host "`n>>> Starting training for: $runId ($cfg)" -ForegroundColor Green
-    python -m rmr_v3.train --config $cfg --run-id $runId 2>&1 | Tee-Object -FilePath $log
+    & $py -m rmr_v3.train --config $cfg --run-id $runId 2>&1 | Tee-Object -FilePath $log
     Write-Host ">>> Completed: $runId" -ForegroundColor Yellow
 
     $ckptPath = "runs/sha_a/$runId/best_val_mae.pt"
     if (Test-Path $ckptPath) {
         Write-Host ">>> Evaluating with Horizontal Flip TTA: $ckptPath" -ForegroundColor Magenta
         $evalLog = "$logDir/${runId}_eval_tta.log"
-        python -m rmr_v3.eval --checkpoint $ckptPath --tta 2>&1 | Tee-Object -FilePath $evalLog
+        & $py -m rmr_v3.eval --checkpoint $ckptPath --tta 2>&1 | Tee-Object -FilePath $evalLog
     }
 }
 

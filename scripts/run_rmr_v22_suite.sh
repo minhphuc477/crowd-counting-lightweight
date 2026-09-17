@@ -18,6 +18,16 @@ echo "==========================================================================
 echo "  RMR-v22 SUB-60 EXPERIMENT SUITE"
 echo "================================================================================"
 
+PYTHON_EXE="python"
+if command -v python3 &>/dev/null; then
+    PYTHON_EXE="python3"
+fi
+if [ -f ".venv/bin/python" ]; then
+    PYTHON_EXE=".venv/bin/python"
+elif [ -f ".venv/Scripts/python.exe" ]; then
+    PYTHON_EXE=".venv/Scripts/python.exe"
+fi
+
 for entry in "${MODELS[@]}"; do
     RUN_ID="${entry%%:*}"
     CFG="${entry##*:}"
@@ -25,14 +35,14 @@ for entry in "${MODELS[@]}"; do
 
     echo ""
     echo ">>> Starting training for: ${RUN_ID} (${CFG})"
-    python -m rmr_v3.train --config "${CFG}" --run-id "${RUN_ID}" 2>&1 | tee "${LOG}"
+    "${PYTHON_EXE}" -m rmr_v3.train --config "${CFG}" --run-id "${RUN_ID}" 2>&1 | tee "${LOG}"
     echo ">>> Completed: ${RUN_ID}"
 
     CKPT="runs/sha_a/${RUN_ID}/best_val_mae.pt"
     if [[ -f "${CKPT}" ]]; then
         echo ">>> Evaluating with Horizontal Flip TTA: ${CKPT}"
         EVAL_LOG="${LOG_DIR}/${RUN_ID}_eval_tta.log"
-        python -m rmr_v3.eval --checkpoint "${CKPT}" --tta 2>&1 | tee "${EVAL_LOG}"
+        "${PYTHON_EXE}" -m rmr_v3.eval --checkpoint "${CKPT}" --tta 2>&1 | tee "${EVAL_LOG}"
     fi
 done
 

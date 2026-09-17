@@ -14,6 +14,8 @@ if command -v python3 &>/dev/null; then
 fi
 if [ -f ".venv/bin/python" ]; then
     PYTHON_EXE=".venv/bin/python"
+elif [ -f ".venv/Scripts/python.exe" ]; then
+    PYTHON_EXE=".venv/Scripts/python.exe"
 fi
 
 echo "================================================================================"
