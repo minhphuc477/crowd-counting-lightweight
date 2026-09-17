@@ -153,6 +153,7 @@ class CheckpointManager:
                 ema_state=ema_manager.state if ema_manager.state else None,
             )
             safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
+            safe_torch_save(ckpt, self.out_dir / "best_model.pt")
             (self.out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
             (self.out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
             return True, " >>> [NEW BEST CHECKPOINT SAVED] <<<"

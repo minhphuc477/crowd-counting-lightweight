@@ -51,6 +51,25 @@ from rmr_v3.model import RMRv3, RMRv3Config
 def load_model_from_ckpt(
     ckpt_path: Path, device: torch.device, use_ema: bool = True
 ) -> tuple[RMRv3, bool, dict, dict]:
+    ckpt_path = Path(ckpt_path)
+    if ckpt_path.is_dir():
+        for cand in ["best_val_mae.pt", "best_model.pt", "last.pt"]:
+            if (ckpt_path / cand).is_file():
+                ckpt_path = ckpt_path / cand
+                break
+        else:
+            raise FileNotFoundError(
+                f"Directory '{ckpt_path}' does not contain 'best_val_mae.pt', 'best_model.pt', or 'last.pt'."
+            )
+    elif not ckpt_path.exists():
+        # Fallback between best_model.pt and best_val_mae.pt
+        if ckpt_path.name == "best_model.pt" and (ckpt_path.parent / "best_val_mae.pt").is_file():
+            ckpt_path = ckpt_path.parent / "best_val_mae.pt"
+        elif ckpt_path.name == "best_val_mae.pt" and (ckpt_path.parent / "best_model.pt").is_file():
+            ckpt_path = ckpt_path.parent / "best_model.pt"
+        else:
+            raise FileNotFoundError(f"Checkpoint file not found: {ckpt_path}")
+
     try:
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     except TypeError:
@@ -95,6 +114,9 @@ def main() -> None:
     ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
     ap.add_argument("--tta", dest="tta", action="store_true", default=False, help="Enable Horizontal Flip Test-Time Augmentation (TTA)")
+    ap.add_argument("--enable-tta", dest="enable_tta", action="store_true", default=False, help="Alias for --tta")
+    ap.add_argument("--dataset", default=None, help="Dataset identifier (e.g. sha_a, sha_b, qnrf) to resolve data/<dataset>_<split>.jsonl")
+    ap.add_argument("--split", default="test", help="Dataset split (default: test, e.g. test, val, train)")
     ap.add_argument("--use-live-weights", dest="use_ema", action="store_false", default=True, help="Evaluate live checkpoint weights instead of EMA weights")
     args = ap.parse_args()
 
@@ -104,13 +126,23 @@ def main() -> None:
     model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device, use_ema=args.use_ema)
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
-    manifest = args.manifest or cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
-    manifest_path = Path(manifest)
+    if args.manifest is not None:
+        manifest_path = Path(args.manifest)
+    elif args.dataset is not None:
+        cand_manifest = Path(f"data/{args.dataset}_{args.split}.jsonl")
+        if not cand_manifest.exists() and Path(f"data/{args.dataset}_val.jsonl").exists() and args.split == "test":
+            cand_manifest = Path(f"data/{args.dataset}_val.jsonl")
+        manifest_path = cand_manifest
+    else:
+        manifest = cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
+        manifest_path = Path(manifest)
+
+    use_tta = bool(args.tta or args.enable_tta)
     mode_tag = "uniform" if uniform_reliability else "weighted"
     tiling_tag = "" if args.tiling else "_notiling"
-    tta_tag = "_tta" if args.tta else ""
+    tta_tag = "_tta" if use_tta else ""
     default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}{tta_tag}"
-    out_dir = Path(args.output_dir) if args.output_dir else ckpt_path.parent / default_dir_name
+    out_dir = Path(args.output_dir) if args.output_dir else (ckpt_path if ckpt_path.is_dir() else ckpt_path.parent) / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stride = int(cfg.get("model", {}).get("output_stride", 4))
@@ -165,7 +197,7 @@ def main() -> None:
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,
         density_bins=density_bins,
-        use_tta=args.tta,
+        use_tta=use_tta,
     )
 
     corrs = compute_reliability_correlations(diag_rows)

@@ -8,6 +8,8 @@ declare -a MODELS=(
     "rmr_v23_canonical:configs/rmr_v23/rmr_v23_canonical.yaml"
     "rmr_v23_ablation_no_bb:configs/rmr_v23/rmr_v23_ablation_no_bb.yaml"
     "rmr_v23_ablation_no_density_gated_diffusion:configs/rmr_v23/rmr_v23_ablation_no_density_gated_diffusion.yaml"
+    "rmr_v23_ablation_no_gated_curvature:configs/rmr_v23/rmr_v23_ablation_no_gated_curvature.yaml"
+    "rmr_v23_ablation_no_scale_align:configs/rmr_v23/rmr_v23_ablation_no_scale_align.yaml"
     "rmr_v23_control_no_solver:configs/rmr_v23/rmr_v23_control_no_solver.yaml"
 )
 

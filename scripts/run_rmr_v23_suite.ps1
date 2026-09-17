@@ -7,6 +7,8 @@ $models = @(
     @{ RunId = "rmr_v23_canonical";                             Config = "configs/rmr_v23/rmr_v23_canonical.yaml" },
     @{ RunId = "rmr_v23_ablation_no_bb";                        Config = "configs/rmr_v23/rmr_v23_ablation_no_bb.yaml" },
     @{ RunId = "rmr_v23_ablation_no_density_gated_diffusion";   Config = "configs/rmr_v23/rmr_v23_ablation_no_density_gated_diffusion.yaml" },
+    @{ RunId = "rmr_v23_ablation_no_gated_curvature";          Config = "configs/rmr_v23/rmr_v23_ablation_no_gated_curvature.yaml" },
+    @{ RunId = "rmr_v23_ablation_no_scale_align";              Config = "configs/rmr_v23/rmr_v23_ablation_no_scale_align.yaml" },
     @{ RunId = "rmr_v23_control_no_solver";                      Config = "configs/rmr_v23/rmr_v23_control_no_solver.yaml" }
 )
 

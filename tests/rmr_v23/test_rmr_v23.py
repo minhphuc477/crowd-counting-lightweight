@@ -48,6 +48,8 @@ class TestRMRv23ParameterBudget:
             ("rmr_v23_canonical.yaml", 104_441),
             ("rmr_v23_ablation_no_bb.yaml", 104_441),
             ("rmr_v23_ablation_no_density_gated_diffusion.yaml", 104_441),
+            ("rmr_v23_ablation_no_gated_curvature.yaml", 104_440),
+            ("rmr_v23_ablation_no_scale_align.yaml", 104_441),
             ("rmr_v23_control_no_solver.yaml", 104_441),
         ],
     )
@@ -63,7 +65,7 @@ class TestRMRv23ParameterBudget:
         assert num_trainable <= 105_000, f"{cfg_name} exceeded budget! Got {num_trainable} > 105,000"
         assert num_trainable == expected_params, f"{cfg_name} expected {expected_params} params, got {num_trainable}"
         headroom = 105_000 - num_trainable
-        assert headroom == 559, f"{cfg_name} expected 559 headroom, got {headroom}"
+        assert headroom in (559, 560), f"{cfg_name} expected 559 or 560 headroom, got {headroom}"
 
 
 class TestInvariant1PartitionOfUnityLeakage:
@@ -511,7 +513,7 @@ class TestRMRv23SchemaAndEndToEnd:
 
     def test_all_v23_configs_pass_schema_validation(self) -> None:
         configs = list(Path("configs/rmr_v23").glob("*.yaml"))
-        assert len(configs) == 4, f"Expected exactly 4 configs in configs/rmr_v23, found {len(configs)}"
+        assert len(configs) == 6, f"Expected exactly 6 configs in configs/rmr_v23, found {len(configs)}"
         for c in configs:
             raw = load_config(c)
             validate_v3_config(raw)
@@ -616,15 +618,78 @@ class TestRMRv23SchemaAndEndToEnd:
         assert not dead_params, f"Dead parameters (zero grad): {dead_params}"
 
     def test_config_hash_determinism_and_uniqueness(self) -> None:
-        """Verify config hash is deterministic and distinguishes all 4 v23 configs."""
+        """Verify config hash is deterministic and distinguishes all 6 v23 configs."""
         configs = {
             c.name: load_config(c)
             for c in Path("configs/rmr_v23").glob("*.yaml")
         }
+        assert len(configs) == 6, f"Expected 6 configs in configs/rmr_v23, found {len(configs)}"
         hashes = {name: compute_config_hash(cfg) for name, cfg in configs.items()}
-        assert len(set(hashes.values())) == 4, (
-            f"Config hashes collided! Expected 4 unique hashes, got {len(set(hashes.values()))}: {hashes}"
+        assert len(set(hashes.values())) == 6, (
+            f"Config hashes collided! Expected 6 unique hashes, got {len(set(hashes.values()))}: {hashes}"
         )
         # Determinism check
         for name, cfg in configs.items():
             assert compute_config_hash(cfg) == hashes[name]
+
+
+class TestRMRv23CheckpointAndEvaluationInteroperability:
+    """Verifies that RMR-v23 checkpoint resolution and evaluation CLI aliases function seamlessly."""
+
+    def test_load_model_from_ckpt_resolution(self, tmp_path: Path) -> None:
+        """Verify load_model_from_ckpt transparently resolves dir, best_model.pt, and best_val_mae.pt."""
+        from rmr_v3.eval import load_model_from_ckpt
+
+        cfg_path = Path("configs/rmr_v23/rmr_v23_canonical.yaml")
+        raw_cfg = load_config(cfg_path)
+        model = RMRv3(RMRv3Config.from_dict(raw_cfg["model"], pretrained=False))
+        model.eval()
+
+        # Build dummy checkpoint
+        ckpt = {
+            "model": model.state_dict(),
+            "config": raw_cfg,
+            "epoch": 100,
+            "best_mae": 65.0,
+        }
+
+        # Case 1: Save as best_val_mae.pt
+        ckpt_dir = tmp_path / "run_test"
+        ckpt_dir.mkdir(parents=True)
+        torch.save(ckpt, ckpt_dir / "best_val_mae.pt")
+
+        device = torch.device("cpu")
+        # Load via directory
+        m1, _, _, _ = load_model_from_ckpt(ckpt_dir, device)
+        assert isinstance(m1, RMRv3)
+
+        # Load via best_model.pt when only best_val_mae.pt exists
+        m2, _, _, _ = load_model_from_ckpt(ckpt_dir / "best_model.pt", device)
+        assert isinstance(m2, RMRv3)
+
+        # Case 2: Save as best_model.pt only
+        ckpt_dir2 = tmp_path / "run_test2"
+        ckpt_dir2.mkdir(parents=True)
+        torch.save(ckpt, ckpt_dir2 / "best_model.pt")
+
+        # Load via best_val_mae.pt when only best_model.pt exists
+        m3, _, _, _ = load_model_from_ckpt(ckpt_dir2 / "best_val_mae.pt", device)
+        assert isinstance(m3, RMRv3)
+
+    def test_eval_cli_parser_aliases(self) -> None:
+        """Verify that --enable-tta, --dataset, and --split are valid CLI arguments."""
+        import subprocess
+        import sys
+
+        py_exe = sys.executable
+        res = subprocess.run(
+            [py_exe, "-m", "rmr_v3.eval", "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd()),
+        )
+        assert res.returncode == 0
+        help_text = res.stdout
+        assert "--enable-tta" in help_text
+        assert "--dataset" in help_text
+        assert "--split" in help_text
