@@ -288,6 +288,17 @@ class RMRv3Config:
     diffusion_dense_threshold: float = 0.15
     diffusion_gate_beta: float = 0.03
 
+    # ── RMR-v24 Breakthrough additions ───────────────────────────────────────
+    # Micro-Perspective 1D Carrier Elevation:
+    # 1D vertical elevation projection (Linear(1, 32), +64 parameters)
+    # mod = tanh(W * v + b) where v in [-1, 1] encodes camera elevation foreshortening.
+    use_perspective_elevation: bool = False
+
+    # Alternating Barzilai-Borwein (ABB) step size in unrolled SIRT solver (0 parameters):
+    # Alternates between BB-1 (Rayleigh quotient) on even secant steps and BB-2
+    # (inverse Rayleigh quotient) on odd secant steps to break cyclic attractor limit cycles.
+    use_alternating_bb: bool = False
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -403,6 +414,7 @@ __all__ = [
     "RMRv3Config",
     "RMRv3",
     "MicroCoordAttn",
+    "MicroPerspectiveElevation",
     "ProbabilisticRegionalEvidenceHead",
     "reliability_from_nb",
     "region_mean_std_features",
@@ -410,6 +422,29 @@ __all__ = [
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
 ]
+
+
+class MicroPerspectiveElevation(nn.Module):
+    """1D Vertical Perspective Carrier Elevation Modulation.
+
+    Maps normalized vertical coordinates v in [-1, 1] through a 1D linear projection
+    (nn.Linear(1, channels), exactly 64 parameters for channels=32) to encode camera
+    foreshortening directly into the P4 carrier with zero-initialized identity warm-start.
+    """
+
+    def __init__(self, channels: int = 32) -> None:
+        super().__init__()
+        self.proj = nn.Linear(1, channels, bias=True)
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = x.shape[-2]
+        # v: [H, 1] normalized vertical coordinates from -1.0 (top) to +1.0 (bottom)
+        v = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=torch.float32).view(h, 1)
+        # elevation_mod: [C, H, 1] broadcasts cleanly across any batch and width dims
+        elevation_mod = self.proj(v).transpose(0, 1).unsqueeze(-1)
+        return x * (1.0 + torch.tanh(elevation_mod).to(dtype=x.dtype))
 
 
 class MicroCoordAttn(nn.Module):
@@ -589,6 +624,14 @@ class RMRv3(nn.Module):
         else:
             self.micro_coord_attn = None
 
+        # ── RMR-v24: Micro-Perspective 1D Carrier Elevation (+64 params) ─────
+        if cfg.use_perspective_elevation:
+            self.perspective_elevation: MicroPerspectiveElevation | None = MicroPerspectiveElevation(
+                channels=cfg.feature_width
+            )
+        else:
+            self.perspective_elevation = None
+
         # ── Dynamic Scale Routing (RMR-v10/v18/v19) ──────────────────────────
         if cfg.factorized_scale_routing:
             self.scale_router: FactorizedRoutingHead | ScaleRoutingHead | None = FactorizedRoutingHead(
@@ -724,6 +767,10 @@ class RMRv3(nn.Module):
         # Micro Perspective Coordinate Attention on P4 (RMR-v20)
         if self.micro_coord_attn is not None:
             p4 = self.micro_coord_attn(p4)
+
+        # Micro-Perspective 1D Carrier Elevation (RMR-v24)
+        if self.perspective_elevation is not None:
+            p4 = self.perspective_elevation(p4)
 
         return p4, p8, p16
 
@@ -927,6 +974,7 @@ class RMRv3(nn.Module):
             b_variance=b_variance,
             morozov_gamma=self.cfg.morozov_gamma,
             use_barzilai_borwein=self.cfg.use_barzilai_borwein,
+            use_alternating_bb=self.cfg.use_alternating_bb,
             use_scale_entropy_trust=self.cfg.use_scale_entropy_trust,
             use_nesterov_momentum=self.cfg.use_nesterov_momentum,
             adaptive_relaxation=self.cfg.adaptive_relaxation,

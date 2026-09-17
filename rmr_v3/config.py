@@ -136,6 +136,9 @@ ALLOWED_MODEL_KEYS = {
     "density_gated_diffusion",
     "diffusion_dense_threshold",
     "diffusion_gate_beta",
+    # RMR-v24 additions
+    "use_perspective_elevation",
+    "use_alternating_bb",
 }
 
 ALLOWED_LOSS_KEYS = {

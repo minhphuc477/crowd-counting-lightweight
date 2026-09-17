@@ -142,6 +142,7 @@ def unrolled_sirt_solver(
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
     use_barzilai_borwein: bool = False,
+    use_alternating_bb: bool = False,
     use_scale_entropy_trust: bool = False,
     use_nesterov_momentum: bool = False,
     adaptive_relaxation: bool = False,
@@ -297,18 +298,30 @@ def unrolled_sirt_solver(
             hybrid_recovery_alpha=float(hybrid_recovery_alpha),
         )
 
-        # Adaptive Barzilai-Borwein step size
+        # Adaptive Barzilai-Borwein step size (BB-1 or Alternating BB-1 / BB-2)
         current_omega: float | torch.Tensor = effective_omega
-        if use_barzilai_borwein and prev_y is not None and prev_field is not None and effective_omega > 0.0:
+        if (use_barzilai_borwein or use_alternating_bb) and prev_y is not None and prev_field is not None and effective_omega > 0.0:
             s_diff = (z_state - prev_y).float()
             r_diff = (field - prev_field).float()
             dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
             norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
-            omega_candidate = torch.where(
-                dot_sr > 0.0,
-                dot_sr / norm_r_sq,
-                torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
-            ).detach()
+            norm_s_sq = (s_diff * s_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
+
+            if use_alternating_bb and (iter_idx % 2 == 1):
+                # BB-2: Inverse Rayleigh quotient alpha_2 = ||s||^2 / <s, r>
+                omega_candidate = torch.where(
+                    dot_sr > 1e-7,
+                    norm_s_sq / dot_sr.clamp_min(1e-7),
+                    torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                ).detach()
+            else:
+                # BB-1: Standard Rayleigh quotient alpha_1 = <s, r> / ||r||^2
+                omega_candidate = torch.where(
+                    dot_sr > 0.0,
+                    dot_sr / norm_r_sq,
+                    torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                ).detach()
+
             current_omega = torch.clamp(omega_candidate, min=0.2 * effective_omega, max=2.0 * effective_omega)
 
         # Density-Adaptive Over-Relaxation (RMR-v20)
