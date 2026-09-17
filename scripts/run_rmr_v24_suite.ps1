@@ -1,5 +1,5 @@
 # PowerShell Runner for RMR-v24 Sub-60 Experiment Suite
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $env:PYTHONUNBUFFERED = "1"
 $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 
