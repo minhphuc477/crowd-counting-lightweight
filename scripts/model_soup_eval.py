@@ -9,14 +9,19 @@ from __future__ import annotations
 import argparse
 import copy
 from pathlib import Path
+import sys
 from typing import Any
 
-import torch
-import yaml
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-from rmr_core.evaluation import evaluate_dataset
-from rmr_v3.config import validate_v3_config
-from rmr_v3.model import RMRv3, RMRv3Config
+import torch  # noqa: E402
+import yaml  # noqa: E402
+
+from rmr_core.evaluation import evaluate_dataset  # noqa: E402
+from rmr_v3.config import validate_v3_config  # noqa: E402
+from rmr_v3.model import RMRv3, RMRv3Config  # noqa: E402
 
 
 def compute_model_soup(checkpoint_paths: list[Path]) -> dict[str, Any]:
@@ -91,16 +96,31 @@ def main() -> None:
         model.eval()
 
         val_manifest = raw_cfg["data"]["val_manifest"]
-        metrics = evaluate_dataset(
+        from rmr_core.data import CrowdManifestDataset, collate_eval
+        from torch.utils.data import DataLoader
+
+        stride = int(raw_cfg.get("model", {}).get("output_stride", 4))
+        dataset = CrowdManifestDataset(
+            Path(val_manifest),
+            train=False,
+            output_stride=stride,
+            data_root=raw_cfg.get("data", {}).get("data_root"),
+        )
+        loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
+
+        rows, metrics = evaluate_dataset(
             model=model,
-            manifest_path=val_manifest,
-            device=args.device,
-            output_stride=4,
+            loader=loader,
+            device=torch.device(args.device),
+            output_stride=stride,
         )
         print("\n--- MODEL SOUP EVALUATION SUMMARY ---")
-        print(f"MAE:  {metrics.get('mae', 0.0):.2f}")
-        print(f"RMSE: {metrics.get('rmse', 0.0):.2f}")
-        print(f"Bias: {metrics.get('bias', 0.0):+.2f}")
+        mae = metrics.get('MAE') or metrics.get('mae', 0.0)
+        rmse = metrics.get('RMSE') or metrics.get('rmse', 0.0)
+        bias = metrics.get('Bias') or metrics.get('bias', 0.0)
+        print(f"MAE:  {mae:.2f}")
+        print(f"RMSE: {rmse:.2f}")
+        print(f"Bias: {bias:+.2f}")
 
 
 if __name__ == "__main__":

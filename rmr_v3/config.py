@@ -7,7 +7,7 @@ from typing import Any
 
 from rmr_core.data import resolve_manifest_path
 from rmr_core.training import compute_file_sha256
-from .model import RMRv3Config
+from rmr_v3.model import RMRv3Config  # noqa: F401
 
 ALLOWED_TOP_LEVEL = {
     "seed",
@@ -666,14 +666,54 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "use_top_down_semantic_gate",
         "tdsg_floor",
         "fg_gate_floor",
+        # RMR-v15 additions
+        "scale_conditioned_prior",
+        "pre_solver_scale_gating",
+        "scale_gating_power",
+        "dynamic_trust_gate",
+        "trust_gate_init_bias",
+        # RMR-v17 additions
+        "density_curvature",
+        "use_scale_entropy_trust",
+        # RMR-v18 additions
+        "perspective_scale_bias",
+        "perspective_horizon_gate",
+        "horizon_cutoff",
+        # RMR-v19 additions
+        "factorized_scale_routing",
+        "num_marginal_scales",
+        "num_aspect_ratios",
+        "gated_density_curvature",
+        "curvature_dense_threshold",
+        "curvature_gate_beta",
+        "curvature_pool_kernel",
+        # RMR-v20 additions
+        "use_micro_coord_attn",
+        "micro_coord_reduction",
+        "use_nesterov_momentum",
+        "adaptive_relaxation",
+        "adaptive_relax_sparse",
+        "adaptive_relax_dense_boost",
+        "adaptive_relax_threshold",
+        "adaptive_relax_scale",
         # RMR-v21 additions
         "hybrid_recovery_alpha",
+        # RMR-v22 / v23 additions
+        "use_barzilai_borwein",
+        "scale_conditioned_fine_head",
+        "density_gated_diffusion",
+        "diffusion_dense_threshold",
+        "diffusion_gate_beta",
+        "enable_solver",
+        "init_m0",
     ],
     "loss": [
         "lambda_count",
         "lambda_flat_dm16",
         "lambda_cell",
         "lambda_region_nb",
+        "lambda_hurdle",
+        "lambda_trunc_nb",
         "count_loss_mode",
         "count_nb_dispersion",
         "kappa_flat16",
@@ -709,7 +749,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "scale_align_kernel",
         # RMR-v14 loss fields
         "scale_align_mask_bg",
-        # RMR-v21 loss fields
+        # RMR-v20/v21 loss fields
+        "density_loss_scaling",
         "elementwise_dense_scaling",
     ],
     "train": [

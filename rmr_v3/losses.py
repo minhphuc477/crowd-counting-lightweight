@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Any, Callable
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -38,9 +38,13 @@ def hurdle_focal_bce_loss(
     Returns:
         Scalar focal BCE loss.
     """
-    if pi_logit.ndim == 2:
+    if pi_logit.ndim == 1:
+        pi_logit = pi_logit.unsqueeze(0).unsqueeze(0)
+    elif pi_logit.ndim == 2:
         pi_logit = pi_logit.unsqueeze(1)
-    if target_region.ndim == 2:
+    if target_region.ndim == 1:
+        target_region = target_region.unsqueeze(0).unsqueeze(0)
+    elif target_region.ndim == 2:
         target_region = target_region.unsqueeze(1)
 
     # Binary occupancy label: 1 if any count in region, 0 if empty background.
@@ -81,11 +85,17 @@ def truncated_nb_nll_loss(
         Scalar truncated NB NLL, averaged over occupied regions.
         Returns 0.0 with autograd connectivity if no occupied region exists in batch.
     """
-    if target_region.ndim == 2:
+    if target_region.ndim == 1:
+        target_region = target_region.unsqueeze(0).unsqueeze(0)
+    elif target_region.ndim == 2:
         target_region = target_region.unsqueeze(1)
-    if mu_count.ndim == 2:
+    if mu_count.ndim == 1:
+        mu_count = mu_count.unsqueeze(0).unsqueeze(0)
+    elif mu_count.ndim == 2:
         mu_count = mu_count.unsqueeze(1)
-    if dispersion.ndim == 2:
+    if dispersion.ndim == 1:
+        dispersion = dispersion.unsqueeze(0).unsqueeze(0)
+    elif dispersion.ndim == 2:
         dispersion = dispersion.unsqueeze(1)
 
     occ_mask = (target_region > 0.5)  # [B,1,M]
@@ -98,8 +108,15 @@ def truncated_nb_nll_loss(
         dispersion=dispersion,
         reduction="none",
     )
-    # Average only over occupied regions
-    return per_region_nll[occ_mask].mean()
+    b_sz = target_region.shape[0]
+    sample_losses = []
+    for b_idx in range(b_sz):
+        occ_b = occ_mask[b_idx]
+        if occ_b.any():
+            sample_losses.append(per_region_nll[b_idx][occ_b].mean())
+        else:
+            sample_losses.append((mu_count[b_idx] * 0.0 + dispersion[b_idx] * 0.0).sum())
+    return torch.stack(sample_losses).mean()
 
 
 def scale_balanced_regional_nb_nll(
@@ -451,13 +468,19 @@ def curvature_power_loss(
     regions where local crowd density exceeds `threshold`. This eliminates mass over-inflation
     on isolated heads in moderate crowds while preserving the anti-saturation gradient on dense clumps.
     """
-    if target.ndim == 3:
+    if target.ndim == 2:
+        target = target.unsqueeze(0).unsqueeze(0)
+    elif target.ndim == 3:
         target = target.unsqueeze(1)
-    if y.ndim == 3:
+    if y.ndim == 2:
+        y = y.unsqueeze(0).unsqueeze(0)
+    elif y.ndim == 3:
         y = y.unsqueeze(1)
     work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
     y_f = y.to(dtype=work_dtype).clamp_min(0.0)
     t_f = target.to(dtype=work_dtype).clamp_min(0.0)
+    if y_f.numel() == 0 or t_f.numel() == 0:
+        return (y_f.sum() + t_f.sum()) * 0.0
     diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
     diff_sq = diff.square()
 
@@ -466,7 +489,9 @@ def curvature_power_loss(
 
     # Compute local density via average pooling (covers (kernel_size * stride)^2 pixels)
     pad = int(kernel_size) // 2
-    local_density = F.avg_pool2d(t_f, kernel_size=int(kernel_size), stride=1, padding=pad)
+    local_density = F.avg_pool2d(
+        t_f, kernel_size=int(kernel_size), stride=1, padding=pad, count_include_pad=False
+    )
 
     if mode == "hard":
         gate = (local_density >= float(threshold)).float()
@@ -475,8 +500,10 @@ def curvature_power_loss(
     else:
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
-    gate_sum = gate.sum()
-    return (gate * diff_sq).sum() / gate_sum.clamp_min(1.0)
+    # Sample-level isolation: compute gated curvature loss per image, then average over batch
+    gate_sum = gate.sum(dim=(-2, -1), keepdim=True)  # [B, 1, 1, 1]
+    per_sample_loss = (gate * diff_sq).sum(dim=(-2, -1), keepdim=True) / gate_sum.clamp_min(1.0)
+    return per_sample_loss.mean()
 
 
 def topk_hard_background_loss(
@@ -493,20 +520,36 @@ def topk_hard_background_loss(
     """
     if target.ndim == 3:
         target = target.unsqueeze(1)
+    elif target.ndim == 2:
+        target = target.unsqueeze(0).unsqueeze(0)
     if y.ndim == 3:
         y = y.unsqueeze(1)
+    elif y.ndim == 2:
+        y = y.unsqueeze(0).unsqueeze(0)
+
     y_f = y.float()
     t_f = target.float()
-    bg_mask = (t_f <= float(bg_threshold))
-    if not bg_mask.any():
-        return (y_f * 0.0).sum()
+    b_sz = y_f.shape[0]
+    if b_sz == 0 or y_f.numel() == 0 or t_f.numel() == 0:
+        return (y_f.sum() + t_f.sum()) * 0.0
 
-    bg_preds = torch.clamp_min(y_f[bg_mask], 0.0)
-    num_bg = bg_preds.numel()
-    k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+    sample_losses = []
+    for b_idx in range(b_sz):
+        y_b = y_f[b_idx]
+        t_b = t_f[b_idx]
+        bg_mask = (t_b <= float(bg_threshold))
+        if not bg_mask.any():
+            sample_losses.append((y_b * 0.0).sum())
+            continue
 
-    topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
-    return torch.mean(topk_vals.square())
+        bg_preds = torch.clamp_min(y_b[bg_mask], 0.0)
+        num_bg = bg_preds.numel()
+        k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+
+        topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
+        sample_losses.append(torch.mean(topk_vals.square()))
+
+    return torch.stack(sample_losses).mean()
 
 
 def mass_weighted_cell_loss(
@@ -549,14 +592,20 @@ def mass_weighted_cell_loss(
     Returns:
         Scalar mass-weighted cell loss.
     """
-    if target.ndim == 3:
+    if target.ndim == 2:
+        target = target.unsqueeze(0).unsqueeze(0)
+    elif target.ndim == 3:
         target = target.unsqueeze(1)
-    if y.ndim == 3:
+    if y.ndim == 2:
+        y = y.unsqueeze(0).unsqueeze(0)
+    elif y.ndim == 3:
         y = y.unsqueeze(1)
 
     work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
     y_f = y.to(dtype=work_dtype)
     t_f = target.to(dtype=work_dtype)
+    if y_f.numel() == 0 or t_f.numel() == 0:
+        return (y_f.sum() + t_f.sum()) * 0.0
 
     # Spatial mass per image: [B, 1, 1, 1]
     total_mass = t_f.sum(dim=(-2, -1), keepdim=True)
@@ -619,17 +668,21 @@ def physical_scale_alignment_loss(
     Returns:
         Scalar non-negative KL divergence loss.
     """
-    if target_y.ndim == 3:
+    if target_y.ndim == 2:
+        target_y = target_y.unsqueeze(0).unsqueeze(0)
+    elif target_y.ndim == 3:
         target_y = target_y.unsqueeze(1)
 
     b, k, h, w = scale_weights.shape
-    if k < 2:
-        return (scale_weights * 0.0).sum()
+    if k < 2 or scale_weights.numel() == 0 or target_y.numel() == 0:
+        return (scale_weights.float().sum() + target_y.float().sum()) * 0.0
 
     work_dtype = scale_weights.dtype if scale_weights.dtype in (torch.float32, torch.float64) else torch.float32
     t_f = target_y.to(dtype=work_dtype).clamp_min(0.0)
     pad = int(kernel_size) // 2
-    local_density = F.avg_pool2d(t_f, kernel_size=int(kernel_size), stride=1, padding=pad)
+    local_density = F.avg_pool2d(
+        t_f, kernel_size=int(kernel_size), stride=1, padding=pad, count_include_pad=False
+    )
 
     delta_tau = max(float(tau_dense) - float(tau_sparse), 1e-6)
     s = torch.clamp((local_density - float(tau_sparse)) / delta_tau, 0.0, 1.0)
@@ -655,8 +708,9 @@ def physical_scale_alignment_loss(
 
     if mask_background:
         fg_mask = (local_density >= float(tau_sparse)).float().squeeze(1)  # [B, H, W]
-        fg_sum = fg_mask.sum().clamp_min(1.0)
-        return (kl_per_pixel * fg_mask).sum() / fg_sum
+        fg_sum = fg_mask.sum(dim=(-2, -1), keepdim=True).clamp_min(1.0)  # [B, 1, 1]
+        per_sample_kl = (kl_per_pixel * fg_mask).sum(dim=(-2, -1), keepdim=True) / fg_sum
+        return per_sample_kl.mean()
 
     return kl_per_pixel.mean()
 
@@ -701,6 +755,8 @@ def _compute_elementwise_dense_scaling(
 ) -> dict[str, torch.Tensor]:
     """Elementwise sample-level importance weighting without batch cross-talk leakage."""
     b_sz = target_y.shape[0]
+    if b_sz == 0:
+        return {}
     cfg_single = replace(cfg, elementwise_dense_scaling=False, density_loss_scaling=False)
 
     total_gt = target_y.float().sum(dim=(-2, -1)).view(-1)  # [B]
@@ -994,17 +1050,36 @@ def compute_rmr_v3_losses(
     if cfg is None:
         cfg = RMRv3LossConfig()
 
-    if target_y.ndim == 3:
+    if target_y.ndim == 2:
+        target_y = target_y.unsqueeze(0).unsqueeze(0)
+    elif target_y.ndim == 3:
         target_y = target_y.unsqueeze(1)
+
+    y = outputs["y"].float()
+    y0 = outputs["y0"].float()
+    zero_val = (y.sum() + y0.sum()) * 0.0
+
+    if target_y.shape[0] == 0 or target_y.numel() == 0:
+        return {
+            "total": zero_val,
+            "count": zero_val,
+            "cell": zero_val,
+            "allocation": zero_val,
+            "flat_dm16": zero_val,
+            "region_nb": zero_val,
+            "curvature": zero_val,
+            "hard_bg": zero_val,
+            "fg_bce": zero_val,
+            "hurdle_bce": zero_val,
+            "trunc_nb": zero_val,
+            "scale_align": zero_val,
+        }
 
     # Elementwise High-Density Sample-Level Loss Scaling (RMR-v21)
     if cfg.elementwise_dense_scaling and target_y.shape[0] > 1:
         return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)
 
-    y = outputs["y"].float()
-    y0 = outputs["y0"].float()
     target_float = target_y.float()
-    zero_val = y.sum() * 0.0
 
     regions: RegionSet = outputs["regions"]
     mean_region = outputs["b_region"].float()

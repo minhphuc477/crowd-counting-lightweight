@@ -12,7 +12,16 @@ def balanced_smooth_l1(
     target: torch.Tensor,
     beta: float = 1.0,
 ) -> torch.Tensor:
-    """Equalize empty and non-empty cell contributions."""
+    """Equalize empty and non-empty cell contributions per-image to avoid batch cross-talk."""
+    if pred.numel() == 0 or target.numel() == 0:
+        return (pred.sum() + target.sum()) * 0.0
+
+    if pred.ndim >= 3 and pred.shape[0] > 1:
+        losses = []
+        for i in range(pred.shape[0]):
+            losses.append(balanced_smooth_l1(pred[i : i + 1], target[i : i + 1], beta=beta))
+        return torch.stack(losses).mean()
+
     per = F.smooth_l1_loss(pred, target, reduction="none", beta=beta)
     pos = target > 0
     neg = ~pos
@@ -72,6 +81,8 @@ def count_magnitude_loss(
     dispersion: float = 50.0,
 ) -> torch.Tensor:
     """Total crop count loss using Negative Binomial NLL or log1p smooth L1."""
+    if pred.numel() == 0 or target.numel() == 0:
+        return (pred.sum() + target.sum()) * 0.0
     pn = pred.float().sum(dim=(-2, -1)).view(-1)
     tn = target.float().sum(dim=(-2, -1)).view(-1)
     if mode == "nb":
@@ -163,6 +174,9 @@ def flat_dm_block_loss(
 
     if not strict and (h_pred < k or w_pred < k or h_tgt < k or w_tgt < k):
         return pred_map.new_tensor(0.0)
+
+    if pred_map.numel() == 0 or target_map.numel() == 0:
+        return (pred_map.float().sum() + target_map.float().sum()) * 0.0
 
     pred_block = block_sum_2d(pred_map.float(), k=k, strict=strict).flatten(1)
     target_block = block_sum_2d(target_map.float(), k=k, strict=strict).flatten(1)

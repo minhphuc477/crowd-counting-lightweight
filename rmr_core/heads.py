@@ -15,6 +15,40 @@ _M0_INIT: float = 0.015763
 _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.1422
 
 
+def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
+    """Compute local average density with dimension-safe pooling.
+
+    Handles 0-D (scalar), 1-D, 2-D [H, W], 3-D [C, H, W], and 4-D [B, C, H, W] tensors
+    without dimension mismatch or edge slicing truncation.
+    """
+    if y.ndim < 2:
+        return y
+    orig_ndim = y.ndim
+    if orig_ndim == 2:
+        y_in = y.unsqueeze(0).unsqueeze(0)
+    elif orig_ndim == 3:
+        y_in = y.unsqueeze(0)
+    else:
+        y_in = y
+
+    pad = k_pool // 2
+    y_local = F.avg_pool2d(
+        y_in,
+        kernel_size=k_pool,
+        stride=1,
+        padding=pad,
+        count_include_pad=False,
+    )
+    if y_local.shape[-2:] != y_in.shape[-2:]:
+        y_local = y_local[..., : y_in.shape[-2], : y_in.shape[-1]]
+
+    if orig_ndim == 2:
+        return y_local.squeeze(0).squeeze(0)
+    elif orig_ndim == 3:
+        return y_local.squeeze(0)
+    return y_local
+
+
 class FineMeasureHead(nn.Module):
     """Fine-grained density head with calibrated initial rate.
 
@@ -108,16 +142,7 @@ class FineMeasureHead(nn.Module):
                 # Spatially-conditioned density gate:
                 # Computes local average density in a 32px window (8 cells at stride 4)
                 k_pool = int(self.curvature_pool_kernel)
-                pad = k_pool // 2
-                y_local = F.avg_pool2d(
-                    y_base_f32,
-                    kernel_size=k_pool,
-                    stride=1,
-                    padding=pad,
-                    count_include_pad=False,
-                )
-                if y_local.shape[-2:] != y_base_f32.shape[-2:]:
-                    y_local = y_local[..., :y_base_f32.shape[-2], :y_base_f32.shape[-1]]
+                y_local = _pool_local_density(y_base_f32, k_pool)
                 # Smooth Sigmoid gating:
                 # When y_local < tau_dense (cobblestone, pavement, facades), gate -> 0, eliminating noise squaring
                 # When y_local >= tau_dense (dense crowd clusters), gate -> 1, providing full quadratic expansion
@@ -232,16 +257,7 @@ class ScaleConditionedFineHead(nn.Module):
             y_base_f32 = y_base.float()
             if self.gated_density_curvature:
                 k_pool = int(self.curvature_pool_kernel)
-                pad = k_pool // 2
-                y_local = F.avg_pool2d(
-                    y_base_f32,
-                    kernel_size=k_pool,
-                    stride=1,
-                    padding=pad,
-                    count_include_pad=False,
-                )
-                if y_local.shape[-2:] != y_base_f32.shape[-2:]:
-                    y_local = y_local[..., :y_base_f32.shape[-2], :y_base_f32.shape[-1]]
+                y_local = _pool_local_density(y_base_f32, k_pool)
                 tau_dense = float(self.curvature_dense_threshold)
                 beta = float(max(self.curvature_gate_beta, 1e-4))
                 gate_dense = torch.sigmoid((y_local - tau_dense) / beta)

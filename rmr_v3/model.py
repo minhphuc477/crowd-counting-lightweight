@@ -3,13 +3,14 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, fields
 import math
+from typing import Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
-from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead, build_fine_head
+from rmr_core.heads import build_fine_head
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput

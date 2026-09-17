@@ -78,24 +78,41 @@ def laplacian_tv_diffusion(
         In dense crowd clusters (y_smooth > tau_dense), gate -> 0.0 (strictly zero diffusion),
         preserving sharp peak separation and stopping dense crowd clump mass erosion.
     """
-    if isinstance(tv_lambda, float) and tv_lambda <= 0.0:
+    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
+        return y
+    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
         return y
     if kernel is None:
         kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
     else:
         kernel = kernel.to(device=y.device, dtype=y.dtype)
-    y_pad = F.pad(y, (1, 1, 1, 1), mode="replicate")
+    orig_ndim = y.ndim
+    if orig_ndim == 2:
+        y_4d = y.unsqueeze(0).unsqueeze(0)
+    elif orig_ndim == 3:
+        y_4d = y.unsqueeze(0)
+    elif orig_ndim == 4:
+        y_4d = y
+    else:
+        raise ValueError(f"laplacian_tv_diffusion expects 2D, 3D, or 4D tensor, got ndim={orig_ndim}")
+
+    y_pad = F.pad(y_4d, (1, 1, 1, 1), mode="replicate")
     lap = F.conv2d(y_pad, kernel, padding=0)
 
     if density_gated:
-        y_smooth = F.avg_pool2d(y.float(), kernel_size=5, stride=1, padding=2)
-        y_effective = torch.maximum(y.float(), y_smooth)
+        y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
+        y_effective = torch.maximum(y_4d.float(), y_smooth)
         gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
         step_diff = tv_lambda * gate.to(dtype=y.dtype) * lap
     else:
         step_diff = tv_lambda * lap
 
-    return torch.clamp_min(y + step_diff, 0.0)
+    out = torch.clamp_min(y_4d + step_diff, 0.0)
+    if orig_ndim == 2:
+        return out.squeeze(0).squeeze(0)
+    elif orig_ndim == 3:
+        return out.squeeze(0)
+    return out
 
 
 def unrolled_sirt_solver(
@@ -296,7 +313,7 @@ def unrolled_sirt_solver(
 
         # Density-Adaptive Over-Relaxation (RMR-v20)
         if adaptive_relaxation:
-            z_smooth = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2)
+            z_smooth = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
             gate_dense = torch.sigmoid((z_smooth - float(adaptive_relax_threshold)) / float(adaptive_relax_scale))
             omega_mod = float(adaptive_relax_sparse) + (1.0 - float(adaptive_relax_sparse) + float(adaptive_relax_dense_boost)) * gate_dense
             current_omega = current_omega * omega_mod
