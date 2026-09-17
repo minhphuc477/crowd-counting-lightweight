@@ -362,91 +362,49 @@ class TestInvariant5DensityGatedDiffusion:
         assert out_t is y
 
 
-class TestInvariant6SampleLevelIsolation:
-    """Invariant 6: Sample-Level Isolation (Zero batch cross-talk in loss calculation)."""
+class TestInvariant6BatchActiveGradientPreservation:
+    """Invariant 6: Batch-Active Foreground Normalization.
 
-    def test_zero_batch_crosstalk(self) -> None:
-        cfg_path = Path("configs/rmr_v23/rmr_v23_canonical.yaml")
-        raw_cfg = load_config(cfg_path)
-        model = RMRv3(RMRv3Config.from_dict(raw_cfg["model"], pretrained=False))
-        loss_cfg = RMRv3LossConfig.from_dict(raw_cfg["loss"])
-        model.eval()
+    Guarantees that rare high-density crowd clumps receive full O(1) gradient signals
+    without being diluted by Bx (preventing the catastrophic 8x gradient starvation).
+    """
 
-        torch.manual_seed(123)
-        # Sample 0: Sparse scene
-        x0 = torch.randn(1, 3, 128, 128)
-        tgt0 = torch.zeros(1, 1, 32, 32)
-        tgt0[0, 0, 5, 5] = 1.0
+    def test_gradient_preservation_on_asymmetric_batch(self) -> None:
+        """Verify that a dense scene in a batch of B=8 does NOT have its curvature gradient diluted by 8x."""
+        B = 8
+        H, W = 32, 32
+        y = torch.full((B, 1, H, W), 0.05, requires_grad=True)
+        target = torch.zeros(B, 1, H, W)
+        target[0, 0, 8:24, 8:24] = 2.0  # Only sample 0 has a dense cluster
 
-        # Sample 1: Dense scene
-        x1 = torch.randn(1, 3, 128, 128)
-        tgt1 = torch.zeros(1, 1, 32, 32)
-        tgt1[0, 0, 10:20, 10:20] = 3.0
+        loss = curvature_power_loss(y, target, threshold=0.08, mode="hard")
+        grad = torch.autograd.grad(loss, y)[0]
 
-        # Combined batch of 2
-        x_batch = torch.cat([x0, x1], dim=0)
-        tgt_batch = torch.cat([tgt0, tgt1], dim=0)
-
-        with torch.no_grad():
-            out0 = model(x0)
-            loss0 = compute_rmr_v3_losses(out0, tgt0, loss_cfg)
-
-            out1 = model(x1)
-            loss1 = compute_rmr_v3_losses(out1, tgt1, loss_cfg)
-
-            out_batch = model(x_batch)
-            loss_batch = compute_rmr_v3_losses(out_batch, tgt_batch, loss_cfg)
-
-        # Invariant 6: L_batch["total"] must equal 0.5 * (L_0["total"] + L_1["total"])
-        expected_total = 0.5 * (loss0["total"].item() + loss1["total"].item())
-        actual_total = loss_batch["total"].item()
-        rel_diff = abs(actual_total - expected_total) / max(expected_total, 1e-6)
-        assert rel_diff < 1e-4, (
-            f"Batch cross-talk detected! L_batch={actual_total}, expected={expected_total}, rel_diff={rel_diff}"
+        dense_grad_max = grad[0].abs().max().item()
+        # Full gradient strength on dense cluster must be >= 0.010 (v19 level, NOT diluted to 0.0015)
+        assert dense_grad_max > 0.010, (
+            f"Curvature gradient was starved by batch dilution! Got {dense_grad_max:.4f}, expected > 0.010"
         )
+        # Empty samples must receive strictly zero curvature gradient
+        assert (grad[1:].abs() == 0.0).all(), "Curvature gradient leaked onto empty samples!"
 
-    def test_asymmetric_sample_level_isolation_all_components(self) -> None:
-        """Verify 100% sample isolation on an extreme asymmetric batch (empty vs dense crowd)."""
-        cfg_path = Path("configs/rmr_v23/rmr_v23_canonical.yaml")
-        raw_cfg = load_config(cfg_path)
-        model = RMRv3(RMRv3Config.from_dict(raw_cfg["model"], pretrained=False))
-        loss_cfg = RMRv3LossConfig.from_dict(raw_cfg["loss"])
-        model.eval()
+    def test_scale_alignment_gradient_preservation(self) -> None:
+        """Verify that Scale Router receives full gradient signal on active foreground without Bx dilution."""
+        B = 8
+        H, W = 32, 32
+        sw = torch.full((B, 3, H, W), 1 / 3, requires_grad=True)
+        target = torch.zeros(B, 1, H, W)
+        target[0, 0, 8:24, 8:24] = 1.0  # Only sample 0 has foreground
 
-        torch.manual_seed(42)
-        # Sample 0: Completely empty background
-        x0 = torch.randn(1, 3, 128, 128)
-        tgt0 = torch.zeros(1, 1, 32, 32)
+        loss = physical_scale_alignment_loss(sw, target, mask_background=True)
+        grad = torch.autograd.grad(loss, sw)[0]
 
-        # Sample 1: Extreme crowd scene with high count
-        x1 = torch.randn(1, 3, 128, 128)
-        tgt1 = torch.zeros(1, 1, 32, 32)
-        tgt1[0, 0, 8:24, 8:24] = 2.5  # 2.5 * 256 = 640 count
-
-        x_batch = torch.cat([x0, x1], dim=0)
-        tgt_batch = torch.cat([tgt0, tgt1], dim=0)
-
-        with torch.no_grad():
-            out0 = model(x0)
-            l0 = compute_rmr_v3_losses(out0, tgt0, loss_cfg)
-
-            out1 = model(x1)
-            l1 = compute_rmr_v3_losses(out1, tgt1, loss_cfg)
-
-            out_batch = model(x_batch)
-            l_batch = compute_rmr_v3_losses(out_batch, tgt_batch, loss_cfg)
-
-        # Total loss must be exactly 0.5 * (l0 + l1)
-        expected_total = 0.5 * (l0["total"].item() + l1["total"].item())
-        actual_total = l_batch["total"].item()
-        assert abs(actual_total - expected_total) / max(expected_total, 1e-6) < 1e-4
-
-        # Verify key individual components
-        for comp in ["count", "allocation", "cell", "region_nb", "curvature", "hard_bg", "scale_align"]:
-            if comp in l_batch and l_batch[comp].numel() == 1:
-                exp_c = 0.5 * (l0[comp].item() + l1[comp].item())
-                act_c = l_batch[comp].item()
-                assert abs(act_c - exp_c) / max(exp_c, 1e-6) < 1e-4, f"Cross-talk in component '{comp}'!"
+        active_grad_max = grad[0].abs().max().item()
+        # Full router gradient must be >= 0.005 (not diluted to 0.0009)
+        assert active_grad_max > 0.005, (
+            f"Scale router gradient was starved by batch dilution! Got {active_grad_max:.6f}, expected > 0.005"
+        )
+        assert (grad[1:].abs() == 0.0).all(), "Scale alignment gradient leaked onto empty samples!"
 
     def test_empty_and_2d_loss_components_isolation(self) -> None:
         """Verify topk_hard_background_loss and physical_scale_alignment_loss handle empty & 2D inputs."""

@@ -73,7 +73,7 @@ def test_density_gated_curvature_selective_activation():
 
     # Batch 2 (dense cluster): curvature gradient MUST be active and non-zero
     dense_grad_max = y.grad[2].abs().max().item()
-    assert dense_grad_max > 0.02, f"Dense cluster must have active curvature gradient, got {dense_grad_max}"
+    assert dense_grad_max > 0.05, f"Dense cluster must have active curvature gradient, got {dense_grad_max}"
 
     # Gradient direction: since y=0.05 is under-predicting target (cluster has 8 heads),
     # curvature gradient must pull y UPWARD (negative gradient)

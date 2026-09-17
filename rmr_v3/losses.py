@@ -500,10 +500,10 @@ def curvature_power_loss(
     else:
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
-    # Sample-level isolation: compute gated curvature loss per image, then average over batch
-    gate_sum = gate.sum(dim=(-2, -1), keepdim=True)  # [B, 1, 1, 1]
-    per_sample_loss = (gate * diff_sq).sum(dim=(-2, -1), keepdim=True) / gate_sum.clamp_min(1.0)
-    return per_sample_loss.mean()
+    gate_sum = gate.sum()
+    if gate_sum > 0:
+        return (gate * diff_sq).sum() / gate_sum
+    return (y_f.sum() + t_f.sum()) * 0.0
 
 
 def topk_hard_background_loss(
@@ -529,27 +529,19 @@ def topk_hard_background_loss(
 
     y_f = y.float()
     t_f = target.float()
-    b_sz = y_f.shape[0]
-    if b_sz == 0 or y_f.numel() == 0 or t_f.numel() == 0:
+    if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    sample_losses = []
-    for b_idx in range(b_sz):
-        y_b = y_f[b_idx]
-        t_b = t_f[b_idx]
-        bg_mask = (t_b <= float(bg_threshold))
-        if not bg_mask.any():
-            sample_losses.append((y_b * 0.0).sum())
-            continue
+    bg_mask = (t_f <= float(bg_threshold))
+    if not bg_mask.any():
+        return (y_f.sum() + t_f.sum()) * 0.0
 
-        bg_preds = torch.clamp_min(y_b[bg_mask], 0.0)
-        num_bg = bg_preds.numel()
-        k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+    bg_preds = torch.clamp_min(y_f[bg_mask], 0.0)
+    num_bg = bg_preds.numel()
+    k = min(num_bg, max(1, int(float(ratio) * num_bg)))
 
-        topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
-        sample_losses.append(torch.mean(topk_vals.square()))
-
-    return torch.stack(sample_losses).mean()
+    topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
+    return torch.mean(topk_vals.square())
 
 
 def mass_weighted_cell_loss(
@@ -708,9 +700,10 @@ def physical_scale_alignment_loss(
 
     if mask_background:
         fg_mask = (local_density >= float(tau_sparse)).float().squeeze(1)  # [B, H, W]
-        fg_sum = fg_mask.sum(dim=(-2, -1), keepdim=True).clamp_min(1.0)  # [B, 1, 1]
-        per_sample_kl = (kl_per_pixel * fg_mask).sum(dim=(-2, -1), keepdim=True) / fg_sum
-        return per_sample_kl.mean()
+        fg_sum = fg_mask.sum()
+        if fg_sum > 0:
+            return (kl_per_pixel * fg_mask).sum() / fg_sum
+        return (scale_weights * 0.0).sum()
 
     return kl_per_pixel.mean()
 

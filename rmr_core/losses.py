@@ -12,27 +12,15 @@ def balanced_smooth_l1(
     target: torch.Tensor,
     beta: float = 1.0,
 ) -> torch.Tensor:
-    """Equalize empty and non-empty cell contributions per-image to avoid batch cross-talk."""
+    """Equalize empty and non-empty cell contributions across the batch."""
     if pred.numel() == 0 or target.numel() == 0:
         return (pred.sum() + target.sum()) * 0.0
-
-    if pred.ndim >= 3 and pred.shape[0] > 1:
-        losses = []
-        for i in range(pred.shape[0]):
-            losses.append(balanced_smooth_l1(pred[i : i + 1], target[i : i + 1], beta=beta))
-        return torch.stack(losses).mean()
-
     per = F.smooth_l1_loss(pred, target, reduction="none", beta=beta)
     pos = target > 0
     neg = ~pos
-    terms = []
-    if pos.any():
-        terms.append(per[pos].mean())
-    if neg.any():
-        terms.append(per[neg].mean())
-    if not terms:
-        return per.mean()
-    return torch.stack(terms).mean()
+    pos_loss = per[pos].mean() if pos.any() else per.new_tensor(0.0)
+    neg_loss = per[neg].mean() if neg.any() else per.new_tensor(0.0)
+    return 0.5 * (pos_loss + neg_loss)
 
 
 _MAX_DISPERSION = 1e4
