@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.backbones import MobileNetV4Backbone
-from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead
+from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead, build_fine_head
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput
@@ -83,6 +83,7 @@ class RMRv3Config:
     # Registered clean-causal variant
     detach_region_mean_in_solver: bool = True
     detach_reliability_in_solver: bool = True
+    uniform_reliability: bool = False
 
     # V4 candidate switches
     native_scale_pooling: bool = False
@@ -538,31 +539,19 @@ class RMRv3(nn.Module):
 
         init_bias = _softplus_inverse(cfg.init_m0)
 
-        if cfg.scale_conditioned_fine_head:
-            self.fine_head = ScaleConditionedFineHead(
-                width=cfg.feature_width,
-                num_scales=len(cfg.region_sizes_px),
-                init_bias=init_bias,
-                temp_softplus=cfg.temp_softplus,
-                density_curvature=cfg.density_curvature,
-                gated_density_curvature=cfg.gated_density_curvature,
-                curvature_dense_threshold=cfg.curvature_dense_threshold,
-                curvature_gate_beta=cfg.curvature_gate_beta,
-                curvature_pool_kernel=cfg.curvature_pool_kernel,
-            )
-        else:
-            self.fine_head = FineMeasureHead(
-                width=cfg.feature_width,
-                init_bias=init_bias,
-                temp_softplus=cfg.temp_softplus,
-                scale_conditioned=cfg.scale_conditioned_prior,
-                num_scales=len(cfg.region_sizes_px),
-                density_curvature=cfg.density_curvature,
-                gated_density_curvature=cfg.gated_density_curvature,
-                curvature_dense_threshold=cfg.curvature_dense_threshold,
-                curvature_gate_beta=cfg.curvature_gate_beta,
-                curvature_pool_kernel=cfg.curvature_pool_kernel,
-            )
+        self.fine_head = build_fine_head(
+            width=cfg.feature_width,
+            scale_conditioned_fine_head=cfg.scale_conditioned_fine_head,
+            num_scales=len(cfg.region_sizes_px),
+            init_bias=init_bias,
+            temp_softplus=cfg.temp_softplus,
+            scale_conditioned_prior=cfg.scale_conditioned_prior,
+            density_curvature=cfg.density_curvature,
+            gated_density_curvature=cfg.gated_density_curvature,
+            curvature_dense_threshold=cfg.curvature_dense_threshold,
+            curvature_gate_beta=cfg.curvature_gate_beta,
+            curvature_pool_kernel=cfg.curvature_pool_kernel,
+        )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
             feature_dim=cfg.feature_width,
@@ -754,12 +743,8 @@ class RMRv3(nn.Module):
         self, p4: torch.Tensor, scale_weights: torch.Tensor | None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Predict pre-solver fine density logits z0 and non-negative density y0 with optional foreground gating."""
-        if self.cfg.scale_conditioned_fine_head:
-            z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
-            y0 = self.fine_head.activate(z0)
-        else:
-            z0 = self.fine_head.forward_logits(p4)
-            y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
+        z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
+        y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
 
         fg_logit = None
         if self.fg_gate is not None:

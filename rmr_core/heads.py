@@ -131,7 +131,11 @@ class FineMeasureHead(nn.Module):
             return y_out_f32.to(orig_dtype)
         return y_base
 
-    def forward_logits(self, f: tuple[torch.Tensor, ...] | torch.Tensor) -> torch.Tensor:
+    def forward_logits(
+        self,
+        f: tuple[torch.Tensor, ...] | torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Compute raw pre-activation logit field z0."""
         if isinstance(f, tuple):
             f = f[0]
@@ -210,7 +214,11 @@ class ScaleConditionedFineHead(nn.Module):
         if self.density_curvature:
             self.curvature_alpha = nn.Parameter(torch.tensor(-8.0))
 
-    def activate(self, z: torch.Tensor) -> torch.Tensor:
+    def activate(
+        self,
+        z: torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Compute calibrated non-negative measure Y0 from latent logit field z0."""
         if self.temp_softplus:
             tau = self.tau.clamp_min(0.1)
@@ -283,5 +291,45 @@ class ScaleConditionedFineHead(nn.Module):
     ) -> torch.Tensor:
         z = self.forward_logits(f, scale_weights=scale_weights)
         return self.activate(z)
+
+
+def build_fine_head(
+    width: int = 32,
+    scale_conditioned_fine_head: bool = False,
+    num_scales: int = 3,
+    init_bias: float = _FINE_HEAD_BIAS_INIT,
+    temp_softplus: bool = True,
+    scale_conditioned_prior: bool = False,
+    density_curvature: bool = False,
+    gated_density_curvature: bool = False,
+    curvature_dense_threshold: float = 0.15,
+    curvature_gate_beta: float = 0.03,
+    curvature_pool_kernel: int = 8,
+) -> nn.Module:
+    """Factory function for instantiating polymorphic RMR fine density heads."""
+    if scale_conditioned_fine_head:
+        return ScaleConditionedFineHead(
+            width=width,
+            num_scales=num_scales,
+            init_bias=init_bias,
+            temp_softplus=temp_softplus,
+            density_curvature=density_curvature,
+            gated_density_curvature=gated_density_curvature,
+            curvature_dense_threshold=curvature_dense_threshold,
+            curvature_gate_beta=curvature_gate_beta,
+            curvature_pool_kernel=curvature_pool_kernel,
+        )
+    return FineMeasureHead(
+        width=width,
+        init_bias=init_bias,
+        temp_softplus=temp_softplus,
+        scale_conditioned=scale_conditioned_prior,
+        num_scales=num_scales,
+        density_curvature=density_curvature,
+        gated_density_curvature=gated_density_curvature,
+        curvature_dense_threshold=curvature_dense_threshold,
+        curvature_gate_beta=curvature_gate_beta,
+        curvature_pool_kernel=curvature_pool_kernel,
+    )
 
 

@@ -162,7 +162,7 @@ def main() -> None:
         model, cfg_uniform = make_model(cfg)
         model = model.to(device).eval()
         uniform_reliability = cfg_uniform if args.uniform_reliability is None else args.uniform_reliability
-        iterations = getattr(model.cfg, "iterations", args.iterations)
+        iterations = int(model.cfg.iterations)
     else:
         mcfg = RMRv3Config(
             iterations=args.iterations,
@@ -177,7 +177,7 @@ def main() -> None:
     x = torch.randn(1, 3, args.height, args.width, device=device)
 
     mode_str = "uniform" if uniform_reliability else "weighted"
-    stride = int(getattr(model.cfg, "output_stride", 4))
+    stride = int(model.cfg.output_stride)
 
     if args.tiling:
         forward_call = lambda inp: predict_tiled(
@@ -213,8 +213,8 @@ def main() -> None:
     total_params = count_trainable_parameters(model)
 
     is_v4 = bool(
-        getattr(model.cfg, "native_scale_pooling", False)
-        or getattr(model.cfg, "regional_feature_stats", "mean") == "mean_std"
+        model.cfg.native_scale_pooling
+        or model.cfg.regional_feature_stats == "mean_std"
         or (args.config and "rmr_v4" in str(args.config).lower())
     )
     arch_name = "RMR-v4" if is_v4 else "RMR-v3"

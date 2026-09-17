@@ -51,7 +51,7 @@ class DiagnosticTracker:
         self.e_befores: list[float] = []
         self.e_afters: list[float] = []
 
-        scale_sizes = tuple(getattr(model.cfg, "region_sizes_px", (32, 64, 128)))
+        scale_sizes = tuple(model.cfg.region_sizes_px)
         self.scale_map: dict[int, int | str] = {
             sid: (f"{s[0]}_{s[1]}" if isinstance(s, (tuple, list)) else int(s))
             for sid, s in enumerate(scale_sizes)
@@ -175,15 +175,15 @@ def format_dynamic_training_banner(
 
     # 1. Carrier & Backbone
     bb_name = m_cfg.backbone_name.split(".")[0]
-    stride = getattr(m_cfg, "output_stride", 4)
-    feat_w = getattr(m_cfg, "feature_width", 32)
-    neck_desc = getattr(m_cfg, "neck_type", "additive")
-    if getattr(m_cfg, "use_coord_attn", False):
+    stride = m_cfg.output_stride
+    feat_w = m_cfg.feature_width
+    neck_desc = m_cfg.neck_type
+    if m_cfg.use_coord_attn:
         neck_desc += "+CoordAttn"
     carrier_line = f"Stride-{stride} | Backbone: {bb_name} | Neck: {neck_desc} (C={feat_w})"
 
     # 2. Geometry & Spatial Pooling
-    region_sizes = list(getattr(m_cfg, "region_sizes_px", (32, 64, 128)))
+    region_sizes = list(m_cfg.region_sizes_px)
     is_aniso = any(isinstance(s, (tuple, list)) and len(s) == 2 and s[0] != s[1] for s in region_sizes)
     geo_tag = "Anisotropic Perspective" if is_aniso else "Isotropic"
 
@@ -193,73 +193,78 @@ def format_dynamic_training_banner(
             reg_strs.append(f"({s[0]}x{s[1]})")
         else:
             reg_strs.append(str(s))
-    overlap = getattr(m_cfg, "region_overlap", 0.5)
+    overlap = m_cfg.region_overlap
     reg_desc = f"[{', '.join(reg_strs)}] px ({geo_tag}, overlap={overlap:.0%})"
 
-    pool_mode = getattr(m_cfg, "regional_feature_stats", "mean")
+    pool_mode = m_cfg.regional_feature_stats
     if pool_mode == "mean_std":
         pooling_desc = "Spatial Moments (Mean+Std)"
-    elif getattr(m_cfg, "native_scale_pooling", False):
+    elif m_cfg.native_scale_pooling:
         pooling_desc = "Native Multiscale Pooling"
     else:
         pooling_desc = "Spatial Average"
 
     # 3. Inverse Solver Engine
-    if not getattr(m_cfg, "enable_solver", True):
+    if not m_cfg.enable_solver:
         solver_desc = "Disabled (Direct Feedforward Carrier Head)"
     else:
         solver_parts = []
-        if getattr(m_cfg, "proximal_tau", 0.0) > 0.0:
-            p_mode = getattr(m_cfg, "proximal_mode", "firm").upper()
-            solver_parts.append(f"Proximal {p_mode} RW-SIRT (tau={m_cfg.proximal_tau}, mu={getattr(m_cfg, 'proximal_mu', 3.0)})")
-        elif getattr(m_cfg, "solver_mode", "additive") == "multiplicative":
+        if m_cfg.proximal_tau > 0.0:
+            p_mode = m_cfg.proximal_mode.upper()
+            solver_parts.append(f"Proximal {p_mode} RW-SIRT (tau={m_cfg.proximal_tau}, mu={m_cfg.proximal_mu})")
+        elif m_cfg.solver_mode == "multiplicative":
             solver_parts.append(f"Density-Gated RW-SIRT (rho={m_cfg.density_gate_rho})")
         else:
             solver_parts.append("Additive RW-SIRT")
 
-        solver_parts.append(f"T={getattr(m_cfg, 'iterations', 2)}")
-        solver_parts.append(f"omega={getattr(m_cfg, 'omega', 1.0)}")
+        solver_parts.append(f"T={m_cfg.iterations}")
+        solver_parts.append(f"omega={m_cfg.omega}")
 
-        tv_lam = getattr(m_cfg, "tv_lambda", 0.0)
+        tv_lam = m_cfg.tv_lambda
         if tv_lam > 0.0:
-            tv_t = getattr(m_cfg, "tv_type", "laplacian").capitalize()
-            solver_parts.append(f"{tv_t} TV (lambda={tv_lam})")
+            tv_t = m_cfg.tv_type.capitalize()
+            tv_desc = f"{tv_t} TV (lambda={tv_lam})"
+            if m_cfg.density_gated_diffusion:
+                tv_desc += f" [Density-Gated tau={m_cfg.diffusion_dense_threshold}]"
+            solver_parts.append(tv_desc)
 
-        adj_m = getattr(m_cfg, "adjoint_mode", "flat")
+        adj_m = m_cfg.adjoint_mode
         solver_parts.append(f"Adjoint={'Radon-Nikodym' if adj_m == 'radon_nikodym' else 'Flat'}")
 
-        morozov_g = getattr(m_cfg, "morozov_gamma", 0.0)
+        morozov_g = m_cfg.morozov_gamma
         if morozov_g > 0.0:
             solver_parts.append(f"Morozov(gamma={morozov_g})")
 
-        rel_m = getattr(m_cfg, "reliability_mode", "snr")
+        rel_m = m_cfg.reliability_mode
         rel_tag = "SNR" if rel_m == "snr" else "NB-RateVar"
-        w_mode = "Uniform (W=I)" if getattr(m_cfg, "uniform_reliability", False) else f"Weighted({rel_tag})"
+        w_mode = "Uniform (W=I)" if m_cfg.uniform_reliability else f"Weighted({rel_tag})"
         solver_parts.append(f"Weighting={w_mode}")
-        if getattr(m_cfg, "factorized_scale_routing", False):
-            s_num = getattr(m_cfg, "num_marginal_scales", 3)
-            a_num = getattr(m_cfg, "num_aspect_ratios", 2)
+        if m_cfg.factorized_scale_routing:
+            s_num = m_cfg.num_marginal_scales
+            a_num = m_cfg.num_aspect_ratios
             solver_parts.append(f"ScaleRouting=Factorized2D(S={s_num}, A={a_num})")
-        elif getattr(m_cfg, "dynamic_scale_routing", False):
-            k_num = len(getattr(m_cfg, "region_sizes_px", [32, 64, 128]))
+        elif m_cfg.dynamic_scale_routing:
+            k_num = len(m_cfg.region_sizes_px)
             solver_parts.append(f"ScaleRouting=Dynamic(K={k_num})")
         else:
             solver_parts.append("ScaleRouting=Isotropic")
-        if getattr(m_cfg, "trust_region_kappa", 0.0) > 0.0:
+        if m_cfg.trust_region_kappa > 0.0:
             solver_parts.append(f"TrustRegion(kappa={m_cfg.trust_region_kappa})")
         solver_desc = " | ".join(solver_parts)
 
     # 4. Heads & Densities
-    guidance_head = "Hurdle-NB (Occupancy Gated)" if getattr(m_cfg, "hurdle_head", False) else "Negative-Binomial"
-    if getattr(m_cfg, "temp_softplus", False):
+    guidance_head = "Hurdle-NB (Occupancy Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
+    if m_cfg.scale_conditioned_fine_head:
+        density_head = "ScaleConditionedFineHead (FiLM Continuous Simplex + 3x3 DW Receptive Field)"
+    elif m_cfg.temp_softplus:
         density_head = "FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])"
     else:
         density_head = "FineMeasureHead (Calibrated Log-Space Softplus)"
-    if getattr(m_cfg, "gated_density_curvature", False):
+    if m_cfg.gated_density_curvature:
         density_head += " + GatedCurvature"
-    elif getattr(m_cfg, "density_curvature", False):
+    elif m_cfg.density_curvature:
         density_head += " + QuadraticCurvature"
-    if getattr(m_cfg, "foreground_gate", False):
+    if m_cfg.foreground_gate:
         density_head += " + FG-Gate(33p)"
 
     # 5. Supervision Target & Loss

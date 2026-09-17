@@ -21,7 +21,7 @@ class RMRModelOutput(dict):
     def __getattr__(self, key: str) -> Any:
         if key in self:
             return self[key]
-        if key in ("hurdle_logit", "fg_logit", "scale_weights", "solver_trust_alpha"):
+        if key in ("hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "solver_trust_alpha"):
             return None
         raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
 
@@ -56,6 +56,7 @@ class RMRModelOutput(dict):
     uniform_reliability: bool
     solver_strength: float
     scale_weights: torch.Tensor | None
+    pi_scale: torch.Tensor | None
     hurdle_logit: torch.Tensor | None
     fg_logit: torch.Tensor | None
 

@@ -174,8 +174,8 @@ def main() -> None:
     calib = compute_uncertainty_calibration_bins(diag_rows)
     summary["calibration"] = calib
 
-    disp_min = float(getattr(model.cfg, "dispersion_min", cfg.get("model", {}).get("dispersion_min", 0.5)))
-    disp_max = float(getattr(model.cfg, "dispersion_max", cfg.get("model", {}).get("dispersion_max", 500.0)))
+    disp_min = float(model.cfg.dispersion_min)
+    disp_max = float(model.cfg.dispersion_max)
     sat = compute_dispersion_saturation(diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
 

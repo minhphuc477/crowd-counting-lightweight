@@ -137,7 +137,7 @@ def evaluate_v3(
     all_diag_rows = []
     traj_rows = []
 
-    scale_sizes = tuple(getattr(model.cfg, "region_sizes_px", (32, 64, 128)))
+    scale_sizes = tuple(model.cfg.region_sizes_px)
     scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
@@ -153,7 +153,7 @@ def evaluate_v3(
         model=model,
         loader=loader,
         device=device,
-        output_stride=getattr(model.cfg, "output_stride", 4),
+        output_stride=int(model.cfg.output_stride),
         run_tiling=False,
         forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
         extra_sample_callback=sample_callback,
@@ -170,8 +170,8 @@ def evaluate_v3(
     summary["p50_std_residual"] = calib["p50_std_residual"]
     summary["p90_std_residual"] = calib["p90_std_residual"]
 
-    disp_min = float(getattr(model.cfg, "dispersion_min", 0.5))
-    disp_max = float(getattr(model.cfg, "dispersion_max", 500.0))
+    disp_min = float(model.cfg.dispersion_min)
+    disp_max = float(model.cfg.dispersion_max)
     sat = compute_dispersion_saturation(all_diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
 
@@ -223,7 +223,7 @@ def train_one_epoch(
                     t_out = teacher_model(images)
                     t_y = t_out["y"] if isinstance(t_out, dict) else t_out
 
-                if getattr(loss_cfg, "dm_target", "y0") == "dual":
+                if loss_cfg.dm_target == "dual":
                     kd_y0 = kd_loss_fn(outputs["y0"], t_y)
                     kd_y = kd_loss_fn(outputs["y"], t_y)
                     kd_res = {
@@ -231,7 +231,7 @@ def train_one_epoch(
                         "spatial_kl": 0.5 * kd_y0["spatial_kl"] + 0.5 * kd_y["spatial_kl"],
                         "count_kd": 0.5 * kd_y0["count_kd"] + 0.5 * kd_y["count_kd"],
                     }
-                elif getattr(loss_cfg, "dm_target", "y0") == "y":
+                elif loss_cfg.dm_target == "y":
                     kd_res = kd_loss_fn(outputs["y"], t_y)
                 else:
                     kd_res = kd_loss_fn(outputs["y0"], t_y)
@@ -662,8 +662,8 @@ def main() -> None:
                 "mae_reg_y0": float(val_metrics.get("mae_reg_y0", 0.0)),
                 "mae_reg_y1": float(val_metrics.get("mae_reg_y1", 0.0)),
                 "mae_reg_y2": float(val_metrics.get("mae_reg_y2", 0.0)),
-                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if getattr(model.fine_head, "density_curvature", False) else 0.0,
-                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if getattr(model.fine_head, "density_curvature", False) else 0.0,
+                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if model.fine_head.density_curvature else 0.0,
+                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if model.fine_head.density_curvature else 0.0,
             })
 
             cur_mae = float(val_metrics["MAE"])

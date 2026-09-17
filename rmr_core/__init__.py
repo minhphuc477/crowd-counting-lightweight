@@ -12,7 +12,7 @@ from .data import (
     train_transform,
 )
 from .evaluation import evaluate_dataset, predict_multiscale_tta, predict_tiled, save_evaluation_artifacts
-from .heads import FineMeasureHead, ScaleConditionedFineHead
+from .heads import FineMeasureHead, ScaleConditionedFineHead, build_fine_head
 from .metrics import (
     bootstrap_ci,
     compute_nae,
@@ -96,6 +96,7 @@ __all__ = [
     "save_evaluation_artifacts",
     "FineMeasureHead",
     "ScaleConditionedFineHead",
+    "build_fine_head",
     "bootstrap_ci",
     "compute_nae",
     "density_stratified_mae",

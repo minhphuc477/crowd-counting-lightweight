@@ -130,7 +130,7 @@ class CheckpointManager:
         ema_manager: EMAManager,
         eval_every: int,
     ) -> tuple[bool, str]:
-        solver_enabled = getattr(model.cfg, "enable_solver", True)
+        solver_enabled = bool(model.cfg.enable_solver)
         solver_engaged = (not solver_enabled) or (
             solver_strength >= 1.0 or epoch >= self.solver_warmup_epochs + self.solver_ramp_epochs
         )

@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 
-from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead
+from rmr_core.heads import FineMeasureHead, ScaleConditionedFineHead, build_fine_head
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
@@ -111,6 +111,29 @@ class TestScaleConditionedFineHead:
         density_diff = (out_fine - out_coarse).abs().mean().item()
         assert logit_diff > 1e-2, f"Scale conditioning had no effect on latent logits! Diff: {logit_diff}"
         assert density_diff > 1e-5, f"Scale conditioning had no effect on density prediction! Diff: {density_diff}"
+
+    def test_build_fine_head_factory(self) -> None:
+        """Verifies build_fine_head instantiates the correct class based on config."""
+        head_v22 = build_fine_head(scale_conditioned_fine_head=True)
+        assert isinstance(head_v22, ScaleConditionedFineHead)
+
+        head_baseline = build_fine_head(scale_conditioned_fine_head=False)
+        assert isinstance(head_baseline, FineMeasureHead)
+
+    def test_polymorphic_head_interface(self) -> None:
+        """Verifies both head types satisfy the uniform forward_logits and activate interface."""
+        head_v22 = build_fine_head(scale_conditioned_fine_head=True)
+        head_baseline = build_fine_head(scale_conditioned_fine_head=False)
+
+        f = torch.randn(2, 32, 16, 16)
+        pi = torch.softmax(torch.randn(2, 3, 16, 16), dim=1)
+
+        for head in (head_v22, head_baseline):
+            z = head.forward_logits(f, scale_weights=pi)
+            y = head.activate(z, scale_weights=pi)
+            assert z.shape == (2, 1, 16, 16)
+            assert y.shape == (2, 1, 16, 16)
+            assert (y >= 0.0).all()
 
 
 class TestDensityGatedDiffusion:

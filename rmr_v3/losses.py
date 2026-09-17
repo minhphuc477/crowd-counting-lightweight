@@ -693,18 +693,6 @@ class TargetSupervisionRouter:
             return l_y, {"y": l_y}
 
 
-def compute_rmr_v3_losses(
-    outputs: dict,
-    target_y: torch.Tensor,
-    cfg: RMRv3LossConfig | None = None,
-    points: list[torch.Tensor] | None = None,
-) -> dict[str, torch.Tensor]:
-    if cfg is None:
-        cfg = RMRv3LossConfig()
-
-    if target_y.ndim == 3:
-        target_y = target_y.unsqueeze(1)
-
 def _compute_elementwise_dense_scaling(
     outputs: dict[str, Any],
     target_y: torch.Tensor,
