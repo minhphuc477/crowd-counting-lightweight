@@ -421,6 +421,11 @@ class RMRv3LossConfig:
     def from_dict(cls, d: dict | None) -> "RMRv3LossConfig":
         if not d:
             return cls()
+        import dataclasses
+
+        # Build a map of field name -> field object for type-safe coercion
+        field_map = {f.name: f for f in dataclasses.fields(cls)}
+
         kwargs: dict = {}
         use_multi = bool(d.get("use_multiscale_dm", d.get("use_hierarchical_dm", False)))
         kwargs["use_multiscale_dm"] = use_multi
@@ -429,22 +434,29 @@ class RMRv3LossConfig:
         for k, v in d.items():
             if k in ("use_multiscale_dm", "use_hierarchical_dm"):
                 continue
-            if hasattr(cls, k) and not k.startswith("_"):
-                if isinstance(getattr(cls, k), (int, float, bool, str, tuple)):
-                    if isinstance(getattr(cls, k), tuple) and isinstance(v, (list, tuple)):
-                        kwargs[k] = tuple(v)
-                    elif isinstance(getattr(cls, k), bool):
-                        kwargs[k] = bool(v)
-                    elif isinstance(getattr(cls, k), int):
-                        kwargs[k] = int(v)
-                    elif isinstance(getattr(cls, k), float):
-                        kwargs[k] = float(v)
-                    elif isinstance(getattr(cls, k), str):
-                        kwargs[k] = str(v)
-                    else:
-                        kwargs[k] = v
-                else:
-                    kwargs[k] = v
+            if k not in field_map or k.startswith("_"):
+                continue
+            field = field_map[k]
+            # Determine the canonical type from the field's default value.
+            # Use the actual type annotation if available; fall back to type(default).
+            ftype = field.type  # May be a string annotation in Python 3.10+ style
+            default_val = (
+                field.default
+                if field.default is not dataclasses.MISSING
+                else (field.default_factory() if field.default_factory is not dataclasses.MISSING else None)  # type: ignore[misc]
+            )
+            if isinstance(default_val, bool):
+                kwargs[k] = bool(v)
+            elif isinstance(default_val, int):
+                kwargs[k] = int(v)
+            elif isinstance(default_val, float):
+                kwargs[k] = float(v)
+            elif isinstance(default_val, str):
+                kwargs[k] = str(v)
+            elif isinstance(default_val, tuple) and isinstance(v, (list, tuple)):
+                kwargs[k] = tuple(v)
+            else:
+                kwargs[k] = v
         return cls(**kwargs)
 
 
@@ -1018,8 +1030,11 @@ def _compute_auxiliary_losses(
     else:
         losses["scale_align"] = zero_val
 
-    # High-Density Sample-Level Loss Rescaling (RMR-v20)
-    if cfg.density_loss_scaling or cfg.elementwise_dense_scaling:
+    # High-Density Sample-Level Loss Rescaling (RMR-v20, batch-averaged variant).
+    # Only applied when density_loss_scaling=True.
+    # NOTE: elementwise_dense_scaling (RMR-v21) is handled upstream in compute_rmr_v3_losses()
+    # before this function is called, so it must NOT be applied here again.
+    if cfg.density_loss_scaling:
         total_gt = target_float.sum(dim=(-2, -1))
         dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
             (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),

@@ -49,6 +49,51 @@ def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
     return y_local
 
 
+def _density_activate(
+    z: torch.Tensor,
+    *,
+    temp_softplus: bool,
+    tau: "torch.nn.Parameter | None",
+    density_curvature: bool,
+    curvature_alpha: "torch.nn.Parameter | None",
+    gated_density_curvature: bool,
+    curvature_dense_threshold: float,
+    curvature_gate_beta: float,
+    curvature_pool_kernel: int,
+) -> torch.Tensor:
+    """Shared density activation: temperature-scaled softplus + optional gated quadratic curvature.
+
+    Eliminates copy-paste between FineMeasureHead and ScaleConditionedFineHead.
+    All curvature computation is done in float32 and cast back to z.dtype.
+    """
+    if temp_softplus and tau is not None:
+        tau_clamped = tau.clamp_min(0.1)
+        y_base = tau_clamped * F.softplus(z / tau_clamped)
+    else:
+        y_base = F.softplus(z)
+
+    if density_curvature and curvature_alpha is not None:
+        alpha_eff = F.softplus(curvature_alpha)
+        orig_dtype = y_base.dtype
+        y_base_f32 = y_base.float()
+        if gated_density_curvature:
+            k_pool = int(curvature_pool_kernel)
+            y_local = _pool_local_density(y_base_f32, k_pool)
+            tau_dense = float(curvature_dense_threshold)
+            beta = float(max(curvature_gate_beta, 1e-4))
+            gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
+            curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+        else:
+            curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+        return (y_base_f32 + curv_term).to(orig_dtype)
+    return y_base
+
+
+# Softplus inverse of init_m0=0.015763: softplus(-4.0) ≈ 0.0183 — same order of magnitude,
+# keeps curvature_alpha gradient-connected from epoch 0 (vs. -8.0 which gives ≈0.0003, near-dead).
+_CURVATURE_ALPHA_INIT: float = -4.0
+
+
 class FineMeasureHead(nn.Module):
     """Fine-grained density head with calibrated initial rate.
 
@@ -98,9 +143,9 @@ class FineMeasureHead(nn.Module):
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.0003
-            # providing seamless Step 0 identity with vanilla softplus
-            self.curvature_alpha = nn.Parameter(torch.tensor(-8.0))
+            # Learnable density curvature parameter α; initialized to -4.0 so softplus(-4) ≈ 0.018,
+            # which is gradient-connected from epoch 0 (same order as init_m0=0.015763).
+            self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
 
         self.scale_conditioned = bool(scale_conditioned)
         if self.scale_conditioned:
@@ -128,33 +173,34 @@ class FineMeasureHead(nn.Module):
             gamma_shift = (sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True).clamp(-5.0, 5.0)
             tau_eff = (tau_base * torch.exp(gamma_shift)).clamp_min(0.05)
             y_base = tau_eff * F.softplus((z + b_eff) / tau_eff)
-        elif self.temp_softplus:
-            tau = self.tau.clamp_min(0.1)
-            y_base = tau * F.softplus(z / tau)
-        else:
-            y_base = F.softplus(z)
+            # Apply curvature on top of scale-conditioned base if enabled
+            if self.density_curvature:
+                alpha_eff = F.softplus(self.curvature_alpha)
+                orig_dtype = y_base.dtype
+                y_base_f32 = y_base.float()
+                if self.gated_density_curvature:
+                    k_pool = int(self.curvature_pool_kernel)
+                    y_local = _pool_local_density(y_base_f32, k_pool)
+                    tau_dense = float(self.curvature_dense_threshold)
+                    beta = float(max(self.curvature_gate_beta, 1e-4))
+                    gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
+                    curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+                else:
+                    curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+                return (y_base_f32 + curv_term).to(orig_dtype)
+            return y_base
 
-        if self.density_curvature:
-            alpha_eff = F.softplus(self.curvature_alpha)
-            orig_dtype = y_base.dtype
-            y_base_f32 = y_base.float()
-            if self.gated_density_curvature:
-                # Spatially-conditioned density gate:
-                # Computes local average density in a 32px window (8 cells at stride 4)
-                k_pool = int(self.curvature_pool_kernel)
-                y_local = _pool_local_density(y_base_f32, k_pool)
-                # Smooth Sigmoid gating:
-                # When y_local < tau_dense (cobblestone, pavement, facades), gate -> 0, eliminating noise squaring
-                # When y_local >= tau_dense (dense crowd clusters), gate -> 1, providing full quadratic expansion
-                tau_dense = float(self.curvature_dense_threshold)
-                beta = float(max(self.curvature_gate_beta, 1e-4))
-                gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-                curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
-            else:
-                curv_term = alpha_eff.float() * (y_base_f32 ** 2)
-            y_out_f32 = y_base_f32 + curv_term
-            return y_out_f32.to(orig_dtype)
-        return y_base
+        return _density_activate(
+            z,
+            temp_softplus=self.temp_softplus,
+            tau=getattr(self, "tau", None),
+            density_curvature=self.density_curvature,
+            curvature_alpha=getattr(self, "curvature_alpha", None),
+            gated_density_curvature=self.gated_density_curvature,
+            curvature_dense_threshold=self.curvature_dense_threshold,
+            curvature_gate_beta=self.curvature_gate_beta,
+            curvature_pool_kernel=self.curvature_pool_kernel,
+        )
 
     def forward_logits(
         self,
@@ -184,6 +230,7 @@ class FineMeasureHead(nn.Module):
         if self.temp_softplus or self.scale_conditioned or self.density_curvature:
             return self.activate(z, scale_weights=scale_weights)
         return z
+
 
 
 class ScaleConditionedFineHead(nn.Module):
@@ -237,7 +284,9 @@ class ScaleConditionedFineHead(nn.Module):
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            self.curvature_alpha = nn.Parameter(torch.tensor(-8.0))
+            # Learnable density curvature parameter α; initialized to -4.0 so softplus(-4) ≈ 0.018,
+            # which is gradient-connected from epoch 0 (same order as init_m0=0.015763).
+            self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
 
     def activate(
         self,
@@ -245,28 +294,17 @@ class ScaleConditionedFineHead(nn.Module):
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute calibrated non-negative measure Y0 from latent logit field z0."""
-        if self.temp_softplus:
-            tau = self.tau.clamp_min(0.1)
-            y_base = tau * F.softplus(z / tau)
-        else:
-            y_base = F.softplus(z)
-
-        if self.density_curvature:
-            alpha_eff = F.softplus(self.curvature_alpha)
-            orig_dtype = y_base.dtype
-            y_base_f32 = y_base.float()
-            if self.gated_density_curvature:
-                k_pool = int(self.curvature_pool_kernel)
-                y_local = _pool_local_density(y_base_f32, k_pool)
-                tau_dense = float(self.curvature_dense_threshold)
-                beta = float(max(self.curvature_gate_beta, 1e-4))
-                gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-                curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
-            else:
-                curv_term = alpha_eff.float() * (y_base_f32 ** 2)
-            y_out_f32 = y_base_f32 + curv_term
-            return y_out_f32.to(orig_dtype)
-        return y_base
+        return _density_activate(
+            z,
+            temp_softplus=self.temp_softplus,
+            tau=getattr(self, "tau", None),
+            density_curvature=self.density_curvature,
+            curvature_alpha=getattr(self, "curvature_alpha", None),
+            gated_density_curvature=self.gated_density_curvature,
+            curvature_dense_threshold=self.curvature_dense_threshold,
+            curvature_gate_beta=self.curvature_gate_beta,
+            curvature_pool_kernel=self.curvature_pool_kernel,
+        )
 
     def forward_logits(
         self,

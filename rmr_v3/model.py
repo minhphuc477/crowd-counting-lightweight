@@ -378,6 +378,50 @@ class RMRv3Config:
                 f"hybrid_recovery_alpha must be in [0.0, 1.0], got {self.hybrid_recovery_alpha}"
             )
 
+        # ── Permanently Banned Anti-Pattern Guards ────────────────────────────────────────────
+        # These features were empirically proven harmful and are permanently disabled.
+        # Any config attempting to enable them raises immediately with a clear explanation.
+        if self.use_coord_attn:
+            raise ValueError(
+                "use_coord_attn=True is permanently BANNED (Anti-Pattern #2: Rank-1 phantom Dirac spikes). "
+                "Remove this field from your config."
+            )
+        if getattr(self, "use_micro_coord_attn", False):
+            raise ValueError(
+                "use_micro_coord_attn=True is permanently BANNED (Anti-Pattern #2: Coordinate Attention family). "
+                "Remove this field from your config."
+            )
+        if self.use_nesterov_momentum:
+            raise ValueError(
+                "use_nesterov_momentum=True is permanently BANNED (Anti-Pattern #5: kinetic overshoot in T=6 solver). "
+                "Remove this field from your config."
+            )
+        if self.use_alternating_bb:
+            raise ValueError(
+                "use_alternating_bb=True is permanently BANNED (Anti-Pattern #7: exploding variance in dense clumps). "
+                "Remove this field from your config. Use pure BB-1 with trust damping instead."
+            )
+        if self.density_gated_diffusion:
+            raise ValueError(
+                "density_gated_diffusion=True is permanently BANNED (Anti-Pattern #8: blurs Dirac peaks at stride 4). "
+                "Remove this field from your config."
+            )
+        if self.use_top_down_semantic_gate:
+            raise ValueError(
+                "use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: 90%% gradient suppression). "
+                "Remove this field from your config."
+            )
+        if self.foreground_gate:
+            raise ValueError(
+                "foreground_gate=True is permanently BANNED (Anti-Pattern #4: Hard FG-Gate gradient suppression). "
+                "Remove this field from your config."
+            )
+        if self.hybrid_recovery_alpha > 0.0:
+            raise ValueError(
+                f"hybrid_recovery_alpha={self.hybrid_recovery_alpha} > 0 is permanently BANNED "
+                "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
+                "Keep hybrid_recovery_alpha=0.0."
+            )
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -419,7 +463,6 @@ class RMRv3Config:
 __all__ = [
     "RMRv3Config",
     "RMRv3",
-    "MicroCoordAttn",
     "MicroPerspectiveElevation",
     "ProbabilisticRegionalEvidenceHead",
     "reliability_from_nb",

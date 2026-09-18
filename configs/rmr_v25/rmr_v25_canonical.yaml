@@ -86,7 +86,6 @@ model:
   diffusion_dense_threshold: 0.15
   diffusion_gate_beta: 0.03
   adaptive_relaxation: false
-  use_micro_coord_attn: false
   use_nesterov_momentum: false
   hybrid_recovery_alpha: 0.0
 loss:

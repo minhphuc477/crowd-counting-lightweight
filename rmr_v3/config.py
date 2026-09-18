@@ -121,8 +121,6 @@ ALLOWED_MODEL_KEYS = {
     "curvature_gate_beta",
     "curvature_pool_kernel",
     # RMR-v20 additions
-    "use_micro_coord_attn",
-    "micro_coord_reduction",
     "use_nesterov_momentum",
     "adaptive_relaxation",
     "adaptive_relax_sparse",
@@ -170,8 +168,6 @@ ALLOWED_LOSS_KEYS = {
     "cell_loss_mode",
     "cell_mass_weight_eps",
     "cell_mass_weight_alpha",
-    "lambda_kd_spatial",
-    "lambda_kd_count",
     # RMR-v9: allocation loss target ("y0" | "y")
     "dm_target",
     "dm_strict",
@@ -704,8 +700,9 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "adaptive_relax_scale",
         # RMR-v21 additions
         "hybrid_recovery_alpha",
-        # RMR-v22 / v23 additions
+        # RMR-v17 additions
         "use_barzilai_borwein",
+        # RMR-v22 / v23 additions
         "scale_conditioned_fine_head",
         "density_gated_diffusion",
         "diffusion_dense_threshold",

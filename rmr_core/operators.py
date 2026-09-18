@@ -674,29 +674,7 @@ def build_multiscale_regions(
     return RegionSet(boxes=box_t, scale_id=scale_t, area=area_t, boxes_list=list(boxes_list))
 
 
-def region_geometry(
-    boxes: torch.Tensor,
-    height: int,
-    width: int,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    """Position-free geometry features [M, 4]: log_h, log_w, log_area, log_aspect.
 
-    Retained features (all position-free, scale-invariant):
-        log(h)      absolute grid height (same for same physical scale, any crop)
-        log(w)      absolute grid width
-        log(h*w)    absolute area = log_h + log_w
-        log(w/h)    aspect ratio
-    """
-    boxes = boxes.float()
-    y1, x1, y2, x2 = boxes.unbind(-1)
-    h = (y2 - y1).abs().clamp_min(1.0)
-    w = (x2 - x1).abs().clamp_min(1.0)
-    log_h = torch.log(h + eps)
-    log_w = torch.log(w + eps)
-    log_area = torch.log(h * w + eps)
-    log_aspect = torch.log(w / (h + eps) + eps)
-    return torch.stack([log_h, log_w, log_area, log_aspect], dim=-1)
 
 
 def region_average_features(features: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
@@ -780,27 +758,3 @@ def fractional_region_mean_std_features(
     return torch.cat([mean, std], dim=-1).to(feature.dtype)
 
 
-def center_scatter(
-    values: torch.Tensor,
-    boxes: torch.Tensor,
-    height: int,
-    width: int,
-) -> torch.Tensor:
-    """Sparse learned-projection control: place each region residual at its center.
-
-    values: [B,1,M]
-    returns [B,1,H,W] with collision averaging.
-    """
-    if values.ndim != 3 or values.shape[1] != 1:
-        raise ValueError("center_scatter expects values [B,1,M]")
-    b, _, m = values.shape
-    boxes = boxes.to(device=values.device, dtype=torch.long)
-    y = ((boxes[:, 0] + boxes[:, 2] - 1) // 2).long().clamp(0, height - 1)
-    x = ((boxes[:, 1] + boxes[:, 3] - 1) // 2).long().clamp(0, width - 1)
-    idx = (y * width + x).view(1, 1, m).expand(b, 1, -1)
-    out = values.new_zeros((b, 1, height * width))
-    cnt = values.new_zeros((b, 1, height * width))
-    out.scatter_add_(-1, idx, values)
-    cnt.scatter_add_(-1, idx, torch.ones_like(values))
-    out = out / cnt.clamp_min(1.0)
-    return out.view(b, 1, height, width)
