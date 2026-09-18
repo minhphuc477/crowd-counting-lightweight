@@ -143,6 +143,8 @@ def unrolled_sirt_solver(
     morozov_gamma: float = 0.0,
     use_barzilai_borwein: bool = False,
     use_alternating_bb: bool = False,
+    bb_clamp_min: float = 0.5,
+    bb_clamp_max: float = 1.2,
     use_scale_entropy_trust: bool = False,
     use_nesterov_momentum: bool = False,
     adaptive_relaxation: bool = False,
@@ -322,7 +324,11 @@ def unrolled_sirt_solver(
                     torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
                 ).detach()
 
-            current_omega = torch.clamp(omega_candidate, min=0.2 * effective_omega, max=2.0 * effective_omega)
+            current_omega = torch.clamp(
+                omega_candidate,
+                min=float(bb_clamp_min) * effective_omega,
+                max=float(bb_clamp_max) * effective_omega,
+            )
 
         # Density-Adaptive Over-Relaxation (RMR-v20)
         if adaptive_relaxation:

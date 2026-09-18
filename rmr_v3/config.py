@@ -139,6 +139,9 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v24 additions
     "use_perspective_elevation",
     "use_alternating_bb",
+    # RMR-v26 additions
+    "bb_clamp_min",
+    "bb_clamp_max",
 }
 
 ALLOWED_LOSS_KEYS = {

@@ -299,6 +299,12 @@ class RMRv3Config:
     # (inverse Rayleigh quotient) on odd secant steps to break cyclic attractor limit cycles.
     use_alternating_bb: bool = False
 
+    # ── RMR-v26 Pure BB-1 Rayleigh Contraction with Trust Damping ────────────
+    # Bounds Barzilai-Borwein step size to [bb_clamp_min * omega, bb_clamp_max * omega]
+    # to eliminate oscillatory gradient swings in hyper-dense crowd clusters.
+    bb_clamp_min: float = 0.5
+    bb_clamp_max: float = 1.2
+
     def __post_init__(self) -> None:
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
@@ -425,11 +431,18 @@ __all__ = [
 
 
 class MicroPerspectiveElevation(nn.Module):
-    """1D Vertical Perspective Carrier Elevation Modulation.
+    """1D Vertical Perspective Carrier Elevation Modulation (MPE-v2).
 
     Maps normalized vertical coordinates v in [-1, 1] through a 1D linear projection
-    (nn.Linear(1, channels), exactly 64 parameters for channels=32) to encode camera
-    foreshortening directly into the P4 carrier with zero-initialized identity warm-start.
+    (nn.Linear(1, channels), exactly 64 parameters for channels=32) with mass-conserved
+    spatial normalization:
+        M(v) = 1.0 + tanh(W v + b)
+        M_bar = (1 / H) * sum_{i=1}^H M(v_i)
+        P_tilde = P * (M(v) / M_bar)
+    Preserves vertical mass invariant: (1/H) sum (P_tilde / P) == 1.000000 +- 1e-6 across
+    any height H >= 2, batch size, and channel width. Completely prevents false foreground
+    density over-inflation while preserving camera depth calibration.
+    Zero-initialized identity warm-start (W=0, b=0 -> M(v)=1.0, M_bar=1.0, P_tilde=P).
     """
 
     def __init__(self, channels: int = 32) -> None:
@@ -441,12 +454,16 @@ class MicroPerspectiveElevation(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = x.shape[-2]
         # v: [H, 1] normalized vertical coordinates from -1.0 (top) to +1.0 (bottom)
-        v = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=torch.float32).view(h, 1)
+        v = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=self.proj.weight.dtype).view(h, 1)
         # elevation_mod: [C, H, 1] broadcasts cleanly across any batch and width dims
         elevation_mod = self.proj(v).transpose(0, 1).unsqueeze(-1)
         if x.ndim == 4:
             elevation_mod = elevation_mod.unsqueeze(0)  # [1, C, H, 1]
-        return x * (1.0 + torch.tanh(elevation_mod).to(dtype=x.dtype))
+
+        # MPE-v2: Mass-Conserved Zero-Inflation Perspective Modulation
+        m = 1.0 + torch.tanh(elevation_mod).to(dtype=x.dtype)
+        m_bar = m.mean(dim=-2, keepdim=True)
+        return x * (m / m_bar)
 
 
 class MicroCoordAttn(nn.Module):
@@ -985,6 +1002,8 @@ class RMRv3(nn.Module):
             morozov_gamma=self.cfg.morozov_gamma,
             use_barzilai_borwein=self.cfg.use_barzilai_borwein,
             use_alternating_bb=self.cfg.use_alternating_bb,
+            bb_clamp_min=self.cfg.bb_clamp_min,
+            bb_clamp_max=self.cfg.bb_clamp_max,
             use_scale_entropy_trust=self.cfg.use_scale_entropy_trust,
             use_nesterov_momentum=self.cfg.use_nesterov_momentum,
             adaptive_relaxation=self.cfg.adaptive_relaxation,
