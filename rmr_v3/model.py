@@ -444,6 +444,8 @@ class MicroPerspectiveElevation(nn.Module):
         v = torch.linspace(-1.0, 1.0, steps=h, device=x.device, dtype=torch.float32).view(h, 1)
         # elevation_mod: [C, H, 1] broadcasts cleanly across any batch and width dims
         elevation_mod = self.proj(v).transpose(0, 1).unsqueeze(-1)
+        if x.ndim == 4:
+            elevation_mod = elevation_mod.unsqueeze(0)  # [1, C, H, 1]
         return x * (1.0 + torch.tanh(elevation_mod).to(dtype=x.dtype))
 
 
@@ -704,6 +706,14 @@ class RMRv3(nn.Module):
             tuple,
             RegionSet,
         ] = OrderedDict()
+
+        # Strict parameter budget assertion (max 105,000 parameters)
+        total_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        if total_trainable > 105000:
+            raise ValueError(
+                f"Strict parameter ceiling exceeded: {total_trainable} > 105,000 parameters. "
+                "Check architecture configuration."
+            )
 
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))

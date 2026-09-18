@@ -1,0 +1,7 @@
+run_id,description,exists,epochs,mae,rmse,bias,sparse_mae,moderate_mae,dense_mae,game0,game1,tta_mae,tta_rmse,delta_mae
+rmr_v23_canonical,RMR-v23 Canonical (BB-1 + Gated Diffusion),True,1000,79.48,114.68,-0.60,44.83,61.22,135.95,-,-,-,-,-
+rmr_v23_ablation_no_bb,Ablation 1: No Barzilai-Borwein (Fixed omega),True,1000,81.29,125.08,-5.06,38.41,59.30,149.50,-,-,-,-,+1.81
+rmr_v23_ablation_no_density_gated_diffusion,Ablation 2: No Density-Gated Diffusion,True,1000,81.32,121.77,-6.97,43.58,61.28,143.24,-,-,-,-,+1.84
+rmr_v23_ablation_no_gated_curvature,Ablation 3: No Density-Gated Curvature,False,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v23_ablation_no_scale_align,Ablation 4: No Scale Alignment Loss,False,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v23_control_no_solver,Control: Direct Feedforward (No Solver),True,1000,96.07,153.17,17.04,45.58,68.51,181.03,-,-,-,-,+16.59
