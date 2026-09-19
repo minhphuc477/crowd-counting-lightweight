@@ -1,12 +1,12 @@
 run_id,description,exists,epochs,mae,rmse,bias,sparse_mae,moderate_mae,dense_mae,game0,game1,tta_mae,tta_rmse,delta_v19_direct,delta_v19_tta
-rmr_v27_canonical_restored,"RMR-v27 Canonical Restored (v19 Winning Baseline: w=1.0, BB [0.2, 2.0], Curv=0.50, ScaleAlign=0.05, HardBG=0.15)",False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_sota_push,RMR-v27 SOTA Push (Cyclic BB=2 + Morozov gamma=0.50 + Curv=0.35 -> Sub-70 MAE Target),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_cyclic_bb,Ablation 1: Cyclic BB-1 (Cycle Length = 2),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_no_bb,"Ablation 2: Fixed Step Size (No BB, w=1.0)",False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_morozov05,Ablation 3: Tighter Morozov Deadband (gamma=0.50),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_no_morozov,Ablation 4: No Morozov Regularization (gamma=0.0),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_curv035,Ablation 5: Calibrated Anscombe Curvature (lambda_curv=0.35),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_no_curvature,"Ablation 6: No Curvature Loss (Anscombe Variance-Stabilization Isolation, lambda_curv=0.0)",False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_no_scale_align,Ablation 7: No Physical Scale Alignment (lambda_scale_align=0.0),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_ablation_no_hard_bg,Ablation 8: No Hard Background Mining (lambda_hard_bg=0.0),False,-,-,-,-,-,-,-,-,-,-,-,-,-
-rmr_v27_control_no_solver,"Control: Direct Feedforward (T=0, No SIRT Inverse Solver)",False,-,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v27_canonical_restored,"RMR-v27 Canonical Restored (v19 Winning Baseline: w=1.0, BB [0.2, 2.0], Curv=0.50, ScaleAlign=0.05, HardBG=0.15)",True,1000,79.43,118.83,-1.11,43.89,58.37,143.91,-,-,78.52,116.81,+6.59,+5.91
+rmr_v27_sota_push,RMR-v27 SOTA Push (Cyclic BB=2 + Morozov gamma=0.50 + Curv=0.35 -> Sub-70 MAE Target),True,1000,80.34,124.89,-19.84,38.99,57.49,150.72,-,-,79.79,124.78,+7.50,+7.18
+rmr_v27_ablation_cyclic_bb,Ablation 1: Cyclic BB-1 (Cycle Length = 2),True,1000,80.36,125.39,-4.38,36.14,59.10,146.71,-,-,80.30,127.01,+7.52,+7.69
+rmr_v27_ablation_no_bb,"Ablation 2: Fixed Step Size (No BB, w=1.0)",True,1000,83.18,125.96,-3.84,47.37,60.82,151.33,-,-,82.16,124.58,+10.34,+9.55
+rmr_v27_ablation_morozov05,Ablation 3: Tighter Morozov Deadband (gamma=0.50),True,1000,79.40,120.09,-3.18,42.09,60.67,137.59,-,-,78.37,119.76,+6.56,+5.76
+rmr_v27_ablation_no_morozov,Ablation 4: No Morozov Regularization (gamma=0.0),True,1000,85.99,147.23,-20.50,36.73,56.80,175.34,-,-,84.67,145.99,+13.15,+12.06
+rmr_v27_ablation_curv035,Ablation 5: Calibrated Anscombe Curvature (lambda_curv=0.35),True,1000,80.08,125.03,-4.72,33.72,57.69,149.91,-,-,-,-,+7.24,-
+rmr_v27_ablation_no_curvature,"Ablation 6: No Curvature Loss (Anscombe Variance-Stabilization Isolation, lambda_curv=0.0)",True,4,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v27_ablation_no_scale_align,Ablation 7: No Physical Scale Alignment (lambda_scale_align=0.0),True,4,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v27_ablation_no_hard_bg,Ablation 8: No Hard Background Mining (lambda_hard_bg=0.0),True,3,-,-,-,-,-,-,-,-,-,-,-,-
+rmr_v27_control_no_solver,"Control: Direct Feedforward (T=0, No SIRT Inverse Solver)",True,-,-,-,-,-,-,-,-,-,-,-,-,-

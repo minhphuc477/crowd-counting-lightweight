@@ -335,7 +335,7 @@ class TestInvariant4DensityGatedCurvature:
 
         model = RMRv3(RMRv3Config.from_dict(m, pretrained=False))
         head: FineMeasureHead = model.fine_head  # type: ignore[assignment]
-        assert head.curvature_alpha.item() in (-8.0, -4.0) or abs(head.curvature_alpha.item() - (-4.0)) < 1e-4
+        assert abs(head.curvature_alpha.item() - (-8.0)) < 1e-4, f"Expected -8.0, got {head.curvature_alpha.item()}"
 
     def test_gated_curvature_activation(self) -> None:
         head = FineMeasureHead(

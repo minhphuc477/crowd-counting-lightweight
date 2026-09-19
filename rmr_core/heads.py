@@ -89,9 +89,10 @@ def _density_activate(
     return y_base
 
 
-# Softplus inverse of init_m0=0.015763: softplus(-4.0) ≈ 0.0183 — same order of magnitude,
-# keeps curvature_alpha gradient-connected from epoch 0 (vs. -8.0 which gives ≈0.0003, near-dead).
-_CURVATURE_ALPHA_INIT: float = -4.0
+# Learnable density curvature parameter α initialized to -8.0: softplus(-8.0) ≈ 0.000335.
+# Preserves seamless Step 0 identity with vanilla softplus, maintains the calibrated m0=0.015763 rate,
+# and prevents artificial quadratic overcounting in dense regions (which caused +5.91 MAE regression at -4.0).
+_CURVATURE_ALPHA_INIT: float = -8.0
 
 
 class FineMeasureHead(nn.Module):
@@ -143,8 +144,8 @@ class FineMeasureHead(nn.Module):
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            # Learnable density curvature parameter α; initialized to -4.0 so softplus(-4) ≈ 0.018,
-            # which is gradient-connected from epoch 0 (same order as init_m0=0.015763).
+            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
+            # providing seamless Step 0 identity with vanilla softplus.
             self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
 
         self.scale_conditioned = bool(scale_conditioned)
@@ -284,8 +285,8 @@ class ScaleConditionedFineHead(nn.Module):
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            # Learnable density curvature parameter α; initialized to -4.0 so softplus(-4) ≈ 0.018,
-            # which is gradient-connected from epoch 0 (same order as init_m0=0.015763).
+            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
+            # providing seamless Step 0 identity with vanilla softplus.
             self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
 
     def activate(
