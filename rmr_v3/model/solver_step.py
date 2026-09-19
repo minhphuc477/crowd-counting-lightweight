@@ -120,6 +120,7 @@ def solve_inverse_measure(
         density_gated_diffusion=cfg.density_gated_diffusion,
         diffusion_dense_threshold=cfg.diffusion_dense_threshold,
         diffusion_gate_beta=cfg.diffusion_gate_beta,
+        output_stride=cfg.output_stride,
     )
 
     y = solver_res["y"]

@@ -152,9 +152,15 @@ class FineMeasureHead(nn.Module):
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
-        self.curvature_dense_threshold = float(curvature_dense_threshold)
-        self.curvature_gate_beta = float(curvature_gate_beta)
-        self.curvature_pool_kernel = int(curvature_pool_kernel)
+        if self.subpixel_stride2:
+            # Calibrate curvature thresholds for Stride 2 cell area (1/4 of Stride 4 cell area)
+            self.curvature_dense_threshold = float(curvature_dense_threshold) / 4.0
+            self.curvature_gate_beta = float(curvature_gate_beta) / 4.0
+            self.curvature_pool_kernel = int(curvature_pool_kernel) * 2
+        else:
+            self.curvature_dense_threshold = float(curvature_dense_threshold)
+            self.curvature_gate_beta = float(curvature_gate_beta)
+            self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
             # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
             # providing seamless Step 0 identity with vanilla softplus.

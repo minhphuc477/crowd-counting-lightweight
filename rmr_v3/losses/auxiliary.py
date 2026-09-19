@@ -122,6 +122,7 @@ def curvature_power_loss(
     kernel_size: int = 5,
     mode: str = "none",
     smooth_scale: float = 0.02,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Curvature-preserving square-root power loss for high-density crowds (RMR-v11/v12)."""
     if target.ndim == 2:
@@ -145,15 +146,21 @@ def curvature_power_loss(
     if mode == "none" or float(threshold) <= 0.0:
         return torch.mean(diff_sq)
 
-    pad = int(kernel_size) // 2
+    area_scale = (float(stride) / 4.0) ** 2
+    eff_threshold = float(threshold) * area_scale
+    eff_smooth_scale = float(smooth_scale) * area_scale
+    eff_kernel = int(round(kernel_size * (4.0 / float(stride))))
+    if eff_kernel % 2 == 0:
+        eff_kernel += 1
+    pad = eff_kernel // 2
     local_density = F.avg_pool2d(
-        t_f, kernel_size=int(kernel_size), stride=1, padding=pad, count_include_pad=False
+        t_f, kernel_size=eff_kernel, stride=1, padding=pad, count_include_pad=False
     )
 
     if mode == "hard":
-        gate = (local_density >= float(threshold)).float()
+        gate = (local_density >= eff_threshold).float()
     elif mode == "soft":
-        gate = torch.sigmoid((local_density - float(threshold)) / float(smooth_scale))
+        gate = torch.sigmoid((local_density - eff_threshold) / eff_smooth_scale)
     else:
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
@@ -246,6 +253,7 @@ def physical_scale_alignment_loss(
     kernel_size: int = 5,
     eps: float = 1e-6,
     mask_background: bool = True,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Physical Scale Alignment Loss (RMR-v13 / RMR-v14)."""
     if target_y.ndim == 2:
@@ -264,13 +272,19 @@ def physical_scale_alignment_loss(
             scale_weights, size=t_f.shape[-2:], mode="bilinear", align_corners=False
         )
 
-    pad = int(kernel_size) // 2
+    area_scale = (float(stride) / 4.0) ** 2
+    eff_tau_dense = float(tau_dense) * area_scale
+    eff_tau_sparse = float(tau_sparse) * area_scale
+    eff_kernel = int(round(kernel_size * (4.0 / float(stride))))
+    if eff_kernel % 2 == 0:
+        eff_kernel += 1
+    pad = eff_kernel // 2
     local_density = F.avg_pool2d(
-        t_f, kernel_size=int(kernel_size), stride=1, padding=pad, count_include_pad=False
+        t_f, kernel_size=eff_kernel, stride=1, padding=pad, count_include_pad=False
     )
 
-    delta_tau = max(float(tau_dense) - float(tau_sparse), 1e-6)
-    s = torch.clamp((local_density - float(tau_sparse)) / delta_tau, 0.0, 1.0)
+    delta_tau = max(float(eff_tau_dense) - float(eff_tau_sparse), 1e-6)
+    s = torch.clamp((local_density - float(eff_tau_sparse)) / delta_tau, 0.0, 1.0)
 
     u = s * float(k - 1)
     target_pi_list = []
@@ -290,7 +304,7 @@ def physical_scale_alignment_loss(
     kl_per_pixel = (target_log_target - target_log_pred).sum(dim=1)
 
     if mask_background:
-        fg_mask = (local_density >= float(tau_sparse)).float().squeeze(1)
+        fg_mask = (local_density >= float(eff_tau_sparse)).float().squeeze(1)
         fg_sum = fg_mask.sum()
         if fg_sum > 0:
             return (kl_per_pixel * fg_mask).sum() / fg_sum

@@ -250,6 +250,8 @@ def _compute_auxiliary_losses(
 ) -> dict[str, torch.Tensor]:
     # Curvature Power Loss (RMR-v11/v12)
     if cfg.lambda_curvature > 0.0:
+        stride = int(getattr(cfg, "output_stride", 4))
+
         def _compute_curv(dmap: torch.Tensor) -> torch.Tensor:
             return curvature_power_loss(
                 dmap,
@@ -258,6 +260,7 @@ def _compute_auxiliary_losses(
                 kernel_size=cfg.curvature_gate_kernel,
                 mode=cfg.curvature_gate_mode,
                 smooth_scale=cfg.curvature_gate_scale,
+                stride=stride,
             )
 
         loss_curv, _ = router.dispatch(_compute_curv, y, y0)
@@ -318,6 +321,7 @@ def _compute_auxiliary_losses(
     # Physical Scale Alignment Loss (RMR-v13/v14/v19)
     scale_weights = outputs.get("pi_scale", outputs.get("scale_weights", None))
     if scale_weights is not None and cfg.lambda_scale_align > 0.0:
+        stride = int(getattr(cfg, "output_stride", 4))
         losses["scale_align"] = physical_scale_alignment_loss(
             scale_weights=scale_weights,
             target_y=target_float,
@@ -325,6 +329,7 @@ def _compute_auxiliary_losses(
             tau_sparse=cfg.scale_align_tau_sparse,
             kernel_size=cfg.scale_align_kernel,
             mask_background=cfg.scale_align_mask_bg,
+            stride=stride,
         )
         losses["total"] = losses["total"] + cfg.lambda_scale_align * losses["scale_align"]
     else:

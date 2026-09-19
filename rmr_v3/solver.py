@@ -157,6 +157,7 @@ def unrolled_sirt_solver(
     density_gated_diffusion: bool = False,
     diffusion_dense_threshold: float = 0.15,
     diffusion_gate_beta: float = 0.03,
+    output_stride: int = 4,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -165,48 +166,14 @@ def unrolled_sirt_solver(
 
     via T unrolled projected Richardson-Lucy / SIRT steps with dynamic relaxation:
         y_{t+1} = S_{tau}^+ ( y_t - omega * D_w^{-1} A^T W (A y_t - b) ) + TV_diff(y_{t+1})
-
-    Args:
-        y0: Initial fine density carrier [B, 1, H, W].
-        b_solver: Target regional counts [B, 1, M].
-        weight_solver: Regional reliability weights [B, 1, M].
-        regions: Canonical RegionSet geometric dictionary.
-        iterations: Number of unrolled solver iterations T.
-        omega: SIRT step relaxation parameter.
-        solver_strength: Dynamic ramp factor in [0.0, 1.0].
-        residual_clip: Bound on regional discrepancy (0.0 = unclipped).
-        eps: Small positive constant for numerical division safety.
-        solver_mode: "additive" (standard SIRT) or "multiplicative" (density-gated).
-        density_gate_rho: Density gating threshold rho_0 for multiplicative mode.
-        density_gate_floor: Minimum gate floor for multiplicative mode.
-        proximal_tau: Proximal soft-thresholding parameter tau.
-        proximal_mode: "firm", "soft", or "none".
-        proximal_mu: MCP threshold parameter.
-        tv_lambda: Total variation diffusion coefficient.
-        tv_type: "laplacian" (isotropic) or "charbonnier" (edge-preserving).
-        tv_eps_c: Charbonnier TV smoothness constant.
-        laplace_kernel: Optional pre-allocated 3x3 Laplacian convolution kernel.
-        scale_routing_weights: Optional spatial scale routing probabilities [B, K, H, W].
-        trust_region_kappa: Morozov trust-region step bounding parameter.
-        trust_region_floor: Minimum floor for trust-region step bounding.
-        adjoint_mode: "flat" (standard Lebesgue adjoint) or "radon_nikodym" (measure-modulated).
-        b_variance: Optional predictive variance of b_solver for Morozov shrinkage [B, 1, M].
-        morozov_gamma: Threshold multiplier for Morozov discrepancy deadband (0.0 = disabled).
-
-    Returns:
-        Dictionary containing:
-            "y": Final reconciled measure field [B, 1, H, W].
-            "iterates": List of iterates [y0, y1, ..., yT].
-            "residual_fields": List of adjoint scatter fields at each iteration.
-            "energy_trace": List of dicts with {"before": E_before, "after": E_after}.
-            "effective_omega": Actual omega applied.
-            "effective_tv_lambda": Actual TV lambda applied.
     """
     b, _, h, w = y0.shape
+    area_scale = (float(output_stride) / 4.0) ** 2
     strength = min(max(float(solver_strength), 0.0), 1.0)
     effective_omega = float(omega) * strength
     effective_tv_lambda = float(tv_lambda) * strength
-    effective_tau = float(proximal_tau)
+    effective_tau = float(proximal_tau) * area_scale
+    effective_rho = float(density_gate_rho) * area_scale
     # tau_step and tv_step are per-iteration budgets.
     # Divide by T so that total shrinkage/diffusion over all iterations equals the hyperparameter,
     # making tau and tv_lambda strictly T-invariant hyperparameters.
@@ -298,7 +265,7 @@ def unrolled_sirt_solver(
             residual_clip=residual_clip,
             eps=eps,
             solver_mode=solver_mode,
-            density_gate_rho=float(density_gate_rho),
+            density_gate_rho=float(effective_rho),
             density_gate_floor=float(density_gate_floor),
             scale_routing_weights=scale_routing_weights,
             scale_partitions=scale_partitions,
