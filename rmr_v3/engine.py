@@ -31,7 +31,10 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
 
 
 def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
-    return RMRv3LossConfig.from_dict(cfg.get("loss", {}))
+    loss_d = dict(cfg.get("loss", {})) if "loss" in cfg else dict(cfg)
+    if "output_stride" not in loss_d and "model" in cfg:
+        loss_d["output_stride"] = cfg["model"].get("output_stride", 4)
+    return RMRv3LossConfig.from_dict(loss_d)
 
 
 def build_optimizer(model: RMRv3, cfg: dict, lr_init: float) -> torch.optim.Optimizer:

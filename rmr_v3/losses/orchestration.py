@@ -161,13 +161,14 @@ def _compute_core_losses(
     # Allocation loss supervision (DM16 / Bayesian / OT)
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
+        stride = int(getattr(cfg, "output_stride", 4))
         if cfg.allocation_loss_type == "bayesian":
             loss_val = bayesian_loss(
                 inp,
                 points,
                 sigma=cfg.bayesian_sigma,
                 background_ratio=cfg.bayesian_background_ratio,
-                stride=4,
+                stride=stride,
             )
         elif cfg.allocation_loss_type == "ot_sinkhorn":
             loss_val = sinkhorn_ot_loss(
@@ -175,7 +176,7 @@ def _compute_core_losses(
                 points,
                 reg=cfg.ot_reg,
                 num_iters=cfg.ot_num_iters,
-                stride=4,
+                stride=stride,
             )
         elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
             loss_val, comps = multiscale_dm_loss(
@@ -184,7 +185,7 @@ def _compute_core_losses(
                 block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
                 weights=tuple(float(x) for x in cfg.dm_weights),
                 kappas=tuple(float(x) for x in cfg.dm_kappas),
-                stride=4,
+                stride=stride,
                 normalize_by_count=cfg.normalize_flat_dm16,
                 strict=cfg.dm_strict,
                 return_components=True,
@@ -194,6 +195,7 @@ def _compute_core_losses(
                 inp,
                 target_float,
                 kappa=cfg.kappa_flat16,
+                stride=stride,
                 normalize_by_count=cfg.normalize_flat_dm16,
                 strict=cfg.dm_strict,
             )

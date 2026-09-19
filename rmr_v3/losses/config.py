@@ -27,9 +27,10 @@ class RMRv3LossConfig:
     count_nb_dispersion: float = 50.0
 
     # Allocation loss configuration
+    output_stride: int = 4
     kappa_flat16: float = 20.0
     normalize_flat_dm16: bool = True
-    dm_strict: bool = True
+    dm_strict: bool = False
     dm_target: str = "y"  # "y" | "y0" | "dual"
 
     # Multi-scale / Hierarchical DM loss
