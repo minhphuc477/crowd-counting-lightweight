@@ -295,5 +295,69 @@ def test_v29_subpixel2_with_scale_align_and_anti_pattern_guard():
             assert torch.isfinite(p_tensor.grad).all(), f"NaN/Inf in {name}"
 
 
+def test_v29_loss_resolution_invariance():
+    """Verify that all loss components maintain physical resolution invariance across Stride 4 and Stride 2."""
+    from rmr_core.losses import count_magnitude_loss, flat_dm16_loss, balanced_smooth_l1
+    from rmr_v3.losses.auxiliary import (
+        curvature_power_loss,
+        mass_weighted_cell_loss,
+        topk_hard_background_loss,
+    )
+
+    torch.manual_seed(42)
+    N_pts = 100
+    pts = torch.rand(N_pts, 2) * 512
+
+    t4 = torch.zeros(1, 1, 128, 128)
+    j4 = (pts[:, 0] / 4).long().clamp(0, 127)
+    i4 = (pts[:, 1] / 4).long().clamp(0, 127)
+    t4[0, 0].index_put_((i4, j4), torch.ones(N_pts), accumulate=True)
+
+    t2 = torch.zeros(1, 1, 256, 256)
+    j2 = (pts[:, 0] / 2).long().clamp(0, 255)
+    i2 = (pts[:, 1] / 2).long().clamp(0, 255)
+    t2[0, 0].index_put_((i2, j2), torch.ones(N_pts), accumulate=True)
+
+    y4 = (t4 * 0.85 + 0.01).clamp_min(0.0)
+    y2 = (t2 * 0.85 + 0.0025).clamp_min(0.0)
+
+    # 1. Count loss
+    l_cnt4 = count_magnitude_loss(y4, t4, mode="nb")
+    l_cnt2 = count_magnitude_loss(y2, t2, mode="nb")
+    ratio_cnt = (l_cnt2 / l_cnt4).item()
+    assert 0.99 <= ratio_cnt <= 1.01, f"Count loss ratio failed: {ratio_cnt}"
+
+    # 2. Flat DM16 loss
+    l_dm4 = flat_dm16_loss(y4, t4, stride=4)
+    l_dm2 = flat_dm16_loss(y2, t2, stride=2)
+    ratio_dm = (l_dm2 / l_dm4).item()
+    assert 0.99 <= ratio_dm <= 1.01, f"Flat DM16 loss ratio failed: {ratio_dm}"
+
+    # 3. Mass-weighted cell loss
+    l_mw4 = mass_weighted_cell_loss(y4, t4, stride=4, alpha=2.0, gamma=1.25)
+    l_mw2 = mass_weighted_cell_loss(y2, t2, stride=2, alpha=2.0, gamma=1.25)
+    ratio_mw = (l_mw2 / l_mw4).item()
+    assert 0.95 <= ratio_mw <= 1.20, f"Mass-weighted cell loss ratio failed: {ratio_mw}"
+
+    # 4. Balanced Smooth L1
+    l_bsl4 = balanced_smooth_l1(y4, t4, stride=4)
+    l_bsl2 = balanced_smooth_l1(y2, t2, stride=2)
+    ratio_bsl = (l_bsl2 / l_bsl4).item()
+    assert 0.95 <= ratio_bsl <= 1.20, f"Balanced Smooth L1 ratio failed: {ratio_bsl}"
+
+    # 5. Hard-gated Curvature loss
+    l_curv4 = curvature_power_loss(y4, t4, stride=4, threshold=0.08, kernel_size=5, mode="hard")
+    l_curv2 = curvature_power_loss(y2, t2, stride=2, threshold=0.08, kernel_size=5, mode="hard")
+    ratio_curv = (l_curv2 / l_curv4).item()
+    assert 0.95 <= ratio_curv <= 1.25, f"Curvature loss ratio failed: {ratio_curv}"
+
+    # 6. Hard BG loss
+    l_hbg4 = topk_hard_background_loss(y4, t4, stride=4)
+    l_hbg2 = topk_hard_background_loss(y2, t2, stride=2)
+    ratio_hbg = (l_hbg2 / l_hbg4).item()
+    assert 0.99 <= ratio_hbg <= 1.01, f"Hard BG loss ratio failed: {ratio_hbg}"
+
+
+
 
 
