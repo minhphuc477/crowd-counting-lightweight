@@ -683,6 +683,10 @@ def physical_scale_alignment_loss(
 
     work_dtype = scale_weights.dtype if scale_weights.dtype in (torch.float32, torch.float64) else torch.float32
     t_f = target_y.to(dtype=work_dtype).clamp_min(0.0)
+    if scale_weights.shape[-2:] != t_f.shape[-2:]:
+        scale_weights = F.interpolate(
+            scale_weights, size=t_f.shape[-2:], mode="bilinear", align_corners=False
+        )
     pad = int(kernel_size) // 2
     local_density = F.avg_pool2d(
         t_f, kernel_size=int(kernel_size), stride=1, padding=pad, count_include_pad=False

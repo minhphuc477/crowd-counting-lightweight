@@ -144,6 +144,8 @@ ALLOWED_MODEL_KEYS = {
     "bb_clamp_max",
     # RMR-v27 additions
     "cyclic_bb_length",
+    # RMR-v29 additions
+    "subpixel_stride2",
 }
 
 ALLOWED_LOSS_KEYS = {

@@ -51,6 +51,11 @@ class RMRv3Config:
     backbone_lr_scale: float = 0.1
     init_m0: float = 0.015763
 
+    # RMR-v29: Sub-pixel Stride-2 Reconstruction Head (+99 params)
+    # Uses Conv2d(32, 4, 1) + PixelShuffle(2) to quadruple spatial resolution,
+    # separating merged Dirac point masses in hyper-dense crowd clusters.
+    subpixel_stride2: bool = False
+
     # Neck
     neck_type: str = "additive"  # "additive" | "aspp_lite" | "rep_weighted"
     context_dilations: tuple[int, ...] = (1, 2, 3)  # dilations for AdditiveFPNNeck / RepWeightedFPNNeck
@@ -311,6 +316,8 @@ class RMRv3Config:
     cyclic_bb_length: int = 1
 
     def __post_init__(self) -> None:
+        if self.subpixel_stride2 and self.output_stride != 2:
+            self.output_stride = 2
         if self.cyclic_bb_length < 1:
             raise ValueError(f"cyclic_bb_length must be >= 1, got {self.cyclic_bb_length}")
         if self.region_sizes_px is not None:
@@ -565,9 +572,9 @@ class RMRv3(nn.Module):
         if cfg is None:
             cfg = RMRv3Config()
 
-        if cfg.output_stride != 4:
+        if cfg.output_stride != 4 and not (cfg.subpixel_stride2 and cfg.output_stride == 2):
             raise ValueError(
-                "RMR-v3 registered method requires output_stride=4"
+                "RMR-v3 registered method requires output_stride=4 (or output_stride=2 when subpixel_stride2=True)"
             )
 
         if cfg.include_full_image:
@@ -651,6 +658,7 @@ class RMRv3(nn.Module):
             curvature_dense_threshold=cfg.curvature_dense_threshold,
             curvature_gate_beta=cfg.curvature_gate_beta,
             curvature_pool_kernel=cfg.curvature_pool_kernel,
+            subpixel_stride2=cfg.subpixel_stride2,
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -785,11 +793,13 @@ class RMRv3(nn.Module):
         h: int,
         w: int,
         device: torch.device,
+        stride: int | None = None,
     ) -> RegionSet:
+        effective_stride = self.cfg.output_stride if stride is None else stride
         key = (
             h,
             w,
-            self.cfg.output_stride,
+            effective_stride,
             _deep_tuple(self.cfg.region_sizes_px),
             self.cfg.region_overlap,
             device.type,
@@ -806,7 +816,7 @@ class RMRv3(nn.Module):
         region_set = build_multiscale_regions(
             height=h,
             width=w,
-            output_stride=self.cfg.output_stride,
+            output_stride=effective_stride,
             region_sizes_px=self.cfg.region_sizes_px,
             overlap=self.cfg.region_overlap,
             include_full_image=False,
@@ -1096,23 +1106,29 @@ class RMRv3(nn.Module):
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
         h, w = y0.shape[-2:]
-        regions = self._regions(h, w, x.device)
+        if self.cfg.subpixel_stride2:
+            regions_solver = self._regions(h, w, x.device, stride=2)
+            h4, w4 = p4.shape[-2:]
+            regions_feat = self._regions(h4, w4, x.device, stride=4)
+        else:
+            regions_solver = self._regions(h, w, x.device, stride=4)
+            regions_feat = regions_solver
 
         regional_evidence = self._extract_regional_evidence(
             p4=p4,
             p8=p8,
             p16=p16,
-            regions=regions,
+            regions=regions_feat,
             scale_weights=scale_weights,
             uniform_reliability=uniform_reliability,
-            grid_h=h,
+            grid_h=int(regions_feat.boxes[:, 2].max().item()) if regions_feat.boxes.numel() > 0 else h,
         )
 
         return self._solve_inverse_measure(
             y0=y0,
             z0=z0,
             regional_evidence=regional_evidence,
-            regions=regions,
+            regions=regions_solver,
             scale_weights=scale_weights,
             solver_strength=solver_strength,
             uniform_reliability=uniform_reliability,

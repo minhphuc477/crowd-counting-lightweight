@@ -253,6 +253,10 @@ def unrolled_sirt_solver(
             entropy = -(pi_safe * torch.log(pi_safe)).sum(dim=1, keepdim=True)
             max_entropy = math.log(float(k_scales))
             scale_confidence = (1.0 - (entropy / max_entropy)).clamp(0.0, 1.0)
+            if scale_confidence.shape[-2:] != (h, w):
+                scale_confidence = F.interpolate(
+                    scale_confidence, size=(h, w), mode="bilinear", align_corners=False
+                )
 
     y_curr = y0
     y_prev = y0

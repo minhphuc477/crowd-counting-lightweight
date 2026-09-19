@@ -122,16 +122,28 @@ class FineMeasureHead(nn.Module):
         curvature_dense_threshold: float = 0.15,
         curvature_gate_beta: float = 0.03,
         curvature_pool_kernel: int = 8,
+        subpixel_stride2: bool = False,
     ):
         super().__init__()
+        self.subpixel_stride2 = bool(subpixel_stride2)
+        out_channels = 4 if self.subpixel_stride2 else 1
         self.body = nn.Sequential(
             ConvGNAct(width, width, 3, groups=width),
             ConvGNAct(width, width, 1),
-            nn.Conv2d(width, 1, 1),
+            nn.Conv2d(width, out_channels, 1),
         )
-        final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
-        nn.init.normal_(final_conv.weight, std=0.01)
-        nn.init.constant_(final_conv.bias, init_bias)  # type: ignore[arg-type]
+        if self.subpixel_stride2:
+            self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
+            # When subpixel_stride2=True, calibrate bias for Stride 2 cell area (1/4 of Stride 4 cell area)
+            init_bias_stride2 = math.log(math.exp(_M0_INIT / 4.0) - 1.0)
+            final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
+            nn.init.normal_(final_conv.weight, std=0.01)
+            nn.init.constant_(final_conv.bias, init_bias_stride2)
+        else:
+            self.pixel_shuffle = None
+            final_conv = self.body[-1]  # type: ignore[assignment]
+            nn.init.normal_(final_conv.weight, std=0.01)
+            nn.init.constant_(final_conv.bias, init_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
         if self.temp_softplus:
@@ -211,7 +223,10 @@ class FineMeasureHead(nn.Module):
         """Compute raw pre-activation logit field z0."""
         if isinstance(f, tuple):
             f = f[0]
-        return self.body(f)
+        z = self.body(f)
+        if self.subpixel_stride2 and self.pixel_shuffle is not None:
+            z = self.pixel_shuffle(z)
+        return z
 
     def forward(
         self,
@@ -360,6 +375,7 @@ def build_fine_head(
     curvature_dense_threshold: float = 0.15,
     curvature_gate_beta: float = 0.03,
     curvature_pool_kernel: int = 8,
+    subpixel_stride2: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     if scale_conditioned_fine_head:
@@ -385,6 +401,7 @@ def build_fine_head(
         curvature_dense_threshold=curvature_dense_threshold,
         curvature_gate_beta=curvature_gate_beta,
         curvature_pool_kernel=curvature_pool_kernel,
+        subpixel_stride2=subpixel_stride2,
     )
 
 
