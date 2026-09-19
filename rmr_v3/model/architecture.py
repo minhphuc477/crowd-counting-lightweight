@@ -375,9 +375,9 @@ class RMRv3(nn.Module):
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
         h, w = y0.shape[-2:]
+        h4, w4 = p4.shape[-2:]
         if self.cfg.subpixel_stride2:
             regions_solver = self._regions(h, w, x.device, stride=2)
-            h4, w4 = p4.shape[-2:]
             regions_feat = self._regions(h4, w4, x.device, stride=4)
         else:
             regions_solver = self._regions(h, w, x.device, stride=4)
@@ -390,7 +390,7 @@ class RMRv3(nn.Module):
             regions=regions_feat,
             scale_weights=scale_weights,
             uniform_reliability=uniform_reliability,
-            grid_h=int(regions_feat.boxes[:, 2].max().item()) if regions_feat.boxes.numel() > 0 else h,
+            grid_h=h4,
         )
 
         return self._solve_inverse_measure(
