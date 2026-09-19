@@ -225,3 +225,33 @@ def test_v29_h3_subpixel2_depth8_forward_backward():
             has_grad = True
     assert has_grad, "H3: No parameters received gradients!"
 
+
+def test_v29_h4_h5_h6_forward_backward():
+    """Verify forward-backward gradient flow for H4, H5, and H6 variants."""
+    for cfg_name in ["rmr_v29_h4_scale_preserve.yaml", "rmr_v29_h5_loss_unsuppressed.yaml", "rmr_v29_h6_backbone_lr.yaml"]:
+        p = CONFIG_DIR / cfg_name
+        raw = yaml.safe_load(p.read_text())
+        m_cfg = RMRv3Config.from_dict(raw.get("model", {}))
+        l_cfg = RMRv3LossConfig.from_dict(raw.get("loss", {}))
+
+        model = RMRv3(m_cfg)
+        model.train()
+
+        x = torch.randn(2, 3, 256, 256, requires_grad=False)
+        target_y = torch.zeros(2, 1, 64, 64)
+        target_y[0, 0, 10, 10] = 1.0
+
+        out = model(x)
+        losses = compute_rmr_v3_losses(out, target_y, l_cfg)
+        assert torch.isfinite(losses["total"]), f"{cfg_name}: total loss is non-finite!"
+
+        losses["total"].backward()
+
+        has_grad = False
+        for name, p_tensor in model.named_parameters():
+            if p_tensor.requires_grad and p_tensor.grad is not None:
+                assert torch.isfinite(p_tensor.grad).all(), f"{cfg_name}: NaN/Inf gradient in {name}"
+                has_grad = True
+        assert has_grad, f"{cfg_name}: No parameters received gradients!"
+
+
