@@ -27,9 +27,11 @@ def prefix2d(x: torch.Tensor, preserve_fp32: bool = True) -> torch.Tensor:
 
 
 def _gather_prefix(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """Gather prefix values at M coordinates for every batch/channel."""
+    """Gather prefix values at M coordinates for every batch/channel with strict bounds clamping."""
     b, c, hp, wp = prefix.shape
-    idx = (y * wp + x).view(1, 1, -1).expand(b, c, -1)
+    yc = y.clamp(0, hp - 1)
+    xc = x.clamp(0, wp - 1)
+    idx = (yc * wp + xc).view(1, 1, -1).expand(b, c, -1)
     return torch.gather(prefix.flatten(-2), dim=-1, index=idx)
 
 
@@ -44,6 +46,11 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
         raise ValueError("boxes must have shape [M,4]")
     boxes = boxes.to(device=prefix.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
+    _, _, hp, wp = prefix.shape
+    y1 = y1.clamp(0, hp - 1)
+    x1 = x1.clamp(0, wp - 1)
+    y2 = y2.clamp(0, hp - 1)
+    x2 = x2.clamp(0, wp - 1)
     br = _gather_prefix(prefix, y2, x2)
     tr = _gather_prefix(prefix, y1, x2)
     bl = _gather_prefix(prefix, y2, x1)

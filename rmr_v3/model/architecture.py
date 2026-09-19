@@ -377,6 +377,12 @@ class RMRv3(nn.Module):
         h, w = y0.shape[-2:]
         h4, w4 = p4.shape[-2:]
         if self.cfg.subpixel_stride2:
+            target_h = (x.shape[-2] + 1) // 2
+            target_w = (x.shape[-1] + 1) // 2
+            if y0.shape[-2] != target_h or y0.shape[-1] != target_w:
+                y0 = y0[..., :target_h, :target_w]
+                z0 = z0[..., :target_h, :target_w]
+            h, w = y0.shape[-2:]
             regions_solver = self._regions(h, w, x.device, stride=2)
             regions_feat = self._regions(h4, w4, x.device, stride=4)
         else:

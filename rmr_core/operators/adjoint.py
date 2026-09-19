@@ -35,12 +35,19 @@ def regional_adjoint(
     y1, x1, y2, x2 = boxes.unbind(dim=-1)
     hp, wp = height + 1, width + 1
 
+    y1 = y1.clamp(0, height)
+    x1 = x1.clamp(0, width)
+    y2 = y2.clamp(0, height)
+    x2 = x2.clamp(0, width)
+
     orig_dtype = values.dtype if out_dtype is None else out_dtype
     work = values.float() if values.dtype in (torch.float16, torch.bfloat16) else values
     diff = work.new_zeros((b, c, hp * wp))
 
     def scatter(y: torch.Tensor, x: torch.Tensor, src: torch.Tensor) -> None:
-        idx = (y * wp + x).view(1, 1, -1).expand(b, c, -1)
+        yc = y.clamp(0, hp - 1)
+        xc = x.clamp(0, wp - 1)
+        idx = (yc * wp + xc).view(1, 1, -1).expand(b, c, -1)
         diff.scatter_add_(dim=-1, index=idx, src=src)
 
     scatter(y1, x1, work)

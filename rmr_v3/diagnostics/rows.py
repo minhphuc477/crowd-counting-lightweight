@@ -39,8 +39,13 @@ def regional_reliability_rows(
         count_var = mu + mu.square() / disp.clamp_min(1e-6)
     count_var = count_var.float()
 
+    pred_field = outputs.get("y", outputs.get("y0"))
+    target_float = target_y.float()
+    if pred_field is not None and target_float.shape[-2:] != pred_field.shape[-2:]:
+        target_float = target_float[..., :pred_field.shape[-2], :pred_field.shape[-1]]
+
     gt = regional_sum(
-        target_y.float(),
+        target_float,
         regions.boxes,
         out_dtype=torch.float32,
     )
