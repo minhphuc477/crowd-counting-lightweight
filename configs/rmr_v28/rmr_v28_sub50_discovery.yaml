@@ -86,7 +86,7 @@ model:
   use_scale_entropy_trust: true
   bb_clamp_min: 0.2
   bb_clamp_max: 2.0
-  cyclic_bb_length: 2
+  cyclic_bb_length: 1
 
   use_perspective_elevation: false
   scale_conditioned_fine_head: false
