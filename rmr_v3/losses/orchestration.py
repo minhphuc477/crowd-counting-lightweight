@@ -287,7 +287,12 @@ def _compute_auxiliary_losses(
         if t_bin.ndim == 3:
             t_bin = t_bin.unsqueeze(1)
         t_dilated = F.max_pool2d(t_bin, kernel_size=3, stride=1, padding=1)
-        fg_bce = F.binary_cross_entropy_with_logits(fg_logit.float(), t_dilated)
+        fg_pred = fg_logit.float()
+        if fg_pred.shape[-2:] != t_dilated.shape[-2:]:
+            fg_pred = F.interpolate(
+                fg_pred, size=t_dilated.shape[-2:], mode="bilinear", align_corners=False
+            )
+        fg_bce = F.binary_cross_entropy_with_logits(fg_pred, t_dilated)
         losses["fg_bce"] = fg_bce
         losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
     else:

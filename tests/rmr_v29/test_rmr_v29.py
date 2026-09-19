@@ -255,3 +255,45 @@ def test_v29_h4_h5_h6_forward_backward():
         assert has_grad, f"{cfg_name}: No parameters received gradients!"
 
 
+def test_v29_subpixel2_with_scale_align_and_anti_pattern_guard():
+    """Verify subpixel_stride2 with scale alignment and verify foreground_gate ban."""
+    p = CONFIG_DIR / "rmr_v29_h2_subpixel2.yaml"
+    raw = yaml.safe_load(p.read_text())
+
+    # 1. Verify anti-pattern ban on foreground_gate
+    m_dict_banned = dict(raw.get("model", {}))
+    m_dict_banned["foreground_gate"] = True
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config.from_dict(m_dict_banned)
+
+    # 2. Verify subpixel_stride2 with active scale alignment loss
+    m_dict = dict(raw.get("model", {}))
+    l_dict = dict(raw.get("loss", {}))
+    l_dict["lambda_scale_align"] = 0.1
+
+    m_cfg = RMRv3Config.from_dict(m_dict)
+    l_cfg = RMRv3LossConfig.from_dict(l_dict)
+
+    model = RMRv3(m_cfg)
+    model.train()
+
+    x = torch.randn(2, 3, 256, 256, requires_grad=False)
+    target_y = torch.zeros(2, 1, 128, 128)
+    target_y[0, 0, 20, 20] = 1.0
+
+    out = model(x)
+    assert out.y.shape == (2, 1, 128, 128)
+
+    losses = compute_rmr_v3_losses(out, target_y, l_cfg)
+    assert torch.isfinite(losses["total"])
+    assert torch.isfinite(losses["scale_align"])
+
+    losses["total"].backward()
+
+    for name, p_tensor in model.named_parameters():
+        if p_tensor.requires_grad and p_tensor.grad is not None:
+            assert torch.isfinite(p_tensor.grad).all(), f"NaN/Inf in {name}"
+
+
+
+

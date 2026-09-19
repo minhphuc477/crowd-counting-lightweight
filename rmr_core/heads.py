@@ -135,7 +135,8 @@ class FineMeasureHead(nn.Module):
         if self.subpixel_stride2:
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
             # When subpixel_stride2=True, calibrate bias for Stride 2 cell area (1/4 of Stride 4 cell area)
-            init_bias_stride2 = math.log(math.exp(_M0_INIT / 4.0) - 1.0)
+            m0 = math.log1p(math.exp(float(init_bias)))
+            init_bias_stride2 = math.log(max(math.expm1(m0 / 4.0), 1e-8))
             final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
             nn.init.normal_(final_conv.weight, std=0.01)
             nn.init.constant_(final_conv.bias, init_bias_stride2)

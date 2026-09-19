@@ -305,6 +305,10 @@ class RMRv3(nn.Module):
             fg_logit = self.fg_gate(p4)
             floor = float(self.cfg.fg_gate_floor)
             fg_mask = floor + (1.0 - floor) * torch.sigmoid(fg_logit)
+            if fg_mask.shape[-2:] != y0.shape[-2:]:
+                fg_mask = F.interpolate(
+                    fg_mask, size=y0.shape[-2:], mode="bilinear", align_corners=False
+                )
             y0 = y0 * fg_mask
 
         return z0, y0, fg_logit
