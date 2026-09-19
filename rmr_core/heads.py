@@ -60,6 +60,7 @@ def _density_activate(
     curvature_dense_threshold: float,
     curvature_gate_beta: float,
     curvature_pool_kernel: int,
+    curv_scale: float = 1.0,
 ) -> torch.Tensor:
     """Shared density activation: temperature-scaled softplus + optional gated quadratic curvature.
 
@@ -82,9 +83,9 @@ def _density_activate(
             tau_dense = float(curvature_dense_threshold)
             beta = float(max(curvature_gate_beta, 1e-4))
             gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-            curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+            curv_term = float(curv_scale) * alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
         else:
-            curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+            curv_term = float(curv_scale) * alpha_eff.float() * (y_base_f32 ** 2)
         return (y_base_f32 + curv_term).to(orig_dtype)
     return y_base
 
@@ -153,6 +154,7 @@ class FineMeasureHead(nn.Module):
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
+        self.curv_scale = 4.0 if self.subpixel_stride2 else 1.0
         if self.subpixel_stride2:
             # Calibrate curvature thresholds for Stride 2 cell area (1/4 of Stride 4 cell area)
             self.curvature_dense_threshold = float(curvature_dense_threshold) / 4.0
@@ -204,9 +206,9 @@ class FineMeasureHead(nn.Module):
                     tau_dense = float(self.curvature_dense_threshold)
                     beta = float(max(self.curvature_gate_beta, 1e-4))
                     gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-                    curv_term = alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+                    curv_term = float(self.curv_scale) * alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
                 else:
-                    curv_term = alpha_eff.float() * (y_base_f32 ** 2)
+                    curv_term = float(self.curv_scale) * alpha_eff.float() * (y_base_f32 ** 2)
                 return (y_base_f32 + curv_term).to(orig_dtype)
             return y_base
 
@@ -220,6 +222,7 @@ class FineMeasureHead(nn.Module):
             curvature_dense_threshold=self.curvature_dense_threshold,
             curvature_gate_beta=self.curvature_gate_beta,
             curvature_pool_kernel=self.curvature_pool_kernel,
+            curv_scale=self.curv_scale,
         )
 
     def forward_logits(
@@ -303,6 +306,7 @@ class ScaleConditionedFineHead(nn.Module):
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
+        self.curv_scale = 1.0
         self.curvature_dense_threshold = float(curvature_dense_threshold)
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
@@ -327,6 +331,7 @@ class ScaleConditionedFineHead(nn.Module):
             curvature_dense_threshold=self.curvature_dense_threshold,
             curvature_gate_beta=self.curvature_gate_beta,
             curvature_pool_kernel=self.curvature_pool_kernel,
+            curv_scale=self.curv_scale,
         )
 
     def forward_logits(

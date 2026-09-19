@@ -58,6 +58,15 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 "Conflicting alias keys in model config: cannot declare both 'omega' and 'sirt_omega'."
             )
+        if bool(m_cfg.get("subpixel_stride2", False)) and int(m_cfg.get("output_stride", 4)) != 2:
+            raise ValueError(
+                f"Inconsistent config: subpixel_stride2=True requires output_stride=2, "
+                f"got output_stride={m_cfg.get('output_stride')}"
+            )
+        if int(m_cfg.get("output_stride", 4)) == 2 and not bool(m_cfg.get("subpixel_stride2", False)):
+            raise ValueError(
+                "Inconsistent config: output_stride=2 requires subpixel_stride2=True."
+            )
         if "reliability_weight_min" in m_cfg:
             w_min = float(m_cfg["reliability_weight_min"])
             if w_min <= 0.0:

@@ -140,13 +140,15 @@ def curvature_power_loss(
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
+    area_scale = (float(stride) / 4.0) ** 2
+    y_scaled = y_f / max(area_scale, 1e-4)
+    t_scaled = t_f / max(area_scale, 1e-4)
+    diff = torch.sqrt(y_scaled + float(eps)) - torch.sqrt(t_scaled + float(eps))
     diff_sq = diff.square()
 
     if mode == "none" or float(threshold) <= 0.0:
         return torch.mean(diff_sq)
 
-    area_scale = (float(stride) / 4.0) ** 2
     eff_threshold = float(threshold) * area_scale
     eff_smooth_scale = float(smooth_scale) * area_scale
     eff_kernel = int(round(kernel_size * (4.0 / float(stride))))
