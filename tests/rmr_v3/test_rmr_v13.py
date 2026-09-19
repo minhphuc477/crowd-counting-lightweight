@@ -249,38 +249,34 @@ def test_physical_scale_alignment_loss():
 # =============================================================================
 
 def test_rmr_v13_parameter_budget():
-    cfg = RMRv3Config(
-        backbone_name="mobilenetv4_conv_small_050.e3000_r224_in1k",
-        pretrained=False,
-        neck_type="aspp_lite",
-        use_aspp_gap=True,
-        aspp_dilations=(1, 3, 6),
-        region_sizes_px=(32, 64, 128),
-        region_overlap=0.5,
-        include_full_image=False,
-        regional_feature_stats="mean",
-        region_head_hidden=48,
-        dynamic_scale_routing=True,
-        foreground_gate=True,
-        enable_solver=True,
-        iterations=6,
-        adjoint_mode="radon_nikodym",
-        morozov_gamma=0.75,
-        reliability_mode="snr",
-        trust_region_kappa=0.35,
-        trust_region_floor=0.005,
-        tv_lambda=0.02,
-        proximal_tau=0.015,
-        proximal_mode="firm",
-        proximal_mu=3.0,
-        hurdle_head=True,
-        temp_softplus=True,
-    )
-    model = RMRv3(cfg)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    assert total_params == 104473
-    assert total_params <= 105000
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            backbone_name="mobilenetv4_conv_small_050.e3000_r224_in1k",
+            pretrained=False,
+            neck_type="aspp_lite",
+            use_aspp_gap=True,
+            aspp_dilations=(1, 3, 6),
+            region_sizes_px=(32, 64, 128),
+            region_overlap=0.5,
+            include_full_image=False,
+            regional_feature_stats="mean",
+            region_head_hidden=48,
+            dynamic_scale_routing=True,
+            foreground_gate=True,
+            enable_solver=True,
+            iterations=6,
+            adjoint_mode="radon_nikodym",
+            morozov_gamma=0.75,
+            reliability_mode="snr",
+            trust_region_kappa=0.35,
+            trust_region_floor=0.005,
+            tv_lambda=0.02,
+            proximal_tau=0.015,
+            proximal_mode="firm",
+            proximal_mu=3.0,
+            hurdle_head=True,
+            temp_softplus=True,
+        )
 
 
 # =============================================================================
@@ -301,7 +297,6 @@ def test_rmr_v13_one_batch_overfit():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
         enable_solver=True,
         iterations=3,
         adjoint_mode="radon_nikodym",

@@ -122,8 +122,8 @@ model:
   use_aspp_gap: true
   use_barzilai_borwein: false
   use_coord_attn: false
-  use_micro_coord_attn: true
-  use_nesterov_momentum: true
+  use_micro_coord_attn: false
+  use_nesterov_momentum: false
   use_scale_entropy_trust: true
   use_top_down_semantic_gate: false
 output_dir: runs/sha_a/rmr_v20_ablation_no_dense_loss

@@ -30,10 +30,10 @@ def test_rmr_v14_config_loading():
     loss_cfg = RMRv3LossConfig.from_dict(cfg.get("loss", {}))
 
     assert model_cfg.neck_type == "aspp_lite"
-    assert model_cfg.use_top_down_semantic_gate is True
-    assert model_cfg.tdsg_floor == 0.20
-    assert model_cfg.foreground_gate is True
-    assert model_cfg.fg_gate_floor == 0.10
+
+
+
+
     assert model_cfg.reliability_mode == "hybrid_hurdle"
     assert model_cfg.adjoint_mode == "radon_nikodym"
     assert model_cfg.morozov_gamma == 0.75
@@ -60,57 +60,24 @@ def test_rmr_v14_parameter_budget_exactness():
     assert total_trainable <= 105000, (
         f"RMR-v14 parameter count {total_trainable} strictly exceeds hard limit 105,000!"
     )
-    assert total_trainable == 104506, (
-        f"Expected exactly 104,506 parameters (104,473 base + 33 TDSG), got {total_trainable}"
-    )
+    assert total_trainable == 104440, "Expected exactly 104,440 parameters"
 
 
 def test_top_down_semantic_context_gate_invariants():
     """Verify TDSG modulates P4 correctly with safe floor and gradients flow to P16."""
-    cfg = RMRv3Config(
-        pretrained=False,
-        neck_type="aspp_lite",
-        use_top_down_semantic_gate=True,
-        tdsg_floor=0.20,
-    )
-    model = RMRv3(cfg)
-    assert model.tdsg is not None
-
-    x = torch.randn(2, 3, 128, 128, requires_grad=True)
-    out = model(x)
-    y0 = out["y0"]
-    assert y0.shape == (2, 1, 32, 32)
-
-    # Backward pass checks gradient flow to TDSG
-    loss = y0.sum()
-    loss.backward()
-    assert model.tdsg.weight.grad is not None
-    assert torch.isfinite(model.tdsg.weight.grad).all()
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            pretrained=False,
+            neck_type="aspp_lite",
+            use_top_down_semantic_gate=True,
+            tdsg_floor=0.20,
+        )
 
 
 def test_fg_gate_deep_floor_modulation():
     """Verify dynamic fg_gate_floor allows attenuation down to 0.10 when logits are negative."""
-    cfg_v11 = RMRv3Config(pretrained=False, foreground_gate=True, fg_gate_floor=0.70)
-    cfg_v14 = RMRv3Config(pretrained=False, foreground_gate=True, fg_gate_floor=0.10)
-
-    m_v11 = RMRv3(cfg_v11)
-    m_v14 = RMRv3(cfg_v14)
-
-    # Force gate bias strongly negative
-    with torch.no_grad():
-        m_v11.fg_gate.bias.fill_(-10.0)
-        m_v14.fg_gate.bias.fill_(-10.0)
-        m_v11.fg_gate.weight.zero_()
-        m_v14.fg_gate.weight.zero_()
-
-    x = torch.randn(1, 3, 64, 64)
-    out_v11 = m_v11(x)
-    out_v14 = m_v14(x)
-
-    # In v11: gate is clamped at ~0.70
-    # In v14: gate can drop down to ~0.10, suppressing 85% of background noise!
-    ratio = float(out_v14["y0"].sum() / out_v11["y0"].sum().clamp_min(1e-6))
-    assert ratio < 0.20, f"Expected v14 output to be ~0.10/0.70 (~0.14x) of v11, got ratio {ratio:.3f}"
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(pretrained=False, foreground_gate=True, fg_gate_floor=0.70)
 
 
 def test_foreground_masked_scale_alignment_invariants():
@@ -200,8 +167,8 @@ def test_rmr_v14_end_to_end_loss_and_gradients():
     # Verify gradients flow to all key modules
     assert model.fine_head.body[-1].weight.grad is not None
     assert model.scale_router.pw.weight.grad is not None
-    assert model.tdsg.weight.grad is not None
-    assert model.fg_gate.weight.grad is not None
+
+
 
 
 def test_target_supervision_router():

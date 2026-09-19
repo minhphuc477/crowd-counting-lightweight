@@ -145,6 +145,7 @@ def unrolled_sirt_solver(
     use_alternating_bb: bool = False,
     bb_clamp_min: float = 0.5,
     bb_clamp_max: float = 1.2,
+    cyclic_bb_length: int = 1,
     use_scale_entropy_trust: bool = False,
     use_nesterov_momentum: bool = False,
     adaptive_relaxation: bool = False,
@@ -221,6 +222,7 @@ def unrolled_sirt_solver(
             "iterates": [y0],
             "residual_fields": [],
             "energy_trace": [],
+            "step_omegas": [],
             "effective_omega": effective_omega,
             "effective_tv_lambda": effective_tv_lambda,
         }
@@ -258,9 +260,11 @@ def unrolled_sirt_solver(
     iterates: list[torch.Tensor] = [y0]
     residual_fields: list[torch.Tensor] = []
     energy_trace: list[dict[str, torch.Tensor]] = []
+    step_omegas: list[torch.Tensor | float] = []
 
     prev_y: torch.Tensor | None = None
     prev_field: torch.Tensor | None = None
+    cached_bb_omega: float | torch.Tensor | None = None
 
     for iter_idx in range(iterations):
         # Nesterov momentum extrapolation
@@ -300,35 +304,39 @@ def unrolled_sirt_solver(
             hybrid_recovery_alpha=float(hybrid_recovery_alpha),
         )
 
-        # Adaptive Barzilai-Borwein step size (BB-1 or Alternating BB-1 / BB-2)
+        # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
         current_omega: float | torch.Tensor = effective_omega
         if (use_barzilai_borwein or use_alternating_bb) and prev_y is not None and prev_field is not None and effective_omega > 0.0:
-            s_diff = (z_state - prev_y).float()
-            r_diff = (field - prev_field).float()
-            dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
-            norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
-            norm_s_sq = (s_diff * s_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
-
-            if use_alternating_bb and (iter_idx % 2 == 1):
-                # BB-2: Inverse Rayleigh quotient alpha_2 = ||s||^2 / <s, r>
-                omega_candidate = torch.where(
-                    dot_sr > 1e-7,
-                    norm_s_sq / dot_sr.clamp_min(1e-7),
-                    torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
-                ).detach()
+            if cyclic_bb_length > 1 and cached_bb_omega is not None and ((iter_idx - 1) % cyclic_bb_length != 0):
+                current_omega = cached_bb_omega
             else:
-                # BB-1: Standard Rayleigh quotient alpha_1 = <s, r> / ||r||^2
-                omega_candidate = torch.where(
-                    dot_sr > 0.0,
-                    dot_sr / norm_r_sq,
-                    torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
-                ).detach()
+                s_diff = (z_state - prev_y).float()
+                r_diff = (field - prev_field).float()
+                dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
+                norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
+                norm_s_sq = (s_diff * s_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
 
-            current_omega = torch.clamp(
-                omega_candidate,
-                min=float(bb_clamp_min) * effective_omega,
-                max=float(bb_clamp_max) * effective_omega,
-            )
+                if use_alternating_bb and (iter_idx % 2 == 1):
+                    # BB-2: Inverse Rayleigh quotient alpha_2 = ||s||^2 / <s, r>
+                    omega_candidate = torch.where(
+                        dot_sr > 1e-7,
+                        norm_s_sq / dot_sr.clamp_min(1e-7),
+                        torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                    ).detach()
+                else:
+                    # BB-1: Standard Rayleigh quotient alpha_1 = <s, r> / ||r||^2
+                    omega_candidate = torch.where(
+                        dot_sr > 0.0,
+                        dot_sr / norm_r_sq,
+                        torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                    ).detach()
+
+                current_omega = torch.clamp(
+                    omega_candidate,
+                    min=float(bb_clamp_min) * effective_omega,
+                    max=float(bb_clamp_max) * effective_omega,
+                )
+                cached_bb_omega = current_omega
 
         # Density-Adaptive Over-Relaxation (RMR-v20)
         if adaptive_relaxation:
@@ -337,6 +345,7 @@ def unrolled_sirt_solver(
             omega_mod = float(adaptive_relax_sparse) + (1.0 - float(adaptive_relax_sparse) + float(adaptive_relax_dense_boost)) * gate_dense
             current_omega = current_omega * omega_mod
 
+        step_omegas.append(current_omega)
         step_delta = current_omega * field
         if trust_region_kappa > 0.0:
             bound = float(trust_region_kappa) * torch.clamp_min(z_state.float(), float(trust_region_floor))
@@ -398,6 +407,7 @@ def unrolled_sirt_solver(
         "iterates": iterates,
         "residual_fields": residual_fields,
         "energy_trace": energy_trace,
+        "step_omegas": step_omegas,
         "effective_omega": effective_omega,
         "effective_tv_lambda": effective_tv_lambda,
     }

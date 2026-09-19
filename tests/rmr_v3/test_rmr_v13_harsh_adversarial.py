@@ -54,7 +54,7 @@ def test_harsh_extreme_crowd_density_stability():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
+        
         enable_solver=True,
         iterations=4,
         adjoint_mode="radon_nikodym",
@@ -144,7 +144,7 @@ def test_harsh_pure_empty_background_adversarial():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
+        
         enable_solver=True,
         iterations=3,
         adjoint_mode="radon_nikodym",
@@ -227,7 +227,7 @@ def test_harsh_non_square_odd_dimensions():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
+        
         enable_solver=True,
         iterations=2,
         adjoint_mode="radon_nikodym",
@@ -280,7 +280,7 @@ def test_harsh_full_gradient_flow_zero_dead_branches():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
+        
         enable_solver=True,
         iterations=3,
         adjoint_mode="radon_nikodym",
@@ -703,7 +703,7 @@ def test_harsh_hurdle_variance_scaling_and_empty_batch():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
+        
         enable_solver=True,
         iterations=3,
         adjoint_mode="radon_nikodym",

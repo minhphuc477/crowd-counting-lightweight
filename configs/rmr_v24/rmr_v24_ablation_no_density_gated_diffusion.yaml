@@ -78,7 +78,7 @@ model:
   curvature_gate_beta: 0.03
   curvature_pool_kernel: 8
   use_barzilai_borwein: false
-  use_alternating_bb: true
+  use_alternating_bb: false
   use_perspective_elevation: true
   use_scale_entropy_trust: true
   scale_conditioned_fine_head: false

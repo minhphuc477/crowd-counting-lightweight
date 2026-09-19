@@ -305,7 +305,14 @@ class RMRv3Config:
     bb_clamp_min: float = 0.5
     bb_clamp_max: float = 1.2
 
+    # ── RMR-v27 Cyclic Barzilai-Borwein (CBB) Spectral Safeguard ──────────────
+    # Reuses the computed BB-1 step size for `cyclic_bb_length` iterations (default 1)
+    # to eliminate 2-cycle Rayleigh oscillations while maintaining spectral acceleration (Dai et al. 2006).
+    cyclic_bb_length: int = 1
+
     def __post_init__(self) -> None:
+        if self.cyclic_bb_length < 1:
+            raise ValueError(f"cyclic_bb_length must be >= 1, got {self.cyclic_bb_length}")
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
         if self.aspp_dilations is not None:
@@ -1042,6 +1049,7 @@ class RMRv3(nn.Module):
             use_alternating_bb=self.cfg.use_alternating_bb,
             bb_clamp_min=self.cfg.bb_clamp_min,
             bb_clamp_max=self.cfg.bb_clamp_max,
+            cyclic_bb_length=self.cfg.cyclic_bb_length,
             use_scale_entropy_trust=self.cfg.use_scale_entropy_trust,
             use_nesterov_momentum=self.cfg.use_nesterov_momentum,
             adaptive_relaxation=self.cfg.adaptive_relaxation,

@@ -52,7 +52,7 @@ class TestRMRv15NativeDynamicGeometry:
         model = RMRv3(model_cfg)
 
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        assert n_trainable == 104580, f"Expected 104,580 params, got {n_trainable}"
+        assert n_trainable == 104514, f"Expected 104,514 params, got {n_trainable}"
         assert n_trainable <= 105000, f"Exceeded hard budget: {n_trainable} > 105,000"
 
         # Verify component parameter breakdown

@@ -39,7 +39,7 @@ model:
 
   # Decoupled Foreground Gating Sub-Head (RMR-v11): 33 parameters
   # Total model parameters: exactly 104,473 (strictly <= 105,000 budget, 527 headroom)
-  foreground_gate: true
+
 
   # Measure Reconstruction Solver with Morozov Trust-Region Bounded Updates
   enable_solver:   true

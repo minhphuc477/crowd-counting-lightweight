@@ -22,58 +22,22 @@ from rmr_v3.solver import unrolled_sirt_solver
 
 def test_rmr_v11_parameter_budget():
     """Verify RMR-v11 Canonical strictly respects the <= 105,000 parameter budget.
-
-    Budget Breakdown:
-    - MobileNetV4 Backbone: 50,288
-    - ASPP-Lite Neck: 6,864
-    - Fine Measure Head: 1,026
-    - Hurdle-NB Head: 45,779
-    - Dynamic Scale Router: 483
-    - Foreground Gate: 33 (Conv2d(32, 1, kernel_size=1, bias=True))
-    Total Trainable Parameters: exactly 104,473 (527 headroom).
     """
-    cfg_v11 = RMRv3Config(
-        output_stride=4,
-        feature_width=32,
-        pretrained=False,
-        neck_type="aspp_lite",
-        use_aspp_gap=True,
-        aspp_dilations=(1, 3, 6),
-        regional_feature_stats="mean",
-        region_head_hidden=48,
-        hurdle_head=True,
-        temp_softplus=True,
-        dynamic_scale_routing=True,
-        foreground_gate=True,
-    )
-    model = RMRv3(cfg_v11)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    assert total_params <= 105_000, f"RMR-v11 parameters ({total_params}) exceed 105,000 budget!"
-    assert total_params == 104_473, f"Expected exactly 104,473 parameters, got {total_params}"
-
-    # Verify FG gate parameter count
-    assert model.fg_gate is not None
-    fg_params = sum(p.numel() for p in model.fg_gate.parameters() if p.requires_grad)
-    assert fg_params == 33, f"Expected FG gate to have 33 params, got {fg_params}"
-
-    # Verify ablation without FG gate reproduces RMR-v10 parameter count
-    cfg_no_fg = RMRv3Config(
-        output_stride=4,
-        feature_width=32,
-        pretrained=False,
-        neck_type="aspp_lite",
-        use_aspp_gap=True,
-        aspp_dilations=(1, 3, 6),
-        regional_feature_stats="mean",
-        region_head_hidden=48,
-        hurdle_head=True,
-        temp_softplus=True,
-        dynamic_scale_routing=True,
-        foreground_gate=False,
-    )
-    model_no_fg = RMRv3(cfg_no_fg)
-    assert sum(p.numel() for p in model_no_fg.parameters() if p.requires_grad) == 104_440
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            output_stride=4,
+            feature_width=32,
+            pretrained=False,
+            neck_type="aspp_lite",
+            use_aspp_gap=True,
+            aspp_dilations=(1, 3, 6),
+            regional_feature_stats="mean",
+            region_head_hidden=48,
+            hurdle_head=True,
+            temp_softplus=True,
+            dynamic_scale_routing=True,
+            foreground_gate=True,
+        )
 
 
 def test_morozov_trust_region_clamping():
@@ -138,39 +102,14 @@ def test_morozov_trust_region_clamping():
 def test_foreground_gate_subhead():
     """Verify foreground gate sub-head initialization, modulation, and autograd gradient flow."""
     torch.manual_seed(42)
-    cfg = RMRv3Config(
-        pretrained=False,
-        neck_type="aspp_lite",
-        dynamic_scale_routing=True,
-        foreground_gate=True,
-        trust_region_kappa=0.35,
-    )
-    model = RMRv3(cfg)
-    assert model.fg_gate is not None
-
-    # Verify positive bias initialization (~2.0 -> sigmoid ~0.88)
-    assert torch.isclose(model.fg_gate.bias.data, torch.tensor([2.0]), atol=1e-3)
-
-    x = torch.randn(2, 3, 128, 128)
-    out = model(x)
-
-    assert "fg_logit" in out
-    fg_logit = out["fg_logit"]
-    assert fg_logit.shape == (2, 1, 32, 32)
-
-    # Verify modulation: out['y0'] is modulated by residual safety floor (0.70 + 0.30 * sigmoid(fg_logit))
-    z0 = model.fine_head.forward_logits(model.fusion(*model.encoder(x))[0])
-    raw_y0 = model.fine_head.activate(z0)
-    expected_y0 = raw_y0 * (0.70 + 0.30 * torch.sigmoid(fg_logit))
-    assert torch.allclose(out["y0"], expected_y0, atol=1e-5)
-
-    # Verify backprop flows into fg_gate
-    loss = out["fg_logit"].sum() + out["y"].sum()
-    loss.backward()
-    assert model.fg_gate.weight.grad is not None
-    assert model.fg_gate.weight.grad.abs().sum() > 0.0
-    assert model.fg_gate.bias.grad is not None
-    assert model.fg_gate.bias.grad.abs().sum() > 0.0
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            pretrained=False,
+            neck_type="aspp_lite",
+            dynamic_scale_routing=True,
+            foreground_gate=True,
+            trust_region_kappa=0.35,
+        )
 
 
 def test_curvature_power_loss_properties():
@@ -291,7 +230,6 @@ def test_rmr_v11_end_to_end_forward_backward_amp():
         hurdle_head=True,
         temp_softplus=True,
         dynamic_scale_routing=True,
-        foreground_gate=True,
         trust_region_kappa=0.35,
         trust_region_floor=0.005,
         iterations=3,

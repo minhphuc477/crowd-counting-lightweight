@@ -80,7 +80,7 @@ model:
   use_barzilai_borwein: false
   use_scale_entropy_trust: true
   scale_conditioned_fine_head: false
-  density_gated_diffusion: true
+  density_gated_diffusion: false
   diffusion_dense_threshold: 0.15
   diffusion_gate_beta: 0.03
   adaptive_relaxation: false

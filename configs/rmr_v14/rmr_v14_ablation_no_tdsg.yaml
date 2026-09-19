@@ -38,12 +38,12 @@ model:
   scale_router_temperature: 1.0
 
   # Decoupled Foreground Gating Sub-Head with Deep Background Suppression Floor (RMR-v11/v14): 33 parameters
-  foreground_gate: true
+
   fg_gate_floor:   0.10
 
   # RMR-v14 Upgrade 1: Top-Down Semantic Context Gating (TDSG): 33 parameters
   # Total model parameters: exactly 104,506 (strictly <= 105,000 budget, 494 headroom)
-  use_top_down_semantic_gate: false
+
   tdsg_floor:                 0.20
 
   # Measure Reconstruction Solver with Morozov Trust-Region Bounded Updates

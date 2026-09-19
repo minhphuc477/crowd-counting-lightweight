@@ -131,25 +131,21 @@ def test_rmr_v12_config_loading():
 
 def test_rmr_v12_parameter_budget_exactness():
     """Verify RMR-v12 strictly retains exactly 104,473 parameters."""
-    cfg_v12 = RMRv3Config(
-        output_stride=4,
-        feature_width=32,
-        pretrained=False,
-        neck_type="aspp_lite",
-        use_aspp_gap=True,
-        aspp_dilations=(1, 3, 6),
-        regional_feature_stats="mean",
-        region_head_hidden=48,
-        hurdle_head=True,
-        temp_softplus=True,
-        dynamic_scale_routing=True,
-        foreground_gate=True,
-    )
-    model = RMRv3(cfg_v12)
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    assert total_params <= 105_000, f"Parameters ({total_params}) exceed 105,000 budget!"
-    assert total_params == 104_473, f"Expected exactly 104,473 parameters, got {total_params}"
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            output_stride=4,
+            feature_width=32,
+            pretrained=False,
+            neck_type="aspp_lite",
+            use_aspp_gap=True,
+            aspp_dilations=(1, 3, 6),
+            regional_feature_stats="mean",
+            region_head_hidden=48,
+            hurdle_head=True,
+            temp_softplus=True,
+            dynamic_scale_routing=True,
+            foreground_gate=True,
+        )
 
 
 def test_rmr_v12_end_to_end_loss_dual_supervision():
@@ -165,7 +161,6 @@ def test_rmr_v12_end_to_end_loss_dual_supervision():
         regional_feature_stats="mean",
         region_head_hidden=48,
         dynamic_scale_routing=True,
-        foreground_gate=True,
         enable_solver=True,
         iterations=2, # Fast test
         hurdle_head=True,

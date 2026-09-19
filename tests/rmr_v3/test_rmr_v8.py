@@ -17,6 +17,7 @@ Strictly enforces:
 
 import math
 import tempfile
+import pytest
 from pathlib import Path
 import pytest
 import torch
@@ -226,7 +227,6 @@ def test_make_model_propagates_all_stage2_and_stage3_keys():
             "density_gate_rho": 0.03,
             "tv_type": "charbonnier",
             "tv_eps_c": 0.15,
-            "use_coord_attn": True,
             "neck_type": "aspp_lite",
             "hurdle_head": True,
             "temp_softplus": True,
@@ -240,8 +240,6 @@ def test_make_model_propagates_all_stage2_and_stage3_keys():
     assert abs(model.cfg.density_gate_rho - 0.03) < 1e-5
     assert model.cfg.tv_type == "charbonnier"
     assert abs(model.cfg.tv_eps_c - 0.15) < 1e-5
-    assert model.cfg.use_coord_attn is True
-    assert model.coord_attn is not None
     assert abs(model.cfg.backbone_lr_scale - 0.05) < 1e-5
 
 
@@ -270,7 +268,6 @@ def test_eval_load_model_from_ckpt_propagates_all_keys():
             "density_gate_rho": 0.02,
             "tv_type": "charbonnier",
             "tv_eps_c": 0.1,
-            "use_coord_attn": True,
             "neck_type": "aspp_lite",
             "hurdle_head": True,
             "temp_softplus": True,
@@ -287,8 +284,6 @@ def test_eval_load_model_from_ckpt_propagates_all_keys():
         loaded_model, _, _, _ = load_model_from_ckpt(tmp_path, device=torch.device("cpu"), use_ema=False)
         assert loaded_model.cfg.solver_mode == "multiplicative"
         assert loaded_model.cfg.tv_type == "charbonnier"
-        assert loaded_model.cfg.use_coord_attn is True
-        assert loaded_model.coord_attn is not None
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
@@ -321,24 +316,19 @@ def test_v8_stage2_parameter_budget():
 
 def test_v8_coord_attn_parameter_budget():
     """Stage 3 (+CoordAttn) must have exactly 105,629 parameters (784 added params)."""
-    cfg = RMRv3Config(
-        pretrained=False,
-        neck_type="aspp_lite",
-        aspp_dilations=(1, 3, 6),
-        use_aspp_gap=True,
-        regional_feature_stats="mean_std",
-        region_head_hidden=44,
-        hurdle_head=True,
-        temp_softplus=True,
-        solver_mode="multiplicative",
-        use_coord_attn=True,
-    )
-    model = RMRv3(cfg)
-    n = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    assert model.coord_attn is not None
-    ca_params = sum(p.numel() for p in model.coord_attn.parameters() if p.requires_grad)
-    assert ca_params == 784
-    assert n == 105_629
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        RMRv3Config(
+            pretrained=False,
+            neck_type="aspp_lite",
+            aspp_dilations=(1, 3, 6),
+            use_aspp_gap=True,
+            regional_feature_stats="mean_std",
+            region_head_hidden=44,
+            hurdle_head=True,
+            temp_softplus=True,
+            solver_mode="multiplicative",
+            use_coord_attn=True,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -378,7 +368,6 @@ def test_odd_and_asymmetric_spatial_resolutions():
         neck_type="aspp_lite",
         iterations=2,
         solver_mode="multiplicative",
-        use_coord_attn=True,
     )
     model = RMRv3(cfg).eval()
 
@@ -430,7 +419,6 @@ def test_bfloat16_numerical_stability():
         solver_mode="multiplicative",
         tv_type="charbonnier",
         tv_eps_c=0.1,
-        use_coord_attn=True,
     )
     model = RMRv3(cfg).train()
     x = torch.randn(1, 3, 128, 128)

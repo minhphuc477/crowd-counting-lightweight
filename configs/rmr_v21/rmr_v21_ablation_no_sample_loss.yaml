@@ -50,7 +50,7 @@ model:
   residual_clip: 0.0
   eps: 1.0e-06
   adjoint_mode: radon_nikodym
-  hybrid_recovery_alpha: 0.05
+  hybrid_recovery_alpha: 0.0
   morozov_gamma: 0.75
   reliability_mode: snr
   reliability_rate_std_floor: 0.01

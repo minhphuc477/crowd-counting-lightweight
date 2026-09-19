@@ -121,6 +121,8 @@ ALLOWED_MODEL_KEYS = {
     "curvature_gate_beta",
     "curvature_pool_kernel",
     # RMR-v20 additions
+    "use_micro_coord_attn",    # Permanently banned but key must be recognized to raise correct error
+    "micro_coord_reduction",   # Permanently banned but key must be recognized to raise correct error
     "use_nesterov_momentum",
     "adaptive_relaxation",
     "adaptive_relax_sparse",
@@ -140,6 +142,8 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v26 additions
     "bb_clamp_min",
     "bb_clamp_max",
+    # RMR-v27 additions
+    "cyclic_bb_length",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -707,6 +711,11 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "density_gated_diffusion",
         "diffusion_dense_threshold",
         "diffusion_gate_beta",
+        "use_perspective_elevation",
+        "use_alternating_bb",
+        "bb_clamp_min",
+        "bb_clamp_max",
+        "cyclic_bb_length",
         "enable_solver",
         "init_m0",
     ],

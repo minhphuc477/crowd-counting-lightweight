@@ -569,7 +569,7 @@ def main() -> None:
         model.set_solver_strength(solver_strength)
 
         cur_lr_bb = optimizer.param_groups[0]["lr"]
-        cur_lr_main = optimizer.param_groups[1]["lr"]
+        cur_lr_main = optimizer.param_groups[2]["lr"]
 
         loss_avgs, diag_summary = train_one_epoch(
             model=model,

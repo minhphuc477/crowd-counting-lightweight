@@ -102,7 +102,7 @@ def build_checkpoint(
     return ckpt
 
 
-def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = False) -> None:
+def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = True) -> None:
     """Set seeds across random, numpy, and torch, with deterministic algorithm controls."""
     random.seed(seed)
     np.random.seed(seed)
@@ -114,11 +114,19 @@ def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = Fa
             os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        torch.use_deterministic_algorithms(True, warn_only=warn_only)
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=warn_only)
+        except RuntimeError:
+            # If CuBLAS workspace wasn't configured prior to process start, fallback to warn_only=True
+            torch.use_deterministic_algorithms(True, warn_only=True)
     else:
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True
-        torch.use_deterministic_algorithms(False)
+        try:
+            torch.use_deterministic_algorithms(False)
+        except Exception:
+            pass
+
 
 
 def save_rng_state() -> dict[str, Any]:

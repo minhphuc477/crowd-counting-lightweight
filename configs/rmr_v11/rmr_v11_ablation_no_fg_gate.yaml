@@ -34,7 +34,7 @@ model:
   scale_router_temperature: 1.0
 
   # ABLATION: Disable Decoupled Foreground Gate (104,440 parameters)
-  foreground_gate: false
+
 
   enable_solver:   true
   solver_mode:     additive

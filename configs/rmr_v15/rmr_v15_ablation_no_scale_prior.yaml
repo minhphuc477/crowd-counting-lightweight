@@ -56,11 +56,11 @@ model:
   trust_gate_init_bias: 1.73
 
   # Decoupled Foreground Gating Sub-Head with Deep Background Suppression Floor: 33 parameters
-  foreground_gate: true
+
   fg_gate_floor:   0.10
 
   # Top-Down Semantic Context Gating (TDSG): 33 parameters
-  use_top_down_semantic_gate: true
+
   tdsg_floor:                 0.20
 
   # Measure Reconstruction Solver with Morozov Trust-Region Bounded Updates
