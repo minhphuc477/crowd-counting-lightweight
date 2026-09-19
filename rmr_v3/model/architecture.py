@@ -370,23 +370,42 @@ class RMRv3(nn.Module):
         uniform_reliability: bool = False,
         solver_strength: float | None = None,
     ) -> RMRModelOutput:
-        p4, p8, p16 = self._extract_carrier_features(x)
+        h_in, w_in = x.shape[-2:]
+        divisor = 16  # LCM of strides (2, 4, 8, 16)
+        pad_h = (divisor - h_in % divisor) % divisor
+        pad_w = (divisor - w_in % divisor) % divisor
+        x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
+
+        p4, p8, p16 = self._extract_carrier_features(x_in)
         scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
-        h, w = y0.shape[-2:]
-        h4, w4 = p4.shape[-2:]
+        target_h4, target_w4 = (h_in + 3) // 4, (w_in + 3) // 4
+        if p4.shape[-2] != target_h4 or p4.shape[-1] != target_w4:
+            p4 = p4[..., :target_h4, :target_w4]
+            p8 = p8[..., :(h_in + 7) // 8, :(w_in + 7) // 8]
+            p16 = p16[..., :(h_in + 15) // 16, :(w_in + 15) // 16]
+            if scale_weights is not None:
+                scale_weights = scale_weights[..., :target_h4, :target_w4]
+            if pi_scale is not None:
+                pi_scale = pi_scale[..., :target_h4, :target_w4]
+            if pi_aspect is not None:
+                pi_aspect = pi_aspect[..., :target_h4, :target_w4]
+            if fg_logit is not None:
+                fg_logit = fg_logit[..., :target_h4, :target_w4]
+
         if self.cfg.subpixel_stride2:
-            target_h = (x.shape[-2] + 1) // 2
-            target_w = (x.shape[-1] + 1) // 2
+            target_h, target_w = (h_in + 1) // 2, (w_in + 1) // 2
             if y0.shape[-2] != target_h or y0.shape[-1] != target_w:
                 y0 = y0[..., :target_h, :target_w]
                 z0 = z0[..., :target_h, :target_w]
-            h, w = y0.shape[-2:]
-            regions_solver = self._regions(h, w, x.device, stride=2)
-            regions_feat = self._regions(h4, w4, x.device, stride=4)
+            regions_solver = self._regions(target_h, target_w, x.device, stride=2)
+            regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
         else:
-            regions_solver = self._regions(h, w, x.device, stride=4)
+            if y0.shape[-2] != target_h4 or y0.shape[-1] != target_w4:
+                y0 = y0[..., :target_h4, :target_w4]
+                z0 = z0[..., :target_h4, :target_w4]
+            regions_solver = self._regions(target_h4, target_w4, x.device, stride=4)
             regions_feat = regions_solver
 
         regional_evidence = self._extract_regional_evidence(
@@ -396,7 +415,7 @@ class RMRv3(nn.Module):
             regions=regions_feat,
             scale_weights=scale_weights,
             uniform_reliability=uniform_reliability,
-            grid_h=h4,
+            grid_h=target_h4,
         )
 
         return self._solve_inverse_measure(
