@@ -140,15 +140,20 @@ def curvature_power_loss(
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    area_scale = (float(stride) / 4.0) ** 2
-    y_scaled = y_f / max(area_scale, 1e-4)
-    t_scaled = t_f / max(area_scale, 1e-4)
-    diff = torch.sqrt(y_scaled + float(eps)) - torch.sqrt(t_scaled + float(eps))
+    # NOTE: y_f and t_f are in people/cell (Dirac discrete masses, stride-invariant).
+    # Do NOT divide by area_scale here: the Anscombe VST must be evaluated in the
+    # native counting unit (people/cell), otherwise the operating point shifts by
+    # 1/sqrt(area_scale) per cell, inflating the loss by up to 4.4x at stride 2.
+    diff = torch.sqrt(y_f + float(eps)) - torch.sqrt(t_f + float(eps))
     diff_sq = diff.square()
 
     if mode == "none" or float(threshold) <= 0.0:
         return torch.mean(diff_sq)
 
+    # area_scale is only needed for the gating path:
+    # threshold is expressed in 'people per Stride-4 cell' units, so we scale
+    # it to 'people per current-stride cell' using area_scale = (stride/4)^2.
+    area_scale = (float(stride) / 4.0) ** 2
     eff_threshold = float(threshold) * area_scale
     eff_smooth_scale = float(smooth_scale) * area_scale
     eff_kernel = int(round(kernel_size * (4.0 / float(stride))))
@@ -203,8 +208,11 @@ def topk_hard_background_loss(
     k = min(num_bg, max(1, int(float(ratio) * num_bg)))
 
     topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
-    area_scale = (float(stride) / 4.0) ** 2
-    topk_vals = topk_vals / max(area_scale, 1e-4)
+    # NOTE: no area_scale division here. Background cell predictions are in
+    # people/cell (Dirac discrete masses), which are stride-invariant: each
+    # background cell contributes 0.0 regardless of stride. Dividing by
+    # area_scale = (stride/4)^2 was the same Dirac mass inflation bug fixed
+    # in commit 31fa853 for balanced_smooth_l1 and mass_weighted_cell_loss.
     return torch.mean(topk_vals.square())
 
 
@@ -262,11 +270,12 @@ def physical_scale_alignment_loss(
     stride: int = 4,
 ) -> torch.Tensor:
     """Physical Scale Alignment Loss (RMR-v13 / RMR-v14)."""
+    if scale_weights.ndim == 3:
+        scale_weights = scale_weights.unsqueeze(0)
     if target_y.ndim == 2:
         target_y = target_y.unsqueeze(0).unsqueeze(0)
     elif target_y.ndim == 3:
         target_y = target_y.unsqueeze(1)
-
     b, k, h, w = scale_weights.shape
     if k < 2 or scale_weights.numel() == 0 or target_y.numel() == 0:
         return (scale_weights.float().sum() + target_y.float().sum()) * 0.0
