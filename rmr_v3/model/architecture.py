@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+from collections import OrderedDict
+from typing import Any
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from rmr_core.backbones import MobileNetV4Backbone
+from rmr_core.heads import build_fine_head
+from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
+from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
+from rmr_core.types import RMRModelOutput
+from rmr_core.operators import (
+    RegionSet,
+    build_multiscale_regions,
+)
+from ..regional_head import ProbabilisticRegionalEvidenceHead
+from .config import RMRv3Config, _softplus_inverse, _deep_tuple
+from .evidence import extract_regional_evidence
+from .perspective import MicroPerspectiveElevation, MicroCoordAttn
+from .solver_step import solve_inverse_measure
+
+
+class RMRv3(nn.Module):
+    """Reliability-Weighted Regional Measure Reconciliation."""
+
+    def __init__(
+        self,
+        cfg: RMRv3Config | None = None,
+    ) -> None:
+        super().__init__()
+
+        if cfg is None:
+            cfg = RMRv3Config()
+
+        if cfg.output_stride != 4 and not (cfg.subpixel_stride2 and cfg.output_stride == 2):
+            raise ValueError(
+                "RMR-v3 registered method requires output_stride=4 (or output_stride=2 when subpixel_stride2=True)"
+            )
+
+        if cfg.include_full_image:
+            raise ValueError(
+                "RMR-v3 registered method requires include_full_image=False"
+            )
+
+        if cfg.enable_solver and cfg.iterations < 1:
+            raise ValueError("iterations must be >= 1 when enable_solver=True")
+
+        if cfg.enable_solver and cfg.omega <= 0:
+            raise ValueError("omega must be > 0 when enable_solver=True")
+
+        if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
+            raise ValueError(
+                f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
+            )
+
+        if len(cfg.region_sizes_px) == 0:
+            raise ValueError("region_sizes_px must not be empty")
+
+        if cfg.reliability_weight_min <= 0:
+            raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
+
+        if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
+            raise ValueError(
+                f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"
+            )
+
+        if cfg.reliability_rate_std_floor <= 0:
+            raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
+
+        self.cfg = cfg
+
+        self.encoder = MobileNetV4Backbone(
+            model_name=cfg.backbone_name,
+            pretrained=cfg.pretrained,
+            target_reductions=(4, 8, 16),
+        )
+
+        if cfg.neck_type == "rep_weighted":
+            self.fusion = RepWeightedFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+                context_dilations=cfg.context_dilations,
+            )
+        elif cfg.neck_type == "aspp_lite":
+            self.fusion = ASPPLiteFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+                aspp_dilations=cfg.aspp_dilations,
+                use_aspp_gap=cfg.use_aspp_gap,
+            )
+        elif cfg.neck_type == "additive":
+            self.fusion = AdditiveFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', or 'rep_weighted'."
+            )
+
+        init_bias = _softplus_inverse(cfg.init_m0)
+
+        self.fine_head = build_fine_head(
+            width=cfg.feature_width,
+            scale_conditioned_fine_head=cfg.scale_conditioned_fine_head,
+            num_scales=len(cfg.region_sizes_px),
+            init_bias=init_bias,
+            temp_softplus=cfg.temp_softplus,
+            scale_conditioned_prior=cfg.scale_conditioned_prior,
+            density_curvature=cfg.density_curvature,
+            gated_density_curvature=cfg.gated_density_curvature,
+            curvature_dense_threshold=cfg.curvature_dense_threshold,
+            curvature_gate_beta=cfg.curvature_gate_beta,
+            curvature_pool_kernel=cfg.curvature_pool_kernel,
+            subpixel_stride2=cfg.subpixel_stride2,
+        )
+
+        self.region_head = ProbabilisticRegionalEvidenceHead(
+            feature_dim=cfg.feature_width,
+            hidden=cfg.region_head_hidden,
+            init_rate=cfg.init_m0,
+            region_sizes_px=cfg.region_sizes_px,
+            dispersion_init=cfg.dispersion_init,
+            dispersion_min=cfg.dispersion_min,
+            dispersion_max=cfg.dispersion_max,
+            native_scale_pooling=cfg.native_scale_pooling,
+            regional_feature_stats=cfg.regional_feature_stats,
+            hurdle_head=cfg.hurdle_head,
+        )
+
+        # Stage 3: Coordinate Attention on P4
+        if cfg.use_coord_attn:
+            if cfg.neck_type != "aspp_lite":
+                raise ValueError(f"use_coord_attn=True requires neck_type='aspp_lite', got '{cfg.neck_type}'")
+            self.coord_attn: CoordinateAttention | None = CoordinateAttention(
+                channels=cfg.feature_width,
+                reduction=4,
+            )
+        else:
+            self.coord_attn = None
+
+        if cfg.use_micro_coord_attn:
+            self.micro_coord_attn: MicroCoordAttn | None = MicroCoordAttn(
+                channels=cfg.feature_width,
+                reduction=cfg.micro_coord_reduction,
+            )
+        else:
+            self.micro_coord_attn = None
+
+        if cfg.use_perspective_elevation:
+            self.perspective_elevation: MicroPerspectiveElevation | None = MicroPerspectiveElevation(
+                channels=cfg.feature_width
+            )
+        else:
+            self.perspective_elevation = None
+
+        # Dynamic Scale Routing
+        if cfg.factorized_scale_routing:
+            self.scale_router: FactorizedRoutingHead | ScaleRoutingHead | None = FactorizedRoutingHead(
+                in_channels=cfg.feature_width,
+                num_scales=cfg.num_marginal_scales,
+                num_aspect_ratios=cfg.num_aspect_ratios,
+                temperature=cfg.scale_router_temperature,
+                perspective_bias=cfg.perspective_scale_bias,
+            )
+        elif cfg.dynamic_scale_routing:
+            self.scale_router = ScaleRoutingHead(
+                in_channels=cfg.feature_width,
+                num_scales=len(cfg.region_sizes_px),
+                temperature=cfg.scale_router_temperature,
+                perspective_bias=cfg.perspective_scale_bias,
+            )
+        else:
+            self.scale_router = None
+
+        if cfg.foreground_gate:
+            self.fg_gate: nn.Conv2d | None = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True)
+            nn.init.normal_(self.fg_gate.weight, std=0.01)
+            nn.init.constant_(self.fg_gate.bias, 2.0)
+        else:
+            self.fg_gate = None
+
+        if cfg.use_top_down_semantic_gate:
+            self.tdsg: nn.Conv2d | None = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True)
+            nn.init.normal_(self.tdsg.weight, std=0.01)
+            nn.init.constant_(self.tdsg.bias, 2.0)
+        else:
+            self.tdsg = None
+
+        if cfg.dynamic_trust_gate:
+            self.trust_gate: nn.Linear | None = nn.Linear(cfg.feature_width, 1)
+            nn.init.zeros_(self.trust_gate.weight)
+            nn.init.constant_(self.trust_gate.bias, float(cfg.trust_gate_init_bias))
+        else:
+            self.trust_gate = None
+
+        self.solver_strength: float = 1.0
+
+        self.register_buffer(
+            "_laplace_kernel",
+            torch.tensor(
+                [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
+                dtype=torch.float32,
+            ).view(1, 1, 3, 3),
+            persistent=False,
+        )
+
+        self._region_cache: OrderedDict[tuple, RegionSet] = OrderedDict()
+
+        total_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        if total_trainable > 105000:
+            raise ValueError(
+                f"Strict parameter ceiling exceeded: {total_trainable} > 105,000 parameters. "
+                "Check architecture configuration."
+            )
+
+    def set_solver_strength(self, strength: float) -> None:
+        self.solver_strength = float(min(max(strength, 0.0), 1.0))
+
+    def _regions(
+        self,
+        h: int,
+        w: int,
+        device: torch.device,
+        stride: int | None = None,
+    ) -> RegionSet:
+        effective_stride = self.cfg.output_stride if stride is None else stride
+        key = (
+            h,
+            w,
+            effective_stride,
+            _deep_tuple(self.cfg.region_sizes_px),
+            self.cfg.region_overlap,
+            device.type,
+            device.index if device.type == "cuda" else None,
+        )
+
+        if key in self._region_cache:
+            self._region_cache.move_to_end(key)
+            return self._region_cache[key]
+
+        if len(self._region_cache) >= 32:
+            self._region_cache.popitem(last=False)
+
+        region_set = build_multiscale_regions(
+            height=h,
+            width=w,
+            output_stride=effective_stride,
+            region_sizes_px=self.cfg.region_sizes_px,
+            overlap=self.cfg.region_overlap,
+            include_full_image=False,
+            device=device,
+        )
+        self._region_cache[key] = region_set
+        return region_set
+
+    def _extract_carrier_features(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        c4, c8, c16 = self.encoder(x)
+        p4, p8, p16 = self.fusion(c4, c8, c16)
+
+        if self.tdsg is not None:
+            sem_logit = self.tdsg(p16)
+            sem_gate = F.interpolate(
+                sem_logit, size=p4.shape[-2:], mode="bilinear", align_corners=False
+            )
+            sem_floor = float(self.cfg.tdsg_floor)
+            sem_mask = sem_floor + (1.0 - sem_floor) * torch.sigmoid(sem_gate)
+            p4 = p4 * sem_mask
+
+        if self.coord_attn is not None:
+            p4 = self.coord_attn(p4)
+
+        if self.micro_coord_attn is not None:
+            p4 = self.micro_coord_attn(p4)
+
+        if self.perspective_elevation is not None:
+            p4 = self.perspective_elevation(p4)
+
+        return p4, p8, p16
+
+    def _route_scales(
+        self, p4: torch.Tensor
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        if self.scale_router is None:
+            return None, None, None
+
+        router_out = self.scale_router(p4)
+        if isinstance(router_out, tuple):
+            scale_weights, pi_scale, pi_aspect = router_out
+            return scale_weights, pi_scale, pi_aspect
+        return router_out, None, None
+
+    def _predict_fine_density(
+        self, p4: torch.Tensor, scale_weights: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
+        y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
+
+        fg_logit = None
+        if self.fg_gate is not None:
+            fg_logit = self.fg_gate(p4)
+            floor = float(self.cfg.fg_gate_floor)
+            fg_mask = floor + (1.0 - floor) * torch.sigmoid(fg_logit)
+            y0 = y0 * fg_mask
+
+        return z0, y0, fg_logit
+
+    def _extract_regional_evidence(
+        self,
+        p4: torch.Tensor,
+        p8: torch.Tensor,
+        p16: torch.Tensor,
+        regions: RegionSet,
+        scale_weights: torch.Tensor | None,
+        uniform_reliability: bool,
+        grid_h: int,
+    ) -> dict[str, Any]:
+        return extract_regional_evidence(
+            cfg=self.cfg,
+            region_head=self.region_head,
+            p4=p4,
+            p8=p8,
+            p16=p16,
+            regions=regions,
+            scale_weights=scale_weights,
+            uniform_reliability=uniform_reliability,
+            grid_h=grid_h,
+        )
+
+    def _solve_inverse_measure(
+        self,
+        y0: torch.Tensor,
+        z0: torch.Tensor,
+        regional_evidence: dict[str, Any],
+        regions: RegionSet,
+        scale_weights: torch.Tensor | None,
+        solver_strength: float | None,
+        uniform_reliability: bool,
+        p16: torch.Tensor,
+        fg_logit: torch.Tensor | None,
+        pi_scale: torch.Tensor | None,
+        pi_aspect: torch.Tensor | None,
+    ) -> RMRModelOutput:
+        return solve_inverse_measure(
+            cfg=self.cfg,
+            y0=y0,
+            z0=z0,
+            regional_evidence=regional_evidence,
+            regions=regions,
+            scale_weights=scale_weights,
+            solver_strength=solver_strength,
+            default_solver_strength=self.solver_strength,
+            uniform_reliability=uniform_reliability,
+            p16=p16,
+            fg_logit=fg_logit,
+            pi_scale=pi_scale,
+            pi_aspect=pi_aspect,
+            trust_gate=self.trust_gate,
+            laplace_kernel=self._laplace_kernel,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        uniform_reliability: bool = False,
+        solver_strength: float | None = None,
+    ) -> RMRModelOutput:
+        p4, p8, p16 = self._extract_carrier_features(x)
+        scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
+        z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
+
+        h, w = y0.shape[-2:]
+        if self.cfg.subpixel_stride2:
+            regions_solver = self._regions(h, w, x.device, stride=2)
+            h4, w4 = p4.shape[-2:]
+            regions_feat = self._regions(h4, w4, x.device, stride=4)
+        else:
+            regions_solver = self._regions(h, w, x.device, stride=4)
+            regions_feat = regions_solver
+
+        regional_evidence = self._extract_regional_evidence(
+            p4=p4,
+            p8=p8,
+            p16=p16,
+            regions=regions_feat,
+            scale_weights=scale_weights,
+            uniform_reliability=uniform_reliability,
+            grid_h=int(regions_feat.boxes[:, 2].max().item()) if regions_feat.boxes.numel() > 0 else h,
+        )
+
+        return self._solve_inverse_measure(
+            y0=y0,
+            z0=z0,
+            regional_evidence=regional_evidence,
+            regions=regions_solver,
+            scale_weights=scale_weights,
+            solver_strength=solver_strength,
+            uniform_reliability=uniform_reliability,
+            p16=p16,
+            fg_logit=fg_logit,
+            pi_scale=pi_scale,
+            pi_aspect=pi_aspect,
+        )
+
+    def switch_to_deploy(self) -> None:
+        if hasattr(self.fusion, "switch_to_deploy"):
+            self.fusion.switch_to_deploy()

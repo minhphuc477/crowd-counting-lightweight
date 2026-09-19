@@ -1,0 +1,428 @@
+from __future__ import annotations
+
+from typing import Any
+
+ALLOWED_TOP_LEVEL = {
+    "seed",
+    "output_dir",
+    "data",
+    "model",
+    "loss",
+    "train",
+    "eval",
+}
+
+ALLOWED_DATA_KEYS = {
+    "train_manifest",
+    "val_manifest",
+    "crop_size",
+    "scale_range",
+    "hflip_prob",
+    "brightness_jitter",
+    "contrast_jitter",
+    "gamma_jitter",
+    "random_invert_prob",
+    "data_root",
+}
+
+ALLOWED_MODEL_KEYS = {
+    "output_stride",
+    "feature_width",
+    "backbone",
+    "backbone_name",
+    "pretrained",
+    "backbone_lr_scale",
+    "init_m0",
+    "neck_type",
+    "region_sizes_px",
+    "region_overlap",
+    "include_full_image",
+    "enable_solver",
+    "iterations",
+    "omega",
+    "sirt_omega",
+    "residual_clip",
+    "dispersion_init",
+    "dispersion_min",
+    "dispersion_max",
+    "reliability_mode",
+    "reliability_rate_std_floor",
+    "reliability_weight_min",
+    "reliability_weight_max",
+    "normalize_reliability_within_scale",
+    "detach_region_mean_in_solver",
+    "detach_reliability_in_solver",
+    "uniform_reliability",
+    "eps",
+    "native_scale_pooling",
+    "regional_feature_stats",
+    "context_dilations",
+    "use_aspp_gap",
+    "aspp_dilations",
+    "region_head_hidden",
+    # RMR-v7
+    "hurdle_head",
+    "tv_lambda",
+    "ema_decay",
+    "temp_softplus",
+    # RMR-v8 Stage 2
+    "solver_mode",
+    "density_gate_rho",
+    "density_gate_floor",
+    "tv_type",
+    "tv_eps_c",
+    # RMR-v8 Stage 3
+    "use_coord_attn",
+    # RMR-v9.1 / AQ-RMR additions
+    "proximal_tau",
+    # RMR-v10 additions
+    "proximal_mode",
+    "proximal_mu",
+    "dynamic_scale_routing",
+    "scale_router_temperature",
+    # RMR-v11 additions
+    "trust_region_kappa",
+    "trust_region_floor",
+    "foreground_gate",
+    # RMR-v13 additions
+    "adjoint_mode",
+    "morozov_gamma",
+    # RMR-v14 additions
+    "use_top_down_semantic_gate",
+    "tdsg_floor",
+    "fg_gate_floor",
+    # RMR-v15 additions
+    "scale_conditioned_prior",
+    "pre_solver_scale_gating",
+    "scale_gating_power",
+    "dynamic_trust_gate",
+    "trust_gate_init_bias",
+    # RMR-v17 additions
+    "density_curvature",
+    "use_barzilai_borwein",
+    "use_scale_entropy_trust",
+    # RMR-v18 additions
+    "perspective_scale_bias",
+    "perspective_horizon_gate",
+    "horizon_cutoff",
+    # RMR-v19 additions
+    "factorized_scale_routing",
+    "num_marginal_scales",
+    "num_aspect_ratios",
+    "gated_density_curvature",
+    "curvature_dense_threshold",
+    "curvature_gate_beta",
+    "curvature_pool_kernel",
+    # RMR-v20 additions
+    "use_micro_coord_attn",    # Permanently banned but key must be recognized to raise correct error
+    "micro_coord_reduction",   # Permanently banned but key must be recognized to raise correct error
+    "use_nesterov_momentum",
+    "adaptive_relaxation",
+    "adaptive_relax_sparse",
+    "adaptive_relax_dense_boost",
+    "adaptive_relax_threshold",
+    "adaptive_relax_scale",
+    # RMR-v21 additions
+    "hybrid_recovery_alpha",
+    # RMR-v22 additions
+    "scale_conditioned_fine_head",
+    "density_gated_diffusion",
+    "diffusion_dense_threshold",
+    "diffusion_gate_beta",
+    # RMR-v24 additions
+    "use_perspective_elevation",
+    "use_alternating_bb",
+    # RMR-v26 additions
+    "bb_clamp_min",
+    "bb_clamp_max",
+    # RMR-v27 additions
+    "cyclic_bb_length",
+    # RMR-v29 additions
+    "subpixel_stride2",
+}
+
+ALLOWED_LOSS_KEYS = {
+    "lambda_count",
+    "lambda_flat_dm16",
+    "lambda_cell",
+    "lambda_region_nb",
+    "lambda_hurdle",
+    "lambda_trunc_nb",
+    "allocation_loss_type",
+    "bayesian_sigma",
+    "bayesian_background_ratio",
+    "ot_reg",
+    "ot_num_iters",
+    "count_loss_mode",
+    "count_nb_dispersion",
+    "kappa_flat16",
+    "normalize_flat_dm16",
+    "cell_beta",
+    "use_hierarchical_dm",
+    "use_multiscale_dm",
+    "dm_block_sizes_px",
+    "dm_weights",
+    "dm_kappas",
+    # RMR-v8 Stage 2 & 3
+    "cell_loss_mode",
+    "cell_mass_weight_eps",
+    "cell_mass_weight_alpha",
+    # RMR-v9: allocation loss target ("y0" | "y")
+    "dm_target",
+    "dm_strict",
+    # RMR-v11 additions
+    "cell_mass_weight_gamma",
+    "lambda_curvature",
+    "lambda_hard_bg",
+    "hard_bg_ratio",
+    "lambda_fg_gate",
+    # RMR-v12 additions
+    "curvature_gate_threshold",
+    "curvature_gate_kernel",
+    "curvature_gate_mode",
+    "curvature_gate_scale",
+    # RMR-v13 additions
+    "lambda_scale_align",
+    "scale_align_tau_dense",
+    "scale_align_tau_sparse",
+    "scale_align_kernel",
+    # RMR-v14 additions
+    "scale_align_mask_bg",
+    # RMR-v20 additions
+    "density_loss_scaling",
+    "dense_loss_thresh",
+    "dense_loss_norm",
+    "dense_loss_alpha",
+    "dense_loss_max_boost",
+    # RMR-v21 additions
+    "elementwise_dense_scaling",
+}
+
+ALLOWED_TRAIN_KEYS = {
+    "batch_size",
+    "workers",
+    "pin_memory",
+    "lr",
+    "backbone_lr_scale",
+    "weight_decay",
+    "epochs",
+    "warmup_epochs",
+    "eval_every",
+    "grad_clip",
+    "amp",
+    "early_stopping",
+    "patience",
+    "solver_warmup_epochs",
+    "solver_ramp_epochs",
+    "deterministic",
+    "ema_decay",
+    "teacher_ckpt",
+    "min_lr_ratio",
+}
+
+ALLOWED_EVAL_KEYS = {
+    "density_bins",
+}
+
+SECTION_ALLOWED_KEYS = {
+    "data": ALLOWED_DATA_KEYS,
+    "model": ALLOWED_MODEL_KEYS,
+    "loss": ALLOWED_LOSS_KEYS,
+    "train": ALLOWED_TRAIN_KEYS,
+    "eval": ALLOWED_EVAL_KEYS,
+}
+
+METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
+    "model": [
+        "output_stride",
+        "feature_width",
+        "backbone_name",
+        "backbone",
+        "region_sizes_px",
+        "region_overlap",
+        "include_full_image",
+        "iterations",
+        "omega",
+        "sirt_omega",
+        "residual_clip",
+        "dispersion_init",
+        "dispersion_min",
+        "dispersion_max",
+        "reliability_mode",
+        "reliability_rate_std_floor",
+        "reliability_weight_min",
+        "reliability_weight_max",
+        "normalize_reliability_within_scale",
+        "detach_region_mean_in_solver",
+        "detach_reliability_in_solver",
+        "uniform_reliability",
+        "eps",
+        "native_scale_pooling",
+        "regional_feature_stats",
+        "region_head_hidden",
+        # Neck architecture fields (changing these changes model weights layout)
+        "neck_type",
+        "context_dilations",
+        "use_aspp_gap",
+        "aspp_dilations",
+        # RMR-v7 critical fields (changing these invalidates checkpoint weights)
+        "hurdle_head",
+        "temp_softplus",
+        # RMR-v8 Stage 2 solver fields (changing these changes the SIRT update rule)
+        "solver_mode",
+        "density_gate_rho",
+        "density_gate_floor",
+        "tv_type",
+        "tv_lambda",
+        "tv_eps_c",
+        # RMR-v8 Stage 3 architecture
+        "use_coord_attn",
+        # RMR-v9.1 / AQ-RMR additions
+        "proximal_tau",
+        # RMR-v10 additions
+        "proximal_mode",
+        "proximal_mu",
+        "dynamic_scale_routing",
+        "scale_router_temperature",
+        # RMR-v11 additions
+        "trust_region_kappa",
+        "trust_region_floor",
+        "foreground_gate",
+        # RMR-v13 additions
+        "adjoint_mode",
+        "morozov_gamma",
+        # RMR-v14 additions
+        "use_top_down_semantic_gate",
+        "tdsg_floor",
+        "fg_gate_floor",
+        # RMR-v15 additions
+        "scale_conditioned_prior",
+        "pre_solver_scale_gating",
+        "scale_gating_power",
+        "dynamic_trust_gate",
+        "trust_gate_init_bias",
+        # RMR-v17 additions
+        "density_curvature",
+        "use_scale_entropy_trust",
+        # RMR-v18 additions
+        "perspective_scale_bias",
+        "perspective_horizon_gate",
+        "horizon_cutoff",
+        # RMR-v19 additions
+        "factorized_scale_routing",
+        "num_marginal_scales",
+        "num_aspect_ratios",
+        "gated_density_curvature",
+        "curvature_dense_threshold",
+        "curvature_gate_beta",
+        "curvature_pool_kernel",
+        # RMR-v20 additions
+        "use_micro_coord_attn",
+        "micro_coord_reduction",
+        "use_nesterov_momentum",
+        "adaptive_relaxation",
+        "adaptive_relax_sparse",
+        "adaptive_relax_dense_boost",
+        "adaptive_relax_threshold",
+        "adaptive_relax_scale",
+        # RMR-v21 additions
+        "hybrid_recovery_alpha",
+        # RMR-v17 additions
+        "use_barzilai_borwein",
+        # RMR-v22 / v23 additions
+        "scale_conditioned_fine_head",
+        "density_gated_diffusion",
+        "diffusion_dense_threshold",
+        "diffusion_gate_beta",
+        "use_perspective_elevation",
+        "use_alternating_bb",
+        "bb_clamp_min",
+        "bb_clamp_max",
+        "cyclic_bb_length",
+        "enable_solver",
+        "init_m0",
+    ],
+    "loss": [
+        "lambda_count",
+        "lambda_flat_dm16",
+        "lambda_cell",
+        "lambda_region_nb",
+        "lambda_hurdle",
+        "lambda_trunc_nb",
+        "count_loss_mode",
+        "count_nb_dispersion",
+        "kappa_flat16",
+        "normalize_flat_dm16",
+        "cell_beta",
+        "use_hierarchical_dm",
+        "use_multiscale_dm",
+        "dm_block_sizes_px",
+        "dm_weights",
+        "dm_kappas",
+        # RMR-v8 Stage 2 loss fields
+        "cell_loss_mode",
+        "cell_mass_weight_alpha",
+        "cell_mass_weight_eps",
+        # RMR-v9 allocation loss fields
+        "allocation_loss_type",
+        "dm_target",
+        # RMR-v11 loss fields
+        "cell_mass_weight_gamma",
+        "lambda_curvature",
+        "lambda_hard_bg",
+        "hard_bg_ratio",
+        "lambda_fg_gate",
+        # RMR-v12 loss fields
+        "curvature_gate_threshold",
+        "curvature_gate_kernel",
+        "curvature_gate_mode",
+        "curvature_gate_scale",
+        # RMR-v13 loss fields
+        "lambda_scale_align",
+        "scale_align_tau_dense",
+        "scale_align_tau_sparse",
+        "scale_align_kernel",
+        # RMR-v14 loss fields
+        "scale_align_mask_bg",
+        # RMR-v20/v21 loss fields
+        "density_loss_scaling",
+        "elementwise_dense_scaling",
+    ],
+    "train": [
+        "lr",
+        "backbone_lr_scale",
+        "weight_decay",
+        "epochs",
+        "warmup_epochs",
+        "batch_size",
+        "deterministic",
+        "solver_warmup_epochs",
+        "solver_ramp_epochs",
+        "workers",
+        "eval_every",
+        "early_stopping",
+        "patience",
+    ],
+    "data": [
+        "crop_size",
+        "scale_range",
+        "hflip_prob",
+        "brightness_jitter",
+        "contrast_jitter",
+        "gamma_jitter",
+        "random_invert_prob",
+    ],
+}
+
+CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
+    "workers": 0,
+    "eval_every": 10,
+    "early_stopping": False,
+    "patience": 0,
+    "deterministic": False,
+    "amp": True,
+    "grad_clip": 500.0,
+    "solver_warmup_epochs": 5,
+    "solver_ramp_epochs": 20,
+    "warmup_epochs": 5,
+}
