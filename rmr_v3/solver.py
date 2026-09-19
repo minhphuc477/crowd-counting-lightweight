@@ -174,6 +174,10 @@ def unrolled_sirt_solver(
     effective_tv_lambda = float(tv_lambda) * strength
     effective_tau = float(proximal_tau) * area_scale
     effective_rho = float(density_gate_rho) * area_scale
+    effective_diff_thresh = float(diffusion_dense_threshold) * area_scale
+    effective_diff_beta = float(diffusion_gate_beta) * area_scale
+    effective_relax_thresh = float(adaptive_relax_threshold) * area_scale
+    effective_relax_scale = float(adaptive_relax_scale) * area_scale
     # tau_step and tv_step are per-iteration budgets.
     # Divide by T so that total shrinkage/diffusion over all iterations equals the hyperparameter,
     # making tau and tv_lambda strictly T-invariant hyperparameters.
@@ -312,7 +316,7 @@ def unrolled_sirt_solver(
         # Density-Adaptive Over-Relaxation (RMR-v20)
         if adaptive_relaxation:
             z_smooth = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
-            gate_dense = torch.sigmoid((z_smooth - float(adaptive_relax_threshold)) / float(adaptive_relax_scale))
+            gate_dense = torch.sigmoid((z_smooth - effective_relax_thresh) / max(effective_relax_scale, 1e-6))
             omega_mod = float(adaptive_relax_sparse) + (1.0 - float(adaptive_relax_sparse) + float(adaptive_relax_dense_boost)) * gate_dense
             current_omega = current_omega * omega_mod
 
@@ -352,8 +356,8 @@ def unrolled_sirt_solver(
                     tv_step,
                     kernel=laplace_kernel,
                     density_gated=density_gated_diffusion,
-                    diffusion_dense_threshold=float(diffusion_dense_threshold),
-                    diffusion_gate_beta=float(diffusion_gate_beta),
+                    diffusion_dense_threshold=effective_diff_thresh,
+                    diffusion_gate_beta=effective_diff_beta,
                 )
 
         y_next = y_next.to(dtype=y_curr.dtype)
