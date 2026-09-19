@@ -18,6 +18,10 @@ def test_v29_configs_exist_and_validate():
         "rmr_v29_step0_v19_anchor.yaml",
         "rmr_v29_h1_depth8.yaml",
         "rmr_v29_h2_subpixel2.yaml",
+        "rmr_v29_h3_subpixel2_depth8.yaml",
+        "rmr_v29_h4_scale_preserve.yaml",
+        "rmr_v29_h5_loss_unsuppressed.yaml",
+        "rmr_v29_h6_backbone_lr.yaml",
     ]
     for cfg_name in configs:
         p = CONFIG_DIR / cfg_name
@@ -32,6 +36,10 @@ def test_v29_parameter_budget():
         "rmr_v29_step0_v19_anchor.yaml": 104441,
         "rmr_v29_h1_depth8.yaml": 104441,
         "rmr_v29_h2_subpixel2.yaml": 104540,
+        "rmr_v29_h3_subpixel2_depth8.yaml": 104540,
+        "rmr_v29_h4_scale_preserve.yaml": 104441,
+        "rmr_v29_h5_loss_unsuppressed.yaml": 104441,
+        "rmr_v29_h6_backbone_lr.yaml": 104441,
     }
     for cfg_name, expected_params in configs.items():
         p = CONFIG_DIR / cfg_name
@@ -48,10 +56,18 @@ def test_v29_single_variable_isolation():
     p_step0 = CONFIG_DIR / "rmr_v29_step0_v19_anchor.yaml"
     p_h1 = CONFIG_DIR / "rmr_v29_h1_depth8.yaml"
     p_h2 = CONFIG_DIR / "rmr_v29_h2_subpixel2.yaml"
+    p_h3 = CONFIG_DIR / "rmr_v29_h3_subpixel2_depth8.yaml"
+    p_h4 = CONFIG_DIR / "rmr_v29_h4_scale_preserve.yaml"
+    p_h5 = CONFIG_DIR / "rmr_v29_h5_loss_unsuppressed.yaml"
+    p_h6 = CONFIG_DIR / "rmr_v29_h6_backbone_lr.yaml"
 
     c_step0 = yaml.safe_load(p_step0.read_text())
     c_h1 = yaml.safe_load(p_h1.read_text())
     c_h2 = yaml.safe_load(p_h2.read_text())
+    c_h3 = yaml.safe_load(p_h3.read_text())
+    c_h4 = yaml.safe_load(p_h4.read_text())
+    c_h5 = yaml.safe_load(p_h5.read_text())
+    c_h6 = yaml.safe_load(p_h6.read_text())
 
     # Step 0 vs H1 differs ONLY in iterations
     assert c_step0["model"]["iterations"] == 6
@@ -74,6 +90,39 @@ def test_v29_single_variable_isolation():
     assert c_step0["loss"] == c_h2["loss"], "H2 loss differs from Step 0!"
     assert c_step0["train"] == c_h2["train"], "H2 train differs from Step 0!"
     assert c_step0["eval"] == c_h2["eval"], "H2 eval differs from Step 0!"
+
+    # H3 is the composite of H1 (depth 8) and H2 (subpixel stride 2)
+    assert c_h3["model"]["subpixel_stride2"] is True
+    assert c_h3["model"]["output_stride"] == 2
+    assert c_h3["model"]["iterations"] == 8
+
+    # Step 0 vs H4 differs ONLY in scale_range
+    assert c_step0["data"]["scale_range"] == [0.70, 1.35]
+    assert c_h4["data"]["scale_range"] == [0.80, 1.35]
+    c_s0_d = dict(c_step0["data"])
+    c_h4_d = dict(c_h4["data"])
+    c_s0_d.pop("scale_range")
+    c_h4_d.pop("scale_range")
+    assert c_s0_d == c_h4_d, "H4 introduces uncontrolled data variables against Step 0!"
+    assert c_step0["model"] == c_h4["model"], "H4 model differs from Step 0!"
+    assert c_step0["loss"] == c_h4["loss"], "H4 loss differs from Step 0!"
+
+    # Step 0 vs H5 differs ONLY in lambda_hard_bg
+    assert c_step0["loss"]["lambda_hard_bg"] == 0.15
+    assert c_h5["loss"]["lambda_hard_bg"] == 0.05
+    c_s0_l = dict(c_step0["loss"])
+    c_h5_l = dict(c_h5["loss"])
+    c_s0_l.pop("lambda_hard_bg")
+    c_h5_l.pop("lambda_hard_bg")
+    assert c_s0_l == c_h5_l, "H5 introduces uncontrolled loss variables against Step 0!"
+    assert c_step0["model"] == c_h5["model"], "H5 model differs from Step 0!"
+    assert c_step0["data"] == c_h5["data"], "H5 data differs from Step 0!"
+
+    # Step 0 vs H6 differs ONLY in backbone_lr_scale and warmup_epochs
+    assert c_step0["model"]["backbone_lr_scale"] == 0.1
+    assert c_h6["model"]["backbone_lr_scale"] == 0.20
+    assert c_h6["train"]["backbone_lr_scale"] == 0.20
+    assert c_h6["train"]["warmup_epochs"] == 15
 
 
 def test_v29_step0_forward_backward_gradient_flow():
@@ -141,3 +190,38 @@ def test_v29_h2_subpixel2_forward_backward():
             assert torch.isfinite(p.grad).all(), f"NaN/Inf gradient in parameter {name}"
             has_grad = True
     assert has_grad, "H2: No parameters received gradients!"
+
+
+def test_v29_h3_subpixel2_depth8_forward_backward():
+    """Verify forward-backward gradient flow for H3 (Sub-pixel Stride-2 + Depth 8)."""
+    p = CONFIG_DIR / "rmr_v29_h3_subpixel2_depth8.yaml"
+    raw = yaml.safe_load(p.read_text())
+    m_cfg = RMRv3Config.from_dict(raw.get("model", {}))
+    l_cfg = RMRv3LossConfig.from_dict(raw.get("loss", {}))
+
+    model = RMRv3(m_cfg)
+    model.train()
+
+    # Synthetic batch: 2 images of 256x256
+    x = torch.randn(2, 3, 256, 256, requires_grad=False)
+    # Stride 2 target: 128x128
+    target_y = torch.zeros(2, 1, 128, 128)
+    target_y[0, 0, 20, 20] = 1.0
+    target_y[1, 0, 40, 40] = 1.0
+
+    out = model(x)
+    assert out.y.shape == (2, 1, 128, 128), f"Expected shape (2, 1, 128, 128), got {out.y.shape}"
+    assert len(out.iterates) == 9  # y0 + 8 iterations
+
+    losses = compute_rmr_v3_losses(out, target_y, l_cfg)
+    assert torch.isfinite(losses["total"]), "H3 Total loss is non-finite!"
+
+    losses["total"].backward()
+
+    has_grad = False
+    for name, p in model.named_parameters():
+        if p.requires_grad and p.grad is not None:
+            assert torch.isfinite(p.grad).all(), f"NaN/Inf gradient in parameter {name}"
+            has_grad = True
+    assert has_grad, "H3: No parameters received gradients!"
+
