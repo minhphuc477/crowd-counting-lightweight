@@ -129,6 +129,7 @@ def _compute_core_losses(
         )
 
     def _compute_cell_loss(density_map: torch.Tensor) -> torch.Tensor:
+        stride = int(getattr(cfg, "output_stride", 4))
         if cfg.cell_loss_mode == "mass_weighted":
             return mass_weighted_cell_loss(
                 density_map,
@@ -137,11 +138,13 @@ def _compute_core_losses(
                 eps=cfg.cell_mass_weight_eps,
                 alpha=float(cfg.cell_mass_weight_alpha),
                 gamma=float(cfg.cell_mass_weight_gamma),
+                stride=stride,
             )
         return balanced_smooth_l1(
             density_map,
             target_float,
             beta=cfg.cell_beta,
+            stride=stride,
         )
 
     # Count loss supervision

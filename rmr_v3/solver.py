@@ -178,6 +178,7 @@ def unrolled_sirt_solver(
     effective_diff_beta = float(diffusion_gate_beta) * area_scale
     effective_relax_thresh = float(adaptive_relax_threshold) * area_scale
     effective_relax_scale = float(adaptive_relax_scale) * area_scale
+    effective_trust_floor = float(trust_region_floor) * area_scale
     # tau_step and tv_step are per-iteration budgets.
     # Divide by T so that total shrinkage/diffusion over all iterations equals the hyperparameter,
     # making tau and tv_lambda strictly T-invariant hyperparameters.
@@ -323,7 +324,7 @@ def unrolled_sirt_solver(
         step_omegas.append(current_omega)
         step_delta = current_omega * field
         if trust_region_kappa > 0.0:
-            bound = float(trust_region_kappa) * torch.clamp_min(z_state.float(), float(trust_region_floor))
+            bound = float(trust_region_kappa) * torch.clamp_min(z_state.float(), float(effective_trust_floor))
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 bound = bound * (0.25 + 0.75 * scale_confidence)

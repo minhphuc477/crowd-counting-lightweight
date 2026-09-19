@@ -11,12 +11,16 @@ def balanced_smooth_l1(
     pred: torch.Tensor,
     target: torch.Tensor,
     beta: float = 1.0,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Equalize empty and non-empty cell contributions across the batch."""
     if pred.numel() == 0 or target.numel() == 0:
         return (pred.sum() + target.sum()) * 0.0
-    per = F.smooth_l1_loss(pred, target, reduction="none", beta=beta)
-    pos = target > 0
+    area_scale = (float(stride) / 4.0) ** 2
+    p_scaled = pred / max(area_scale, 1e-4)
+    t_scaled = target / max(area_scale, 1e-4)
+    per = F.smooth_l1_loss(p_scaled, t_scaled, reduction="none", beta=beta)
+    pos = t_scaled > 0
     neg = ~pos
     pos_loss = per[pos].mean() if pos.any() else per.new_tensor(0.0)
     neg_loss = per[neg].mean() if neg.any() else per.new_tensor(0.0)

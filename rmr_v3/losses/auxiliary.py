@@ -215,6 +215,7 @@ def mass_weighted_cell_loss(
     eps: float = 1e-3,
     alpha: float = 1.0,
     gamma: float = 1.0,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Mass-weighted cell allocation loss (RMR-v8 Stage 2 / RMR-v11)."""
     if target.ndim == 2:
@@ -232,21 +233,25 @@ def mass_weighted_cell_loss(
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    total_mass = t_f.sum(dim=(-2, -1), keepdim=True)
-    p = torch.where(total_mass > float(eps), t_f / total_mass.clamp_min(float(eps)), torch.zeros_like(t_f))
+    area_scale = (float(stride) / 4.0) ** 2
+    y_scaled = y_f / max(area_scale, 1e-4)
+    t_scaled = t_f / max(area_scale, 1e-4)
+
+    total_mass = t_scaled.sum(dim=(-2, -1), keepdim=True)
+    p = torch.where(total_mass > float(eps), t_scaled / total_mass.clamp_min(float(eps)), torch.zeros_like(t_scaled))
 
     if abs(float(gamma) - 1.0) > 1e-5:
         p_pow = p.pow(float(gamma))
         sum_p_pow = p_pow.sum(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
         p = p_pow / sum_p_pow
 
-    hw = float(t_f.shape[-2] * t_f.shape[-1])
+    hw = float(t_scaled.shape[-2] * t_scaled.shape[-1])
     raw_weight = 1.0 + float(alpha) * hw * p
 
     norm_factor = raw_weight.mean(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
     weights = raw_weight / norm_factor
 
-    per_pixel = F.smooth_l1_loss(y_f, t_f, beta=float(beta), reduction="none")
+    per_pixel = F.smooth_l1_loss(y_scaled, t_scaled, beta=float(beta), reduction="none")
     return (weights * per_pixel).mean()
 
 
