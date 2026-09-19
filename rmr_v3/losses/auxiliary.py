@@ -175,6 +175,7 @@ def topk_hard_background_loss(
     target: torch.Tensor,
     ratio: float = 0.05,
     bg_threshold: float = 1e-5,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Top-K Hard Negative Background Mining Loss (RMR-v11)."""
     if target.ndim == 3:
@@ -200,6 +201,8 @@ def topk_hard_background_loss(
     k = min(num_bg, max(1, int(float(ratio) * num_bg)))
 
     topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
+    area_scale = (float(stride) / 4.0) ** 2
+    topk_vals = topk_vals / max(area_scale, 1e-4)
     return torch.mean(topk_vals.square())
 
 

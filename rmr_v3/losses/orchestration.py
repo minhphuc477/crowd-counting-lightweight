@@ -271,8 +271,12 @@ def _compute_auxiliary_losses(
 
     # Top-K Hard Background Mining Loss (RMR-v11)
     if cfg.lambda_hard_bg > 0.0:
+        stride = int(getattr(cfg, "output_stride", 4))
+
         def _compute_hard_bg(dmap: torch.Tensor) -> torch.Tensor:
-            return topk_hard_background_loss(dmap, target_float, ratio=cfg.hard_bg_ratio)
+            return topk_hard_background_loss(
+                dmap, target_float, ratio=cfg.hard_bg_ratio, stride=stride
+            )
 
         loss_hard_bg, _ = router.dispatch(_compute_hard_bg, y, y0)
         losses["hard_bg"] = loss_hard_bg

@@ -385,7 +385,7 @@ class RMRv3(nn.Module):
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
         target_h4, target_w4 = (h_in + 3) // 4, (w_in + 3) // 4
-        if p4.shape[-2] != target_h4 or p4.shape[-1] != target_w4:
+        if pad_h > 0 or pad_w > 0 or p4.shape[-2] != target_h4 or p4.shape[-1] != target_w4:
             p4 = p4[..., :target_h4, :target_w4]
             p8 = p8[..., :(h_in + 7) // 8, :(w_in + 7) // 8]
             p16 = p16[..., :(h_in + 15) // 16, :(w_in + 15) // 16]
