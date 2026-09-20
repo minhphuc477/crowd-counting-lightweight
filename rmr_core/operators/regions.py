@@ -15,12 +15,14 @@ class RegionSet:
     scale_id: [M] int64 index of the image-pixel region scale; -1 for full image.
     area: [M] float count-grid area.
     boxes_list: cached Python list of (y1, x1, y2, x2) tuples to eliminate GPU->CPU sync.
+    num_scales: number of multiscale scales K (default: 3) to eliminate GPU-CPU syncs.
     """
 
     boxes: torch.Tensor
     scale_id: torch.Tensor
     area: torch.Tensor
     boxes_list: list[tuple[int, int, int, int]] | None = None
+    num_scales: int = 3
 
     @property
     def areas(self) -> torch.Tensor:
@@ -33,6 +35,7 @@ class RegionSet:
             scale_id=self.scale_id.to(device),
             area=self.area.to(device),
             boxes_list=self.boxes_list,
+            num_scales=self.num_scales,
         )
 
 
@@ -130,7 +133,13 @@ def build_multiscale_regions(
         box_t = box_t.to(device)
         scale_t = scale_t.to(device)
         area_t = area_t.to(device)
-    return RegionSet(boxes=box_t, scale_id=scale_t, area=area_t, boxes_list=list(boxes_list))
+    return RegionSet(
+        boxes=box_t,
+        scale_id=scale_t,
+        area=area_t,
+        boxes_list=list(boxes_list),
+        num_scales=len(canonical_sizes),
+    )
 
 
 def partition_regions_by_scale(

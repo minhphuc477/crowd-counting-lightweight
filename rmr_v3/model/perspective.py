@@ -75,3 +75,51 @@ class MicroCoordAttn(nn.Module):
         a_w = torch.sigmoid(self.conv_w(y_w))
 
         return x * a_h * a_w
+
+
+class ContinuousPerspectiveCarrierModulation(nn.Module):
+    """2D Continuous Perspective Carrier Modulation (CPCM - RMR-v32).
+
+    Maps continuous normalized 2D spatial coordinates [u, v] in [0, 1]^2 to channel-wise
+    modulation weights for P4 carrier features (channels=32).
+    Architecture:
+        Conv2d(2, hidden, kernel_size=1)   (2 * 8 + 8 = 24 params for hidden=8)
+        SiLU()
+        Conv2d(hidden, channels, kernel_size=1) (8 * 32 + 32 = 288 params)
+        Total: exactly 312 parameters.
+
+    Zero-initialization:
+        The output conv is initialized with weights=0, bias=0.
+        Modulation multiplier:
+            M(u, v) = 1.0 + tanh(CPCM(u, v))
+        At epoch 0, M(u, v) == 1.0 identically everywhere.
+        Guarantees 100% bitwise parity with unmodulated baseline at initialization.
+    """
+
+    def __init__(self, channels: int = 32, hidden: int = 8) -> None:
+        super().__init__()
+        self.channels = channels
+        self.hidden = hidden
+        self.mlp = nn.Sequential(
+            nn.Conv2d(2, hidden, kernel_size=1, bias=True),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(hidden, channels, kernel_size=1, bias=True),
+        )
+        nn.init.zeros_(self.mlp[2].weight)
+        nn.init.zeros_(self.mlp[2].bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        param_dtype = self.mlp[0].weight.dtype
+        v = torch.linspace(0.0, 1.0, steps=h, device=x.device, dtype=param_dtype)
+        u = torch.linspace(0.0, 1.0, steps=w, device=x.device, dtype=param_dtype)
+        grid_v, grid_u = torch.meshgrid(v, u, indexing="ij")
+        coords = torch.stack([grid_u, grid_v], dim=0).unsqueeze(0)  # [1, 2, H, W]
+        if b > 1:
+            coords = coords.expand(b, -1, -1, -1)
+
+        delta = self.mlp(coords)
+        mod = (1.0 + torch.tanh(delta)).to(dtype=x.dtype)
+        mod_bar = mod.mean(dim=(-2, -1), keepdim=True)
+        return x * (mod / mod_bar)
+

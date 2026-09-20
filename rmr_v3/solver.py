@@ -88,6 +88,13 @@ def unrolled_sirt_solver(
     via T unrolled projected Richardson-Lucy / SIRT steps with dynamic relaxation:
         y_{t+1} = S_{tau}^+ ( y_t - omega * D_w^{-1} A^T W (A y_t - b) ) + TV_diff(y_{t+1})
     """
+    if b_solver.ndim == 2:
+        b_solver = b_solver.unsqueeze(1)
+    if weight_solver.ndim == 2:
+        weight_solver = weight_solver.unsqueeze(1)
+    if b_variance is not None and b_variance.ndim == 2:
+        b_variance = b_variance.unsqueeze(1)
+
     b, _, h, w = y0.shape
     area_scale = (float(output_stride) / 4.0) ** 2
     strength = min(max(float(solver_strength), 0.0), 1.0)
@@ -336,6 +343,8 @@ def unrolled_sirt_solver(
                 )
 
         y_next = y_next.to(dtype=y_curr.dtype)
+        # Zero-host-sync numerical divergence guard: restore y_curr on NaN/Inf
+        y_next = torch.where(torch.isfinite(y_next), y_next, y_curr)
 
         energy_after = weighted_regional_energy(
             y_next,

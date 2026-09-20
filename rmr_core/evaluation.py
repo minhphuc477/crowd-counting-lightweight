@@ -369,6 +369,16 @@ def evaluate_dataset(
         summary["direct_tiled_discrepancy_ci95"] = [disc_lo, disc_hi]
         summary["direct_tiled_normalized_discrepancy_ci95"] = [norm_lo, norm_hi]
 
+        # Tiled prediction absolute accuracy
+        if "pred_tiled_h0" in rows[0]:
+            ae_h0 = [abs(r["pred_tiled_h0"] - r["gt"]) for r in rows]
+            summary["mae_tiled_h0"] = float(np.mean(ae_h0))
+            summary["rmse_tiled_h0"] = float(np.sqrt(np.mean([err ** 2 for err in ae_h0])))
+        if "pred_tiled_practical" in rows[0]:
+            ae_th = [abs(r["pred_tiled_practical"] - r["gt"]) for r in rows]
+            summary["mae_tiled_practical"] = float(np.mean(ae_th))
+            summary["rmse_tiled_practical"] = float(np.sqrt(np.mean([err ** 2 for err in ae_th])))
+
         # Standard canonical aliases
         summary["mean_abs_prediction_discrepancy"] = summary["direct_tiled_discrepancy_mean"]
         summary["mean_normalized_prediction_discrepancy"] = summary["direct_tiled_normalized_discrepancy_mean"]

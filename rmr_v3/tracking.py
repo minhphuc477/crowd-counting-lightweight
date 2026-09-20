@@ -129,7 +129,7 @@ class DiagnosticTracker:
         w_low_frac = float(np.mean(pred_weights_np <= w_min_val + 1e-4))
         w_high_frac = float(np.mean(pred_weights_np >= w_max_val - 1e-4))
 
-        return {
+        result: dict[str, float] = {
             "region_mu_mean": float(np.mean(self.mu_means)) if self.mu_means else 0.0,
             "region_dispersion_mean": float(np.mean(self.disp_means)) if self.disp_means else 50.0,
             "region_dispersion_p10": float(np.percentile(disps_np, 10)),
@@ -146,17 +146,18 @@ class DiagnosticTracker:
             "solver_energy_before": e_b,
             "solver_energy_after": e_a,
             "solver_energy_reduction": e_red,
-            "weight_mean_16": float(np.mean(self.w_scales[16])) if self.w_scales.get(16) else 1.0,
-            "weight_mean_32": float(np.mean(self.w_scales[32])) if self.w_scales.get(32) else 1.0,
-            "weight_mean_64": float(np.mean(self.w_scales[64])) if self.w_scales.get(64) else 1.0,
-            "weight_mean_128": float(np.mean(self.w_scales[128])) if self.w_scales.get(128) else 1.0,
-            "scale_pi_16": float(np.mean(self.pi_scales[16])) if self.pi_scales.get(16) else 0.0,
-            "scale_pi_32": float(np.mean(self.pi_scales[32])) if self.pi_scales.get(32) else 0.0,
-            "scale_pi_64": float(np.mean(self.pi_scales[64])) if self.pi_scales.get(64) else 0.0,
-            "scale_pi_128": float(np.mean(self.pi_scales[128])) if self.pi_scales.get(128) else 0.0,
-            "weight_mean_64_32": float(np.mean(self.w_scales["64_32"])) if self.w_scales.get("64_32") else 1.0,
-            "scale_pi_64_32": float(np.mean(self.pi_scales["64_32"])) if self.pi_scales.get("64_32") else 0.0,
         }
+        # Dynamic per-scale diagnostics: iterate over actual scale keys from region_sizes_px
+        # Fixes silent data loss when region_sizes_px differs from the hardcoded set {16,32,64,128}
+        for s_val in self.scale_map.values():
+            s_str = str(s_val).replace(", ", "_").strip("()")
+            result[f"weight_mean_{s_str}"] = (
+                float(np.mean(self.w_scales[s_val])) if self.w_scales.get(s_val) else 1.0
+            )
+            result[f"scale_pi_{s_str}"] = (
+                float(np.mean(self.pi_scales[s_val])) if self.pi_scales.get(s_val) else 0.0
+            )
+        return result
 
 
 def format_dynamic_training_banner(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -50,8 +51,19 @@ __all__ = [
     "make_loss_cfg",
     "make_model",
     "run_training_loop",
+    "sanitize_run_id",
     "train_one_epoch",
 ]
+
+
+def sanitize_run_id(run_id: str) -> str:
+    """Sanitize run_id to prevent directory traversal attacks (CWE-22)."""
+    clean = run_id.strip()
+    if not clean or not re.match(r"^[A-Za-z0-9_\-]+$", clean):
+        raise ValueError(
+            f"Invalid run_id '{run_id}'. Run ID must contain only alphanumeric characters, underscores, and hyphens."
+        )
+    return clean
 
 
 def main() -> None:
@@ -98,7 +110,7 @@ def main() -> None:
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)
     elif args.run_id is not None:
-        cfg["output_dir"] = f"runs/sha_a/{args.run_id}"
+        cfg["output_dir"] = f"runs/sha_a/{sanitize_run_id(args.run_id)}"
     elif "output_dir" not in cfg:
         cfg["output_dir"] = f"runs/sha_a/{Path(args.config).stem}"
 

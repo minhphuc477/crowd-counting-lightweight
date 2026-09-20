@@ -150,7 +150,12 @@ ALLOWED_MODEL_KEYS = {
     "density_gated_anscombe",
     "anscombe_tau_dense",
     "area_normalized_adjoint",
+    # RMR-v32 additions
+    "use_cpcm",
+    "cpcm_hidden",
+    "floor_tau",
 }
+
 
 ALLOWED_LOSS_KEYS = {
     "lambda_count",
@@ -205,11 +210,10 @@ ALLOWED_LOSS_KEYS = {
     "dense_loss_norm",
     "dense_loss_alpha",
     "dense_loss_max_boost",
-    # RMR-v21 additions
+    # RMR-v21 / RMR-v30 / KD additions
     "elementwise_dense_scaling",
-    # RMR-v30 additions
-    "lambda_carrier_cell",
-    "lambda_fine_cell",
+    "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
+    "lambda_kd_spatial", "lambda_kd_count",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -344,6 +348,15 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "density_gated_anscombe",
         "anscombe_tau_dense",
         "area_normalized_adjoint",
+        # RMR-v30 additions (were in ALLOWED but missing from METHOD_CRITICAL_FIELDS)
+        "use_anscombe_sirt",
+        "anscombe_c",
+        "adaptive_tau",
+        "adaptive_tau_rho0",
+        # RMR-v32 additions
+        "use_cpcm",
+        "cpcm_hidden",
+        "floor_tau",
     ],
     "loss": [
         "lambda_count",
@@ -390,9 +403,9 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         # RMR-v20/v21 loss fields
         "density_loss_scaling",
         "elementwise_dense_scaling",
-        # RMR-v30 loss fields
-        "lambda_carrier_cell",
-        "lambda_fine_cell",
+        # RMR-v30 / KD loss fields
+        "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
+        "lambda_kd_spatial", "lambda_kd_count",
     ],
     "train": [
         "lr",

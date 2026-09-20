@@ -49,6 +49,15 @@ def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
     return y_local
 
 
+def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
+    """C1-continuous quadratic floor suppression with strictly non-zero gradients.
+
+    Eliminates the Dying ReLU trap of F.relu(y_base - tau) where dz == 0 on background.
+    """
+    tau = float(floor_tau)
+    return torch.where(y_base > tau, y_base - 0.5 * tau, y_base.square() / (2.0 * tau))
+
+
 def _density_activate(
     z: torch.Tensor,
     *,
@@ -61,6 +70,7 @@ def _density_activate(
     curvature_gate_beta: float,
     curvature_pool_kernel: int,
     curv_scale: float = 1.0,
+    floor_tau: float = 0.0,
 ) -> torch.Tensor:
     """Shared density activation: temperature-scaled softplus + optional gated quadratic curvature.
 
@@ -72,6 +82,10 @@ def _density_activate(
         y_base = tau_clamped * F.softplus(z / tau_clamped)
     else:
         y_base = F.softplus(z)
+
+    if floor_tau > 0.0:
+        y_base = _smooth_floor(y_base, floor_tau)
+
 
     if density_curvature and curvature_alpha is not None:
         alpha_eff = F.softplus(curvature_alpha)
@@ -94,6 +108,11 @@ def _density_activate(
 # Preserves seamless Step 0 identity with vanilla softplus, maintains the calibrated m0=0.015763 rate,
 # and prevents artificial quadratic overcounting in dense regions (which caused +5.91 MAE regression at -4.0).
 _CURVATURE_ALPHA_INIT: float = -8.0
+
+
+def _softplus_inverse(y: float) -> float:
+    y = max(float(y), 1e-8)
+    return math.log(math.expm1(y))
 
 
 class FineMeasureHead(nn.Module):
@@ -124,28 +143,30 @@ class FineMeasureHead(nn.Module):
         curvature_gate_beta: float = 0.03,
         curvature_pool_kernel: int = 8,
         subpixel_stride2: bool = False,
+        floor_tau: float = 0.0,
     ):
         super().__init__()
         self.subpixel_stride2 = bool(subpixel_stride2)
+        # Scaled floor suppression: at stride 2, cell area is 1/4 of stride 4 cell area
+        self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
         self.body = nn.Sequential(
             ConvGNAct(width, width, 3, groups=width),
             ConvGNAct(width, width, 1),
             nn.Conv2d(width, out_channels, 1),
         )
+        final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
+        nn.init.normal_(final_conv.weight, std=0.01)
+        m0 = math.log1p(math.exp(float(init_bias)))
+
         if self.subpixel_stride2:
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
-            # When subpixel_stride2=True, calibrate bias for Stride 2 cell area (1/4 of Stride 4 cell area)
-            m0 = math.log1p(math.exp(float(init_bias)))
-            init_bias_stride2 = math.log(max(math.expm1(m0 / 4.0), 1e-8))
-            final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
-            nn.init.normal_(final_conv.weight, std=0.01)
+            init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
             nn.init.constant_(final_conv.bias, init_bias_stride2)
         else:
             self.pixel_shuffle = None
-            final_conv = self.body[-1]  # type: ignore[assignment]
-            nn.init.normal_(final_conv.weight, std=0.01)
-            nn.init.constant_(final_conv.bias, init_bias)  # type: ignore[arg-type]
+            eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
+            nn.init.constant_(final_conv.bias, eff_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
         if self.temp_softplus:
@@ -195,6 +216,8 @@ class FineMeasureHead(nn.Module):
             gamma_shift = (sw * self.scale_gamma.view(1, k, 1, 1)).sum(dim=1, keepdim=True).clamp(-5.0, 5.0)
             tau_eff = (tau_base * torch.exp(gamma_shift)).clamp_min(0.05)
             y_base = tau_eff * F.softplus((z + b_eff) / tau_eff)
+            if self.floor_tau > 0.0:
+                y_base = _smooth_floor(y_base, self.floor_tau)
             # Apply curvature on top of scale-conditioned base if enabled
             if self.density_curvature:
                 alpha_eff = F.softplus(self.curvature_alpha)
@@ -223,6 +246,7 @@ class FineMeasureHead(nn.Module):
             curvature_gate_beta=self.curvature_gate_beta,
             curvature_pool_kernel=self.curvature_pool_kernel,
             curv_scale=self.curv_scale,
+            floor_tau=getattr(self, "floor_tau", 0.0),
         )
 
     def forward_logits(
@@ -261,19 +285,7 @@ class FineMeasureHead(nn.Module):
 
 class ScaleConditionedFineHead(nn.Module):
     """Scale-Conditioned Dynamic Fine Density Head (RMR-v22).
-
-    Upgrades the static 1x1 projection into a content-adaptive head:
-    1. Local Depthwise Context: 3x3 depthwise conv with groups=width.
-       Provides a 12x12 px receptive field on the input image to perceive head contours.
-    2. Continuous Scale Simplex Modulation (FiLM):
-       Scale routing probabilities pi(u) in Delta^{K-1} predict channel-wise scaling:
-           gamma(u) = 1.0 + W_s * pi(u)  (K * width params, zero-initialized)
-           h_mod = h * gamma(u)
-    3. Pointwise Joint Density Projection:
-       Projects concatenated [h_mod, pi] (width + K ch) -> 1 ch.
-    4. Calibrated Bias Initialization & Gated Curvature Power:
-       Zero init on pi weights ensures exact Step-0 identity with calibrated prior b0.
-       Includes learnable temperature tau and gated quadratic curvature expansion.
+    Combines depthwise context, FiLM scale simplex modulation, and calibrated bias.
     """
 
     def __init__(
@@ -287,8 +299,10 @@ class ScaleConditionedFineHead(nn.Module):
         curvature_dense_threshold: float = 0.15,
         curvature_gate_beta: float = 0.03,
         curvature_pool_kernel: int = 8,
+        floor_tau: float = 0.0,
     ):
         super().__init__()
+        self.floor_tau = float(floor_tau)
         self.dw = ConvGNAct(width, width, 3, groups=width)
         self.pw = ConvGNAct(width, width, 1)
 
@@ -298,7 +312,9 @@ class ScaleConditionedFineHead(nn.Module):
 
         self.out_conv = nn.Conv2d(width + self.num_scales, 1, kernel_size=1)
         nn.init.normal_(self.out_conv.weight, std=0.01)
-        nn.init.constant_(self.out_conv.bias, init_bias)  # type: ignore[arg-type]
+        m0 = math.log1p(math.exp(float(init_bias)))
+        eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
+        nn.init.constant_(self.out_conv.bias, eff_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
         if self.temp_softplus:
@@ -332,7 +348,9 @@ class ScaleConditionedFineHead(nn.Module):
             curvature_gate_beta=self.curvature_gate_beta,
             curvature_pool_kernel=self.curvature_pool_kernel,
             curv_scale=self.curv_scale,
+            floor_tau=self.floor_tau,
         )
+
 
     def forward_logits(
         self,
@@ -388,6 +406,7 @@ def build_fine_head(
     curvature_gate_beta: float = 0.03,
     curvature_pool_kernel: int = 8,
     subpixel_stride2: bool = False,
+    floor_tau: float = 0.0,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     if scale_conditioned_fine_head:
@@ -401,6 +420,7 @@ def build_fine_head(
             curvature_dense_threshold=curvature_dense_threshold,
             curvature_gate_beta=curvature_gate_beta,
             curvature_pool_kernel=curvature_pool_kernel,
+            floor_tau=floor_tau,
         )
     return FineMeasureHead(
         width=width,
@@ -414,6 +434,7 @@ def build_fine_head(
         curvature_gate_beta=curvature_gate_beta,
         curvature_pool_kernel=curvature_pool_kernel,
         subpixel_stride2=subpixel_stride2,
+        floor_tau=floor_tau,
     )
 
 

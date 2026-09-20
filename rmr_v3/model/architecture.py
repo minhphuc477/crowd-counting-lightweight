@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from rmr_core.backbones import MobileNetV4Backbone
+from rmr_core.backbones import TimmPyramidBackbone, MobileNetV4Backbone
 from rmr_core.heads import build_fine_head
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
@@ -18,8 +18,13 @@ from rmr_core.operators import (
 from ..regional_head import ProbabilisticRegionalEvidenceHead
 from .config import RMRv3Config, _softplus_inverse, _deep_tuple
 from .evidence import extract_regional_evidence
-from .perspective import MicroPerspectiveElevation, MicroCoordAttn
+from .perspective import (
+    MicroPerspectiveElevation,
+    MicroCoordAttn,
+    ContinuousPerspectiveCarrierModulation,
+)
 from .solver_step import solve_inverse_measure
+
 from .dual_lattice import push_forward_stride2_to_stride4
 
 
@@ -56,7 +61,7 @@ class RMRv3(nn.Module):
 
         self.cfg = cfg
 
-        self.encoder = MobileNetV4Backbone(
+        self.encoder = TimmPyramidBackbone(
             model_name=cfg.backbone_name,
             pretrained=cfg.pretrained,
             target_reductions=(4, 8, 16),
@@ -100,6 +105,7 @@ class RMRv3(nn.Module):
             curvature_gate_beta=cfg.curvature_gate_beta,
             curvature_pool_kernel=cfg.curvature_pool_kernel,
             subpixel_stride2=cfg.subpixel_stride2,
+            floor_tau=cfg.floor_tau,
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -113,33 +119,17 @@ class RMRv3(nn.Module):
             native_scale_pooling=cfg.native_scale_pooling,
             regional_feature_stats=cfg.regional_feature_stats,
             hurdle_head=cfg.hurdle_head,
+            floor_tau=cfg.floor_tau,
         )
 
-        # Stage 3: Coordinate Attention on P4
-        if cfg.use_coord_attn:
-            if cfg.neck_type != "aspp_lite":
-                raise ValueError(f"use_coord_attn=True requires neck_type='aspp_lite', got '{cfg.neck_type}'")
-            self.coord_attn: CoordinateAttention | None = CoordinateAttention(
-                channels=cfg.feature_width,
-                reduction=4,
-            )
-        else:
-            self.coord_attn = None
-
-        if cfg.use_micro_coord_attn:
-            self.micro_coord_attn: MicroCoordAttn | None = MicroCoordAttn(
-                channels=cfg.feature_width,
-                reduction=cfg.micro_coord_reduction,
-            )
-        else:
-            self.micro_coord_attn = None
-
-        if cfg.use_perspective_elevation:
-            self.perspective_elevation: MicroPerspectiveElevation | None = MicroPerspectiveElevation(
-                channels=cfg.feature_width
-            )
-        else:
-            self.perspective_elevation = None
+        self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
+        self.micro_coord_attn = MicroCoordAttn(channels=cfg.feature_width, reduction=cfg.micro_coord_reduction) if cfg.use_micro_coord_attn else None
+        self.perspective_elevation = MicroPerspectiveElevation(channels=cfg.feature_width) if cfg.use_perspective_elevation else None
+        self.cpcm: ContinuousPerspectiveCarrierModulation | None = (
+            ContinuousPerspectiveCarrierModulation(channels=cfg.feature_width, hidden=cfg.cpcm_hidden)
+            if cfg.use_cpcm
+            else None
+        )
 
         # Dynamic Scale Routing
         if cfg.factorized_scale_routing:
@@ -195,9 +185,9 @@ class RMRv3(nn.Module):
         self._region_cache: OrderedDict[tuple, RegionSet] = OrderedDict()
 
         total_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        if total_trainable > 105000:
+        if self.cfg.max_trainable_params > 0 and total_trainable > self.cfg.max_trainable_params:
             raise ValueError(
-                f"Strict parameter ceiling exceeded: {total_trainable} > 105,000 parameters. "
+                f"Strict parameter ceiling exceeded: {total_trainable} > {self.cfg.max_trainable_params} parameters. "
                 "Check architecture configuration."
             )
 
@@ -264,6 +254,9 @@ class RMRv3(nn.Module):
 
         if self.perspective_elevation is not None:
             p4 = self.perspective_elevation(p4)
+
+        if self.cpcm is not None:
+            p4 = self.cpcm(p4)
 
         return p4, p8, p16
 
@@ -392,13 +385,28 @@ class RMRv3(nn.Module):
             if y0.shape[-2] != target_h or y0.shape[-1] != target_w:
                 y0 = y0[..., :target_h, :target_w]
                 z0 = z0[..., :target_h, :target_w]
-            regions_solver = self._regions(target_h, target_w, x.device, stride=2)
             regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
+            b_s2 = regions_feat.boxes * 2
+            b_s2[:, [0, 2]] = b_s2[:, [0, 2]].clamp(0, target_h)
+            b_s2[:, [1, 3]] = b_s2[:, [1, 3]].clamp(0, target_w)
+            bl_s2 = [
+                (min(target_h, 2 * y1), min(target_w, 2 * x1), min(target_h, 2 * y2), min(target_w, 2 * x2))
+                for (y1, x1, y2, x2) in regions_feat.boxes_list
+            ] if regions_feat.boxes_list is not None else None
+            area_s2 = ((b_s2[:, 2] - b_s2[:, 0]) * (b_s2[:, 3] - b_s2[:, 1])).float()
+            regions_solver = RegionSet(
+                boxes=b_s2,
+                scale_id=regions_feat.scale_id,
+                area=area_s2,
+                boxes_list=bl_s2,
+                num_scales=regions_feat.num_scales,
+            )
         else:
-            h_grid, w_grid = y0.shape[-2:]
-            regions_solver = self._regions(h_grid, w_grid, x.device, stride=4)
+            if y0.shape[-2] != target_h4 or y0.shape[-1] != target_w4:
+                y0 = y0[..., :target_h4, :target_w4]
+                z0 = z0[..., :target_h4, :target_w4]
+            regions_solver = self._regions(target_h4, target_w4, x.device, stride=4)
             regions_feat = regions_solver
-            target_h4, target_w4 = h_grid, w_grid
 
         regional_evidence = self._extract_regional_evidence(
             p4=p4,

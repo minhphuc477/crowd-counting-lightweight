@@ -258,6 +258,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             lam_fc = float(l_cfg_pre["lambda_fine_cell"])
             if lam_fc < 0.0:
                 raise ValueError(f"lambda_fine_cell must be non-negative, got {lam_fc}")
+        if "lambda_kd_spatial" in l_cfg_pre:
+            lam_kds = float(l_cfg_pre["lambda_kd_spatial"])
+            if lam_kds < 0.0:
+                raise ValueError(f"lambda_kd_spatial must be non-negative, got {lam_kds}")
+        if "lambda_kd_count" in l_cfg_pre:
+            lam_kdc = float(l_cfg_pre["lambda_kd_count"])
+            if lam_kdc < 0.0:
+                raise ValueError(f"lambda_kd_count must be non-negative, got {lam_kdc}")
         if "curvature_gate_threshold" in l_cfg_pre:
             cgt = float(l_cfg_pre["curvature_gate_threshold"])
             if cgt < 0.0:
@@ -306,6 +314,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(
                     f"elementwise_dense_scaling must be a boolean, got {type(l_cfg_pre['elementwise_dense_scaling']).__name__}"
                 )
+        if "output_stride" in l_cfg_pre:
+            os_val = int(l_cfg_pre["output_stride"])
+            if os_val not in (2, 4):
+                raise ValueError(f"output_stride in loss must be 2 or 4, got {os_val}")
 
     l_cfg = cfg.get("loss", {})
     if isinstance(l_cfg, dict):

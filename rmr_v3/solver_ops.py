@@ -40,10 +40,12 @@ def laplacian_tv_diffusion(
         In dense crowd clusters (y_smooth > tau_dense), gate -> 0.0 (strictly zero diffusion),
         preserving sharp peak separation and stopping dense crowd clump mass erosion.
     """
-    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
-        return y
-    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
-        return y
+    if isinstance(tv_lambda, (int, float)):
+        if tv_lambda <= 0.0:
+            return y
+    elif isinstance(tv_lambda, torch.Tensor):
+        if tv_lambda.numel() == 1 and not (tv_lambda > 0.0):
+            return y
     if kernel is None:
         kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
     else:
@@ -101,6 +103,11 @@ def anscombe_discrepancy(
     With optional Morozov deadband shrinkage in the stabilized domain.
     Eliminates the 1/b^2 gradient starvation on dense crowds, bounding updates to O(1).
     """
+    if b.ndim == 2:
+        b = b.unsqueeze(1)
+    if b_variance is not None and b_variance.ndim == 2:
+        b_variance = b_variance.unsqueeze(1)
+
     q32 = q.float()
     b32 = b.float()
     c_val = float(c)
@@ -192,6 +199,11 @@ def density_gated_anscombe_discrepancy(
     gradient stiffness and noise amplification caused by 1/sqrt(q+c) on near-zero counts,
     while maintaining exact discrete mass conservation in the measure space.
     """
+    if b.ndim == 2:
+        b = b.unsqueeze(1)
+    if b_variance is not None and b_variance.ndim == 2:
+        b_variance = b_variance.unsqueeze(1)
+
     area_clamped = area.clamp_min(1.0)
     rates = torch.maximum(q.float(), b.float()) / area_clamped
     dense_mask = (rates >= float(tau_dense)).float()
@@ -229,10 +241,12 @@ def perona_malik_anisotropic_diffusion(
     At steep head peaks (|nabla y| >> kappa), g -> 0, preventing diffusion over-smoothing
     during deep SIRT unrolling (T=6, 8).
     """
-    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
-        return y
-    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
-        return y
+    if isinstance(tv_lambda, (int, float)):
+        if tv_lambda <= 0.0:
+            return y
+    elif isinstance(tv_lambda, torch.Tensor):
+        if tv_lambda.numel() == 1 and not (tv_lambda > 0.0):
+            return y
 
     orig_ndim = y.ndim
     if orig_ndim == 2:
@@ -246,7 +260,7 @@ def perona_malik_anisotropic_diffusion(
 
     y_curr = y4d.float()
     kap_sq = float(max(kappa, 1e-6)) ** 2
-    dt = float(tv_lambda)
+    dt = tv_lambda if isinstance(tv_lambda, torch.Tensor) else float(tv_lambda)
 
     y_pad = F.pad(y_curr, (1, 1, 1, 1), mode="replicate")
     y_c = y_pad[:, :, 1:-1, 1:-1]

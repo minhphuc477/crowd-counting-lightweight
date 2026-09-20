@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 import math
+import warnings
 from typing import Any
 
 
@@ -25,6 +26,7 @@ class RMRv3Config:
     pretrained: bool = True
     backbone_lr_scale: float = 0.1
     init_m0: float = 0.015763
+    max_trainable_params: int = 105000
 
     # RMR-v29: Sub-pixel Stride-2 Reconstruction Head (+99 params)
     subpixel_stride2: bool = False
@@ -105,6 +107,12 @@ class RMRv3Config:
     anscombe_tau_dense: float = 0.08
     area_normalized_adjoint: bool = False
 
+    # RMR-v32: Continuous Perspective Carrier Modulation & Non-Saturating Floor Subtraction
+    use_cpcm: bool = False
+    cpcm_hidden: int = 8
+    floor_tau: float = 0.0
+
+
     # Dynamic Scale Routing
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
@@ -165,9 +173,18 @@ class RMRv3Config:
 
     def __post_init__(self) -> None:
         if self.subpixel_stride2 and self.output_stride != 2:
+            warnings.warn(
+                f"subpixel_stride2=True requires output_stride=2; "
+                f"overriding output_stride={self.output_stride} → 2. "
+                "Set output_stride: 2 in your YAML to suppress this warning.",
+                UserWarning,
+                stacklevel=2,
+            )
             self.output_stride = 2
         if self.cyclic_bb_length < 1:
             raise ValueError(f"cyclic_bb_length must be >= 1, got {self.cyclic_bb_length}")
+        if self.max_trainable_params < 0:
+            raise ValueError(f"max_trainable_params must be >= 0, got {self.max_trainable_params}")
         if self.region_sizes_px is not None:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
         if self.aspp_dilations is not None:
@@ -237,6 +254,15 @@ class RMRv3Config:
             raise ValueError(
                 f"proximal_tau must be non-negative, got {self.proximal_tau}"
             )
+        if self.floor_tau < 0.0:
+            raise ValueError(
+                f"floor_tau must be non-negative, got {self.floor_tau}"
+            )
+        if self.use_cpcm and self.cpcm_hidden <= 0:
+            raise ValueError(
+                f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}"
+            )
+
         if self.proximal_mode not in ("firm", "soft", "none", "clamp"):
             raise ValueError(
                 f"proximal_mode must be 'firm', 'soft', or 'none', got '{self.proximal_mode}'"

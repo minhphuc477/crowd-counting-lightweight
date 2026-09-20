@@ -4,12 +4,13 @@ import torch
 import torch.nn as nn
 
 
-class MobileNetV4Backbone(nn.Module):
-    """MobileNetV4 feature backbone returning a configured feature pyramid (C4, C8, C16).
+class TimmPyramidBackbone(nn.Module):
+    """Pyramid feature backbone returning features at target reductions (C4, C8, C16).
 
     Probes feature_info.reduction() dynamically to find target reductions {4, 8, 16},
-    selects actual channel dimensions, and physically truncates blocks after the last
-    requested feature module.
+    selects actual channel dimensions, and conditionally truncates stages when supported
+    (e.g. MobileNetV4 blocks). Supports diverse model families in timm (MobileNetV4,
+    ConvNeXt, ResNet, Swin).
     """
 
     def __init__(
@@ -24,7 +25,7 @@ class MobileNetV4Backbone(nn.Module):
         target_reductions = tuple(int(r) for r in target_reductions)
         if target_reductions != (4, 8, 16):
             raise ValueError(
-                f"MobileNetV4Backbone requires target_reductions=(4, 8, 16), got {target_reductions}"
+                f"TimmPyramidBackbone requires target_reductions=(4, 8, 16), got {target_reductions}"
             )
 
         self.model_name = model_name
@@ -50,28 +51,49 @@ class MobileNetV4Backbone(nn.Module):
 
         self.selected_indices = tuple(selected_indices)
         self.out_channels = tuple(selected_channels)
-        self.backbone = timm.create_model(
-            model_name,
-            pretrained=pretrained,
-            features_only=True,
-            out_indices=self.selected_indices,
-        )
+        try:
+            self.backbone = timm.create_model(
+                model_name,
+                pretrained=self.pretrained,
+                features_only=True,
+                out_indices=self.selected_indices,
+            )
+        except Exception as e:
+            if self.pretrained:
+                import warnings
+                warnings.warn(
+                    f"Failed to load pretrained weights for '{model_name}' ({e}). "
+                    "Falling back to randomly initialized backbone for offline operation.",
+                    UserWarning,
+                )
+                self.pretrained = False
+                self.backbone = timm.create_model(
+                    model_name,
+                    pretrained=False,
+                    features_only=True,
+                    out_indices=self.selected_indices,
+                )
+            else:
+                raise
 
         selected_module_names = list(self.backbone.feature_info.module_name())
         last_module = selected_module_names[-1]
-        if not last_module.startswith("blocks."):
-            raise RuntimeError(
-                f"Cannot safely truncate {model_name}: last selected feature is {last_module!r}"
-            )
-        last_block_index = int(last_module.split(".")[1])
-        blocks = list(self.backbone.blocks.children())
-        if last_block_index >= len(blocks):
-            raise RuntimeError(
-                f"Invalid truncation block {last_block_index} for {len(blocks)} MobileNet stages"
-            )
-        self.backbone.blocks = nn.Sequential(*blocks[: last_block_index + 1])
         self.truncated_after = last_module
+
+        # Optional physical truncation for MobileNetV4 models with sequential blocks
+        if last_module.startswith("blocks.") and hasattr(self.backbone, "blocks"):
+            try:
+                last_block_index = int(last_module.split(".")[1])
+                blocks = list(self.backbone.blocks.children())
+                if last_block_index < len(blocks):
+                    self.backbone.blocks = nn.Sequential(*blocks[: last_block_index + 1])
+            except Exception:
+                pass
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         feats = tuple(self.backbone(x))
         return feats[0], feats[1], feats[2]
+
+
+# Backward compatibility alias
+MobileNetV4Backbone = TimmPyramidBackbone

@@ -20,6 +20,7 @@ from rmr_core.training import (
     load_rng_state,
     make_generator,
     make_scheduler,
+    safe_torch_load,
     seed_everything,
     seed_worker,
 )
@@ -73,10 +74,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 raise FileNotFoundError(
                     f"--resume was given directory '{args.resume}', but neither 'last.pt' nor 'best_val_mae.pt' was found inside it."
                 )
-        try:
-            resume_ckpt = torch.load(resume_path, map_location="cpu", weights_only=False)
-        except TypeError:
-            resume_ckpt = torch.load(resume_path, map_location="cpu")
+        resume_ckpt = safe_torch_load(resume_path, map_location="cpu", weights_only=True)
         current_commit, _ = get_git_info()
         ckpt_commit = str(resume_ckpt.get("git_commit", resume_ckpt.get("provenance", {}).get("git_commit", "unknown")))
         validate_resume_compatibility(
@@ -164,7 +162,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         tp = Path(teacher_ckpt_path)
         if tp.exists():
             try:
-                t_ckpt = torch.load(tp, map_location="cpu", weights_only=False)
+                t_ckpt = safe_torch_load(tp, map_location="cpu", weights_only=True)
                 t_cfg = t_ckpt.get("config", {})
                 teacher_model, _ = make_model(t_cfg)
                 if "ema_model" in t_ckpt:
@@ -285,8 +283,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             solver_strength = min(1.0, float(epoch - solver_warmup_epochs + 1) / max(1.0, float(solver_ramp_epochs)))
         model.set_solver_strength(solver_strength)
 
-        cur_lr_bb = optimizer.param_groups[0]["lr"]
-        cur_lr_main = optimizer.param_groups[2]["lr"]
+        cur_lr_bb = next((g["lr"] for g in optimizer.param_groups if g.get("name") == "backbone_decay"), optimizer.param_groups[0]["lr"])
+        cur_lr_main = next((g["lr"] for g in optimizer.param_groups if g.get("name") == "main_decay"), optimizer.param_groups[2]["lr"] if len(optimizer.param_groups) > 2 else optimizer.param_groups[-1]["lr"])
 
         loss_avgs, diag_summary = train_one_epoch(
             model=model,

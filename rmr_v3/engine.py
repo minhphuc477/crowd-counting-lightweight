@@ -60,10 +60,10 @@ def build_optimizer(model: RMRv3, cfg: dict, lr_init: float) -> torch.optim.Opti
 
     return torch.optim.AdamW(
         [
-            {"params": bb_decay, "lr": lr_init * backbone_scale, "weight_decay": wd},
-            {"params": bb_no_decay, "lr": lr_init * backbone_scale, "weight_decay": 0.0},
-            {"params": other_decay, "lr": lr_init, "weight_decay": wd},
-            {"params": other_no_decay, "lr": lr_init, "weight_decay": 0.0},
+            {"name": "backbone_decay", "params": bb_decay, "lr": lr_init * backbone_scale, "weight_decay": wd},
+            {"name": "backbone_no_decay", "params": bb_no_decay, "lr": lr_init * backbone_scale, "weight_decay": 0.0},
+            {"name": "main_decay", "params": other_decay, "lr": lr_init, "weight_decay": wd},
+            {"name": "main_no_decay", "params": other_no_decay, "lr": lr_init, "weight_decay": 0.0},
         ],
     )
 
@@ -84,9 +84,10 @@ def evaluate_v3(
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample["target_y"].to(device)
-        d_rows = regional_reliability_rows(out, target.unsqueeze(0), max_regions=300)
+        target_4d = target if target.ndim == 4 else (target.unsqueeze(0) if target.ndim == 3 else target.unsqueeze(0).unsqueeze(0))
+        d_rows = regional_reliability_rows(out, target_4d, max_regions=300)
         all_diag_rows.extend(d_rows)
-        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0), scale_map=scale_map)
+        t_diag = compute_solver_trajectory_diagnostics(out, target_4d, scale_map=scale_map)
         if t_diag:
             traj_rows.append(t_diag)
         return {}

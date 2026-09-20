@@ -298,25 +298,21 @@ def _compute_auxiliary_losses(
             y_fine=y, y_carrier=y_carrier.float(),
             target_stride2=target_float, target_stride4=target_stride4,
             lambda_carrier_cell=cfg.lambda_carrier_cell, lambda_fine_cell=cfg.lambda_fine_cell,
+            cell_loss_mode=cfg.cell_loss_mode,
+            beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+            alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma),
         )
         losses["cell_carrier"] = dual["cell_carrier"]
-        losses["cell_fine"] = dual["cell_fine"]
-        losses["total"] = losses["total"] + dual["cell_combined"]
+        losses["cell_fine"] = losses["cell"]
+        # losses["total"] in core losses already includes cfg.lambda_cell * losses["cell"].
+        # Add carrier cell loss, and adjust fine cell loss if lambda_fine_cell is explicitly specified:
+        eff_fine_delta = (cfg.lambda_fine_cell - cfg.lambda_cell) if cfg.lambda_fine_cell > 0.0 else 0.0
+        losses["total"] = losses["total"] + cfg.lambda_carrier_cell * dual["cell_carrier"] + eff_fine_delta * losses["cell"]
     else:
         losses["cell_carrier"] = zero_val
         losses["cell_fine"] = zero_val
-
-    if cfg.density_loss_scaling:
-        total_gt = target_float.sum(dim=(-2, -1))
-        dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
-            (total_gt - float(cfg.dense_loss_thresh)) / float(cfg.dense_loss_norm),
-            min=0.0, max=float(cfg.dense_loss_max_boost),
-        )
-        sample_scale = (1.0 + dense_boost).detach().mean()
-        losses["total"] = losses["total"] * sample_scale
-        losses["dense_loss_scale"] = sample_scale
-
     return losses
+
 
 
 def compute_rmr_v3_losses(
@@ -347,7 +343,7 @@ def compute_rmr_v3_losses(
             "cell_carrier": zero_val, "cell_fine": zero_val,
         }
 
-    if cfg.elementwise_dense_scaling and target_y.shape[0] > 1:
+    if cfg.elementwise_dense_scaling or cfg.density_loss_scaling:
         return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)
 
     target_float = target_y.float()

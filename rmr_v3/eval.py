@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval
 from rmr_core.evaluation import evaluate_dataset, save_evaluation_artifacts
-from rmr_core.training import compute_file_sha256, get_git_info
+from rmr_core.training import compute_file_sha256, get_git_info, safe_torch_load
 from rmr_v3.diagnostics import (
     compute_dispersion_saturation,
     compute_nb_interval_coverage,
@@ -70,10 +70,7 @@ def load_model_from_ckpt(
         else:
             raise FileNotFoundError(f"Checkpoint file not found: {ckpt_path}")
 
-    try:
-        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    except TypeError:
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = safe_torch_load(ckpt_path, map_location="cpu", weights_only=True)
     cfg = ckpt.get("config", {})
     m_cfg = cfg.get("model", {})
 

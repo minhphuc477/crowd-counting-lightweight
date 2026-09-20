@@ -56,9 +56,8 @@ def truncated_nb_nll_loss(
     elif dispersion.ndim == 2:
         dispersion = dispersion.unsqueeze(1)
 
-    occ_mask = (target_region > 0.5)
-    if not occ_mask.any():
-        return (mu_count * 0.0 + dispersion * 0.0).sum()
+    occ_mask = (target_region > 0.5).float()
+    occ_count = occ_mask.sum(dim=-1, keepdim=True)
 
     per_region_nll = negative_binomial_nll_mean_dispersion(
         target_region,
@@ -66,7 +65,10 @@ def truncated_nb_nll_loss(
         dispersion=dispersion,
         reduction="none",
     )
-    return per_region_nll[occ_mask].mean()
+    sample_nll = (per_region_nll * occ_mask).sum(dim=-1, keepdim=True) / occ_count.clamp_min(1.0)
+    has_occ = (occ_count > 0).float()
+    total_samples = has_occ.sum().clamp_min(1.0)
+    return (sample_nll * has_occ).sum() / total_samples
 
 
 def scale_balanced_regional_nb_nll(
@@ -92,18 +94,23 @@ def scale_balanced_regional_nb_nll(
         reduction="none",
     )
 
-    losses = []
-    for sid in torch.unique(regions.scale_id):
-        if int(sid.item()) < 0:
-            continue
-        mask = regions.scale_id == sid
-        if bool(mask.any()):
-            losses.append(per_region[..., mask].mean())
+    scale_losses = []
+    scale_weights = []
+    num_scales = int(getattr(regions, "num_scales", 3))
+    # Support full-image scale -1 if present, and standard scales [0, num_scales-1]
+    for sid in range(-1, num_scales):
+        mask = (regions.scale_id == sid)
+        count = mask.float().sum()
+        has_scale = (count > 0).float()
+        # Compute loss for this scale without dynamic host branching
+        loss_s = (per_region[..., mask].sum(dim=-1) / count.clamp_min(1.0)).mean()
+        scale_losses.append(loss_s * has_scale)
+        scale_weights.append(has_scale)
 
-    if not losses:
-        raise RuntimeError("No valid regional scales for NB loss")
+    total_weight = torch.stack(scale_weights).sum()
+    total_loss = torch.stack(scale_losses).sum()
+    return torch.where(total_weight > 0, total_loss / total_weight.clamp_min(1.0), (per_region.sum()) * 0.0)
 
-    return torch.stack(losses).mean()
 
 
 def curvature_power_loss(
@@ -164,9 +171,7 @@ def curvature_power_loss(
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
     gate_sum = gate.sum()
-    if gate_sum > 0:
-        return (gate * diff_sq).sum() / gate_sum
-    return (y_f.sum() + t_f.sum()) * 0.0
+    return (gate * diff_sq).sum() / gate_sum.clamp_min(1.0)
 
 
 def topk_hard_background_loss(
@@ -191,21 +196,23 @@ def topk_hard_background_loss(
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    bg_mask = (t_f <= float(bg_threshold))
-    if not bg_mask.any():
-        return (y_f.sum() + t_f.sum()) * 0.0
+    b_size = y_f.shape[0]
+    sample_losses = []
+    for b in range(b_size):
+        y_b = y_f[b : b + 1]
+        t_b = t_f[b : b + 1]
+        bg_mask = (t_b <= float(bg_threshold))
+        if not bg_mask.any():
+            sample_losses.append((y_b.sum() + t_b.sum()) * 0.0)
+            continue
 
-    bg_preds = torch.clamp_min(y_f[bg_mask], 0.0)
-    num_bg = bg_preds.numel()
-    k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+        bg_preds = torch.clamp_min(y_b[bg_mask], 0.0)
+        num_bg = bg_preds.numel()
+        k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+        topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
+        sample_losses.append(torch.mean(topk_vals.square()))
 
-    topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
-    # NOTE: no area_scale division here. Background cell predictions are in
-    # people/cell (Dirac discrete masses), which are stride-invariant: each
-    # background cell contributes 0.0 regardless of stride. Dividing by
-    # area_scale = (stride/4)^2 was the same Dirac mass inflation bug fixed
-    # in commit 31fa853 for balanced_smooth_l1 and mass_weighted_cell_loss.
-    return torch.mean(topk_vals.square())
+    return torch.stack(sample_losses).mean()
 
 
 def mass_weighted_cell_loss(
@@ -313,8 +320,6 @@ def physical_scale_alignment_loss(
     if mask_background:
         fg_mask = (local_density >= float(eff_tau_sparse)).float().squeeze(1)
         fg_sum = fg_mask.sum()
-        if fg_sum > 0:
-            return (kl_per_pixel * fg_mask).sum() / fg_sum
-        return (scale_weights * 0.0).sum()
+        return (kl_per_pixel * fg_mask).sum() / fg_sum.clamp_min(1.0)
 
     return kl_per_pixel.mean()

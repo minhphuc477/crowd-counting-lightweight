@@ -109,9 +109,18 @@ def block_sum_2d(x: torch.Tensor, k: int = 4, strict: bool = True) -> torch.Tens
     return out if had_channel else out.squeeze(1)
 
 
-def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 1e-8) -> torch.Tensor:
-    mass = mass.float().clamp_min(tiny)
-    return mass / mass.sum(dim=-1, keepdim=True).clamp_min(tiny)
+def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 0.05) -> torch.Tensor:
+    """Compute strictly positive probability distribution over blocks via Bayesian Laplace smoothing.
+
+    Guarantees sum(pi) == 1.0, active gradients on all blocks without clamp_min cutoff,
+    and bounded gradients (< 65504) that never overflow FP16 under AMP:
+        pi_k = (mass_k + prior) / (sum(mass) + eps)
+    """
+    mass_f = mass.float()
+    k_blocks = mass_f.shape[-1]
+    eps = max(float(tiny), 0.01)
+    prior = eps / float(max(k_blocks, 1))
+    return (mass_f + prior) / (mass_f.sum(dim=-1, keepdim=True) + eps)
 
 
 def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:

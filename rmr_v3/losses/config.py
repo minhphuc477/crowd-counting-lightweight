@@ -116,6 +116,7 @@ class RMRv3LossConfig:
                 f"scale_align_kernel must be a positive odd integer, got {self.scale_align_kernel}"
             )
 
+
     @classmethod
     def from_dict(cls, d: dict | None) -> "RMRv3LossConfig":
         if not d:

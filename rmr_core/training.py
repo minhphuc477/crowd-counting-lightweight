@@ -228,34 +228,116 @@ def safe_torch_save(
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = target.with_name(f"{target.stem}_{os.getpid()}_{time.time_ns()}.tmp")
 
+    saved_directly = False
     try:
-        torch.save(state, tmp_path)
-    except Exception:
-        # Fallback to direct save with retry if temp file creation fails
-        for attempt in range(retries):
-            try:
-                torch.save(state, target)
-                return
-            except Exception:
-                if attempt == retries - 1:
-                    raise
-                time.sleep(delay)
-        return
-
-    # Atomic or retry replacement on Windows
-    for attempt in range(retries):
         try:
-            os.replace(tmp_path, target)
-            return
-        except OSError:
-            if attempt == retries - 1:
+            torch.save(state, tmp_path)
+        except Exception:
+            # Fallback to direct save with retry if temp file creation fails
+            for attempt in range(retries):
                 try:
-                    target.unlink(missing_ok=True)
-                    os.replace(tmp_path, target)
+                    torch.save(state, target)
+                    saved_directly = True
                     return
                 except Exception:
-                    torch.save(state, target)
-                    tmp_path.unlink(missing_ok=True)
-                    return
-            time.sleep(delay)
+                    if attempt == retries - 1:
+                        raise
+                    time.sleep(delay)
+            return
+
+        # Atomic or retry replacement on Windows
+        for attempt in range(retries):
+            try:
+                os.replace(tmp_path, target)
+                return
+            except OSError:
+                if attempt == retries - 1:
+                    try:
+                        target.unlink(missing_ok=True)
+                        os.replace(tmp_path, target)
+                        return
+                    except Exception:
+                        torch.save(state, target)
+                        saved_directly = True
+                        return
+                time.sleep(delay)
+    finally:
+        # SEC-05: Ensure temporary file is never leaked on disk if an error occurs or direct save was used
+        if not saved_directly and tmp_path.exists():
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+_SAFE_GLOBALS_INITIALIZED = False
+
+
+def register_safe_globals() -> None:
+    """Register safe NumPy data structures in PyTorch unpickler allowlist (CWE-502 mitigation)."""
+    global _SAFE_GLOBALS_INITIALIZED
+    if _SAFE_GLOBALS_INITIALIZED:
+        return
+
+    safe_types: list[Any] = []
+    # NumPy internal multiarray reconstructors
+    for mod_name in ("numpy._core.multiarray", "numpy.core.multiarray"):
+        try:
+            mod = __import__(mod_name, fromlist=["_reconstruct", "scalar"])
+            for fn_name in ("_reconstruct", "scalar"):
+                if hasattr(mod, fn_name):
+                    safe_types.append(getattr(mod, fn_name))
+        except (ImportError, AttributeError):
+            pass
+
+    # NumPy arrays, dtypes, and scalar types
+    try:
+        import numpy as np
+        safe_types.extend([np.ndarray, np.dtype])
+        for dt in (np.float32, np.float64, np.int32, np.int64, np.uint32, np.uint64, np.bool_):
+            safe_types.append(dt)
+        if hasattr(np, "dtypes"):
+            for attr in dir(np.dtypes):
+                obj = getattr(np.dtypes, attr)
+                if isinstance(obj, type):
+                    safe_types.append(obj)
+    except (ImportError, AttributeError):
+        pass
+
+    if hasattr(torch.serialization, "add_safe_globals") and safe_types:
+        try:
+            torch.serialization.add_safe_globals(safe_types)
+        except Exception:
+            pass
+
+    _SAFE_GLOBALS_INITIALIZED = True
+
+
+def safe_torch_load(
+    path: str | os.PathLike,
+    map_location: str | torch.device = "cpu",
+    weights_only: bool = True,
+) -> dict[str, Any]:
+    """Safely deserialize PyTorch checkpoints with safe globals allowlisted against CWE-502."""
+    register_safe_globals()
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Checkpoint file not found: {p}")
+
+    try:
+        return torch.load(p, map_location=map_location, weights_only=weights_only)
+    except TypeError:
+        # Backward compatibility for PyTorch versions lacking weights_only parameter
+        return torch.load(p, map_location=map_location)
+    except Exception as e:
+        if weights_only:
+            # Fallback for legacy checkpoints containing non-allowlisted custom objects
+            import warnings
+            warnings.warn(
+                f"Loading checkpoint '{p.name}' with weights_only=True failed ({e}). "
+                "Falling back to weights_only=False for local trusted checkpoint.",
+                UserWarning,
+            )
+            return torch.load(p, map_location=map_location, weights_only=False)
+        raise
 

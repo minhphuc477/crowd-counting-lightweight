@@ -62,8 +62,11 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         native_scale_pooling: bool = False,
         regional_feature_stats: str = "mean",
         hurdle_head: bool = False,
+        floor_tau: float = 0.0,
     ) -> None:
         super().__init__()
+        self.floor_tau = float(floor_tau)
+
 
         if dispersion_min <= 0:
             raise ValueError("dispersion_min must be > 0")
@@ -103,10 +106,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             nn.init.zeros_(self.hurdle_head_layer.bias)
 
         # Mean initialization: same empirical rate prior as fine head.
+        # When floor_tau > 0, compensate bias so that the predicted rate AFTER floor subtraction
+        effective_init_rate = float(init_rate) + 0.5 * self.floor_tau if self.floor_tau > 0.0 else float(init_rate)
         nn.init.normal_(self.mean_head.weight, std=0.01)
         nn.init.constant_(
             self.mean_head.bias,
-            _softplus_inverse(init_rate),
+            _softplus_inverse(effective_init_rate),
         )
 
         # Dispersion initialization.
@@ -137,41 +142,36 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
         for sid, size_spec in enumerate(self.region_sizes_px):
             mask = regions.scale_id == sid
-            if not bool(mask.any()):
+            boxes4 = regions.boxes[mask]
+            if boxes4.shape[0] == 0:
                 continue
 
             hy_px, wx_px = _canonicalize_region_size(size_spec)
             max_size_px = max(hy_px, wx_px)
-
             if max_size_px <= 32:
-                feat = p4
-                dst_stride = 4
+                feat_curr, dst_stride = p4, 4
             elif max_size_px <= 64:
-                feat = p8
-                dst_stride = 8
+                feat_curr, dst_stride = p8, 8
             else:
-                feat = p16
-                dst_stride = 16
+                feat_curr, dst_stride = p16, 16
 
-            boxes4 = regions.boxes[mask]
-
-            if self.native_scale_pooling and feat.shape[-2:] != src_hw:
+            if self.native_scale_pooling and feat_curr.shape[-2:] != src_hw:
                 scale = 4.0 / float(dst_stride)
                 float_boxes = boxes4.float() * scale
                 if self.regional_feature_stats == "mean_std":
                     pooled = fractional_region_mean_std_features(
-                        feat,
+                        feat_curr,
                         float_boxes,
                     )
                 else:
                     pooled = fractional_region_average_features(
-                        feat,
+                        feat_curr,
                         float_boxes,
                     )
             else:
-                if feat.shape[-2:] != src_hw:
-                    feat = F.interpolate(
-                        feat,
+                if feat_curr.shape[-2:] != src_hw:
+                    feat_curr = F.interpolate(
+                        feat_curr,
                         size=src_hw,
                         mode="bilinear",
                         align_corners=False,
@@ -180,12 +180,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
                 if self.regional_feature_stats == "mean_std":
                     pooled = region_mean_std_features(
-                        feat,
+                        feat_curr,
                         boxes_level,
                     )
                 else:
                     pooled = region_average_features(
-                        feat,
+                        feat_curr,
                         boxes_level,
                     )
 
@@ -204,13 +204,30 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 )
             )
 
-        out = torch.cat(feat_list, dim=1) if feat_list else torch.zeros((p4.shape[0], m_total, out_dim), device=device, dtype=dtype)
-
-        # Main method disables full-image regions.
-        if bool((regions.scale_id == -1).any()):
-            raise RuntimeError(
-                "RMR-v3 registered method does not support full-image regions"
+        # Collect full-image regions (scale_id == -1) if present
+        mask_full = (regions.scale_id == -1)
+        if mask_full.any():
+            boxes_full = regions.boxes[mask_full]
+            feat_curr = p16
+            if feat_curr.shape[-2:] != src_hw:
+                feat_curr = F.interpolate(
+                    feat_curr,
+                    size=src_hw,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            if self.regional_feature_stats == "mean_std":
+                pooled_full = region_mean_std_features(feat_curr, boxes_full)
+            else:
+                pooled_full = region_average_features(feat_curr, boxes_full)
+            geom_scale_px = math.sqrt(float(src_hw[0] * 4.0) * float(src_hw[1] * 4.0))
+            log_scale_full = torch.full_like(
+                pooled_full[..., :1],
+                fill_value=float(math.log(max(geom_scale_px, 32.0) / 32.0)),
             )
+            feat_list.append(torch.cat([pooled_full, log_scale_full], dim=-1))
+
+        out = torch.cat(feat_list, dim=1) if feat_list else torch.zeros((p4.shape[0], m_total, out_dim), device=device, dtype=dtype)
 
         return out
 
@@ -228,6 +245,9 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
         mean_raw = self.mean_head(h).squeeze(-1)
         rate = F.softplus(mean_raw)
+        if getattr(self, "floor_tau", 0.0) > 0.0:
+            tau = float(self.floor_tau)
+            rate = torch.where(rate > tau, rate - 0.5 * tau, rate.square() / (2.0 * tau))
 
         area = regions.area.to(
             device=rate.device,
@@ -298,7 +318,9 @@ def reliability_from_nb(
     def _normalize_precision(p: torch.Tensor) -> torch.Tensor:
         if normalize_within_scale:
             w = torch.zeros_like(p)
-            for sid in torch.unique(regions.scale_id):
+            num_scales = int(getattr(regions, "num_scales", 3))
+            # Include scale_id=-1 (full image) if present, plus standard scales [0, num_scales-1]
+            for sid in range(-1, num_scales):
                 mask = (regions.scale_id == sid).to(dtype=p.dtype).view(1, 1, -1)
                 q_sum = (p * mask).sum(dim=-1, keepdim=True)
                 count = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
@@ -364,6 +386,10 @@ def apply_scale_consistency_gating(
         w_R <- w_R * sigmoid((y_center/H - horizon_cutoff) / 0.05)
         This physically guarantees zero false positive mass bleeding from vertical boxes at the horizon.
     """
+    orig_ndim = weight.ndim
+    if orig_ndim == 2:
+        weight = weight.unsqueeze(1)
+
     b, k_scales = scale_weights.shape[:2]
     w_out = weight.clone()
     area = regions.area.to(device=weight.device)
@@ -389,5 +415,7 @@ def apply_scale_consistency_gating(
 
         w_out[:, :, mask_k] = w_out[:, :, mask_k] * gate
 
+    if orig_ndim == 2:
+        return w_out.squeeze(1)
     return w_out
 

@@ -128,6 +128,8 @@ def weighted_coverage(
     scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
 ) -> torch.Tensor:
     """Compute D_{c,w} diagonal field = A^T w, optionally modulated by spatial scale routing weights."""
+    if weight.ndim == 2:
+        weight = weight.unsqueeze(1)
     if scale_routing_weights is not None:
         b, k_scales = scale_routing_weights.shape[:2]
         if scale_routing_weights.shape[-2:] != (height, width):
@@ -189,6 +191,13 @@ def weighted_normalized_adjoint_field(
     to maintain consistent Radon-Nikodym rate residual scaling across lattice strides.
     """
     _, _, h, w = y.shape
+
+    if b_region.ndim == 2:
+        b_region = b_region.unsqueeze(1)
+    if weight.ndim == 2:
+        weight = weight.unsqueeze(1)
+    if b_variance is not None and b_variance.ndim == 2:
+        b_variance = b_variance.unsqueeze(1)
 
     y32 = y.float()
     b32 = b_region.float()
@@ -330,6 +339,11 @@ def weighted_regional_energy(
 
         E = 1/2 sum_R w_R * (Ay-b)^2 / area_R
     """
+    if b_region.ndim == 2:
+        b_region = b_region.unsqueeze(1)
+    if weight.ndim == 2:
+        weight = weight.unsqueeze(1)
+
     q = regional_sum(
         y.float(),
         regions.boxes,
