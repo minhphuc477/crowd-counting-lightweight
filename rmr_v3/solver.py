@@ -16,81 +16,15 @@ from rmr_core.operators import (
     weighted_regional_energy,
 )
 from .solver_ops import (
+    _LAPLACE_KERNEL,
     anscombe_discrepancy,
     compute_adaptive_tau,
+    density_gated_anscombe_discrepancy,
+    laplacian_tv_diffusion,
+    perona_malik_anisotropic_diffusion,
     proximal_firm_threshold,
+    proximal_soft_threshold,
 )
-
-# Standard 2D 5-point discrete Laplacian kernel for isotropic TV diffusion
-_LAPLACE_KERNEL: torch.Tensor = torch.tensor(
-    [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float32
-).view(1, 1, 3, 3)
-
-
-def proximal_soft_threshold(y: torch.Tensor, tau: float | torch.Tensor) -> torch.Tensor:
-    """Exact proximal operator for non-negative L1-shrinkage: S_tau^+(z) = max(0, z - tau).
-
-    Provides a noise deadband in [0, tau] that completely suppresses background
-    phantom mass accumulation without zero-absorbing barriers.
-    """
-    if isinstance(tau, (int, float)) and tau <= 0.0:
-        return torch.clamp_min(y, 0.0)
-    return torch.clamp_min(y - tau, 0.0)
-
-
-def laplacian_tv_diffusion(
-    y: torch.Tensor,
-    tv_lambda: float | torch.Tensor,
-    kernel: torch.Tensor | None = None,
-    density_gated: bool = False,
-    diffusion_dense_threshold: float = 0.15,
-    diffusion_gate_beta: float = 0.03,
-) -> torch.Tensor:
-    """Isotropic Laplacian total-variation diffusion step with Neumann zero-flux boundary:
-    y <- max(0, y + lambda * Delta y). Uses replication padding so sum(Delta y) == 0.
-
-    When density_gated=True (RMR-v22):
-        The effective diffusion rate is modulated by local density:
-            gate(u) = 1.0 - sigmoid((y_smooth(u) - tau_dense) / beta)
-        In sparse/background regions (y_smooth < tau_dense), gate -> 1.0 (full diffusion).
-        In dense crowd clusters (y_smooth > tau_dense), gate -> 0.0 (strictly zero diffusion),
-        preserving sharp peak separation and stopping dense crowd clump mass erosion.
-    """
-    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
-        return y
-    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
-        return y
-    if kernel is None:
-        kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
-    else:
-        kernel = kernel.to(device=y.device, dtype=y.dtype)
-    orig_ndim = y.ndim
-    if orig_ndim == 2:
-        y_4d = y.unsqueeze(0).unsqueeze(0)
-    elif orig_ndim == 3:
-        y_4d = y.unsqueeze(0)
-    elif orig_ndim == 4:
-        y_4d = y
-    else:
-        raise ValueError(f"laplacian_tv_diffusion expects 2D, 3D, or 4D tensor, got ndim={orig_ndim}")
-
-    y_pad = F.pad(y_4d, (1, 1, 1, 1), mode="replicate")
-    lap = F.conv2d(y_pad, kernel, padding=0)
-
-    if density_gated:
-        y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
-        y_effective = torch.maximum(y_4d.float(), y_smooth)
-        gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
-        step_diff = tv_lambda * gate.to(dtype=y.dtype) * lap
-    else:
-        step_diff = tv_lambda * lap
-
-    out = torch.clamp_min(y_4d + step_diff, 0.0)
-    if orig_ndim == 2:
-        return out.squeeze(0).squeeze(0)
-    elif orig_ndim == 3:
-        return out.squeeze(0)
-    return out
 
 
 def unrolled_sirt_solver(
@@ -140,6 +74,11 @@ def unrolled_sirt_solver(
     anscombe_c: float = 0.375,
     adaptive_tau: bool = False,
     adaptive_tau_rho0: float = 0.05,
+    anisotropic_diffusion: bool = False,
+    pm_kappa: float = 0.05,
+    density_gated_anscombe: bool = False,
+    anscombe_tau_dense: float = 0.08,
+    area_normalized_adjoint: bool = False,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -246,15 +185,19 @@ def unrolled_sirt_solver(
         is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
         if is_anscombe:
             q = regional_sum(z_state.float(), regions.boxes, out_dtype=torch.float32)
-            rate_res = anscombe_discrepancy(
-                q,
-                b_solver,
-                c=anscombe_c,
-                b_variance=b_variance,
-                morozov_gamma=float(morozov_gamma),
-            )
             area = regions.area.float().view(1, 1, -1)
-            eff_q = q + float(eps) * area.clamp_min(1.0)
+            if density_gated_anscombe:
+                rate_res = density_gated_anscombe_discrepancy(
+                    q, b_solver, area, c=anscombe_c, b_variance=b_variance,
+                    morozov_gamma=float(morozov_gamma), tau_dense=float(anscombe_tau_dense),
+                )
+            else:
+                rate_res = anscombe_discrepancy(
+                    q, b_solver, c=anscombe_c, b_variance=b_variance,
+                    morozov_gamma=float(morozov_gamma),
+                )
+            eff_area = area * area_scale if area_normalized_adjoint else area
+            eff_q = q + float(eps) * eff_area.clamp_min(1.0)
             b_effective = q - rate_res * eff_q.clamp_min(float(eps))
             field = weighted_normalized_adjoint_field(
                 z_state,
@@ -273,6 +216,8 @@ def unrolled_sirt_solver(
                 b_variance=None,
                 morozov_gamma=0.0,
                 hybrid_recovery_alpha=float(hybrid_recovery_alpha),
+                output_stride=output_stride,
+                area_normalized=area_normalized_adjoint,
             )
         else:
             field = weighted_normalized_adjoint_field(
@@ -292,6 +237,8 @@ def unrolled_sirt_solver(
                 b_variance=b_variance,
                 morozov_gamma=float(morozov_gamma),
                 hybrid_recovery_alpha=float(hybrid_recovery_alpha),
+                output_stride=output_stride,
+                area_normalized=area_normalized_adjoint,
             )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
@@ -376,6 +323,8 @@ def unrolled_sirt_solver(
         if tv_step > 0.0:
             if tv_type == "charbonnier":
                 y_next = charbonnier_tv_step(y_next, tv_step, float(tv_eps_c))
+            elif tv_type == "perona_malik" or anisotropic_diffusion:
+                y_next = perona_malik_anisotropic_diffusion(y_next, tv_step, kappa=float(pm_kappa))
             else:
                 y_next = laplacian_tv_diffusion(
                     y_next,

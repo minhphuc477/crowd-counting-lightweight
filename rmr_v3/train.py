@@ -66,7 +66,8 @@ def main() -> None:
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
-    ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism")
+    ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism (default: enabled)")
+    ap.add_argument("--non-deterministic", action="store_true", default=False, help="Disable strict determinism")
     ap.add_argument("--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
@@ -89,6 +90,10 @@ def main() -> None:
     if args.disable_early_stopping:
         cfg.setdefault("train", {})["early_stopping"] = False
         cfg.setdefault("train", {})["patience"] = 0
+    if args.non_deterministic:
+        cfg.setdefault("train", {})["deterministic"] = False
+    elif args.deterministic or "deterministic" not in cfg.get("train", {}):
+        cfg.setdefault("train", {})["deterministic"] = True
 
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)

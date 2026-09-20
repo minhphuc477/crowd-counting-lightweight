@@ -5,6 +5,78 @@ import torch
 import torch.nn.functional as F
 
 
+# Standard 2D 5-point discrete Laplacian kernel for isotropic TV diffusion
+_LAPLACE_KERNEL: torch.Tensor = torch.tensor(
+    [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+).view(1, 1, 3, 3)
+
+
+def proximal_soft_threshold(y: torch.Tensor, tau: float | torch.Tensor) -> torch.Tensor:
+    """Exact proximal operator for non-negative L1-shrinkage: S_tau^+(z) = max(0, z - tau).
+
+    Provides a noise deadband in [0, tau] that completely suppresses background
+    phantom mass accumulation without zero-absorbing barriers.
+    """
+    if isinstance(tau, (int, float)) and tau <= 0.0:
+        return torch.clamp_min(y, 0.0)
+    return torch.clamp_min(y - tau, 0.0)
+
+
+def laplacian_tv_diffusion(
+    y: torch.Tensor,
+    tv_lambda: float | torch.Tensor,
+    kernel: torch.Tensor | None = None,
+    density_gated: bool = False,
+    diffusion_dense_threshold: float = 0.15,
+    diffusion_gate_beta: float = 0.03,
+) -> torch.Tensor:
+    """Isotropic Laplacian total-variation diffusion step with Neumann zero-flux boundary:
+    y <- max(0, y + lambda * Delta y). Uses replication padding so sum(Delta y) == 0.
+
+    When density_gated=True (RMR-v22):
+        The effective diffusion rate is modulated by local density:
+            gate(u) = 1.0 - sigmoid((y_smooth(u) - tau_dense) / beta)
+        In sparse/background regions (y_smooth < tau_dense), gate -> 1.0 (full diffusion).
+        In dense crowd clusters (y_smooth > tau_dense), gate -> 0.0 (strictly zero diffusion),
+        preserving sharp peak separation and stopping dense crowd clump mass erosion.
+    """
+    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
+        return y
+    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
+        return y
+    if kernel is None:
+        kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
+    else:
+        kernel = kernel.to(device=y.device, dtype=y.dtype)
+    orig_ndim = y.ndim
+    if orig_ndim == 2:
+        y_4d = y.unsqueeze(0).unsqueeze(0)
+    elif orig_ndim == 3:
+        y_4d = y.unsqueeze(0)
+    elif orig_ndim == 4:
+        y_4d = y
+    else:
+        raise ValueError(f"laplacian_tv_diffusion expects 2D, 3D, or 4D tensor, got ndim={orig_ndim}")
+
+    y_pad = F.pad(y_4d, (1, 1, 1, 1), mode="replicate")
+    lap = F.conv2d(y_pad, kernel, padding=0)
+
+    if density_gated:
+        y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
+        y_effective = torch.maximum(y_4d.float(), y_smooth)
+        gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
+        step_diff = tv_lambda * gate.to(dtype=y.dtype) * lap
+    else:
+        step_diff = tv_lambda * lap
+
+    out = torch.clamp_min(y_4d + step_diff, 0.0)
+    if orig_ndim == 2:
+        return out.squeeze(0).squeeze(0)
+    elif orig_ndim == 3:
+        return out.squeeze(0)
+    return out
+
+
 def anscombe_transform(y: torch.Tensor, c: float = 0.375) -> torch.Tensor:
     """Compute Anscombe Variance-Stabilizing Transformation: T(y) = 2 * sqrt(max(0, y) + c).
 
@@ -100,3 +172,103 @@ def proximal_firm_threshold(
     ramp = slope * (y - tau)
     out = torch.where(y > mu_tau, y, ramp)
     return torch.clamp_min(out, 0.0)
+
+
+def density_gated_anscombe_discrepancy(
+    q: torch.Tensor,
+    b: torch.Tensor,
+    area: torch.Tensor,
+    c: float = 0.375,
+    b_variance: torch.Tensor | None = None,
+    morozov_gamma: float = 0.0,
+    tau_dense: float = 0.08,
+) -> torch.Tensor:
+    """Density-gated Anscombe variance-stabilized rate discrepancy (RMR-v31).
+
+    Applies Anscombe VST only in regions where crowd rate exceeds tau_dense
+    (max(q, b) / area >= tau_dense). In background and sparse regions, falls
+    back to canonical linear rate discrepancy (q - b) / area to prevent the
+    gradient stiffness and noise amplification caused by 1/sqrt(q+c) on near-zero counts.
+    """
+    area_clamped = area.clamp_min(1.0)
+    rates = torch.maximum(q.float(), b.float()) / area_clamped
+    dense_mask = (rates >= float(tau_dense)).float()
+
+    rate_res_anscombe = anscombe_discrepancy(
+        q, b, c=c, b_variance=b_variance, morozov_gamma=morozov_gamma
+    )
+
+    delta = q.float() - b.float()
+    if morozov_gamma > 0.0 and b_variance is not None:
+        sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
+        deadband = float(morozov_gamma) * sigma_b
+        delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
+    rate_res_linear = delta / area_clamped
+
+    return dense_mask * rate_res_anscombe + (1.0 - dense_mask) * rate_res_linear
+
+
+def perona_malik_anisotropic_diffusion(
+    y: torch.Tensor,
+    tv_lambda: float | torch.Tensor,
+    kappa: float = 0.05,
+) -> torch.Tensor:
+    """Edge-preserving Perona-Malik anisotropic diffusion step (RMR-v31).
+
+    Uses 4-directional conductance g(|nabla y|) = 1 / (1 + (|nabla y| / kappa)^2)
+    with zero-flux Neumann boundary conditions:
+        nabla_N y_{i,j} = y_{i-1, j} - y_{i, j}
+        nabla_S y_{i,j} = y_{i+1, j} - y_{i, j}
+        nabla_W y_{i,j} = y_{i, j-1} - y_{i, j}
+        nabla_E y_{i,j} = y_{i, j+1} - y_{i, j}
+        div(g nabla y) = sum_{d in {N,S,W,E}} g(|nabla_d y|) * nabla_d y
+    Guarantees exact discrete mass conservation: sum(div(g nabla y)) == 0.
+    At steep head peaks (|nabla y| >> kappa), g -> 0, preventing diffusion over-smoothing
+    during deep SIRT unrolling (T=6, 8).
+    """
+    if isinstance(tv_lambda, (int, float)) and tv_lambda <= 0.0:
+        return y
+    if isinstance(tv_lambda, torch.Tensor) and tv_lambda.numel() == 1 and tv_lambda.item() <= 0.0:
+        return y
+
+    orig_ndim = y.ndim
+    if orig_ndim == 2:
+        y4d = y.unsqueeze(0).unsqueeze(0)
+    elif orig_ndim == 3:
+        y4d = y.unsqueeze(0)
+    elif orig_ndim == 4:
+        y4d = y
+    else:
+        raise ValueError(f"perona_malik_anisotropic_diffusion expects 2D, 3D, or 4D tensor, got ndim={orig_ndim}")
+
+    y_curr = y4d.float()
+    kap_sq = float(max(kappa, 1e-6)) ** 2
+    dt = float(tv_lambda)
+
+    y_pad = F.pad(y_curr, (1, 1, 1, 1), mode="replicate")
+    y_c = y_pad[:, :, 1:-1, 1:-1]
+    y_n = y_pad[:, :, 0:-2, 1:-1]
+    y_s = y_pad[:, :, 2:, 1:-1]
+    y_w = y_pad[:, :, 1:-1, 0:-2]
+    y_e = y_pad[:, :, 1:-1, 2:]
+
+    diff_n = y_n - y_c
+    diff_s = y_s - y_c
+    diff_w = y_w - y_c
+    diff_e = y_e - y_c
+
+    g_n = 1.0 / (1.0 + diff_n.square() / kap_sq)
+    g_s = 1.0 / (1.0 + diff_s.square() / kap_sq)
+    g_w = 1.0 / (1.0 + diff_w.square() / kap_sq)
+    g_e = 1.0 / (1.0 + diff_e.square() / kap_sq)
+
+    flux = g_n * diff_n + g_s * diff_s + g_w * diff_w + g_e * diff_e
+    out = torch.clamp_min(y_c + dt * flux, 0.0)
+
+    out = out.to(dtype=y.dtype)
+    if orig_ndim == 2:
+        return out.squeeze(0).squeeze(0)
+    elif orig_ndim == 3:
+        return out.squeeze(0)
+    return out
+

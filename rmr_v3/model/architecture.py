@@ -360,10 +360,14 @@ class RMRv3(nn.Module):
         solver_strength: float | None = None,
     ) -> RMRModelOutput:
         h_in, w_in = x.shape[-2:]
-        divisor = 16  # LCM of strides (2, 4, 8, 16)
-        pad_h = (divisor - h_in % divisor) % divisor
-        pad_w = (divisor - w_in % divisor) % divisor
-        x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
+        if self.cfg.subpixel_stride2:
+            divisor = 16  # LCM of strides (2, 4, 8, 16)
+            pad_h = (divisor - h_in % divisor) % divisor
+            pad_w = (divisor - w_in % divisor) % divisor
+            x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
+        else:
+            pad_h = pad_w = 0
+            x_in = x
 
         p4, p8, p16 = self._extract_carrier_features(x_in)
         scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
@@ -391,11 +395,10 @@ class RMRv3(nn.Module):
             regions_solver = self._regions(target_h, target_w, x.device, stride=2)
             regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
         else:
-            if y0.shape[-2] != target_h4 or y0.shape[-1] != target_w4:
-                y0 = y0[..., :target_h4, :target_w4]
-                z0 = z0[..., :target_h4, :target_w4]
-            regions_solver = self._regions(target_h4, target_w4, x.device, stride=4)
+            h_grid, w_grid = y0.shape[-2:]
+            regions_solver = self._regions(h_grid, w_grid, x.device, stride=4)
             regions_feat = regions_solver
+            target_h4, target_w4 = h_grid, w_grid
 
         regional_evidence = self._extract_regional_evidence(
             p4=p4,

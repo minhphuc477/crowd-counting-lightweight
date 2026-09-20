@@ -168,6 +168,7 @@ loss:
   lambda_fine_cell:    0.25
 
 train:
+  deterministic: true
   epochs:          1000
   batch_size:      8
   workers:         4

@@ -137,3 +137,54 @@ The team must build and execute a clean 6-model single-variable ablation suite:
 - [ ] Sparse MAE (count < 100) retains the v29 breakthrough: MAE <= 14.0.
 - [ ] Dense MAE (count >= 500) improves from 122.71 to <= 105.0.
 - [ ] Net validation count bias stays bounded within [-8.0, +3.0] (eliminating v29 H2's -29.95 bias).
+
+## 2026-09-20T09:07:36Z
+
+Full Research Team (1 Orchestrator, 1 Math-Physics Lead, 1 Architecture Engineer, 1 Benchmark Auditor)
+
+Perform an exhaustive, empirical, and mathematical cross-generational analysis of all historical RMR experimental versions (v4 through v30) in `runs/sha_a`, identifying the governing mathematical physics, architectural breakthroughs, and optimization failure modes on ShanghaiTech Part A to synthesize a definitive, parameter-budgeted Sub-50 MAE blueprint.
+
+Working directory: f:/lightweightcrcn
+Integrity mode: development
+
+## Requirements
+
+### R1. Comprehensive Cross-Generational Data Aggregation
+Extract and tabulate validation metrics (MAE, RMSE, NAE, Bias, Sparse <100, Moderate 100-500, Dense >500, GAME 0-3), training loss dynamics, convergence epochs, parameter counts, and trajectory diagnostics (solver help/harm fractions, energy monotonicity, dispersion saturation) across all completed runs in `runs/sha_a` from v4 to v30.
+
+### R2. Mechanistic Inflection Point & Failure Autopsy
+Perform an objective scientific autopsy identifying the exact governing mechanism for every major breakthrough and regression:
+- **v19 Canonical (72.39 / 72.84 MAE):** Macro-isotropic regional Poisson modeling, BB-1 adaptive step size, and Morozov discrepancy stopping.
+- **v20-v23 (80-90+ MAE):** High-density sample loss scaling instability, micro-attention parameter inflation, and flux drift.
+- **v24-v26 (74-76 MAE):** Alternating Barzilai-Borwein (ABB) vs pure BB-1 Rayleigh contraction dynamics, and micro-perspective elevation.
+- **v27-v28 (80-100+ MAE):** Multi-variable shotgun configuration changes, cyclic BB instability, and curvature alpha initialization sensitivity.
+- **v29 (75-80 MAE):** Sub-pixel Stride 2 coordinate misalignment and Dirac area-scale scaling bugs.
+- **v30 (75.81 Anchor vs 15.20 Sparse / 183.49 Dense):** Why Stride 2 Dual-Lattice excels on sparse crowds (15.20 MAE) but collapses on dense crowds (183.49 MAE), and why Anscombe VST destabilizes background cells.
+
+### R3. Determinism & Engineering Architecture Verification
+Verify that all code and experiment runner configurations satisfy strict production-grade engineering constraints:
+- Deterministic execution auto-enabled by default (`seed_worker`, `torch.Generator`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`).
+- Line count ceiling <= 450 lines per Python source file across all packages (`rmr_v3/`, `rmr_core/`).
+- Parameter budget <= 105,000 trainable parameters.
+- Zero Knowledge Distillation / Zero external teachers.
+
+### R4. Definitive Sub-50 MAE Synthesis Blueprint
+Synthesize the cumulative empirical evidence into a mathematically proven, parameter-budgeted architectural blueprint for the next generation:
+- Decoupled / Density-Adaptive Multi-Lattice Resolution (Stride 2 for sparse heads, Stride 4 for dense clumps).
+- Density-Gated Anscombe VST (active only for high-density counts y > tau_dense to prevent background noise explosion).
+- Edge-Preserving / Anisotropic SIRT diffusion to prevent over-smoothing at deeper iterations.
+
+## Acceptance Criteria
+
+### Comprehensive Benchmark Audit Matrix
+- [ ] Complete comparative markdown table of all versions in `runs/sha_a` (v4 through v30) with exact numerical metrics extracted from raw `summary.json` and `train_log.csv`.
+- [ ] Stratification across density tiers: Sparse (<100), Moderate (100-500), and Dense (>500).
+
+### Mathematical & Physical Rigor
+- [ ] Exact analytical formulas and gradient derivations explaining the success or failure of each mechanism.
+- [ ] Empirical correlation between diagnostic metrics (`energy_monotonic_fraction`, `solver_help_fraction`, `dispersion_p90`) and validation MAE.
+
+### Next-Generation Specification
+- [ ] Actionable, parameter-counted architectural design (<= 105,000 parameters) ready for implementation.
+- [ ] Clear ablation ladder testing one single variable at a time (Two-Loop Autoresearch protocol).
+

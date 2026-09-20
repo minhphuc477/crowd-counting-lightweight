@@ -159,6 +159,7 @@ loss:
   lambda_fg_gate:   0.0
 
 train:
+  deterministic: true
   epochs:          1000
   batch_size:      8
   workers:         4

@@ -102,8 +102,9 @@ def build_checkpoint(
     return ckpt
 
 
-def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = True) -> None:
+def seed_everything(seed: int, deterministic: bool = True, warn_only: bool = True) -> None:
     """Set seeds across random, numpy, and torch, with deterministic algorithm controls."""
+    os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -126,6 +127,20 @@ def seed_everything(seed: int, deterministic: bool = False, warn_only: bool = Tr
             torch.use_deterministic_algorithms(False)
         except Exception:
             pass
+
+
+def seed_worker(worker_id: int) -> None:
+    """Seed DataLoader worker processes deterministically across numpy, random, and torch."""
+    worker_seed = (torch.initial_seed() + worker_id) % (2**32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def make_generator(seed: int = 42) -> torch.Generator:
+    """Create a seeded PyTorch Generator for reproducible DataLoader shuffling."""
+    g = torch.Generator()
+    g.manual_seed(seed)
+    return g
 
 
 

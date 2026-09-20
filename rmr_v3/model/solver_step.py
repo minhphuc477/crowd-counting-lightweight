@@ -125,6 +125,11 @@ def solve_inverse_measure(
         anscombe_c=getattr(cfg, "anscombe_c", 0.375),
         adaptive_tau=getattr(cfg, "adaptive_tau", False),
         adaptive_tau_rho0=getattr(cfg, "adaptive_tau_rho0", 0.05),
+        anisotropic_diffusion=getattr(cfg, "anisotropic_diffusion", False),
+        pm_kappa=getattr(cfg, "pm_kappa", 0.05),
+        density_gated_anscombe=getattr(cfg, "density_gated_anscombe", False),
+        anscombe_tau_dense=getattr(cfg, "anscombe_tau_dense", 0.08),
+        area_normalized_adjoint=getattr(cfg, "area_normalized_adjoint", False),
     )
 
     y = solver_res["y"]

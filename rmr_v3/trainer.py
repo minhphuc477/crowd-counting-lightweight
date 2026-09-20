@@ -18,8 +18,10 @@ from rmr_core.data import (
 from rmr_core.training import (
     get_git_info,
     load_rng_state,
+    make_generator,
     make_scheduler,
     seed_everything,
+    seed_worker,
 )
 
 from rmr_v3.checkpoint import CheckpointManager, EMAManager
@@ -41,7 +43,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     validate_v3_config(cfg)
 
     seed = int(cfg.get("seed", 42))
-    deterministic = bool(args.deterministic or cfg.get("train", {}).get("deterministic", False))
+    deterministic = bool(
+        getattr(args, "deterministic", False)
+        or (not getattr(args, "non_deterministic", False) and cfg.get("train", {}).get("deterministic", True))
+    )
     cfg.setdefault("train", {})["deterministic"] = deterministic
     seed_everything(seed, deterministic=deterministic)
 
@@ -121,6 +126,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
 
     workers = int(cfg.get("train", {}).get("workers", 0))
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", False))
+    gen = make_generator(seed) if deterministic else None
     train_loader = DataLoader(
         train_ds,
         batch_size=int(cfg.get("train", {}).get("batch_size", 8)),
@@ -129,6 +135,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         pin_memory=pin_mem,
         collate_fn=collate_train,
         drop_last=True,
+        worker_init_fn=seed_worker if deterministic else None,
+        generator=gen,
     )
     val_loader = None if val_ds is None else DataLoader(
         val_ds,
@@ -156,10 +164,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         tp = Path(teacher_ckpt_path)
         if tp.exists():
             try:
-                try:
-                    t_ckpt = torch.load(tp, map_location="cpu", weights_only=False)
-                except TypeError:
-                    t_ckpt = torch.load(tp, map_location="cpu")
+                t_ckpt = torch.load(tp, map_location="cpu", weights_only=False)
                 t_cfg = t_ckpt.get("config", {})
                 teacher_model, _ = make_model(t_cfg)
                 if "ema_model" in t_ckpt:

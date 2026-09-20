@@ -174,6 +174,8 @@ def weighted_normalized_adjoint_field(
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
     hybrid_recovery_alpha: float = 0.0,
+    output_stride: int = 4,
+    area_normalized: bool = False,
 ) -> torch.Tensor:
     """Compute:
 
@@ -183,6 +185,8 @@ def weighted_normalized_adjoint_field(
     Morozov discrepancy shrinkage, and Radon-Nikodym measure modulation.
     In RMR-v21, hybrid_recovery_alpha > 0 interpolates the Radon-Nikodym adjoint
     with a faint Lebesgue discovery flux to break the zero-absorbing barrier.
+    When area_normalized=True (RMR-v31), scales cell area by (output_stride/4)^2
+    to maintain consistent Radon-Nikodym rate residual scaling across lattice strides.
     """
     _, _, h, w = y.shape
 
@@ -207,6 +211,7 @@ def weighted_normalized_adjoint_field(
         delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
     area = regions.area.float().view(1, 1, -1)
+    eff_area = area * ((float(output_stride) / 4.0) ** 2) if area_normalized else area
 
     alpha_recov = float(max(0.0, min(1.0, hybrid_recovery_alpha)))
     use_hybrid = (adjoint_mode == "radon_nikodym" and alpha_recov > 0.0)
@@ -215,13 +220,13 @@ def weighted_normalized_adjoint_field(
     if adjoint_mode == "radon_nikodym":
         # Discrepancy is scattered proportionally to current measure density y / q_m.
         # For a uniform field y = c * 1, q = c * area, so y * delta / q = delta / area (Theorem 1).
-        eff_q = q + float(eps) * area.clamp_min(1.0)
+        eff_q = q + float(eps) * eff_area.clamp_min(1.0)
         rate_residual = delta / eff_q.clamp_min(float(eps))
     else:
-        rate_residual = delta / area.clamp_min(1.0)
+        rate_residual = delta / eff_area.clamp_min(1.0)
 
     weighted_residual = weight32 * rate_residual
-    weighted_residual_leb = (weight32 * (delta / area.clamp_min(1.0))) if use_hybrid else None
+    weighted_residual_leb = (weight32 * (delta / eff_area.clamp_min(1.0))) if use_hybrid else None
 
     def _scatter_residual(w_res: torch.Tensor) -> torch.Tensor:
         if scale_routing_weights is not None:

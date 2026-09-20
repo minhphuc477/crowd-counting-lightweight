@@ -98,6 +98,13 @@ class RMRv3Config:
     adaptive_tau: bool = False
     adaptive_tau_rho0: float = 0.05
 
+    # RMR-v31: Sub-50 MAE Dual-Lattice, Density-Gated Anscombe & Anisotropic SIRT
+    anisotropic_diffusion: bool = False
+    pm_kappa: float = 0.05
+    density_gated_anscombe: bool = False
+    anscombe_tau_dense: float = 0.08
+    area_normalized_adjoint: bool = False
+
     # Dynamic Scale Routing
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0

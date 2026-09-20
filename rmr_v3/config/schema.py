@@ -144,6 +144,12 @@ ALLOWED_MODEL_KEYS = {
     "anscombe_c",
     "adaptive_tau",
     "adaptive_tau_rho0",
+    # RMR-v31 additions
+    "anisotropic_diffusion",
+    "pm_kappa",
+    "density_gated_anscombe",
+    "anscombe_tau_dense",
+    "area_normalized_adjoint",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -268,55 +274,42 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "native_scale_pooling",
         "regional_feature_stats",
         "region_head_hidden",
-        # Neck architecture fields (changing these changes model weights layout)
         "neck_type",
         "context_dilations",
         "use_aspp_gap",
         "aspp_dilations",
-        # RMR-v7 critical fields (changing these invalidates checkpoint weights)
         "hurdle_head",
         "temp_softplus",
-        # RMR-v8 Stage 2 solver fields (changing these changes the SIRT update rule)
         "solver_mode",
         "density_gate_rho",
         "density_gate_floor",
         "tv_type",
         "tv_lambda",
         "tv_eps_c",
-        # RMR-v8 Stage 3 architecture
         "use_coord_attn",
-        # RMR-v9.1 / AQ-RMR additions
         "proximal_tau",
-        # RMR-v10 additions
         "proximal_mode",
         "proximal_mu",
         "dynamic_scale_routing",
         "scale_router_temperature",
-        # RMR-v11 additions
         "trust_region_kappa",
         "trust_region_floor",
         "foreground_gate",
-        # RMR-v13 additions
         "adjoint_mode",
         "morozov_gamma",
-        # RMR-v14 additions
         "use_top_down_semantic_gate",
         "tdsg_floor",
         "fg_gate_floor",
-        # RMR-v15 additions
         "scale_conditioned_prior",
         "pre_solver_scale_gating",
         "scale_gating_power",
         "dynamic_trust_gate",
         "trust_gate_init_bias",
-        # RMR-v17 additions
         "density_curvature",
         "use_scale_entropy_trust",
-        # RMR-v18 additions
         "perspective_scale_bias",
         "perspective_horizon_gate",
         "horizon_cutoff",
-        # RMR-v19 additions
         "factorized_scale_routing",
         "num_marginal_scales",
         "num_aspect_ratios",
@@ -324,7 +317,6 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "curvature_dense_threshold",
         "curvature_gate_beta",
         "curvature_pool_kernel",
-        # RMR-v20 additions
         "use_micro_coord_attn",
         "micro_coord_reduction",
         "use_nesterov_momentum",
@@ -333,11 +325,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "adaptive_relax_dense_boost",
         "adaptive_relax_threshold",
         "adaptive_relax_scale",
-        # RMR-v21 additions
         "hybrid_recovery_alpha",
-        # RMR-v17 additions
         "use_barzilai_borwein",
-        # RMR-v22 / v23 additions
         "scale_conditioned_fine_head",
         "density_gated_diffusion",
         "diffusion_dense_threshold",
@@ -349,6 +338,12 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "cyclic_bb_length",
         "enable_solver",
         "init_m0",
+        # RMR-v31 additions
+        "anisotropic_diffusion",
+        "pm_kappa",
+        "density_gated_anscombe",
+        "anscombe_tau_dense",
+        "area_normalized_adjoint",
     ],
     "loss": [
         "lambda_count",
@@ -430,7 +425,7 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "eval_every": 10,
     "early_stopping": False,
     "patience": 0,
-    "deterministic": False,
+    "deterministic": True,
     "amp": True,
     "grad_clip": 500.0,
     "solver_warmup_epochs": 5,

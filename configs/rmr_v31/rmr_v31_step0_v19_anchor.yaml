@@ -1,7 +1,6 @@
 seed: 42
-# RMR-v30 Control: Direct Feedforward Baseline (Solver Disabled / Y0 Mode)
-# Single-Variable Delta from Step 0: enable_solver=false
-# Objective: Measure pure value-add of unrolled inverse SIRT solving on Radon measure recovery
+# RMR-v31 Step 0: Golden Anchor Baseline (100% Bitwise Identical to RMR-v19 Canonical Isotropic)
+# Target: Verify 72.61 TTA MAE / 72.84 Direct MAE on ShanghaiTech Part A
 # Parameter count: exactly 104,441 (strictly <= 105,000 budget, 559 headroom)
 # Zero Knowledge Distillation / Zero External Teacher
 # Canonical ShanghaiTech Part A Partition (300 Train / 182 Test)
@@ -55,8 +54,8 @@ model:
   use_top_down_semantic_gate: false
   scale_conditioned_prior:    false
 
-  # Solver Disabled: Direct Feedforward Carrier Mode
-  enable_solver:   false
+  # Unrolled Measure Reconstruction Solver (T=6)
+  enable_solver:   true
   solver_mode:     additive
   iterations:      6
   omega:           1.0
@@ -178,4 +177,4 @@ train:
 eval:
   density_bins: [100.0, 500.0]
 
-output_dir: runs/sha_a/rmr_v30_control_no_solver
+output_dir: runs/sha_a/rmr_v31_step0_v19_anchor

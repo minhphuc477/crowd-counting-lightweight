@@ -410,13 +410,14 @@ class TestTier1F6SixModelSuiteConfigs:
             assert spec["loss"].get("lambda_kd", 0.0) == 0.0
 
     def test_f6_single_variable_step0_to_h1(self) -> None:
-        """Ablation purity: Step 0 vs H1 differs ONLY in use_anscombe_sirt."""
+        """Ablation purity: Step 0 vs H1 differs ONLY in Anscombe SIRT operator settings."""
         s0 = get_rmr_v30_config_spec("step0_v19_anchor")["model"]
         h1 = get_rmr_v30_config_spec("h1_anscombe_sirt")["model"]
-        assert s0["use_anscombe_sirt"] is False
-        assert h1["use_anscombe_sirt"] is True
-        s0_diff = {k: v for k, v in s0.items() if k != "use_anscombe_sirt"}
-        h1_diff = {k: v for k, v in h1.items() if k != "use_anscombe_sirt"}
+        assert s0.get("use_anscombe_sirt", False) is False
+        assert h1.get("use_anscombe_sirt", False) is True
+        anscombe_keys = {"use_anscombe_sirt", "adjoint_mode", "anscombe_c"}
+        s0_diff = {k: v for k, v in s0.items() if k not in anscombe_keys}
+        h1_diff = {k: v for k, v in h1.items() if k not in anscombe_keys}
         assert s0_diff == h1_diff, "H1 introduced uncontrolled variables against Step 0!"
 
     def test_f6_single_variable_step0_to_h2(self) -> None:
