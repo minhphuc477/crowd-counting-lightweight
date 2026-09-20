@@ -42,7 +42,7 @@ def anscombe_discrepancy(
     # Morozov shrinkage in variance-stabilized domain (sigma_tilde ≈ 1)
     if morozov_gamma > 0.0:
         if b_variance is not None:
-            sigma_tilde = torch.sqrt(b_variance.float() / b_stab).clamp_min(0.1)
+            sigma_tilde = torch.sqrt(torch.clamp_min(b_variance.float(), 0.0) / b_stab).clamp_min(0.1)
         else:
             sigma_tilde = torch.ones_like(delta_tilde)
         deadband = float(morozov_gamma) * sigma_tilde
@@ -66,7 +66,7 @@ def compute_adaptive_tau(
     In sparse/background regions (rho <= rho0): returns base_tau_step (full noise pruning).
     In dense clusters (rho >> rho0): smoothly attenuates tau_eff -> 0 to prevent mass clipping.
     """
-    if mode == "uniform" or base_tau_step <= 0.0:
+    if mode == "uniform" or base_tau_step <= 0.0 or y_current.numel() == 0:
         return base_tau_step
 
     y32 = y_current.float()

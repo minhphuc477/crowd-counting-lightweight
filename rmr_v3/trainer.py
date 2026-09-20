@@ -319,6 +319,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             "train_hard_bg": loss_avgs.get("hard_bg", 0.0),
             "train_fg_bce": loss_avgs.get("fg_bce", 0.0),
             "train_scale_align": loss_avgs.get("scale_align", 0.0),
+            "train_cell_carrier": loss_avgs.get("cell_carrier", 0.0),
+            "train_cell_fine": loss_avgs.get("cell_fine", 0.0),
             "train_kd_total": loss_avgs.get("kd_total", 0.0),
             "train_kd_spatial": loss_avgs.get("kd_spatial", 0.0),
             "train_kd_count": loss_avgs.get("kd_count", 0.0),
