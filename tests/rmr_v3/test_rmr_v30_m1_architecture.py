@@ -129,6 +129,22 @@ class TestDualLatticeOperators:
         # Mass conservation
         assert check_mass_conservation(y2_prolong, y4, eps=1e-5)
 
+    def test_push_forward_and_pullback_odd_dimensions_mass_conservation(self):
+        """Boundary zero-padding guarantees exact mass conservation on odd dimensions."""
+        torch.manual_seed(42)
+        for h, w in [(65, 65), (251, 352), (127, 201), (501, 703)]:
+            y2 = torch.rand(2, 1, h, w).abs() * 3.0
+            y4 = push_forward_stride2_to_stride4(y2)
+            expected_h4 = (h + 1) // 2
+            expected_w4 = (w + 1) // 2
+            assert y4.shape == (2, 1, expected_h4, expected_w4)
+            assert check_mass_conservation(y2, y4, eps=1e-5)
+
+            # Prolongation test
+            prolong = pullback_stride4_to_stride2_rn(y4, y2)
+            assert prolong.shape == (2, 1, h, w)
+            assert check_mass_conservation(prolong, y4, eps=1e-5)
+
     def test_dual_lattice_losses(self):
         """Dual lattice supervision computes finite loss and propagates gradients."""
         y_fine = torch.rand(2, 1, 64, 64, requires_grad=True)

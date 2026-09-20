@@ -24,6 +24,7 @@ from .auxiliary import (
     truncated_nb_nll_loss,
 )
 from .dual_supervision import compute_dual_lattice_losses
+from rmr_v3.model.dual_lattice import push_forward_stride2_to_stride4
 
 
 class TargetSupervisionRouter:
@@ -292,7 +293,7 @@ def _compute_auxiliary_losses(
     )
     if is_dual_lattice:
         # Mass-preserving push: 2x2 box sum → stride-4 carrier target
-        target_stride4 = 4.0 * F.avg_pool2d(target_float, kernel_size=2, stride=2, count_include_pad=False)
+        target_stride4 = push_forward_stride2_to_stride4(target_float)
         dual = compute_dual_lattice_losses(
             y_fine=y, y_carrier=y_carrier.float(),
             target_stride2=target_float, target_stride4=target_stride4,

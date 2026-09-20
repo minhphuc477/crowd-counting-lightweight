@@ -22,8 +22,16 @@ def push_forward_stride2_to_stride4(y_stride2: torch.Tensor) -> torch.Tensor:
     else:
         raise ValueError(f"push_forward_stride2_to_stride4 expects 2D, 3D, or 4D tensor, got ndim={orig_ndim}")
 
+    h, w = y4d.shape[-2:]
+    pad_h = h % 2
+    pad_w = w % 2
+    if pad_h > 0 or pad_w > 0:
+        y4d = F.pad(y4d.float(), (0, pad_w, 0, pad_h), mode="constant", value=0.0)
+    else:
+        y4d = y4d.float()
+
     # Non-overlapping 2x2 sum pooling: 4.0 * AvgPool2d(2, 2)
-    carrier = 4.0 * F.avg_pool2d(y4d.float(), kernel_size=2, stride=2, count_include_pad=False)
+    carrier = 4.0 * F.avg_pool2d(y4d, kernel_size=2, stride=2, count_include_pad=False)
     carrier = carrier.to(dtype=y_stride2.dtype)
 
     if orig_ndim == 2:
@@ -50,8 +58,13 @@ def pullback_stride4_to_stride2_rn(
     y2_0 = y_fine_prior.float()
 
     prior_carrier = push_forward_stride2_to_stride4(y2_0)
-    y4_up = F.interpolate(y4, size=y2_0.shape[-2:], mode="nearest")
-    prior_carrier_up = F.interpolate(prior_carrier, size=y2_0.shape[-2:], mode="nearest")
+    h, w = y2_0.shape[-2:]
+    pad_h = h % 2
+    pad_w = w % 2
+    target_size = (h + pad_h, w + pad_w)
+
+    y4_up = F.interpolate(y4, size=target_size, mode="nearest")[..., :h, :w]
+    prior_carrier_up = F.interpolate(prior_carrier, size=target_size, mode="nearest")[..., :h, :w]
 
     zero_prior_mask = (prior_carrier_up <= float(eps))
     denom = torch.where(zero_prior_mask, torch.ones_like(prior_carrier_up), prior_carrier_up)
