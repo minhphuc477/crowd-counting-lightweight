@@ -145,9 +145,9 @@ class RMRv3Config:
     use_perspective_elevation: bool = False
     use_alternating_bb: bool = False
 
-    # BB clamp & cyclic BB
-    bb_clamp_min: float = 0.5
-    bb_clamp_max: float = 1.2
+    # BB clamp & cyclic BB (v19/v27 restored baseline)
+    bb_clamp_min: float = 0.2
+    bb_clamp_max: float = 2.0
     cyclic_bb_length: int = 1
 
     def __post_init__(self) -> None:

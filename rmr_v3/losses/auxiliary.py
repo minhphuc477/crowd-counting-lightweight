@@ -66,15 +66,7 @@ def truncated_nb_nll_loss(
         dispersion=dispersion,
         reduction="none",
     )
-    b_sz = target_region.shape[0]
-    sample_losses = []
-    for b_idx in range(b_sz):
-        occ_b = occ_mask[b_idx]
-        if occ_b.any():
-            sample_losses.append(per_region_nll[b_idx][occ_b].mean())
-        else:
-            sample_losses.append((mu_count[b_idx] * 0.0 + dispersion[b_idx] * 0.0).sum())
-    return torch.stack(sample_losses).mean()
+    return per_region_nll[occ_mask].mean()
 
 
 def scale_balanced_regional_nb_nll(
