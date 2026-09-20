@@ -68,7 +68,10 @@ def pullback_stride4_to_stride2_rn(
 
     zero_prior_mask = (prior_carrier_up <= float(eps))
     denom = torch.where(zero_prior_mask, torch.ones_like(prior_carrier_up), prior_carrier_up)
-    weights = torch.where(zero_prior_mask, torch.full_like(y2_0, 0.25), y2_0 / denom)
+    block_cell_counts = push_forward_stride2_to_stride4(torch.ones_like(y2_0))
+    block_cell_counts_up = F.interpolate(block_cell_counts, size=target_size, mode="nearest")[..., :h, :w]
+    uniform_weight = 1.0 / block_cell_counts_up.clamp_min(1.0)
+    weights = torch.where(zero_prior_mask, uniform_weight, y2_0 / denom)
     fine_prolong = y4_up * weights
     return fine_prolong.to(dtype=y_carrier.dtype)
 

@@ -145,7 +145,7 @@ def main() -> None:
     out_dir = Path(args.output_dir) if args.output_dir else (ckpt_path if ckpt_path.is_dir() else ckpt_path.parent) / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    stride = int(cfg.get("model", {}).get("output_stride", 4))
+    stride = int(getattr(model.cfg, "output_stride", cfg.get("model", {}).get("output_stride", 4)))
     dataset = CrowdManifestDataset(
         manifest_path,
         train=False,
