@@ -109,6 +109,10 @@ model:
 
   # Pillar 2: Barzilai-Borwein Adaptive Step Size (0 parameters)
   use_barzilai_borwein: true
+  # Restore v19 BB clamp [0.2, 2.0] — v26 changed default to [0.5, 1.2] causing regression
+  # v19 achieved 72.84 MAE with this wider clamp (10x range vs 2.4x of new default)
+  bb_clamp_min: 0.2
+  bb_clamp_max: 2.0
 
   # Pillar 3: Scale-Entropy Modulated Trust Region Bound (0 parameters)
   use_scale_entropy_trust: true
