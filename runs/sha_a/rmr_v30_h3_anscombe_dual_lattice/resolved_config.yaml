@@ -115,10 +115,12 @@ loss:
   lambda_hard_bg: 0.15
   hard_bg_ratio: 0.05
   lambda_fg_gate: 0.0
+  lambda_carrier_cell: 0.5
+  lambda_fine_cell: 0.25
 train:
-  epochs: 1
+  epochs: 1000
   batch_size: 8
-  workers: 0
+  workers: 4
   pin_memory: true
   lr: 0.0001
   backbone_lr_scale: 0.1
@@ -131,7 +133,7 @@ train:
   solver_ramp_epochs: 20
   early_stopping: false
   patience: 0
-  eval_every: 1
+  eval_every: 5
   deterministic: false
 eval:
   density_bins:
