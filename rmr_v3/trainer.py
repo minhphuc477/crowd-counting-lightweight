@@ -45,11 +45,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     cfg.setdefault("train", {})["deterministic"] = deterministic
     seed_everything(seed, deterministic=deterministic)
 
-    if "init_m0" not in cfg.get("model", {}) and "train_manifest" in cfg.get("data", {}):
-        stride = int(cfg.get("model", {}).get("output_stride", 4))
-        cfg.setdefault("model", {})["init_m0"] = compute_manifest_density(
+    m_cfg = cfg.setdefault("model", {})
+    eff_stride = 2 if m_cfg.get("subpixel_stride2", False) else int(m_cfg.get("output_stride", 4))
+    if "init_m0" not in m_cfg and "train_manifest" in cfg.get("data", {}):
+        m_cfg["init_m0"] = compute_manifest_density(
             cfg["data"]["train_manifest"],
-            output_stride=stride,
+            output_stride=eff_stride,
             data_root=cfg["data"].get("data_root"),
         )
 
@@ -100,7 +101,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     train_ds = CrowdManifestDataset(
         cfg["data"]["train_manifest"],
         train=True,
-        output_stride=cfg.get("model", {}).get("output_stride", 4),
+        output_stride=eff_stride,
         crop_size=cfg.get("data", {}).get("crop_size", 512),
         scale_range=tuple(cfg.get("data", {}).get("scale_range", [0.75, 1.25])),
         hflip_prob=float(cfg.get("data", {}).get("hflip_prob", 0.5)),
@@ -114,7 +115,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     val_ds = None if not val_manifest else CrowdManifestDataset(
         val_manifest,
         train=False,
-        output_stride=cfg.get("model", {}).get("output_stride", 4),
+        output_stride=eff_stride,
         data_root=cfg.get("data", {}).get("data_root"),
     )
 
@@ -372,8 +373,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 "mae_reg_y0": float(val_metrics.get("mae_reg_y0", 0.0)),
                 "mae_reg_y1": float(val_metrics.get("mae_reg_y1", 0.0)),
                 "mae_reg_y2": float(val_metrics.get("mae_reg_y2", 0.0)),
-                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if model.fine_head.density_curvature else 0.0,
-                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if model.fine_head.density_curvature else 0.0,
+                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha") else 0.0,
+                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha") else 0.0,
             })
 
             cur_mae = float(val_metrics["MAE"])
