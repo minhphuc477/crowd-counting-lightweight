@@ -182,13 +182,15 @@ def density_gated_anscombe_discrepancy(
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
     tau_dense: float = 0.08,
+    eps: float = 1e-6,
 ) -> torch.Tensor:
     """Density-gated Anscombe variance-stabilized rate discrepancy (RMR-v31).
 
     Applies Anscombe VST only in regions where crowd rate exceeds tau_dense
     (max(q, b) / area >= tau_dense). In background and sparse regions, falls
-    back to canonical linear rate discrepancy (q - b) / area to prevent the
-    gradient stiffness and noise amplification caused by 1/sqrt(q+c) on near-zero counts.
+    back to canonical Radon-Nikodym rate discrepancy delta / eff_q to prevent the
+    gradient stiffness and noise amplification caused by 1/sqrt(q+c) on near-zero counts,
+    while maintaining exact discrete mass conservation in the measure space.
     """
     area_clamped = area.clamp_min(1.0)
     rates = torch.maximum(q.float(), b.float()) / area_clamped
@@ -203,7 +205,8 @@ def density_gated_anscombe_discrepancy(
         sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
         deadband = float(morozov_gamma) * sigma_b
         delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
-    rate_res_linear = delta / area_clamped
+    eff_q = q.float() + float(eps) * area_clamped
+    rate_res_linear = delta / eff_q.clamp_min(float(eps))
 
     return dense_mask * rate_res_anscombe + (1.0 - dense_mask) * rate_res_linear
 

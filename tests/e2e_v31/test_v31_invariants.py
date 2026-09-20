@@ -106,15 +106,17 @@ def test_density_gated_anscombe_discrepancy() -> None:
     area = torch.tensor([[[64.0]]])
 
     res_bg = density_gated_anscombe_discrepancy(q_bg, b_bg, area, tau_dense=0.08)
-    expected_linear_bg = (q_bg - b_bg) / area
-    assert torch.allclose(res_bg, expected_linear_bg, atol=1e-6), "Anscombe VST should be disabled on background"
+    eff_q_bg = q_bg + 1e-6 * area
+    expected_linear_bg = (q_bg - b_bg) / eff_q_bg
+    assert torch.allclose(res_bg, expected_linear_bg, atol=1e-5), "Anscombe VST should fall back to RN rate discrepancy on background"
 
     # Dense region: q = 20.0, b = 15.0, area = 64 cells (rate = 20/64 = 0.3125 > 0.08)
     q_dense = torch.tensor([[[20.0]]])
     b_dense = torch.tensor([[[15.0]]])
     res_dense = density_gated_anscombe_discrepancy(q_dense, b_dense, area, tau_dense=0.08)
     # Should NOT equal linear discrepancy
-    linear_dense = (q_dense - b_dense) / area
+    eff_q_dense = q_dense + 1e-6 * area
+    linear_dense = (q_dense - b_dense) / eff_q_dense
     assert not torch.allclose(res_dense, linear_dense, atol=1e-4), "Anscombe VST must be active on dense crowds"
 
 

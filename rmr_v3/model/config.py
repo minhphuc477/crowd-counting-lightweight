@@ -221,9 +221,17 @@ class RMRv3Config:
             raise ValueError(
                 f"solver_mode must be 'additive' or 'multiplicative', got '{self.solver_mode}'"
             )
-        if self.tv_type not in ("laplacian", "charbonnier"):
+        if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(
-                f"tv_type must be 'laplacian' or 'charbonnier', got '{self.tv_type}'"
+                f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
+            )
+        if self.pm_kappa <= 0.0:
+            raise ValueError(
+                f"pm_kappa must be strictly positive, got {self.pm_kappa}"
+            )
+        if self.anscombe_tau_dense <= 0.0:
+            raise ValueError(
+                f"anscombe_tau_dense must be strictly positive, got {self.anscombe_tau_dense}"
             )
         if self.proximal_tau < 0.0:
             raise ValueError(

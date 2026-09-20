@@ -186,9 +186,10 @@ def unrolled_sirt_solver(
         if is_anscombe:
             q = regional_sum(z_state.float(), regions.boxes, out_dtype=torch.float32)
             area = regions.area.float().view(1, 1, -1)
+            eff_area = area * area_scale if area_normalized_adjoint else area
             if density_gated_anscombe:
                 rate_res = density_gated_anscombe_discrepancy(
-                    q, b_solver, area, c=anscombe_c, b_variance=b_variance,
+                    q, b_solver, eff_area, c=anscombe_c, b_variance=b_variance,
                     morozov_gamma=float(morozov_gamma), tau_dense=float(anscombe_tau_dense),
                 )
             else:
@@ -196,7 +197,6 @@ def unrolled_sirt_solver(
                     q, b_solver, c=anscombe_c, b_variance=b_variance,
                     morozov_gamma=float(morozov_gamma),
                 )
-            eff_area = area * area_scale if area_normalized_adjoint else area
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
             b_effective = q - rate_res * eff_q.clamp_min(float(eps))
             field = weighted_normalized_adjoint_field(

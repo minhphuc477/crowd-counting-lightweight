@@ -84,7 +84,7 @@ model:
   anisotropic_diffusion: true
   pm_kappa:              0.05
   tv_lambda:             0.02
-  tv_type:               laplacian
+  tv_type:               perona_malik
 
   # Scale-Aware Density-Adaptive Proximal Thresholding (MCP)
   proximal_tau:    0.015

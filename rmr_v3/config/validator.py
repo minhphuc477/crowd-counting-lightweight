@@ -91,9 +91,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "tv_type" in m_cfg:
             tv_type = str(m_cfg["tv_type"])
-            if tv_type not in ("laplacian", "charbonnier"):
+            if tv_type not in ("laplacian", "charbonnier", "perona_malik"):
                 raise ValueError(
-                    f"tv_type must be 'laplacian' or 'charbonnier', got '{tv_type}'"
+                    f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{tv_type}'"
                 )
         if "density_gate_rho" in m_cfg:
             rho = float(m_cfg["density_gate_rho"])
@@ -113,6 +113,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                         f"Charbonnier TV CFL stability violation: tv_lambda ({tv_lambda}) must be <= "
                         f"tv_eps_c / 4 ({cfl_limit}) to ensure contractivity and prevent numerical divergence."
                     )
+        if "pm_kappa" in m_cfg:
+            pm_k = float(m_cfg["pm_kappa"])
+            if pm_k <= 0.0:
+                raise ValueError(f"pm_kappa must be strictly positive, got {pm_k}")
+        if "anscombe_tau_dense" in m_cfg:
+            at_dense = float(m_cfg["anscombe_tau_dense"])
+            if at_dense <= 0.0:
+                raise ValueError(f"anscombe_tau_dense must be strictly positive, got {at_dense}")
         if "proximal_tau" in m_cfg:
             ptau = float(m_cfg["proximal_tau"])
             if ptau < 0.0:
