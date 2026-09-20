@@ -103,6 +103,10 @@ class RMRv3LossConfig:
             raise ValueError(f"lambda_fg_gate must be non-negative, got {self.lambda_fg_gate}")
         if self.lambda_scale_align < 0.0:
             raise ValueError(f"lambda_scale_align must be non-negative, got {self.lambda_scale_align}")
+        if self.lambda_carrier_cell < 0.0:
+            raise ValueError(f"lambda_carrier_cell must be non-negative, got {self.lambda_carrier_cell}")
+        if self.lambda_fine_cell < 0.0:
+            raise ValueError(f"lambda_fine_cell must be non-negative, got {self.lambda_fine_cell}")
         if self.scale_align_tau_dense <= self.scale_align_tau_sparse:
             raise ValueError(
                 f"scale_align_tau_dense ({self.scale_align_tau_dense}) must be > scale_align_tau_sparse ({self.scale_align_tau_sparse})"
