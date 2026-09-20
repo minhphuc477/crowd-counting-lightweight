@@ -11,11 +11,13 @@ from .auxiliary import (
     topk_hard_background_loss,
     truncated_nb_nll_loss,
 )
+from .dual_supervision import compute_dual_lattice_losses
 from .orchestration import TargetSupervisionRouter, compute_rmr_v3_losses
 
 __all__ = [
     "RMRv3LossConfig",
     "compute_rmr_v3_losses",
+    "compute_dual_lattice_losses",
     "TargetSupervisionRouter",
     "bayesian_loss",
     "sinkhorn_ot_loss",

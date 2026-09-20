@@ -23,6 +23,7 @@ from .auxiliary import (
     topk_hard_background_loss,
     truncated_nb_nll_loss,
 )
+from .dual_supervision import compute_dual_lattice_losses
 
 
 class TargetSupervisionRouter:
@@ -347,6 +348,34 @@ def _compute_auxiliary_losses(
     else:
         losses["scale_align"] = zero_val
 
+    # Dual-Lattice Carrier Supervision (RMR-v30 H2/H3: subpixel_stride2=True)
+    # Detected automatically: y_carrier shape differs from y when stride-2 fine head is active.
+    y_carrier = outputs.get("y_carrier", None)
+    is_dual_lattice = (
+        y_carrier is not None
+        and y_carrier.shape[-2:] != y.shape[-2:]
+        and (cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0)
+    )
+    if is_dual_lattice:
+        # Push stride-2 target to stride-4 carrier: exact mass-preserving 2x2 box sum.
+        target_stride4 = 4.0 * F.avg_pool2d(
+            target_float, kernel_size=2, stride=2, count_include_pad=False
+        )
+        dual = compute_dual_lattice_losses(
+            y_fine=y,
+            y_carrier=y_carrier.float(),
+            target_stride2=target_float,
+            target_stride4=target_stride4,
+            lambda_carrier_cell=cfg.lambda_carrier_cell,
+            lambda_fine_cell=cfg.lambda_fine_cell,
+        )
+        losses["cell_carrier"] = dual["cell_carrier"]
+        losses["cell_fine"] = dual["cell_fine"]
+        losses["total"] = losses["total"] + dual["cell_combined"]
+    else:
+        losses["cell_carrier"] = zero_val
+        losses["cell_fine"] = zero_val
+
     if cfg.density_loss_scaling:
         total_gt = target_float.sum(dim=(-2, -1))
         dense_boost = float(cfg.dense_loss_alpha) * torch.clamp(
@@ -394,6 +423,8 @@ def compute_rmr_v3_losses(
             "hurdle_bce": zero_val,
             "trunc_nb": zero_val,
             "scale_align": zero_val,
+            "cell_carrier": zero_val,
+            "cell_fine": zero_val,
         }
 
     # Elementwise High-Density Sample-Level Loss Scaling (RMR-v21)

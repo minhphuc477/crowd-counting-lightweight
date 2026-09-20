@@ -10,9 +10,15 @@ from rmr_core.operators import (
     RegionSet,
     charbonnier_tv_step,
     partition_regions_by_scale,
+    regional_sum,
     weighted_coverage,
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
+)
+from .solver_ops import (
+    anscombe_discrepancy,
+    compute_adaptive_tau,
+    proximal_firm_threshold,
 )
 
 # Standard 2D 5-point discrete Laplacian kernel for isotropic TV diffusion
@@ -21,43 +27,15 @@ _LAPLACE_KERNEL: torch.Tensor = torch.tensor(
 ).view(1, 1, 3, 3)
 
 
-def proximal_soft_threshold(y: torch.Tensor, tau: float) -> torch.Tensor:
+def proximal_soft_threshold(y: torch.Tensor, tau: float | torch.Tensor) -> torch.Tensor:
     """Exact proximal operator for non-negative L1-shrinkage: S_tau^+(z) = max(0, z - tau).
 
     Provides a noise deadband in [0, tau] that completely suppresses background
     phantom mass accumulation without zero-absorbing barriers.
     """
-    if tau <= 0.0:
+    if isinstance(tau, (int, float)) and tau <= 0.0:
         return torch.clamp_min(y, 0.0)
     return torch.clamp_min(y - tau, 0.0)
-
-
-def proximal_firm_threshold(
-    y: torch.Tensor,
-    tau: float,
-    mu: float = 3.0,
-) -> torch.Tensor:
-    """Exact proximal operator for Minimax Concave Penalty (MCP) / Firm Thresholding:
-
-        S_firm^+(z; tau, mu) =
-            0                                  if z <= tau
-            (mu / (mu - 1)) * (z - tau)        if tau < z <= mu * tau
-            z                                  if z > mu * tau
-
-    Properties for crowd counting:
-    - z <= tau: Background noise is strictly zeroed out (anti-smearing / zero deadband).
-    - z > mu * tau: Real crowd peaks suffer ZERO shrinkage (identity mapping),
-      completely resolving the dense clump mass erosion caused by soft-thresholding.
-    - tau < z <= mu * tau: Smooth, continuous monotonic transition.
-    """
-    if tau <= 0.0:
-        return torch.clamp_min(y, 0.0)
-    mu_val = float(max(mu, 1.001))
-    mu_tau = mu_val * tau
-    slope = mu_val / (mu_val - 1.0)
-    ramp = slope * (y - tau)
-    out = torch.where(y > mu_tau, y, ramp)
-    return torch.clamp_min(out, 0.0)
 
 
 def laplacian_tv_diffusion(
@@ -158,6 +136,10 @@ def unrolled_sirt_solver(
     diffusion_dense_threshold: float = 0.15,
     diffusion_gate_beta: float = 0.03,
     output_stride: int = 4,
+    use_anscombe: bool = False,
+    anscombe_c: float = 0.375,
+    adaptive_tau: bool = False,
+    adaptive_tau_rho0: float = 0.05,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -261,24 +243,56 @@ def unrolled_sirt_solver(
         ).detach()
 
         # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
-        field = weighted_normalized_adjoint_field(
-            z_state,
-            b_solver,
-            weight_solver,
-            regions,
-            weighted_cov=cov_w,
-            residual_clip=residual_clip,
-            eps=eps,
-            solver_mode=solver_mode,
-            density_gate_rho=float(effective_rho),
-            density_gate_floor=float(density_gate_floor),
-            scale_routing_weights=scale_routing_weights,
-            scale_partitions=scale_partitions,
-            adjoint_mode=adjoint_mode,
-            b_variance=b_variance,
-            morozov_gamma=float(morozov_gamma),
-            hybrid_recovery_alpha=float(hybrid_recovery_alpha),
-        )
+        is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
+        if is_anscombe:
+            q = regional_sum(z_state.float(), regions.boxes, out_dtype=torch.float32)
+            rate_res = anscombe_discrepancy(
+                q,
+                b_solver,
+                c=anscombe_c,
+                b_variance=b_variance,
+                morozov_gamma=float(morozov_gamma),
+            )
+            area = regions.area.float().view(1, 1, -1)
+            eff_q = q + float(eps) * area.clamp_min(1.0)
+            b_effective = q - rate_res * eff_q.clamp_min(float(eps))
+            field = weighted_normalized_adjoint_field(
+                z_state,
+                b_effective,
+                weight_solver,
+                regions,
+                weighted_cov=cov_w,
+                residual_clip=residual_clip,
+                eps=eps,
+                solver_mode=solver_mode,
+                density_gate_rho=float(effective_rho),
+                density_gate_floor=float(density_gate_floor),
+                scale_routing_weights=scale_routing_weights,
+                scale_partitions=scale_partitions,
+                adjoint_mode="radon_nikodym",
+                b_variance=None,
+                morozov_gamma=0.0,
+                hybrid_recovery_alpha=float(hybrid_recovery_alpha),
+            )
+        else:
+            field = weighted_normalized_adjoint_field(
+                z_state,
+                b_solver,
+                weight_solver,
+                regions,
+                weighted_cov=cov_w,
+                residual_clip=residual_clip,
+                eps=eps,
+                solver_mode=solver_mode,
+                density_gate_rho=float(effective_rho),
+                density_gate_floor=float(density_gate_floor),
+                scale_routing_weights=scale_routing_weights,
+                scale_partitions=scale_partitions,
+                adjoint_mode=adjoint_mode,
+                b_variance=b_variance,
+                morozov_gamma=float(morozov_gamma),
+                hybrid_recovery_alpha=float(hybrid_recovery_alpha),
+            )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
         current_omega: float | torch.Tensor = effective_omega
@@ -336,10 +350,21 @@ def unrolled_sirt_solver(
         y_step = z_state.float() - step_delta
 
         # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
+        tau_current: float | torch.Tensor = tau_step
+        if adaptive_tau and tau_step > 0.0:
+            tau_current = compute_adaptive_tau(
+                tau_step,
+                z_state,
+                stride=output_stride,
+                mode="density_adaptive",
+                rho0=float(adaptive_tau_rho0),
+                pool_kernel=5,
+            )
+
         if proximal_mode == "firm":
-            y_next = proximal_firm_threshold(y_step, tau=tau_step, mu=float(proximal_mu))
+            y_next = proximal_firm_threshold(y_step, tau=tau_current, mu=float(proximal_mu))
         elif proximal_mode == "soft":
-            y_next = proximal_soft_threshold(y_step, tau=tau_step)
+            y_next = proximal_soft_threshold(y_step, tau=tau_current)
         elif proximal_mode in ("none", "clamp"):
             y_next = torch.clamp_min(y_step, 0.0)
         else:

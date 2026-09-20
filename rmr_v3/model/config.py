@@ -92,6 +92,12 @@ class RMRv3Config:
     proximal_mode: str = "soft"
     proximal_mu: float = 3.0
 
+    # RMR-v30: Anscombe Variance-Stabilizing SIRT & Density-Conditioned Spatial Resolution
+    use_anscombe_sirt: bool = False
+    anscombe_c: float = 0.375
+    adaptive_tau: bool = False
+    adaptive_tau_rho0: float = 0.05
+
     # Dynamic Scale Routing
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
@@ -240,9 +246,19 @@ class RMRv3Config:
             raise ValueError(
                 f"trust_region_floor must be strictly positive, got {self.trust_region_floor}"
             )
-        if self.adjoint_mode not in ("flat", "radon_nikodym"):
+        if self.adjoint_mode not in ("flat", "radon_nikodym", "anscombe_vst"):
             raise ValueError(
-                f"adjoint_mode must be 'flat' or 'radon_nikodym', got '{self.adjoint_mode}'"
+                f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'"
+            )
+        if self.adjoint_mode == "anscombe_vst":
+            self.use_anscombe_sirt = True
+        if self.anscombe_c <= 0.0:
+            raise ValueError(
+                f"anscombe_c must be strictly positive, got {self.anscombe_c}"
+            )
+        if self.adaptive_tau_rho0 <= 0.0:
+            raise ValueError(
+                f"adaptive_tau_rho0 must be strictly positive, got {self.adaptive_tau_rho0}"
             )
         if self.morozov_gamma < 0.0:
             raise ValueError(

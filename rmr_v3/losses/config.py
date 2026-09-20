@@ -51,6 +51,10 @@ class RMRv3LossConfig:
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
     lambda_fg_gate: float = 0.0          # weight for foreground gate BCE loss (0 = disabled)
 
+    # Dual-Lattice Carrier Supervision (RMR-v30 H2/H3: subpixel_stride2=True)
+    lambda_carrier_cell: float = 0.0    # carrier (Stride 4) mass-weighted cell loss weight
+    lambda_fine_cell: float = 0.0       # fine (Stride 2) mass-weighted cell loss weight
+
     # RMR-v12 Density-Gated Curvature additions
     curvature_gate_threshold: float = 0.0  # density threshold to activate curvature loss (0 = disabled / full image)
     curvature_gate_kernel: int = 5         # kernel size for local density pooling (covers 20x20 px at stride 4)

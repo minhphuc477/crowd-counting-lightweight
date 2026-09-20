@@ -29,6 +29,11 @@ from .config import RMRv3Config
 from .evidence import extract_regional_evidence
 from .perspective import MicroCoordAttn, MicroPerspectiveElevation
 from .solver_step import solve_inverse_measure
+from .dual_lattice import (
+    push_forward_stride2_to_stride4,
+    pullback_stride4_to_stride2_rn,
+    check_mass_conservation,
+)
 
 __all__ = [
     "AdditiveFPNNeck",
@@ -50,8 +55,11 @@ __all__ = [
     "build_multiscale_regions",
     "center_scatter",
     "charbonnier_tv_step",
+    "check_mass_conservation",
     "extract_regional_evidence",
     "multiplicative_gated_adjoint",
+    "pullback_stride4_to_stride2_rn",
+    "push_forward_stride2_to_stride4",
     "region_mean_std_features",
     "regional_adjoint",
     "regional_sum",

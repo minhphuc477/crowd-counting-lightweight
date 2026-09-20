@@ -20,6 +20,7 @@ from .config import RMRv3Config, _softplus_inverse, _deep_tuple
 from .evidence import extract_regional_evidence
 from .perspective import MicroPerspectiveElevation, MicroCoordAttn
 from .solver_step import solve_inverse_measure
+from .dual_lattice import push_forward_stride2_to_stride4
 
 
 class RMRv3(nn.Module):
@@ -35,37 +36,21 @@ class RMRv3(nn.Module):
             cfg = RMRv3Config()
 
         if cfg.output_stride != 4 and not (cfg.subpixel_stride2 and cfg.output_stride == 2):
-            raise ValueError(
-                "RMR-v3 registered method requires output_stride=4 (or output_stride=2 when subpixel_stride2=True)"
-            )
-
+            raise ValueError("RMR-v3 requires output_stride=4 (or output_stride=2 when subpixel_stride2=True)")
         if cfg.include_full_image:
-            raise ValueError(
-                "RMR-v3 registered method requires include_full_image=False"
-            )
-
+            raise ValueError("RMR-v3 registered method requires include_full_image=False")
         if cfg.enable_solver and cfg.iterations < 1:
             raise ValueError("iterations must be >= 1 when enable_solver=True")
-
         if cfg.enable_solver and cfg.omega <= 0:
             raise ValueError("omega must be > 0 when enable_solver=True")
-
         if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
-            raise ValueError(
-                f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
-            )
-
+            raise ValueError(f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'.")
         if len(cfg.region_sizes_px) == 0:
             raise ValueError("region_sizes_px must not be empty")
-
         if cfg.reliability_weight_min <= 0:
             raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
-
         if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
-            raise ValueError(
-                f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"
-            )
-
+            raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})")
         if cfg.reliability_rate_std_floor <= 0:
             raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
 
@@ -422,7 +407,7 @@ class RMRv3(nn.Module):
             grid_h=target_h4,
         )
 
-        return self._solve_inverse_measure(
+        out = self._solve_inverse_measure(
             y0=y0,
             z0=z0,
             regional_evidence=regional_evidence,
@@ -435,6 +420,15 @@ class RMRv3(nn.Module):
             pi_scale=pi_scale,
             pi_aspect=pi_aspect,
         )
+
+        if self.cfg.subpixel_stride2:
+            out["y_carrier"] = push_forward_stride2_to_stride4(out.y)
+            out["y0_carrier"] = push_forward_stride2_to_stride4(out.y0)
+        else:
+            out["y_carrier"] = out.y
+            out["y0_carrier"] = out.y0
+
+        return out
 
     def switch_to_deploy(self) -> None:
         if hasattr(self.fusion, "switch_to_deploy"):

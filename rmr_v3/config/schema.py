@@ -139,6 +139,11 @@ ALLOWED_MODEL_KEYS = {
     "cyclic_bb_length",
     # RMR-v29 additions
     "subpixel_stride2",
+    # RMR-v30 additions
+    "use_anscombe_sirt",
+    "anscombe_c",
+    "adaptive_tau",
+    "adaptive_tau_rho0",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -196,6 +201,9 @@ ALLOWED_LOSS_KEYS = {
     "dense_loss_max_boost",
     # RMR-v21 additions
     "elementwise_dense_scaling",
+    # RMR-v30 additions
+    "lambda_carrier_cell",
+    "lambda_fine_cell",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -387,6 +395,9 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         # RMR-v20/v21 loss fields
         "density_loss_scaling",
         "elementwise_dense_scaling",
+        # RMR-v30 loss fields
+        "lambda_carrier_cell",
+        "lambda_fine_cell",
     ],
     "train": [
         "lr",

@@ -149,8 +149,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "adjoint_mode" in m_cfg:
             adj = str(m_cfg["adjoint_mode"])
-            if adj not in ("flat", "radon_nikodym"):
-                raise ValueError(f"adjoint_mode must be 'flat' or 'radon_nikodym', got '{adj}'")
+            if adj not in ("flat", "radon_nikodym", "anscombe_vst"):
+                raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{adj}'")
+        if "anscombe_c" in m_cfg:
+            ac = float(m_cfg["anscombe_c"])
+            if ac <= 0.0:
+                raise ValueError(f"anscombe_c must be strictly positive, got {ac}")
+        if "adaptive_tau_rho0" in m_cfg:
+            at_rho = float(m_cfg["adaptive_tau_rho0"])
+            if at_rho <= 0.0:
+                raise ValueError(f"adaptive_tau_rho0 must be strictly positive, got {at_rho}")
         if "morozov_gamma" in m_cfg:
             m_gamma = float(m_cfg["morozov_gamma"])
             if m_gamma < 0.0:
@@ -234,6 +242,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             lam_fg = float(l_cfg_pre["lambda_fg_gate"])
             if lam_fg < 0.0:
                 raise ValueError(f"lambda_fg_gate must be non-negative, got {lam_fg}")
+        if "lambda_carrier_cell" in l_cfg_pre:
+            lam_cc = float(l_cfg_pre["lambda_carrier_cell"])
+            if lam_cc < 0.0:
+                raise ValueError(f"lambda_carrier_cell must be non-negative, got {lam_cc}")
+        if "lambda_fine_cell" in l_cfg_pre:
+            lam_fc = float(l_cfg_pre["lambda_fine_cell"])
+            if lam_fc < 0.0:
+                raise ValueError(f"lambda_fine_cell must be non-negative, got {lam_fc}")
         if "curvature_gate_threshold" in l_cfg_pre:
             cgt = float(l_cfg_pre["curvature_gate_threshold"])
             if cgt < 0.0:

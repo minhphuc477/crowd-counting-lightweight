@@ -121,6 +121,10 @@ def solve_inverse_measure(
         diffusion_dense_threshold=cfg.diffusion_dense_threshold,
         diffusion_gate_beta=cfg.diffusion_gate_beta,
         output_stride=cfg.output_stride,
+        use_anscombe=getattr(cfg, "use_anscombe_sirt", False) or (cfg.adjoint_mode == "anscombe_vst"),
+        anscombe_c=getattr(cfg, "anscombe_c", 0.375),
+        adaptive_tau=getattr(cfg, "adaptive_tau", False),
+        adaptive_tau_rho0=getattr(cfg, "adaptive_tau_rho0", 0.05),
     )
 
     y = solver_res["y"]
