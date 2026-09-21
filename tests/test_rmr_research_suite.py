@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 from typing import Any
 import pytest
+import torch
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -20,12 +21,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 from rmr_v3.config import validate_v3_config
 from rmr_v3.engine import make_loss_cfg, make_model
+from rmr_v3.losses import compute_rmr_v3_losses
 
 
 RESEARCH_CONFIG_DIR = _REPO_ROOT / "configs" / "rmr_research"
 CANONICAL_V19_PATH = _REPO_ROOT / "configs" / "rmr_v19" / "rmr_v19_canonical_isotropic.yaml"
 
 CONFIG_FILES = [
+    "h1_no_jitter.yaml",
+    "h2_spectral_loss.yaml",
     "h3a_depth2.yaml",
     "h3b_depth4.yaml",
     "h3c_depth8.yaml",
@@ -109,6 +113,18 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
     # while all research configs explicitly specify train.deterministic: false,
     # and output_dir points to their dedicated experiment run folder.
     expected_diffs = {
+        "h1_no_jitter.yaml": {
+            "data.scale_range": [1.0, 1.0],
+            "data.brightness_jitter": 0.0,
+            "data.contrast_jitter": 0.0,
+            "data.gamma_jitter": [1.0, 1.0],
+        },
+        "h2_spectral_loss.yaml": {
+            "loss.use_spectral_loss": True,
+            "loss.lambda_spectral": 0.1,
+            "loss.spectral_beta": 2.0,
+            "loss.lambda_spectral_dc": 1.0,
+        },
         "h3a_depth2.yaml": {
             "model.iterations": 2,
         },
@@ -204,6 +220,80 @@ def test_h6_spectral_loss_integration():
     assert loss_cfg.lambda_spectral == 0.2
     assert loss_cfg.spectral_beta == 2.0
     assert loss_cfg.lambda_spectral_dc == 1.0
+
+
+@pytest.mark.parametrize(
+    "config_name",
+    [
+        "h2_spectral_loss.yaml",
+        "h7a_resonant_adjoint.yaml",
+        "h7b_anscombe_morozov.yaml",
+        "h7c_bandpass_spectral.yaml",
+        "h7d_regional_mass_weight.yaml",
+        "h7_resonant_adjoint.yaml",
+        "h8_harmonious_composite.yaml",
+    ],
+)
+def test_full_forward_backward_optimization_cycle(config_name: str):
+    """Deep adversarial test: verify AMP forward, loss computation, and finite backward gradients."""
+    torch.manual_seed(42)
+    cfg_path = RESEARCH_CONFIG_DIR / config_name
+    cfg = load_yaml(cfg_path)
+    model, _ = make_model(cfg)
+    loss_cfg = make_loss_cfg(cfg)
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+    b, c, h, w = 2, 3, 128, 128
+    x = torch.randn(b, c, h, w)
+    eff_stride = int(getattr(model.cfg, "output_stride", 4))
+    target_y = torch.rand(b, 1, h // eff_stride, w // eff_stride)
+
+    optimizer.zero_grad(set_to_none=True)
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        out = model(x)
+        losses = compute_rmr_v3_losses(out, target_y, loss_cfg)
+        loss = losses["total"]
+
+    assert torch.isfinite(loss), f"Non-finite loss in {config_name}: {loss}"
+    loss.backward()
+
+    # Verify all trainable parameters receive healthy, non-vanishing, finite gradients
+    n_params_checked = 0
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            assert param.grad is not None, f"Missing gradient for {name} in {config_name}"
+            assert torch.isfinite(param.grad).all(), f"Non-finite gradient in {name} in {config_name}"
+            n_params_checked += 1
+    assert n_params_checked > 0
+
+    optimizer.step()
+
+
+@pytest.mark.parametrize("config_name", ["h7_resonant_adjoint.yaml", "h8_harmonious_composite.yaml"])
+def test_odd_and_prime_dimension_stress(config_name: str):
+    """Stress-test FPN padding, regional grids, and spectral loss on odd prime dimensions."""
+    torch.manual_seed(42)
+    cfg_path = RESEARCH_CONFIG_DIR / config_name
+    cfg = load_yaml(cfg_path)
+    model, _ = make_model(cfg)
+    loss_cfg = make_loss_cfg(cfg)
+    model.train()
+
+    # Odd/prime test resolution
+    h, w = 113, 127
+    x = torch.randn(1, 3, h, w)
+    eff_stride = int(getattr(model.cfg, "output_stride", 4))
+    expected_h = (h + eff_stride - 1) // eff_stride
+    expected_w = (w + eff_stride - 1) // eff_stride
+    target_y = torch.rand(1, 1, expected_h, expected_w)
+
+    out = model(x)
+    assert out.y.shape[-2:] == (expected_h, expected_w)
+    losses = compute_rmr_v3_losses(out, target_y, loss_cfg)
+    loss = losses["total"]
+    assert torch.isfinite(loss)
+    loss.backward()
 
 
 def test_codebase_line_count_invariant():

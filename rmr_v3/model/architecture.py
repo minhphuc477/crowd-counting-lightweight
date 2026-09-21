@@ -413,8 +413,10 @@ class RMRv3(nn.Module):
         carrier_energy = None
         if self.cfg.resonant_adjoint:
             b_c, c_p4, h_p4, w_p4 = p4.shape
-            p4_flat = p4.view(b_c * c_p4, 1, h_p4, w_p4)
-            lap_p4 = F.conv2d(p4_flat, self._laplace_kernel, padding=1).view(b_c, c_p4, h_p4, w_p4)
+            # Defensive Float32 execution prevents HalfTensor/FloatTensor mismatch and AMP overflow
+            p4_flat_f32 = p4.float().view(b_c * c_p4, 1, h_p4, w_p4)
+            kernel_f32 = self._laplace_kernel.to(device=p4.device, dtype=torch.float32)
+            lap_p4 = F.conv2d(p4_flat_f32, kernel_f32, padding=1).view(b_c, c_p4, h_p4, w_p4)
             carrier_energy = (lap_p4 ** 2).mean(dim=1, keepdim=True)
 
         out = self._solve_inverse_measure(
