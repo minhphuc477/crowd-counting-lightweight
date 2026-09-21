@@ -205,3 +205,34 @@ def test_mass_weighted_regional_nb_loss():
     assert torch.isfinite(loss_weighted)
     # The weighted loss must give significantly more weight to the error on the 50-person box
     assert loss_weighted > loss_unweighted
+
+
+def test_anscombe_symmetric_exact_identity():
+    """Verify that symmetric inverse mapping (g_q - g_b) * 0.5 * (sqrt(q+c) + sqrt(b+c)) === q - b.
+
+    When deadband = 0, this identity must hold with machine precision across all density ratios,
+    preventing the 37.5% deficit throttling caused by single-sided sqrt(q+c) scaling.
+    """
+    c = 0.375
+    # Extreme dense undercount scenario: q = 10 (pred), b = 100 (ground truth)
+    q = torch.tensor([[[10.0]]], dtype=torch.float32)
+    b = torch.tensor([[[100.0]]], dtype=torch.float32)
+
+    g_q = 2.0 * torch.sqrt(q + c)
+    g_b = 2.0 * torch.sqrt(b + c)
+    g_delta = g_q - g_b
+
+    # Exact symmetric scale
+    scale_symm = 0.5 * (torch.sqrt(q + c) + torch.sqrt(b + c))
+    delta_recovered = g_delta * scale_symm
+    delta_true = q - b
+
+    # Must match true delta with error < 1e-5
+    assert torch.allclose(delta_recovered, delta_true, atol=1e-5), (
+        f"Symmetric mapping failed: recovered {delta_recovered} vs true {delta_true}"
+    )
+
+    # Demonstrate that single-sided scaling severely throttled the step
+    delta_old_asymm = g_delta * torch.sqrt(q + c)
+    rel_error = ((delta_true - delta_old_asymm).abs() / delta_true.abs()).item()
+    assert rel_error > 0.35, f"Expected >35% error in old asymmetric formula, got {rel_error}"

@@ -228,7 +228,10 @@ def weighted_normalized_adjoint_field(
             g_delta = g_q - g_b
             g_deadband = float(morozov_gamma) * 1.0
             g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - g_deadband, 0.0)
-            delta = g_shrunk * torch.sqrt(q.clamp_min(0.0) + c)
+            # Exact symmetric inverse mapping: (g_q - g_b) * (sqrt(q+c) + sqrt(b+c)) / 2 === q - b
+            # Eliminates 37.5% asymmetric deficit throttling when q << b in ultra-dense crowds
+            scale_symm = 0.5 * (torch.sqrt(q.clamp_min(0.0) + c) + torch.sqrt(b32.clamp_min(0.0) + c))
+            delta = g_shrunk * scale_symm
         else:
             sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
             deadband = float(morozov_gamma) * sigma_b

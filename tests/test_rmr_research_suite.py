@@ -32,6 +32,10 @@ CONFIG_FILES = [
     "h4_no_morozov.yaml",
     "h5_no_curvature.yaml",
     "h6_spectral_composite.yaml",
+    "h7a_resonant_adjoint.yaml",
+    "h7b_anscombe_morozov.yaml",
+    "h7c_bandpass_spectral.yaml",
+    "h7d_regional_mass_weight.yaml",
     "h7_resonant_adjoint.yaml",
     "h8_harmonious_composite.yaml",
 ]
@@ -125,6 +129,25 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
             "loss.lambda_spectral": 0.2,
             "loss.spectral_beta": 2.0,
             "loss.lambda_spectral_dc": 1.0,
+        },
+        "h7a_resonant_adjoint.yaml": {
+            "model.resonant_adjoint": True,
+            "model.resonant_adjoint_lambda": 0.5,
+        },
+        "h7b_anscombe_morozov.yaml": {
+            "model.anscombe_morozov": True,
+        },
+        "h7c_bandpass_spectral.yaml": {
+            "loss.use_spectral_loss": True,
+            "loss.lambda_spectral": 0.2,
+            "loss.spectral_beta": 2.0,
+            "loss.lambda_spectral_dc": 1.0,
+            "loss.spectral_bandpass": True,
+            "loss.spectral_omega_low": 0.02,
+            "loss.spectral_omega_high": 0.35,
+        },
+        "h7d_regional_mass_weight.yaml": {
+            "loss.regional_mass_weight_alpha": 1.5,
         },
         "h7_resonant_adjoint.yaml": {
             "model.resonant_adjoint": True,
