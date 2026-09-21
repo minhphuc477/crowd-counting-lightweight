@@ -15,6 +15,7 @@ data:
   brightness_jitter:   0.2
   contrast_jitter:     0.2
   gamma_jitter:        [0.6, 1.5]
+  preload:             true
   random_invert_prob:  0.0
 
 model:

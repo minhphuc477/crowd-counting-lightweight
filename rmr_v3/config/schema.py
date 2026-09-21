@@ -207,6 +207,8 @@ ALLOWED_LOSS_KEYS = {
     "elementwise_dense_scaling",
     "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
     "lambda_kd_spatial", "lambda_kd_count",
+    # Spectral Loss (H2)
+    "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
 }
 
 ALLOWED_TRAIN_KEYS = {

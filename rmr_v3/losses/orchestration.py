@@ -12,6 +12,7 @@ from rmr_core.losses import (
     flat_dm16_loss,
     multiscale_dm_loss,
 )
+from rmr_core.spectral import count_preserving_spectral_loss
 from .config import RMRv3LossConfig
 from .point_supervision import bayesian_loss, sinkhorn_ot_loss
 from .auxiliary import (
@@ -311,6 +312,45 @@ def _compute_auxiliary_losses(
     else:
         losses["cell_carrier"] = zero_val
         losses["cell_fine"] = zero_val
+
+    # Count-Preserving Heavy-Tailed Spectral Loss (Hypothesis H2)
+    if cfg.use_spectral_loss and cfg.lambda_spectral > 0.0:
+        if router.mode == "dual":
+            l_y, c_y = count_preserving_spectral_loss(
+                y, target_float, beta=cfg.spectral_beta,
+                lambda_count=cfg.lambda_spectral_dc, lambda_spectral=1.0,
+            )
+            l_y0, c_y0 = count_preserving_spectral_loss(
+                y0, target_float, beta=cfg.spectral_beta,
+                lambda_count=cfg.lambda_spectral_dc, lambda_spectral=1.0,
+            )
+            loss_spec = 0.5 * l_y + 0.5 * l_y0
+            loss_spec_dc = 0.5 * c_y["spectral_dc"] + 0.5 * c_y0["spectral_dc"]
+            loss_spec_ac = 0.5 * c_y["spectral_ac"] + 0.5 * c_y0["spectral_ac"]
+        elif router.mode == "y0":
+            loss_spec, comps = count_preserving_spectral_loss(
+                y0, target_float, beta=cfg.spectral_beta,
+                lambda_count=cfg.lambda_spectral_dc, lambda_spectral=1.0,
+            )
+            loss_spec_dc = comps["spectral_dc"]
+            loss_spec_ac = comps["spectral_ac"]
+        else:
+            loss_spec, comps = count_preserving_spectral_loss(
+                y, target_float, beta=cfg.spectral_beta,
+                lambda_count=cfg.lambda_spectral_dc, lambda_spectral=1.0,
+            )
+            loss_spec_dc = comps["spectral_dc"]
+            loss_spec_ac = comps["spectral_ac"]
+
+        losses["spectral"] = loss_spec
+        losses["spectral_dc"] = loss_spec_dc
+        losses["spectral_ac"] = loss_spec_ac
+        losses["total"] = losses["total"] + cfg.lambda_spectral * loss_spec
+    else:
+        losses["spectral"] = zero_val
+        losses["spectral_dc"] = zero_val
+        losses["spectral_ac"] = zero_val
+
     return losses
 
 
@@ -341,6 +381,7 @@ def compute_rmr_v3_losses(
             "curvature": zero_val, "hard_bg": zero_val, "fg_bce": zero_val,
             "hurdle_bce": zero_val, "trunc_nb": zero_val, "scale_align": zero_val,
             "cell_carrier": zero_val, "cell_fine": zero_val,
+            "spectral": zero_val, "spectral_dc": zero_val, "spectral_ac": zero_val,
         }
 
     if cfg.elementwise_dense_scaling or cfg.density_loss_scaling:

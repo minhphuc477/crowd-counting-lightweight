@@ -9,6 +9,7 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "train_dm16", "train_dm32", "train_dm64",
     "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
     "train_curvature", "train_hard_bg", "train_fg_bce", "train_scale_align",
+    "train_spectral", "train_spectral_dc", "train_spectral_ac",
     "train_cell_carrier", "train_cell_fine",
     "train_kd_total", "train_kd_spatial", "train_kd_count",
     "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
@@ -64,6 +65,8 @@ def format_epoch_row(
         v11_str += f" | c_car: {loss_avgs.get('cell_carrier', 0.0):.4f}"
     if loss_avgs.get("cell_fine", 0.0) > 0:
         v11_str += f" | c_fine: {loss_avgs.get('cell_fine', 0.0):.4f}"
+    if loss_avgs.get("spectral", 0.0) > 0:
+        v11_str += f" | spec: {loss_avgs.get('spectral', 0.0):.4f}"
 
     return (
         f"[{epoch+1:04d}/{epochs:04d}] "
@@ -105,6 +108,8 @@ def format_eval_block(
         v11_str += f" | fg_bce: {loss_avgs.get('fg_bce', 0.0):.4f}"
     if loss_avgs.get("scale_align", 0.0) > 0:
         v11_str += f" | sc_aln: {loss_avgs.get('scale_align', 0.0):.4f}"
+    if loss_avgs.get("spectral", 0.0) > 0:
+        v11_str += f" | spec: {loss_avgs.get('spectral', 0.0):.4f}"
 
     sparse_s = f"Sparse(<=100): {val_metrics.get('mae_sparse', 0.0):.2f}" if "mae_sparse" in val_metrics else ""
     mod_s = f"Mod(101-500): {val_metrics.get('mae_moderate', 0.0):.2f}" if "mae_moderate" in val_metrics else ""

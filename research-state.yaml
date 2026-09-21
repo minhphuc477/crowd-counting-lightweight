@@ -1,0 +1,77 @@
+# Central State Tracking for Ultra-Lightweight Crowd Counting Research
+project: lightweightcrcn
+objective: "Break the capacity chasm in crowd counting: achieve competitive MAE on ShanghaiTech Part A under <= 105,000 trainable parameters with zero knowledge distillation."
+current_state: "Experiment suite designed, all 8 single-variable configurations created and validated, ready for sequential execution."
+
+constraints:
+  max_trainable_parameters: 105000
+  knowledge_distillation: false
+  external_teacher: false
+  dataset: "ShanghaiTech Part A Canonical (300 Train / 182 Test)"
+  output_stride: 4
+  max_code_lines_per_file: 450
+  deterministic: false
+
+ground_truth_anchor:
+  version: "RMR-v19 Canonical"
+  checkpoint: "runs/sha_a/rmr_v19_canonical_isotropic/best_val_mae.pt"
+  trainable_params: 104441
+  direct_mae: 72.84
+  direct_rmse: 110.57
+  tta_mae: 72.61
+  tta_rmse: 109.98
+  mae_ci95: [61.13, 85.10]
+  sparse_mae: 20.01
+  moderate_mae: 55.85
+  dense_mae: 127.64
+  solver_contribution_mae: -13.82
+
+hypotheses_queue:
+  - id: H0
+    name: "Clean Anchor Verification"
+    description: "Verify v19 execution from disk checkpoint to ensure exact numerical replication."
+    status: "VERIFIED"
+    result: "72.84 direct MAE, 104,441 parameters replicated 100% on disk."
+  - id: H1
+    name: "Augmentation Entropy Isolation"
+    config: "configs/rmr_research/h1_no_jitter.yaml"
+    description: "Measure exact contribution of scale jitter [0.7, 1.35] vs fixed scale [1.0, 1.0] on 300-image dataset."
+    status: "READY"
+  - id: H2
+    name: "Count-Preserving Heavy-Tailed Spectral Loss"
+    config: "configs/rmr_research/h2_spectral_loss.yaml"
+    description: "Evaluate Fourier-domain cluster supervision (beta=2.0, lambda=0.2) to resolve dense clump bottleneck."
+    status: "READY"
+  - id: H3a
+    name: "SIRT Solver Contraction Depth T=2"
+    config: "configs/rmr_research/h3a_depth2.yaml"
+    description: "Evaluate shallow unrolled SIRT contraction (66% speedup in solver)."
+    status: "READY"
+  - id: H3b
+    name: "SIRT Solver Contraction Depth T=4"
+    config: "configs/rmr_research/h3b_depth4.yaml"
+    description: "Intermediate contraction step to map monotonic convergence."
+    status: "READY"
+  - id: H3c
+    name: "SIRT Solver Contraction Depth T=8"
+    config: "configs/rmr_research/h3c_depth8.yaml"
+    description: "Deep unrolled SIRT contraction to test autograd saturation boundary."
+    status: "READY"
+  - id: H4
+    name: "Morozov Discrepancy Deadband Ablation"
+    config: "configs/rmr_research/h4_no_morozov.yaml"
+    description: "Test gamma=0.0 (disable noise deadband) to prove protection against phantom background noise."
+    status: "READY"
+  - id: H5
+    name: "Gated Curvature Regularization Ablation"
+    config: "configs/rmr_research/h5_no_curvature.yaml"
+    description: "Test lambda_curv=0.0 to quantify curvature impact on dense crowd clumpiness."
+    status: "READY"
+  - id: H6
+    name: "Spectral Composite Breakthrough Model"
+    config: "configs/rmr_research/h6_spectral_composite.yaml"
+    description: "Fuses canonical v19 with Count-Preserving Spectral Loss to target sub-70 MAE."
+    status: "READY"
+
+active_iteration: "A* Experiment Suite Ready"
+last_updated: "2026-09-21T17:35:00+07:00"

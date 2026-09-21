@@ -78,7 +78,19 @@ class RMRv3LossConfig:
     # RMR-v21 Elementwise Sample-Level Loss Scaling (0 params)
     elementwise_dense_scaling: bool = False
 
+    # Spectral Loss configuration (Hypothesis H2)
+    use_spectral_loss: bool = False
+    lambda_spectral: float = 0.0
+    spectral_beta: float = 2.0
+    lambda_spectral_dc: float = 1.0
+
     def __post_init__(self) -> None:
+        if self.lambda_spectral < 0.0:
+            raise ValueError(f"lambda_spectral must be non-negative, got {self.lambda_spectral}")
+        if self.lambda_spectral_dc < 0.0:
+            raise ValueError(f"lambda_spectral_dc must be non-negative, got {self.lambda_spectral_dc}")
+        if self.spectral_beta <= 0.0:
+            raise ValueError(f"spectral_beta must be strictly positive, got {self.spectral_beta}")
         if self.use_hierarchical_dm and not self.use_multiscale_dm:
             self.use_multiscale_dm = True
         if self.dm_target not in ("y", "y0", "dual"):

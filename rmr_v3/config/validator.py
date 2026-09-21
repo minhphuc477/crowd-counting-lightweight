@@ -266,6 +266,12 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             lam_kdc = float(l_cfg_pre["lambda_kd_count"])
             if lam_kdc < 0.0:
                 raise ValueError(f"lambda_kd_count must be non-negative, got {lam_kdc}")
+        if "lambda_spectral" in l_cfg_pre and float(l_cfg_pre["lambda_spectral"]) < 0.0:
+            raise ValueError(f"lambda_spectral must be non-negative, got {l_cfg_pre['lambda_spectral']}")
+        if "lambda_spectral_dc" in l_cfg_pre and float(l_cfg_pre["lambda_spectral_dc"]) < 0.0:
+            raise ValueError(f"lambda_spectral_dc must be non-negative, got {l_cfg_pre['lambda_spectral_dc']}")
+        if "spectral_beta" in l_cfg_pre and float(l_cfg_pre["spectral_beta"]) <= 0.0:
+            raise ValueError(f"spectral_beta must be strictly positive, got {l_cfg_pre['spectral_beta']}")
         if "curvature_gate_threshold" in l_cfg_pre:
             cgt = float(l_cfg_pre["curvature_gate_threshold"])
             if cgt < 0.0:

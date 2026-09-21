@@ -34,10 +34,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     validate_v3_config(cfg)
 
     seed = int(cfg.get("seed", 42))
-    deterministic = bool(
-        getattr(args, "deterministic", False)
-        or (not getattr(args, "non_deterministic", False) and cfg.get("train", {}).get("deterministic", True))
-    )
+    if getattr(args, "non_deterministic", False):
+        deterministic = False
+    elif getattr(args, "deterministic", False):
+        deterministic = True
+    else:
+        deterministic = bool(cfg.get("train", {}).get("deterministic", True))
     cfg.setdefault("train", {})["deterministic"] = deterministic
     seed_everything(seed, deterministic=deterministic)
 
@@ -117,6 +119,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     workers = int(cfg.get("train", {}).get("workers", 0))
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", device.type == "cuda"))
     gen = make_generator(seed) if deterministic else None
@@ -319,6 +324,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             "train_hard_bg": loss_avgs.get("hard_bg", 0.0),
             "train_fg_bce": loss_avgs.get("fg_bce", 0.0),
             "train_scale_align": loss_avgs.get("scale_align", 0.0),
+            "train_spectral": loss_avgs.get("spectral", 0.0),
+            "train_spectral_dc": loss_avgs.get("spectral_dc", 0.0),
+            "train_spectral_ac": loss_avgs.get("spectral_ac", 0.0),
             "train_cell_carrier": loss_avgs.get("cell_carrier", 0.0),
             "train_cell_fine": loss_avgs.get("cell_fine", 0.0),
             "train_kd_total": loss_avgs.get("kd_total", 0.0),

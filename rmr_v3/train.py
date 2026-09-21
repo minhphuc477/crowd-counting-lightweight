@@ -104,7 +104,9 @@ def main() -> None:
         cfg.setdefault("train", {})["patience"] = 0
     if args.non_deterministic:
         cfg.setdefault("train", {})["deterministic"] = False
-    elif args.deterministic or "deterministic" not in cfg.get("train", {}):
+    elif args.deterministic:
+        cfg.setdefault("train", {})["deterministic"] = True
+    elif "deterministic" not in cfg.get("train", {}):
         cfg.setdefault("train", {})["deterministic"] = True
 
     if args.output_dir is not None:

@@ -302,6 +302,8 @@ def format_dynamic_training_banner(
         extra_loss_tags.append(f"HardBG({loss_cfg_dict.get('lambda_hard_bg')})")
     if loss_cfg_dict.get("lambda_fg_gate", 0.0) > 0.0:
         extra_loss_tags.append(f"FGBce({loss_cfg_dict.get('lambda_fg_gate')})")
+    if loss_cfg_dict.get("use_spectral_loss", False) and float(loss_cfg_dict.get("lambda_spectral", 0.0)) > 0.0:
+        extra_loss_tags.append(f"Spectral({loss_cfg_dict.get('lambda_spectral')})")
     if extra_loss_tags:
         supervision_desc += f" + [{', '.join(extra_loss_tags)}]"
 

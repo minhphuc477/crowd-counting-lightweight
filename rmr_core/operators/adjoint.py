@@ -215,7 +215,7 @@ def weighted_normalized_adjoint_field(
     # When |q - b| <= gamma * sigma_b, discrepancy is within the measurement noise floor
     # of the regional head. Shrinking delta eliminates solver over-fitting on noisy heads.
     if morozov_gamma > 0.0 and b_variance is not None:
-        sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
+        sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
         deadband = float(morozov_gamma) * sigma_b
         delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
