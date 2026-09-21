@@ -169,6 +169,7 @@ def unrolled_sirt_solver(
     prev_y: torch.Tensor | None = None
     prev_field: torch.Tensor | None = None
     cached_bb_omega: float | torch.Tensor | None = None
+    energy_after: torch.Tensor | None = None
 
     for iter_idx in range(iterations):
         # Nesterov momentum extrapolation
@@ -181,7 +182,9 @@ def unrolled_sirt_solver(
         else:
             z_state = y_curr
 
-        if iter_idx == 0:
+        # Fast Energy Trajectory: Reuse energy_after from step t-1 as energy_before for step t
+        # Eliminates 50% of redundant 2D prefix sums during unrolled SIRT optimization
+        if iter_idx == 0 or energy_after is None:
             energy_before = weighted_regional_energy(
                 y_curr,
                 b_solver,

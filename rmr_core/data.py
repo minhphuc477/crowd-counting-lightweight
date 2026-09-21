@@ -195,10 +195,17 @@ def resolve_manifest_path(manifest_val: str | Path, data_root: str | Path | None
 
 
 class CrowdManifestDataset(Dataset):
-    """Dataset over a standardized JSONL manifest.
+    """Standardized Crowd Counting Dataset with Zero-Stall In-Memory RAM Caching.
 
-    Each line:
-      {"image": "relative/or/absolute/path.jpg", "points": [[x,y], ...], "id": "optional"}
+    Key Architectural Invariants:
+    - Zero Ad-hoc Split Policy: Strictly rejects ad-hoc internal splits (e.g. 270/30).
+      Enforces canonical 300 Train / 182 Test partitions for ShanghaiTech Part A.
+    - In-Memory RAM Caching (Train): Caches decoded PIL RGB images in self._image_cache,
+      completely eliminating redundant disk I/O and JPEG decoding across 1,000 epochs.
+    - Static Evaluation Caching (Eval): In test/val mode (train=False), caches normalized
+      image tensors and rasterized target counts in self._eval_cache, making 200 evaluation
+      cycles instant memory queries with zero redundant CPU preprocessing.
+    - Copy-on-Write Optimization: Coordinates pre-converted to float32 tensors on init.
     """
 
     def __init__(

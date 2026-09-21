@@ -16,11 +16,20 @@ from .model import RMRv3
 
 
 class LossTracker:
-    """Tracks and averages multi-task training loss components across mini-batches."""
+    """Zero-stall multi-task training loss aggregator.
+
+    Accumulates detached scalar tensors directly on device to avoid GPU-CPU host
+    synchronization stalls (.item()) on every mini-batch. Only flushes to host floats
+    once per epoch when averages() is queried.
+    """
 
     def __init__(self) -> None:
-        self.totals: dict[str, Any] = {}
+        self.totals: dict[str, torch.Tensor | float] = {}
         self.count: int = 0
+
+    def reset(self) -> None:
+        self.totals.clear()
+        self.count = 0
 
     def update(self, loss_dict: dict[str, Any]) -> None:
         self.count += 1
