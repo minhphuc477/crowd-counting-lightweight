@@ -104,6 +104,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         random_invert_prob=float(cfg.get("data", {}).get("random_invert_prob", 0.0)),
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
+        preload=bool(cfg.get("data", {}).get("preload", False)),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -112,10 +113,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         output_stride=eff_stride,
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
+        preload=bool(cfg.get("data", {}).get("preload", False)),
     )
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     workers = int(cfg.get("train", {}).get("workers", 0))
-    pin_mem = bool(cfg.get("train", {}).get("pin_memory", False))
+    pin_mem = bool(cfg.get("train", {}).get("pin_memory", device.type == "cuda"))
     gen = make_generator(seed) if deterministic else None
     train_loader = DataLoader(
         train_ds,
@@ -138,7 +141,6 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         collate_fn=collate_eval,
     )
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model, uniform_reliability = make_model(cfg)
     model.to(device)
 
@@ -335,44 +337,26 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                     density_bins=density_bins,
                 )
 
-            row_log.update({
-                "val_mae": float(val_metrics["MAE"]),
-                "val_rmse": float(val_metrics["RMSE"]),
-                "val_nae": float(val_metrics["NAE"]),
-                "val_bias": float(val_metrics["Bias"]),
-                "val_game0": float(val_metrics["GAME0"]),
-                "val_game1": float(val_metrics["GAME1"]),
-                "val_game2": float(val_metrics["GAME2"]),
-                "val_game3": float(val_metrics["GAME3"]),
-                "val_mae_sparse": float(val_metrics.get("mae_sparse", 0.0)),
-                "val_mae_moderate": float(val_metrics.get("mae_moderate", 0.0)),
-                "val_mae_dense": float(val_metrics.get("mae_dense", 0.0)),
-                "pearson_rate_var_error": float(val_metrics.get("pearson_rate_var_error", 0.0)),
-                "spearman_rate_var_error": float(val_metrics.get("spearman_rate_var_error", 0.0)),
-                "spearman_weight_error": float(val_metrics.get("spearman_weight_error", 0.0)),
-                "spearman_pred_weight_error": float(val_metrics.get("spearman_pred_weight_error", 0.0)),
-                "spearman_rate_var_error_16": float(val_metrics.get("spearman_rate_var_error_16", 0.0)),
-                "spearman_rate_var_error_32": float(val_metrics.get("spearman_rate_var_error_32", 0.0)),
-                "spearman_rate_var_error_64": float(val_metrics.get("spearman_rate_var_error_64", 0.0)),
-                "spearman_rate_var_error_128": float(val_metrics.get("spearman_rate_var_error_128", 0.0)),
-                "mean_std_residual": float(val_metrics.get("mean_std_residual", 0.0)),
-                "coverage_50": float(val_metrics.get("coverage_50", 0.0)),
-                "coverage_80": float(val_metrics.get("coverage_80", 0.0)),
-                "coverage_95": float(val_metrics.get("coverage_95", 0.0)),
-                "calib_gap_50": float(val_metrics.get("calib_gap_50", 0.0)),
-                "calib_gap_80": float(val_metrics.get("calib_gap_80", 0.0)),
-                "calib_gap_95": float(val_metrics.get("calib_gap_95", 0.0)),
-                "dispersion_sat_low_fraction": float(val_metrics.get("dispersion_sat_low_fraction", 0.0)),
-                "dispersion_sat_high_fraction": float(val_metrics.get("dispersion_sat_high_fraction", 0.0)),
-                "solver_help_fraction": float(val_metrics.get("solver_help_fraction", 0.0)),
-                "solver_harm_fraction": float(val_metrics.get("solver_harm_fraction", 0.0)),
-                "energy_monotonic_fraction": float(val_metrics.get("energy_monotonic_fraction", 1.0)),
-                "mae_reg_y0": float(val_metrics.get("mae_reg_y0", 0.0)),
-                "mae_reg_y1": float(val_metrics.get("mae_reg_y1", 0.0)),
-                "mae_reg_y2": float(val_metrics.get("mae_reg_y2", 0.0)),
-                "curvature_alpha": float(model.fine_head.curvature_alpha.item()) if getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha") else 0.0,
-                "effective_curvature": float(F.softplus(model.fine_head.curvature_alpha).item()) if getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha") else 0.0,
-            })
+            eval_map = {
+                "val_mae": "MAE", "val_rmse": "RMSE", "val_nae": "NAE", "val_bias": "Bias",
+                "val_game0": "GAME0", "val_game1": "GAME1", "val_game2": "GAME2", "val_game3": "GAME3",
+                "val_mae_sparse": "mae_sparse", "val_mae_moderate": "mae_moderate", "val_mae_dense": "mae_dense",
+            }
+            extra_keys = [
+                "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
+                "spearman_pred_weight_error", "spearman_rate_var_error_16", "spearman_rate_var_error_32",
+                "spearman_rate_var_error_64", "spearman_rate_var_error_128", "mean_std_residual",
+                "coverage_50", "coverage_80", "coverage_95", "calib_gap_50", "calib_gap_80", "calib_gap_95",
+                "dispersion_sat_low_fraction", "dispersion_sat_high_fraction", "solver_help_fraction",
+                "solver_harm_fraction", "energy_monotonic_fraction", "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
+            ]
+            for lk, vk in eval_map.items():
+                row_log[lk] = float(val_metrics.get(vk, 0.0))
+            for k in extra_keys:
+                row_log[k] = float(val_metrics.get(k, 1.0 if k == "energy_monotonic_fraction" else 0.0))
+            has_curv = getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha")
+            row_log["curvature_alpha"] = float(model.fine_head.curvature_alpha.item()) if has_curv else 0.0
+            row_log["effective_curvature"] = float(F.softplus(model.fine_head.curvature_alpha).item()) if has_curv else 0.0
 
             cur_mae = float(val_metrics["MAE"])
             is_best, status_tag = ckpt_manager.evaluate_and_save_best(

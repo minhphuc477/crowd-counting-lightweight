@@ -113,6 +113,9 @@ Các agent mới phải đọc kỹ các thất bại lịch sử sau để khô
 4. **Bẫy Nhân Đôi Trọng Số Loss Trong Phân Cấp (Loss Scaling Orthogonality):**
    - *Bài học:* Outer loop nhân trọng số mẫu $w_i$, inner loss lại nhân tiếp $w_i$, dẫn đến gradient bị khuếch đại thành $w_i^2$, làm sụp đổ hội tụ của mô hình.
    - *Chuẩn mực:* Giữ đúng nguyên tắc đơn nhiệm (Single Responsibility): Điều phối viên vòng ngoài áp dụng trọng số mẫu; hàm loss bên trong giữ nguyên dạng chuẩn.
+5. **Bẫy Tin Tưởng Mù Quáng Vào Test Đơn Thuần (The Blind-Test Trap & Vectorized Metrics):**
+   - *Bài học:* Unit test với 5 điểm tọa độ pass hoàn toàn, nhưng khi đánh giá trên ảnh thực với 2,000 điểm, vòng lặp `for pt in pts:` trong `game_physical_image` thực thi 1.45 triệu lần lặp Python, làm mỗi lần eval mất 8.41 giây (tổng cộng stall GPU hơn 28 phút qua 200 lần eval)! Tương tự, gọi 18 lần `.item()` trên từng mẫu trong `trajectory.py` gây ra 3,276 lần GPU sync flush.
+   - *Chuẩn mực:* Mọi phép tính metric trên mảng tọa độ phải được vector hóa với `np.add.at` / `np.searchsorted` (tăng tốc 171x). Trích xuất chẩn đoán phải dùng bulk array sang NumPy (tăng tốc 3.6x), tuyệt đối không gọi `.item()` trên từng mẫu hoặc từng mini-batch. Luôn tuân thủ kỹ năng `.agents/skills/training-performance-and-engineering-audit/SKILL.md`.
 
 ---
 

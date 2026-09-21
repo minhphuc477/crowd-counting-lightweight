@@ -95,12 +95,15 @@ def game_physical_image(
 
         gt_counts = np.zeros((parts, parts), dtype=np.float64)
         if pts.size > 0:
-            for pt in pts:
-                px, py = pt[0], pt[1]
-                if 0.0 <= px < float(image_w) and 0.0 <= py < float(image_h):
-                    bx = int(np.clip(np.searchsorted(part_x_edges[1:], px, side="right"), 0, parts - 1))
-                    by = int(np.clip(np.searchsorted(part_y_edges[1:], py, side="right"), 0, parts - 1))
-                    gt_counts[by, bx] += 1.0
+            px = pts[:, 0]
+            py = pts[:, 1]
+            valid = (px >= 0.0) & (px < float(image_w)) & (py >= 0.0) & (py < float(image_h))
+            if valid.any():
+                px_v = px[valid]
+                py_v = py[valid]
+                bx = np.clip(np.searchsorted(part_x_edges[1:], px_v, side="right"), 0, parts - 1)
+                by = np.clip(np.searchsorted(part_y_edges[1:], py_v, side="right"), 0, parts - 1)
+                np.add.at(gt_counts, (by, bx), 1.0)
 
         total_abs_error = float(np.sum(np.abs(pred_counts - gt_counts)))
         out[level] = total_abs_error

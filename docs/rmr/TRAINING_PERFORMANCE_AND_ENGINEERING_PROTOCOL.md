@@ -93,6 +93,18 @@
      stats = np.mean(arr[idx], axis=1)
      ```
    - Tốc độ nhanh hơn 4.3 lần so với vòng lặp Python 5,000 lượt.
+3. **Vectorized Physical-Support GAME (Tăng tốc 171 Lần):**
+   - Không lặp `for pt in pts:` trong Python để tìm ô lưới qua `np.searchsorted`.
+   - Vector hóa toàn bộ tọa độ điểm qua `np.add.at` và `np.searchsorted` một lần cho toàn mảng điểm:
+     ```python
+     bx = np.clip(np.searchsorted(part_x_edges[1:], px[valid], side="right"), 0, parts - 1)
+     by = np.clip(np.searchsorted(part_y_edges[1:], py[valid], side="right"), 0, parts - 1)
+     np.add.at(gt_counts, (by, bx), 1.0)
+     ```
+   - Giảm thời gian tính GAME cho 182 ảnh từ **8.41s $\to$ 0.049s**, loại bỏ 28 phút chờ của CPU qua 200 lượt evaluation.
+4. **Zero-Sync Trajectory Diagnostics & PCIe DMA Reuse:**
+   - Trong [`rmr_v3/diagnostics/trajectory.py`](file:///f:/lightweightcrcn/rmr_v3/diagnostics/trajectory.py), trích xuất mảng NumPy một lần thay vì gọi 18 lần `.item()` trên từng mẫu test, loại bỏ 3,276 lần GPU sync flushes.
+   - Gán `sample["target_device"] = target` trong [`rmr_core/evaluation.py`](file:///f:/lightweightcrcn/rmr_core/evaluation.py) để callback tái sử dụng trực tiếp tensor trên GPU, tránh copy lại qua PCIe.
 
 ---
 

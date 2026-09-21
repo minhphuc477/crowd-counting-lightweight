@@ -13,16 +13,9 @@ ALLOWED_TOP_LEVEL = {
 }
 
 ALLOWED_DATA_KEYS = {
-    "train_manifest",
-    "val_manifest",
-    "crop_size",
-    "scale_range",
-    "hflip_prob",
-    "brightness_jitter",
-    "contrast_jitter",
-    "gamma_jitter",
-    "random_invert_prob",
-    "data_root",
+    "train_manifest", "val_manifest", "crop_size", "scale_range",
+    "hflip_prob", "brightness_jitter", "contrast_jitter", "gamma_jitter",
+    "random_invert_prob", "data_root", "cache_images", "preload",
 }
 
 ALLOWED_MODEL_KEYS = {

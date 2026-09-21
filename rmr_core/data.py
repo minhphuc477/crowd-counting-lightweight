@@ -292,6 +292,9 @@ class CrowdManifestDataset(Dataset):
                     p = self.root / p
                 with Image.open(p) as img:
                     self._image_cache[i] = img.convert("RGB")
+            if not self.train:
+                for i in range(len(self.items)):
+                    _ = self[i]
 
     def __len__(self) -> int:
         return len(self.items)

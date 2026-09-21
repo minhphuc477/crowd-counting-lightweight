@@ -83,7 +83,7 @@ def evaluate_v3(
     scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
-        target = sample["target_y"].to(device)
+        target = sample.get("target_device", sample["target_y"].to(device))
         target_4d = target if target.ndim == 4 else (target.unsqueeze(0) if target.ndim == 3 else target.unsqueeze(0).unsqueeze(0))
         d_rows = regional_reliability_rows(out, target_4d, max_regions=300)
         all_diag_rows.extend(d_rows)
