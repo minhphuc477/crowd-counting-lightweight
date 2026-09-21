@@ -26,3 +26,34 @@ def test_rasterize_points_conserves_edge_points():
     assert y[0, 3, 3].item() == 1
     assert y[0, 0, 0].item() == 1
     assert y[0, 0, 3].item() == 1
+
+
+def test_dataset_ram_caching_train_and_eval():
+    from rmr_core.data import CrowdManifestDataset
+    # Test Train Caching
+    train_ds = CrowdManifestDataset("data/sha_a_train_all.jsonl", train=True, cache_images=True)
+    assert len(train_ds._image_cache) == 0
+    s0 = train_ds[0]
+    assert len(train_ds._image_cache) == 1
+    assert 0 in train_ds._image_cache
+    s0_again = train_ds[0]
+    assert len(train_ds._image_cache) == 1
+
+    # Test Eval Caching (static samples)
+    eval_ds = CrowdManifestDataset("data/sha_a_test.jsonl", train=False, cache_images=True)
+    assert len(eval_ds._eval_cache) == 0
+    e0 = eval_ds[0]
+    assert len(eval_ds._eval_cache) == 1
+    e0_again = eval_ds[0]
+    assert torch.equal(e0["image"], e0_again["image"])
+    assert torch.equal(e0["target_y"], e0_again["target_y"])
+
+    # Verify returned points clone protects cached points tensor
+    e0_again["points"][0, 0] = 9999.0
+    e0_third = eval_ds[0]
+    assert e0_third["points"][0, 0].item() != 9999.0
+
+    # Test Preload
+    preload_ds = CrowdManifestDataset("data/sha_a_test.jsonl", train=False, cache_images=True, preload=True)
+    assert len(preload_ds._image_cache) == 182
+

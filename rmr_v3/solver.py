@@ -181,12 +181,15 @@ def unrolled_sirt_solver(
         else:
             z_state = y_curr
 
-        energy_before = weighted_regional_energy(
-            y_curr,
-            b_solver,
-            weight_solver,
-            regions,
-        ).detach()
+        if iter_idx == 0:
+            energy_before = weighted_regional_energy(
+                y_curr,
+                b_solver,
+                weight_solver,
+                regions,
+            ).detach()
+        else:
+            energy_before = energy_after
 
         # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
         is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")

@@ -214,6 +214,8 @@ class CrowdManifestDataset(Dataset):
         gamma_jitter: tuple[float, float] = (1.0, 1.0),
         random_invert_prob: float = 0.0,
         data_root: str | Path | None = None,
+        cache_images: bool = True,
+        preload: bool = False,
     ):
         manifest_str = str(manifest).replace("\\", "/")
         if manifest_str.endswith("sha_a_train.jsonl") or manifest_str.endswith("sha_a_val.jsonl"):
@@ -237,6 +239,9 @@ class CrowdManifestDataset(Dataset):
         self.contrast_jitter = float(contrast_jitter)
         self.gamma_jitter = (float(gamma_jitter[0]), float(gamma_jitter[1]))
         self.random_invert_prob = float(random_invert_prob)
+        self.cache_images = bool(cache_images)
+        self._image_cache: dict[int, Image.Image] = {}
+        self._eval_cache: dict[int, dict] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -273,16 +278,42 @@ class CrowdManifestDataset(Dataset):
             pts_raw = it.get("points", [])
             it["points_tensor"] = torch.tensor(pts_raw, dtype=torch.float32).reshape(-1, 2)
 
+        if self.cache_images and preload:
+            for i, it in enumerate(self.items):
+                p = Path(it["image"])
+                if not p.is_absolute():
+                    p = self.root / p
+                with Image.open(p) as img:
+                    self._image_cache[i] = img.convert("RGB")
+
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> dict:
+        if not self.train and self.cache_images and idx in self._eval_cache:
+            c = self._eval_cache[idx]
+            return {
+                "image": c["image"],
+                "target_y": c["target_y"],
+                "points": c["points"].clone(),
+                "id": c["id"],
+                "path": c["path"],
+                "height": c["height"],
+                "width": c["width"],
+            }
+
         item = self.items[idx]
         path = Path(item["image"])
         if not path.is_absolute():
             path = self.root / path
-        with Image.open(path) as img:
-            image = img.convert("RGB")
+        if self.cache_images:
+            if idx not in self._image_cache:
+                with Image.open(path) as img:
+                    self._image_cache[idx] = img.convert("RGB")
+            image = self._image_cache[idx].copy()
+        else:
+            with Image.open(path) as img:
+                image = img.convert("RGB")
         pts_tensor = item.get("points_tensor")
         if pts_tensor is not None:
             pts = pts_tensor.clone()
@@ -307,7 +338,7 @@ class CrowdManifestDataset(Dataset):
         h, w = image_t.shape[-2:]
         target_y = rasterize_points(pts, h, w, stride=self.output_stride)
         image_t = normalize_image(image_t)
-        return {
+        res = {
             "image": image_t,
             "target_y": target_y,
             "points": pts,
@@ -316,6 +347,9 @@ class CrowdManifestDataset(Dataset):
             "height": h,
             "width": w,
         }
+        if not self.train and self.cache_images:
+            self._eval_cache[idx] = res
+        return res
 
 
 def collate_train(batch: list[dict]) -> dict:

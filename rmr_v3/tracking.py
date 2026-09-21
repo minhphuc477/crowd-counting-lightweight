@@ -19,23 +19,27 @@ class LossTracker:
     """Tracks and averages multi-task training loss components across mini-batches."""
 
     def __init__(self) -> None:
-        self.totals: dict[str, float] = {}
+        self.totals: dict[str, Any] = {}
         self.count: int = 0
 
     def update(self, loss_dict: dict[str, Any]) -> None:
         self.count += 1
         for k, v in loss_dict.items():
             if isinstance(v, torch.Tensor):
-                val = float(v.item())
+                val = v.detach()
+                self.totals[k] = self.totals[k] + val if k in self.totals else val
             elif isinstance(v, (float, int)):
                 val = float(v)
+                self.totals[k] = self.totals.get(k, 0.0) + val
             else:
                 continue
-            self.totals[k] = self.totals.get(k, 0.0) + val
 
     def averages(self) -> dict[str, float]:
         c = max(self.count, 1)
-        return {k: v / c for k, v in self.totals.items()}
+        return {
+            k: float(v.item() if isinstance(v, torch.Tensor) else v) / c
+            for k, v in self.totals.items()
+        }
 
 
 class DiagnosticTracker:

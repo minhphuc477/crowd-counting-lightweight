@@ -9,20 +9,10 @@ import torch.nn.functional as F
 import yaml
 from torch.utils.data import DataLoader
 
-from rmr_core.data import (
-    CrowdManifestDataset,
-    collate_eval,
-    collate_train,
-    compute_manifest_density,
-)
+from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.training import (
-    get_git_info,
-    load_rng_state,
-    make_generator,
-    make_scheduler,
-    safe_torch_load,
-    seed_everything,
-    seed_worker,
+    get_git_info, load_rng_state, make_generator, make_scheduler,
+    safe_torch_load, seed_everything, seed_worker,
 )
 
 from rmr_v3.checkpoint import CheckpointManager, EMAManager
@@ -113,6 +103,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         gamma_jitter=tuple(cfg.get("data", {}).get("gamma_jitter", [1.0, 1.0])),
         random_invert_prob=float(cfg.get("data", {}).get("random_invert_prob", 0.0)),
         data_root=cfg.get("data", {}).get("data_root"),
+        cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -120,6 +111,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         train=False,
         output_stride=eff_stride,
         data_root=cfg.get("data", {}).get("data_root"),
+        cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
     )
 
     workers = int(cfg.get("train", {}).get("workers", 0))

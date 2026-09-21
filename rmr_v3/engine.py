@@ -150,9 +150,14 @@ def train_one_epoch(
     loss_tracker = LossTracker()
     diag_tracker = DiagnosticTracker(model)
 
-    for batch in train_loader:
-        images = batch["image"].to(device)
-        targets = batch["target_y"].to(device)
+    try:
+        n_batches = len(train_loader)
+    except (TypeError, AttributeError):
+        n_batches = -1
+
+    for batch_idx, batch in enumerate(train_loader):
+        images = batch["image"].to(device, non_blocking=True)
+        targets = batch["target_y"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -193,7 +198,8 @@ def train_one_epoch(
         ema_manager.update(model)
 
         loss_tracker.update(losses)
-        diag_tracker.update(outputs)
+        if n_batches <= 0 or batch_idx == n_batches - 1:
+            diag_tracker.update(outputs)
 
     scheduler.step()
     return loss_tracker.averages(), diag_tracker.summarize()
