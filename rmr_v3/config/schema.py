@@ -144,9 +144,9 @@ ALLOWED_MODEL_KEYS = {
     "anscombe_tau_dense",
     "area_normalized_adjoint",
     # RMR-v32 additions
-    "use_cpcm",
-    "cpcm_hidden",
-    "floor_tau",
+    "use_cpcm", "cpcm_hidden", "floor_tau",
+    # RMR-v33 additions (H7/H8 Resonant Adjoint)
+    "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
 }
 
 
@@ -207,8 +207,10 @@ ALLOWED_LOSS_KEYS = {
     "elementwise_dense_scaling",
     "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
     "lambda_kd_spatial", "lambda_kd_count",
-    # Spectral Loss (H2)
+    # Spectral Loss (H2/H8) & Regional Mass Weight (H8)
     "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
+    "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
+    "regional_mass_weight_alpha",
 }
 
 ALLOWED_TRAIN_KEYS = {

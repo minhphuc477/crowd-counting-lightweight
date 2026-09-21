@@ -326,23 +326,15 @@ class RMRv3(nn.Module):
         fg_logit: torch.Tensor | None,
         pi_scale: torch.Tensor | None,
         pi_aspect: torch.Tensor | None,
+        carrier_energy: torch.Tensor | None = None,
     ) -> RMRModelOutput:
         return solve_inverse_measure(
-            cfg=self.cfg,
-            y0=y0,
-            z0=z0,
-            regional_evidence=regional_evidence,
-            regions=regions,
-            scale_weights=scale_weights,
-            solver_strength=solver_strength,
-            default_solver_strength=self.solver_strength,
-            uniform_reliability=uniform_reliability,
-            p16=p16,
-            fg_logit=fg_logit,
-            pi_scale=pi_scale,
-            pi_aspect=pi_aspect,
-            trust_gate=self.trust_gate,
-            laplace_kernel=self._laplace_kernel,
+            cfg=self.cfg, y0=y0, z0=z0, regional_evidence=regional_evidence,
+            regions=regions, scale_weights=scale_weights, solver_strength=solver_strength,
+            default_solver_strength=self.solver_strength, uniform_reliability=uniform_reliability,
+            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
+            trust_gate=self.trust_gate, laplace_kernel=self._laplace_kernel,
+            carrier_energy=carrier_energy,
         )
 
     def forward(
@@ -418,18 +410,18 @@ class RMRv3(nn.Module):
             grid_h=target_h4,
         )
 
+        carrier_energy = None
+        if self.cfg.resonant_adjoint:
+            b_c, c_p4, h_p4, w_p4 = p4.shape
+            p4_flat = p4.view(b_c * c_p4, 1, h_p4, w_p4)
+            lap_p4 = F.conv2d(p4_flat, self._laplace_kernel, padding=1).view(b_c, c_p4, h_p4, w_p4)
+            carrier_energy = (lap_p4 ** 2).mean(dim=1, keepdim=True)
+
         out = self._solve_inverse_measure(
-            y0=y0,
-            z0=z0,
-            regional_evidence=regional_evidence,
-            regions=regions_solver,
-            scale_weights=scale_weights,
-            solver_strength=solver_strength,
-            uniform_reliability=uniform_reliability,
-            p16=p16,
-            fg_logit=fg_logit,
-            pi_scale=pi_scale,
-            pi_aspect=pi_aspect,
+            y0=y0, z0=z0, regional_evidence=regional_evidence, regions=regions_solver,
+            scale_weights=scale_weights, solver_strength=solver_strength,
+            uniform_reliability=uniform_reliability, p16=p16, fg_logit=fg_logit,
+            pi_scale=pi_scale, pi_aspect=pi_aspect, carrier_energy=carrier_energy,
         )
 
         if self.cfg.subpixel_stride2:

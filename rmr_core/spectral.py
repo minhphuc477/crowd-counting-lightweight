@@ -18,6 +18,10 @@ def compute_spectral_weights(
     width_rfft: int,
     full_width: int,
     beta: float = 2.0,
+    omega_0: float = 0.05,
+    bandpass: bool = False,
+    omega_low: float = 0.02,
+    omega_high: float = 0.35,
     device: torch.device | None = None,
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
@@ -28,6 +32,10 @@ def compute_spectral_weights(
         width_rfft: RFFT frequency width W // 2 + 1.
         full_width: Original spatial width W.
         beta: Power decay exponent for heavy-tailed spectral weighting.
+        omega_0: Base spatial frequency scale (default 0.05).
+        bandpass: If True, uses resonant band-pass weighting preserving crowd-wave frequencies.
+        omega_low: Low-frequency cutoff for bandpass window.
+        omega_high: High-frequency cutoff for bandpass window.
         device: Target torch device.
         dtype: Output tensor dtype.
 
@@ -41,10 +49,14 @@ def compute_spectral_weights(
     grid_y, grid_x = torch.meshgrid(freq_y, freq_x, indexing="ij")
     omega_mag = torch.sqrt(grid_y ** 2 + grid_x ** 2)  # [H, W_rfft]
 
-    # Heavy-tailed decay: w(omega) = 1 / (1 + (omega / omega_0))^beta
-    # Set omega_0 = 0.05 (focusing on cluster structures of period ~20px)
-    omega_0 = 0.05
-    weights = 1.0 / (1.0 + (omega_mag / omega_0) ** beta)
+    if bandpass:
+        # Resonant crowd-wave bandpass: passes cluster and queue frequencies [omega_low, omega_high]
+        high_cut = 1.0 / (1.0 + (omega_mag / float(omega_high)) ** float(beta))
+        low_cut = (omega_mag / float(omega_low)) ** 2 / (1.0 + (omega_mag / float(omega_low)) ** 2)
+        weights = high_cut * low_cut
+    else:
+        # Heavy-tailed decay: w(omega) = 1 / (1 + (omega / omega_0))^beta
+        weights = 1.0 / (1.0 + (omega_mag / float(omega_0)) ** float(beta))
 
     # Exclude DC component (omega = 0, 0) from AC weight grid
     weights[0, 0] = 0.0
@@ -57,6 +69,10 @@ def count_preserving_spectral_loss(
     beta: float = 2.0,
     lambda_count: float = 1.0,
     lambda_spectral: float = 0.5,
+    omega_0: float = 0.05,
+    bandpass: bool = False,
+    omega_low: float = 0.02,
+    omega_high: float = 0.35,
     eps: float = 1e-6,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute count-preserving heavy-tailed spectral loss between pred and target.
@@ -67,6 +83,10 @@ def count_preserving_spectral_loss(
         beta: Heavy-tailed spectral decay exponent.
         lambda_count: Weight for explicit DC mass conservation term.
         lambda_spectral: Weight for weighted AC spectral discrepancy term.
+        omega_0: Base spatial frequency scale (default 0.05).
+        bandpass: If True, uses resonant band-pass weighting preserving crowd-wave frequencies.
+        omega_low: Low-frequency cutoff for bandpass window.
+        omega_high: High-frequency cutoff for bandpass window.
         eps: Small positive constant for numerical safety.
 
     Returns:
@@ -90,12 +110,16 @@ def count_preserving_spectral_loss(
     dc_target = fft_target[..., 0, 0].real
     dc_loss = F.l1_loss(dc_pred, dc_target)
 
-    # 3. AC Spectral Discrepancy with Heavy-Tailed Weighting
+    # 3. AC Spectral Discrepancy with Heavy-Tailed or Resonant Weighting
     spec_weights = compute_spectral_weights(
         height=h,
         width_rfft=fft_pred.shape[-1],
         full_width=w,
         beta=beta,
+        omega_0=omega_0,
+        bandpass=bandpass,
+        omega_low=omega_low,
+        omega_high=omega_high,
         device=pred.device,
         dtype=torch.float32,
     )
@@ -125,11 +149,19 @@ class CountPreservingSpectralLoss(nn.Module):
         beta: float = 2.0,
         lambda_count: float = 1.0,
         lambda_spectral: float = 0.5,
+        omega_0: float = 0.05,
+        bandpass: bool = False,
+        omega_low: float = 0.02,
+        omega_high: float = 0.35,
     ) -> None:
         super().__init__()
         self.beta = beta
         self.lambda_count = lambda_count
         self.lambda_spectral = lambda_spectral
+        self.omega_0 = omega_0
+        self.bandpass = bandpass
+        self.omega_low = omega_low
+        self.omega_high = omega_high
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
@@ -140,5 +172,9 @@ class CountPreservingSpectralLoss(nn.Module):
             beta=self.beta,
             lambda_count=self.lambda_count,
             lambda_spectral=self.lambda_spectral,
+            omega_0=self.omega_0,
+            bandpass=self.bandpass,
+            omega_low=self.omega_low,
+            omega_high=self.omega_high,
         )
         return loss

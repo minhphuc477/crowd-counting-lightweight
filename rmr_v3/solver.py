@@ -79,6 +79,9 @@ def unrolled_sirt_solver(
     density_gated_anscombe: bool = False,
     anscombe_tau_dense: float = 0.08,
     area_normalized_adjoint: bool = False,
+    carrier_energy: torch.Tensor | None = None,
+    resonant_lambda: float = 0.0,
+    anscombe_morozov: bool = False,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -231,6 +234,9 @@ def unrolled_sirt_solver(
                 hybrid_recovery_alpha=float(hybrid_recovery_alpha),
                 output_stride=output_stride,
                 area_normalized=area_normalized_adjoint,
+                carrier_energy=carrier_energy,
+                resonant_lambda=float(resonant_lambda),
+                anscombe_morozov=False,
             )
         else:
             field = weighted_normalized_adjoint_field(
@@ -252,6 +258,9 @@ def unrolled_sirt_solver(
                 hybrid_recovery_alpha=float(hybrid_recovery_alpha),
                 output_stride=output_stride,
                 area_normalized=area_normalized_adjoint,
+                carrier_energy=carrier_energy,
+                resonant_lambda=float(resonant_lambda),
+                anscombe_morozov=anscombe_morozov,
             )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)

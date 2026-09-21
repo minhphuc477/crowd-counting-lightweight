@@ -76,8 +76,13 @@ def scale_balanced_regional_nb_nll(
     mean_region: torch.Tensor,
     dispersion_region: torch.Tensor,
     regions: RegionSet,
+    mass_weight_alpha: float = 0.0,
 ) -> torch.Tensor:
-    """Average proper NB NLL within scale, then average scales."""
+    """Average proper NB NLL within scale, then average scales.
+
+    When mass_weight_alpha > 0, weights region errors by target mass to prevent
+    empty background boxes from dominating dense crowd boxes.
+    """
     if target_region.shape != mean_region.shape:
         raise ValueError(
             f"target/mean mismatch: {target_region.shape} vs {mean_region.shape}"
@@ -102,8 +107,14 @@ def scale_balanced_regional_nb_nll(
         mask = (regions.scale_id == sid)
         count = mask.float().sum()
         has_scale = (count > 0).float()
-        # Compute loss for this scale without dynamic host branching
-        loss_s = (per_region[..., mask].sum(dim=-1) / count.clamp_min(1.0)).mean()
+        if mass_weight_alpha > 0.0 and count > 0:
+            t_s = target_region[..., mask].float()
+            t_mean = t_s.mean(dim=-1, keepdim=True).clamp_min(1e-4)
+            w_raw = 1.0 + float(mass_weight_alpha) * (t_s / t_mean)
+            w_norm = w_raw / w_raw.mean(dim=-1, keepdim=True).clamp_min(1e-4)
+            loss_s = (w_norm * per_region[..., mask]).mean()
+        else:
+            loss_s = (per_region[..., mask].sum(dim=-1) / count.clamp_min(1.0)).mean()
         scale_losses.append(loss_s * has_scale)
         scale_weights.append(has_scale)
 

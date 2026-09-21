@@ -78,13 +78,22 @@ class RMRv3LossConfig:
     # RMR-v21 Elementwise Sample-Level Loss Scaling (0 params)
     elementwise_dense_scaling: bool = False
 
-    # Spectral Loss configuration (Hypothesis H2)
+    # Spectral Loss configuration (Hypothesis H2/H8)
     use_spectral_loss: bool = False
     lambda_spectral: float = 0.0
     spectral_beta: float = 2.0
     lambda_spectral_dc: float = 1.0
+    spectral_omega_0: float = 0.05
+    spectral_bandpass: bool = False
+    spectral_omega_low: float = 0.02
+    spectral_omega_high: float = 0.35
+
+    # Mass-Weighted Regional Loss (Hypothesis H8)
+    regional_mass_weight_alpha: float = 0.0
 
     def __post_init__(self) -> None:
+        if self.regional_mass_weight_alpha < 0.0:
+            raise ValueError(f"regional_mass_weight_alpha must be non-negative, got {self.regional_mass_weight_alpha}")
         if self.lambda_spectral < 0.0:
             raise ValueError(f"lambda_spectral must be non-negative, got {self.lambda_spectral}")
         if self.lambda_spectral_dc < 0.0:

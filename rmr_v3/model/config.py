@@ -112,6 +112,11 @@ class RMRv3Config:
     cpcm_hidden: int = 8
     floor_tau: float = 0.0
 
+    # RMR-v33 (Hypothesis H7/H8): Resonant Carrier Adjoint & Anscombe Morozov (0 params)
+    resonant_adjoint: bool = False
+    resonant_adjoint_lambda: float = 0.5
+    anscombe_morozov: bool = False
+
 
     # Dynamic Scale Routing
     dynamic_scale_routing: bool = False

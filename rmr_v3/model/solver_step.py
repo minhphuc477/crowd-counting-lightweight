@@ -27,6 +27,7 @@ def solve_inverse_measure(
     pi_aspect: torch.Tensor | None,
     trust_gate: nn.Linear | None,
     laplace_kernel: torch.Tensor,
+    carrier_energy: torch.Tensor | None = None,
 ) -> RMRModelOutput:
     """Solve the unrolled inverse problem on Radon measures using SIRT and return RMRModelOutput."""
     mu_count = regional_evidence["mu_count"]
@@ -130,6 +131,9 @@ def solve_inverse_measure(
         density_gated_anscombe=getattr(cfg, "density_gated_anscombe", False),
         anscombe_tau_dense=getattr(cfg, "anscombe_tau_dense", 0.08),
         area_normalized_adjoint=getattr(cfg, "area_normalized_adjoint", False),
+        carrier_energy=carrier_energy,
+        resonant_lambda=getattr(cfg, "resonant_adjoint_lambda", 0.5),
+        anscombe_morozov=getattr(cfg, "anscombe_morozov", False),
     )
 
     y = solver_res["y"]
