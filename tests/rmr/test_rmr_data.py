@@ -30,20 +30,20 @@ def test_rasterize_points_conserves_edge_points():
 
 def test_dataset_ram_caching_train_and_eval():
     from rmr_core.data import CrowdManifestDataset
-    # Test Train Caching
+    # Test Train Caching via compressed raw bytes store
     train_ds = CrowdManifestDataset("data/sha_a_train_all.jsonl", train=True, cache_images=True)
-    assert len(train_ds._image_cache) == 0
+    assert len(train_ds._raw_bytes_cache) == 0
     s0 = train_ds[0]
-    assert len(train_ds._image_cache) == 1
-    assert 0 in train_ds._image_cache
+    assert len(train_ds._raw_bytes_cache) == 1
+    assert 0 in train_ds._raw_bytes_cache
     s0_again = train_ds[0]
-    assert len(train_ds._image_cache) == 1
+    assert len(train_ds._raw_bytes_cache) == 1
 
-    # Test Eval Caching (static samples)
+    # Test Eval Caching via compressed raw bytes store
     eval_ds = CrowdManifestDataset("data/sha_a_test.jsonl", train=False, cache_images=True)
-    assert len(eval_ds._eval_cache) == 0
+    assert len(eval_ds._raw_bytes_cache) == 0
     e0 = eval_ds[0]
-    assert len(eval_ds._eval_cache) == 1
+    assert len(eval_ds._raw_bytes_cache) == 1
     e0_again = eval_ds[0]
     assert torch.equal(e0["image"], e0_again["image"])
     assert torch.equal(e0["target_y"], e0_again["target_y"])
@@ -55,5 +55,6 @@ def test_dataset_ram_caching_train_and_eval():
 
     # Test Preload
     preload_ds = CrowdManifestDataset("data/sha_a_test.jsonl", train=False, cache_images=True, preload=True)
-    assert len(preload_ds._image_cache) == 182
+    assert len(preload_ds._raw_bytes_cache) == 182
+
 

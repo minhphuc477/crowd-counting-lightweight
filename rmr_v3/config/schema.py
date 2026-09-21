@@ -145,8 +145,10 @@ ALLOWED_MODEL_KEYS = {
     "area_normalized_adjoint",
     # RMR-v32 additions
     "use_cpcm", "cpcm_hidden", "floor_tau",
-    # RMR-v33 additions (H7/H8 Resonant Adjoint)
+    # RMR-v33 additions (H7/H8 Resonant Adjoint, CRCDF, A-SAM)
     "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
+    "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
+    "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
 }
 
 
@@ -210,7 +212,7 @@ ALLOWED_LOSS_KEYS = {
     # Spectral Loss (H2/H8) & Regional Mass Weight (H8)
     "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
     "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
-    "regional_mass_weight_alpha",
+    "spectral_transform", "regional_mass_weight_alpha",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -339,70 +341,25 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "cyclic_bb_length",
         "enable_solver",
         "init_m0",
-        # RMR-v31 additions
-        "anisotropic_diffusion",
-        "pm_kappa",
-        "density_gated_anscombe",
-        "anscombe_tau_dense",
-        "area_normalized_adjoint",
-        # RMR-v30 additions (were in ALLOWED but missing from METHOD_CRITICAL_FIELDS)
-        "use_anscombe_sirt",
-        "anscombe_c",
-        "adaptive_tau",
-        "adaptive_tau_rho0",
-        # RMR-v32 additions
-        "use_cpcm",
-        "cpcm_hidden",
-        "floor_tau",
+        # RMR-v31/v32/v33 additions
+        "anisotropic_diffusion", "pm_kappa", "density_gated_anscombe", "anscombe_tau_dense",
+        "area_normalized_adjoint", "use_anscombe_sirt", "anscombe_c", "adaptive_tau", "adaptive_tau_rho0",
+        "use_cpcm", "cpcm_hidden", "floor_tau",
+        "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
+        "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
+        "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
     ],
     "loss": [
-        "lambda_count",
-        "lambda_flat_dm16",
-        "lambda_cell",
-        "lambda_region_nb",
-        "lambda_hurdle",
-        "lambda_trunc_nb",
-        "count_loss_mode",
-        "count_nb_dispersion",
-        "kappa_flat16",
-        "normalize_flat_dm16",
-        "cell_beta",
-        "use_hierarchical_dm",
-        "use_multiscale_dm",
-        "dm_block_sizes_px",
-        "dm_weights",
-        "dm_kappas",
-        # RMR-v8 Stage 2 loss fields
-        "cell_loss_mode",
-        "cell_mass_weight_alpha",
-        "cell_mass_weight_eps",
-        # RMR-v9 allocation loss fields
-        "allocation_loss_type",
-        "dm_target",
-        # RMR-v11 loss fields
-        "cell_mass_weight_gamma",
-        "lambda_curvature",
-        "lambda_hard_bg",
-        "hard_bg_ratio",
-        "lambda_fg_gate",
-        # RMR-v12 loss fields
-        "curvature_gate_threshold",
-        "curvature_gate_kernel",
-        "curvature_gate_mode",
-        "curvature_gate_scale",
-        # RMR-v13 loss fields
-        "lambda_scale_align",
-        "scale_align_tau_dense",
-        "scale_align_tau_sparse",
-        "scale_align_kernel",
-        # RMR-v14 loss fields
-        "scale_align_mask_bg",
-        # RMR-v20/v21 loss fields
-        "density_loss_scaling",
-        "elementwise_dense_scaling",
-        # RMR-v30 / KD loss fields
-        "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
-        "lambda_kd_spatial", "lambda_kd_count",
+        "lambda_count", "lambda_flat_dm16", "lambda_cell", "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",
+        "count_loss_mode", "count_nb_dispersion", "kappa_flat16", "normalize_flat_dm16", "cell_beta",
+        "use_hierarchical_dm", "use_multiscale_dm", "dm_block_sizes_px", "dm_weights", "dm_kappas",
+        "cell_loss_mode", "cell_mass_weight_alpha", "cell_mass_weight_eps", "allocation_loss_type", "dm_target",
+        "cell_mass_weight_gamma", "lambda_curvature", "lambda_hard_bg", "hard_bg_ratio", "lambda_fg_gate",
+        "curvature_gate_threshold", "curvature_gate_kernel", "curvature_gate_mode", "curvature_gate_scale",
+        "lambda_scale_align", "scale_align_tau_dense", "scale_align_tau_sparse", "scale_align_kernel",
+        "scale_align_mask_bg", "density_loss_scaling", "elementwise_dense_scaling",
+        "output_stride", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count",
+        "spectral_transform", "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
     ],
     "train": [
         "lr",

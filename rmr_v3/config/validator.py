@@ -199,6 +199,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             hra = float(m_cfg["hybrid_recovery_alpha"])
             if hra < 0.0 or hra > 1.0:
                 raise ValueError(f"hybrid_recovery_alpha must be in [0.0, 1.0], got {hra}")
+        if "crest_kappa_0" in m_cfg and float(m_cfg["crest_kappa_0"]) < 0.0:
+            raise ValueError(f"crest_kappa_0 must be non-negative, got {m_cfg['crest_kappa_0']}")
+        if "crest_eps_seed" in m_cfg and float(m_cfg["crest_eps_seed"]) < 0.0:
+            raise ValueError(f"crest_eps_seed must be non-negative, got {m_cfg['crest_eps_seed']}")
+        if "morozov_gamma_under" in m_cfg and float(m_cfg["morozov_gamma_under"]) < 0.0:
+            raise ValueError(f"morozov_gamma_under must be non-negative, got {m_cfg['morozov_gamma_under']}")
+        if "morozov_rho" in m_cfg and float(m_cfg["morozov_rho"]) < 0.0:
+            raise ValueError(f"morozov_rho must be non-negative, got {m_cfg['morozov_rho']}")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
@@ -272,6 +280,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"lambda_spectral_dc must be non-negative, got {l_cfg_pre['lambda_spectral_dc']}")
         if "spectral_beta" in l_cfg_pre and float(l_cfg_pre["spectral_beta"]) <= 0.0:
             raise ValueError(f"spectral_beta must be strictly positive, got {l_cfg_pre['spectral_beta']}")
+        if "spectral_transform" in l_cfg_pre and str(l_cfg_pre["spectral_transform"]) not in ("fft", "dct"):
+            raise ValueError(f"spectral_transform must be 'fft' or 'dct', got '{l_cfg_pre['spectral_transform']}'")
         if "curvature_gate_threshold" in l_cfg_pre:
             cgt = float(l_cfg_pre["curvature_gate_threshold"])
             if cgt < 0.0:

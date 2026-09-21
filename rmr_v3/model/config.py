@@ -116,6 +116,12 @@ class RMRv3Config:
     resonant_adjoint: bool = False
     resonant_adjoint_lambda: float = 0.5
     anscombe_morozov: bool = False
+    crest_discovery_flux: bool = False
+    crest_kappa_0: float = 2.0
+    crest_eps_seed: float = 0.005
+    asymmetric_morozov: bool = False
+    morozov_gamma_under: float = 0.20
+    morozov_rho: float = 0.30
 
 
     # Dynamic Scale Routing
@@ -326,6 +332,14 @@ class RMRv3Config:
             raise ValueError(
                 f"hybrid_recovery_alpha must be in [0.0, 1.0], got {self.hybrid_recovery_alpha}"
             )
+        if self.crest_kappa_0 < 0.0:
+            raise ValueError(f"crest_kappa_0 must be non-negative, got {self.crest_kappa_0}")
+        if self.crest_eps_seed < 0.0:
+            raise ValueError(f"crest_eps_seed must be non-negative, got {self.crest_eps_seed}")
+        if self.morozov_gamma_under < 0.0:
+            raise ValueError(f"morozov_gamma_under must be non-negative, got {self.morozov_gamma_under}")
+        if self.morozov_rho < 0.0:
+            raise ValueError(f"morozov_rho must be non-negative, got {self.morozov_rho}")
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":

@@ -94,15 +94,11 @@ def anscombe_discrepancy(
     c: float = 0.375,
     b_variance: torch.Tensor | None = None,
     morozov_gamma: float = 0.0,
+    asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20,
+    morozov_rho: float = 0.30,
 ) -> torch.Tensor:
-    """Compute Anscombe-stabilized rate discrepancy in float32.
-
-    Formula:
-        delta_tilde = 2.0 * (sqrt(q + c) - sqrt(b + c))
-        rate_res = delta_tilde / sqrt(q + c)
-    With optional Morozov deadband shrinkage in the stabilized domain.
-    Eliminates the 1/b^2 gradient starvation on dense crowds, bounding updates to O(1).
-    """
+    """Compute Anscombe-stabilized rate discrepancy in float32 with optional A-SAM."""
     if b.ndim == 2:
         b = b.unsqueeze(1)
     if b_variance is not None and b_variance.ndim == 2:
@@ -124,7 +120,12 @@ def anscombe_discrepancy(
             sigma_tilde = torch.sqrt(torch.clamp_min(b_variance.float(), 0.0) / b_stab).clamp_min(0.1)
         else:
             sigma_tilde = torch.ones_like(delta_tilde)
-        deadband = float(morozov_gamma) * sigma_tilde
+        if asymmetric_morozov:
+            gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+            gamma_eff = torch.where(delta_tilde > 0.0, float(morozov_gamma), gamma_under)
+        else:
+            gamma_eff = float(morozov_gamma)
+        deadband = gamma_eff * sigma_tilde
         delta_tilde = torch.sign(delta_tilde) * torch.clamp_min(delta_tilde.abs() - deadband, 0.0)
 
     # Chain rule adjoint projection factor: 1 / sqrt(q_stab)
@@ -190,15 +191,11 @@ def density_gated_anscombe_discrepancy(
     morozov_gamma: float = 0.0,
     tau_dense: float = 0.08,
     eps: float = 1e-6,
+    asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20,
+    morozov_rho: float = 0.30,
 ) -> torch.Tensor:
-    """Density-gated Anscombe variance-stabilized rate discrepancy (RMR-v31).
-
-    Applies Anscombe VST only in regions where crowd rate exceeds tau_dense
-    (max(q, b) / area >= tau_dense). In background and sparse regions, falls
-    back to canonical Radon-Nikodym rate discrepancy delta / eff_q to prevent the
-    gradient stiffness and noise amplification caused by 1/sqrt(q+c) on near-zero counts,
-    while maintaining exact discrete mass conservation in the measure space.
-    """
+    """Density-gated Anscombe variance-stabilized rate discrepancy with A-SAM."""
     if b.ndim == 2:
         b = b.unsqueeze(1)
     if b_variance is not None and b_variance.ndim == 2:
@@ -209,13 +206,21 @@ def density_gated_anscombe_discrepancy(
     dense_mask = (rates >= float(tau_dense)).float()
 
     rate_res_anscombe = anscombe_discrepancy(
-        q, b, c=c, b_variance=b_variance, morozov_gamma=morozov_gamma
+        q, b, c=c, b_variance=b_variance, morozov_gamma=morozov_gamma,
+        asymmetric_morozov=asymmetric_morozov,
+        morozov_gamma_under=morozov_gamma_under,
+        morozov_rho=morozov_rho,
     )
 
     delta = q.float() - b.float()
     if morozov_gamma > 0.0 and b_variance is not None:
         sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
-        deadband = float(morozov_gamma) * sigma_b
+        if asymmetric_morozov:
+            gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b.float().clamp_min(0.0)))
+            gamma_eff = torch.where(delta > 0.0, float(morozov_gamma), gamma_under)
+        else:
+            gamma_eff = float(morozov_gamma)
+        deadband = gamma_eff * sigma_b
         delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
     eff_q = q.float() + float(eps) * area_clamped
     rate_res_linear = delta / eff_q.clamp_min(float(eps))

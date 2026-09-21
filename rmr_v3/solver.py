@@ -82,6 +82,12 @@ def unrolled_sirt_solver(
     carrier_energy: torch.Tensor | None = None,
     resonant_lambda: float = 0.0,
     anscombe_morozov: bool = False,
+    crest_discovery_flux: bool = False,
+    crest_kappa_0: float = 2.0,
+    crest_eps_seed: float = 0.005,
+    asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20,
+    morozov_rho: float = 0.30,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -207,11 +213,17 @@ def unrolled_sirt_solver(
                 rate_res = density_gated_anscombe_discrepancy(
                     q, b_solver, eff_area, c=anscombe_c, b_variance=b_variance,
                     morozov_gamma=float(morozov_gamma), tau_dense=float(anscombe_tau_dense),
+                    asymmetric_morozov=asymmetric_morozov,
+                    morozov_gamma_under=float(morozov_gamma_under),
+                    morozov_rho=float(morozov_rho),
                 )
             else:
                 rate_res = anscombe_discrepancy(
                     q, b_solver, c=anscombe_c, b_variance=b_variance,
                     morozov_gamma=float(morozov_gamma),
+                    asymmetric_morozov=asymmetric_morozov,
+                    morozov_gamma_under=float(morozov_gamma_under),
+                    morozov_rho=float(morozov_rho),
                 )
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
             b_effective = q - rate_res * eff_q.clamp_min(float(eps))
@@ -237,6 +249,10 @@ def unrolled_sirt_solver(
                 carrier_energy=carrier_energy,
                 resonant_lambda=float(resonant_lambda),
                 anscombe_morozov=False,
+                crest_discovery_flux=crest_discovery_flux,
+                crest_kappa_0=float(crest_kappa_0),
+                crest_eps_seed=float(crest_eps_seed),
+                asymmetric_morozov=False,
             )
         else:
             field = weighted_normalized_adjoint_field(
@@ -261,6 +277,12 @@ def unrolled_sirt_solver(
                 carrier_energy=carrier_energy,
                 resonant_lambda=float(resonant_lambda),
                 anscombe_morozov=anscombe_morozov,
+                crest_discovery_flux=crest_discovery_flux,
+                crest_kappa_0=float(crest_kappa_0),
+                crest_eps_seed=float(crest_eps_seed),
+                asymmetric_morozov=asymmetric_morozov,
+                morozov_gamma_under=float(morozov_gamma_under),
+                morozov_rho=float(morozov_rho),
             )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)

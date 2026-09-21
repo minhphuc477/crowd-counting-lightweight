@@ -40,6 +40,9 @@ CONFIG_FILES = [
     "h7b_anscombe_morozov.yaml",
     "h7c_bandpass_spectral.yaml",
     "h7d_regional_mass_weight.yaml",
+    "h7e_carrier_crest_discovery.yaml",
+    "h7f_asymmetric_morozov.yaml",
+    "h7g_dct_spectral.yaml",
     "h7_resonant_adjoint.yaml",
     "h8_harmonious_composite.yaml",
 ]
@@ -165,6 +168,29 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
         "h7d_regional_mass_weight.yaml": {
             "loss.regional_mass_weight_alpha": 1.5,
         },
+        "h7e_carrier_crest_discovery.yaml": {
+            "model.resonant_adjoint": True,
+            "model.resonant_adjoint_lambda": 0.5,
+            "model.crest_discovery_flux": True,
+            "model.crest_kappa_0": 2.0,
+            "model.crest_eps_seed": 0.005,
+        },
+        "h7f_asymmetric_morozov.yaml": {
+            "model.anscombe_morozov": True,
+            "model.asymmetric_morozov": True,
+            "model.morozov_gamma_under": 0.20,
+            "model.morozov_rho": 0.30,
+        },
+        "h7g_dct_spectral.yaml": {
+            "loss.use_spectral_loss": True,
+            "loss.lambda_spectral": 0.2,
+            "loss.spectral_beta": 2.0,
+            "loss.lambda_spectral_dc": 1.0,
+            "loss.spectral_bandpass": True,
+            "loss.spectral_omega_low": 0.02,
+            "loss.spectral_omega_high": 0.35,
+            "loss.spectral_transform": "dct",
+        },
         "h7_resonant_adjoint.yaml": {
             "model.resonant_adjoint": True,
             "model.resonant_adjoint_lambda": 0.5,
@@ -173,7 +199,13 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
         "h8_harmonious_composite.yaml": {
             "model.resonant_adjoint": True,
             "model.resonant_adjoint_lambda": 0.5,
+            "model.crest_discovery_flux": True,
+            "model.crest_kappa_0": 2.0,
+            "model.crest_eps_seed": 0.005,
             "model.anscombe_morozov": True,
+            "model.asymmetric_morozov": True,
+            "model.morozov_gamma_under": 0.20,
+            "model.morozov_rho": 0.30,
             "loss.use_spectral_loss": True,
             "loss.lambda_spectral": 0.2,
             "loss.spectral_beta": 2.0,
@@ -181,6 +213,7 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
             "loss.spectral_bandpass": True,
             "loss.spectral_omega_low": 0.02,
             "loss.spectral_omega_high": 0.35,
+            "loss.spectral_transform": "dct",
             "loss.regional_mass_weight_alpha": 1.5,
         },
     }

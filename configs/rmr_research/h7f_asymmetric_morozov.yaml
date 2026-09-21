@@ -1,8 +1,9 @@
 seed: 42
-# Hypothesis H8: Harmonious Wave-Lattice Architecture (Resonant Adjoint + Anscombe Morozov + Crowd-Wave Bandpass Spectral + Mass-Weighted Regional Loss)
-# Formulation: Synergistic integration of Carrier-Resonant Adjoint (A_m*), Anscombe-domain Morozov deadband,
-# Crowd-Wave Bandpass Spectral Loss (omega in [0.02, 0.35], preserving 4-8px inter-head lattice harmonics),
-# and Regional Mass-Weighting (alpha=1.5) to prevent background dominance over dense crowd clusters.
+# Hypothesis H7f: Asymmetric SNR-Adaptive Anscombe-Morozov (A-SAM)
+# Formulation: Eliminates dense crowd under-counting bias by dynamically shrinking
+# the Morozov deadband on under-prediction (gamma_under = 0.20 / (1 + 0.30 * sqrt(b))),
+# reducing the deadband gap from 7.5 to 0.5 persons at b=100 while maintaining a strict
+# 0.75 deadband on over-prediction to suppress background false positives.
 # Parameter count: exactly 104,441 (strictly <= 105,000 budget, 559 headroom)
 # Zero Knowledge Distillation / Zero External Teacher Cheating
 # Canonical ShanghaiTech Part A Partition (300 Train / 182 Test)
@@ -65,15 +66,6 @@ model:
 
   # Mathematical Operator 3: Radon-Nikodym Measure-Modulated Adjoint Field (0 parameters)
   adjoint_mode:    radon_nikodym
-
-  # Carrier-Resonant Adjoint Field: Modulates adjoint by high-frequency carrier energy E = ||Δ P_4||^2 (0 params)
-  resonant_adjoint:        true
-  resonant_adjoint_lambda: 0.5
-
-  # Carrier-Resonant Crest Discovery Flux (CRCDF)
-  crest_discovery_flux:    true
-  crest_kappa_0:           2.0
-  crest_eps_seed:          0.005
 
   # Mathematical Operator 4: Asymmetric SNR-Adaptive Anscombe-Morozov (A-SAM)
   morozov_gamma:       0.75
@@ -169,19 +161,6 @@ loss:
 
   lambda_fg_gate:   0.0
 
-  # Crowd-Wave Resonant Bandpass Count-Preserving 2D DCT-II Spectral Loss (CP-DCT2)
-  use_spectral_loss:   true
-  lambda_spectral:     0.2
-  spectral_beta:       2.0
-  lambda_spectral_dc:  1.0
-  spectral_bandpass:   true
-  spectral_omega_low:  0.02
-  spectral_omega_high: 0.35
-  spectral_transform:  dct
-
-  # Regional Mass-Weighting to Prevent Empty-Box Domination
-  regional_mass_weight_alpha: 1.5
-
 train:
   epochs:          1000
   batch_size:      8
@@ -204,4 +183,4 @@ train:
 eval:
   density_bins: [100.0, 500.0]
 
-output_dir: runs/sha_a/rmr_h8_harmonious_composite
+output_dir: runs/sha_a/rmr_h7f_asymmetric_morozov

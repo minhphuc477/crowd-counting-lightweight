@@ -181,20 +181,14 @@ def weighted_normalized_adjoint_field(
     carrier_energy: torch.Tensor | None = None,
     resonant_lambda: float = 0.0,
     anscombe_morozov: bool = False,
+    crest_discovery_flux: bool = False,
+    crest_kappa_0: float = 2.0,
+    crest_eps_seed: float = 0.005,
+    asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20,
+    morozov_rho: float = 0.30,
 ) -> torch.Tensor:
-    """Compute:
-
-        r = D_cw^-1 A^T W D_a^-1 (A y - b)
-
-    entirely in float32, with optional spatial scale routing modulation,
-    Morozov discrepancy shrinkage, and Radon-Nikodym measure modulation.
-    In RMR-v21, hybrid_recovery_alpha > 0 interpolates the Radon-Nikodym adjoint
-    with a faint Lebesgue discovery flux to break the zero-absorbing barrier.
-    When area_normalized=True (RMR-v31), scales cell area by (output_stride/4)^2
-    to maintain consistent Radon-Nikodym rate residual scaling across lattice strides.
-    When carrier_energy is provided (Hypothesis H7/H8), modulates the Radon-Nikodym
-    metric by carrier high-frequency energy m(u) with exact discrete mass conservation.
-    """
+    """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
 
     if b_region.ndim == 2:
@@ -208,33 +202,32 @@ def weighted_normalized_adjoint_field(
     b32 = b_region.float()
     weight32 = weight.float()
 
-    q = regional_sum(
-        y32,
-        regions.boxes,
-        out_dtype=torch.float32,
-    )
-
+    q = regional_sum(y32, regions.boxes, out_dtype=torch.float32)
     delta = q - b32
 
-    # Morozov Discrepancy Shrinkage (Statistical Inverse Problem Regularization):
-    # When |q - b| <= gamma * sigma_b, discrepancy is within the measurement noise floor
-    # of the regional head. Shrinking delta eliminates solver over-fitting on noisy heads.
-    # Under anscombe_morozov=True, evaluated in variance-stabilized space where sigma == 1.0.
+    # Morozov Discrepancy Shrinkage (Symmetric or Asymmetric SNR-Adaptive A-SAM)
     if morozov_gamma > 0.0 and b_variance is not None:
         if anscombe_morozov:
             c = 0.375
             g_q = 2.0 * torch.sqrt(q.clamp_min(0.0) + c)
             g_b = 2.0 * torch.sqrt(b32.clamp_min(0.0) + c)
             g_delta = g_q - g_b
-            g_deadband = float(morozov_gamma) * 1.0
-            g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - g_deadband, 0.0)
-            # Exact symmetric inverse mapping: (g_q - g_b) * (sqrt(q+c) + sqrt(b+c)) / 2 === q - b
-            # Eliminates 37.5% asymmetric deficit throttling when q << b in ultra-dense crowds
+            if asymmetric_morozov:
+                gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+                gamma_eff = torch.where(g_delta > 0.0, float(morozov_gamma), gamma_under)
+            else:
+                gamma_eff = float(morozov_gamma)
+            g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - gamma_eff, 0.0)
             scale_symm = 0.5 * (torch.sqrt(q.clamp_min(0.0) + c) + torch.sqrt(b32.clamp_min(0.0) + c))
             delta = g_shrunk * scale_symm
         else:
             sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
-            deadband = float(morozov_gamma) * sigma_b
+            if asymmetric_morozov:
+                gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+                gamma_eff = torch.where(delta > 0.0, float(morozov_gamma), gamma_under)
+            else:
+                gamma_eff = float(morozov_gamma)
+            deadband = gamma_eff * sigma_b
             delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
     area = regions.area.float().view(1, 1, -1)
@@ -243,24 +236,28 @@ def weighted_normalized_adjoint_field(
     alpha_recov = float(max(0.0, min(1.0, hybrid_recovery_alpha)))
     use_hybrid = (adjoint_mode == "radon_nikodym" and alpha_recov > 0.0)
 
-    # Carrier Texture Measure Modulation (Hypothesis H7/H8 Resonant Adjoint)
-    # m(u) channels deficit mass directly onto carrier high-frequency crests
+    # Carrier Texture Modulation & Crest Discovery Flux (CRCDF)
     m_carrier = y32
-    if carrier_energy is not None and resonant_lambda > 0.0:
-        lam = float(max(0.0, min(1.0, resonant_lambda)))
+    psi_crest = None
+    if carrier_energy is not None:
         E = carrier_energy.float()
         if E.shape[-2:] != (h, w):
             E = F.interpolate(E, size=(h, w), mode="bilinear", align_corners=False)
         E_pool = F.avg_pool2d(E, kernel_size=9, stride=1, padding=4, count_include_pad=False)
-        phi = (E / (E_pool + 1e-4)).clamp(0.2, 4.0)
-        m_carrier = y32 * ((1.0 - lam) + lam * phi)
+        if resonant_lambda > 0.0:
+            phi = (E / (E_pool + 1e-4)).clamp(0.2, 4.0)
+            m_carrier = y32 * ((1.0 - float(resonant_lambda)) + float(resonant_lambda) * phi)
+        if crest_discovery_flux:
+            E_sq_pool = F.avg_pool2d(E.square(), kernel_size=9, stride=1, padding=4, count_include_pad=False)
+            E_var = (E_sq_pool - E_pool.square()).clamp_min(1e-8)
+            z_E = (E - E_pool) / (torch.sqrt(E_var) + 1e-4)
+            psi_crest = torch.relu(z_E - float(crest_kappa_0)).square()
 
-    # Radon-Nikodym Measure-Modulated Adjoint vs Standard Flat Lebesgue Adjoint
+    # Radon-Nikodym Measure-Modulated Adjoint vs Flat Lebesgue Adjoint
     if adjoint_mode == "radon_nikodym":
-        # Discrepancy is scattered proportionally to current measure density m_carrier / q_m.
-        # Under resonant carrier adjoint, q_m is the regional integral of m_carrier.
-        if carrier_energy is not None and resonant_lambda > 0.0:
-            q_m = regional_sum(m_carrier, regions.boxes, out_dtype=torch.float32)
+        if carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
+            m_base = m_carrier + (float(crest_eps_seed) * psi_crest if (crest_discovery_flux and psi_crest is not None) else 0.0)
+            q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
             eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
         else:
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
@@ -333,13 +330,15 @@ def weighted_normalized_adjoint_field(
     back = _scatter_residual(weighted_residual)
 
     if adjoint_mode == "radon_nikodym":
+        if crest_discovery_flux and psi_crest is not None:
+            m_eff = m_carrier + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
+        else:
+            m_eff = m_carrier
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)
-            # Interpolate: (1 - alpha) * (m_carrier * back_rn) + alpha * back_leb
-            # Breaks the zero-absorbing barrier when y=0 at an uncounted head (b > q)
-            back = (1.0 - alpha_recov) * (m_carrier * back) + alpha_recov * back_leb
+            back = (1.0 - alpha_recov) * (m_eff * back) + alpha_recov * back_leb
         else:
-            back = m_carrier * back
+            back = m_eff * back
 
     if weighted_cov is None:
         weighted_cov = weighted_coverage(

@@ -48,6 +48,42 @@ EXPERIMENT_REGISTRY: dict[str, dict[str, str]] = {
         "config": "configs/rmr_research/h6_spectral_composite.yaml",
         "desc": "Spectral Composite Model (v19 + Spectral Loss breakthrough)",
     },
+    "h7a_resonant_adjoint": {
+        "config": "configs/rmr_research/h7a_resonant_adjoint.yaml",
+        "desc": "Carrier-Resonant Adjoint Field (lambda=0.5)",
+    },
+    "h7b_anscombe_morozov": {
+        "config": "configs/rmr_research/h7b_anscombe_morozov.yaml",
+        "desc": "Anscombe-space Morozov Discrepancy (sigma_A=1.0)",
+    },
+    "h7c_bandpass_spectral": {
+        "config": "configs/rmr_research/h7c_bandpass_spectral.yaml",
+        "desc": "Crowd-Wave Bandpass Spectral Loss (omega in [0.02, 0.35])",
+    },
+    "h7d_regional_mass_weight": {
+        "config": "configs/rmr_research/h7d_regional_mass_weight.yaml",
+        "desc": "Deficit-Sensitive Regional Mass Weighting (alpha=1.5)",
+    },
+    "h7e_carrier_crest_discovery": {
+        "config": "configs/rmr_research/h7e_carrier_crest_discovery.yaml",
+        "desc": "Carrier-Resonant Crest Discovery Flux (CRCDF, kappa_0=2.0, eps_seed=0.005)",
+    },
+    "h7f_asymmetric_morozov": {
+        "config": "configs/rmr_research/h7f_asymmetric_morozov.yaml",
+        "desc": "Asymmetric SNR-Adaptive Morozov (A-SAM, gamma_under=0.20, rho=0.30)",
+    },
+    "h7g_dct_spectral": {
+        "config": "configs/rmr_research/h7g_dct_spectral.yaml",
+        "desc": "Count-Preserving 2D DCT-II Spectral Loss (CP-DCT2)",
+    },
+    "h7_resonant_adjoint": {
+        "config": "configs/rmr_research/h7_resonant_adjoint.yaml",
+        "desc": "Combined Solver Baseline (H7a + H7b)",
+    },
+    "h8_harmonious_composite": {
+        "config": "configs/rmr_research/h8_harmonious_composite.yaml",
+        "desc": "Harmonious Wave-Lattice Composite (CRCDF + A-SAM + CP-DCT2 + Mass-Weight)",
+    },
 }
 
 SUMMARY_CSV_PATH = Path("runs/sha_a/rmr_research_suite_summary.csv")

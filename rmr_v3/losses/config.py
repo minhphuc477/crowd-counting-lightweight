@@ -87,11 +87,14 @@ class RMRv3LossConfig:
     spectral_bandpass: bool = False
     spectral_omega_low: float = 0.02
     spectral_omega_high: float = 0.35
+    spectral_transform: str = "fft"
 
     # Mass-Weighted Regional Loss (Hypothesis H8)
     regional_mass_weight_alpha: float = 0.0
 
     def __post_init__(self) -> None:
+        if self.spectral_transform not in ("fft", "dct"):
+            raise ValueError(f"spectral_transform must be 'fft' or 'dct', got '{self.spectral_transform}'")
         if self.regional_mass_weight_alpha < 0.0:
             raise ValueError(f"regional_mass_weight_alpha must be non-negative, got {self.regional_mass_weight_alpha}")
         if self.lambda_spectral < 0.0:

@@ -134,6 +134,12 @@ def solve_inverse_measure(
         carrier_energy=carrier_energy,
         resonant_lambda=getattr(cfg, "resonant_adjoint_lambda", 0.5),
         anscombe_morozov=getattr(cfg, "anscombe_morozov", False),
+        crest_discovery_flux=getattr(cfg, "crest_discovery_flux", False),
+        crest_kappa_0=getattr(cfg, "crest_kappa_0", 2.0),
+        crest_eps_seed=getattr(cfg, "crest_eps_seed", 0.005),
+        asymmetric_morozov=getattr(cfg, "asymmetric_morozov", False),
+        morozov_gamma_under=getattr(cfg, "morozov_gamma_under", 0.20),
+        morozov_rho=getattr(cfg, "morozov_rho", 0.30),
     )
 
     y = solver_res["y"]

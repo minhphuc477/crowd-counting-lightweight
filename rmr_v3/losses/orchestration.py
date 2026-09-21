@@ -324,6 +324,7 @@ def _compute_auxiliary_losses(
             "bandpass": getattr(cfg, "spectral_bandpass", False),
             "omega_low": getattr(cfg, "spectral_omega_low", 0.02),
             "omega_high": getattr(cfg, "spectral_omega_high", 0.35),
+            "transform": getattr(cfg, "spectral_transform", "fft"),
         }
         if router.mode == "dual":
             l_y, c_y = count_preserving_spectral_loss(y, target_float, **sp_kw)
