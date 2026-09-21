@@ -160,10 +160,14 @@ def bootstrap_ci(
     n = len(arr)
     if n == 0:
         return float("nan"), float("nan")
-    stats = np.empty(n_boot, dtype=np.float64)
-    for i in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        stats[i] = statistic(arr[idx])
+    if statistic is np.mean or getattr(statistic, "__name__", "") == "mean":
+        idx = rng.integers(0, n, size=(n_boot, n))
+        stats = np.mean(arr[idx], axis=1)
+    else:
+        stats = np.empty(n_boot, dtype=np.float64)
+        for i in range(n_boot):
+            idx = rng.integers(0, n, size=n)
+            stats[i] = statistic(arr[idx])
     lo = np.quantile(stats, alpha / 2)
     hi = np.quantile(stats, 1 - alpha / 2)
     return float(lo), float(hi)

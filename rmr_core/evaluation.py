@@ -214,8 +214,8 @@ def evaluate_dataset(
 
     for batch_list in loader:
         for sample in batch_list:
-            image = sample["image"].unsqueeze(0).to(device)
-            target = sample["target_y"].to(device)
+            image = sample["image"].unsqueeze(0).to(device, non_blocking=True)
+            target = sample["target_y"].to(device, non_blocking=True)
 
             out = model(image, **forward_kwargs)
             if use_tta:
