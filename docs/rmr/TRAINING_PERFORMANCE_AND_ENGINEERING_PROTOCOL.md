@@ -135,3 +135,55 @@
 | **H3: Composite Model** | `configs/rmr_v32/rmr_v32_h3_composite.yaml` | `python -m rmr_v3.train --config configs/rmr_v32/rmr_v32_h3_composite.yaml --run-id v32_h3_composite` |
 | **H4: Dense Loss Scaling** | `configs/rmr_v32/rmr_v32_h4_dense_loss_scaling.yaml` | `python -m rmr_v3.train --config configs/rmr_v32/rmr_v32_h4_dense_loss_scaling.yaml --run-id v32_h4_dense_loss_scaling` |
 | **H5: Conservative SIRT** | `configs/rmr_v32/rmr_v32_h5_conservative_solver.yaml` | `python -m rmr_v3.train --config configs/rmr_v32/rmr_v32_h5_conservative_solver.yaml --run-id v32_h5_conservative_solver` |
+
+---
+
+## 8. Quy Chuẩn Toán Học và Bất Biến Đã Kiểm Chứng (Mathematical Correctness Protocol)
+
+> [!CAUTION]
+> Unit tests chỉ kiểm tra hành vi trên input nhỏ — KHÔNG đảm bảo tính đúng đắn toán học ở quy mô thực.
+> Mọi thay đổi thuật toán **phải được kiểm tra thủ công** về các bất biến dưới đây.
+
+### 8.1. Bất Biến Toán Học Cốt Lõi
+
+| Bất Biến | Vị Trí | Kiểm Tra |
+|---|---|---|
+| $A^T$ là adjoint chính xác của $A$ | `adjoint.py` + `prefix_sums.py` | `test_adjoint_exact_duality` |
+| Tổng khối lượng bảo toàn qua TV Laplacian (Neumann BC) | `solver_ops.py:laplacian_tv_diffusion` | `mode="replicate"` bắt buộc |
+| Tổng khối lượng bảo toàn qua TV Charbonnier (Neumann BC) | `diffusion.py:charbonnier_tv_step` | Replicate-pad trước khi tính gradient |
+| Tổng khối lượng bảo toàn qua TV Perona-Malik | `solver_ops.py:perona_malik_anisotropic_diffusion` | `mode="replicate"` bắt buộc |
+| BB-1 step size positive khi `dot_sr >= 0` | `solver.py` | `bb_clamp_min > 0` bắt buộc |
+| BB-1 track actual iterate $y_t$, KHÔNG track Nesterov extrapolate $z_t$ | `solver.py:prev_y` | `prev_y = y_curr.detach()` |
+
+### 8.2. Lịch Sử Lỗi Đã Sửa (Bug Archaeology)
+
+| Bug ID | Vị Trí | Mô Tả | Commit Sửa |
+|---|---|---|---|
+| BUG-DEVICE | `rmr_v3/trainer.py:L119` | `UnboundLocalError: device` — device scope trước DataLoader | `ebe2a44` |
+| BUG-GAME-SLOW | `rmr_core/metrics.py` | GAME metric Python loop: 171x speedup bằng NumPy vectorize | `ebe2a44` |
+| BUG-CUDA-FLUSH | `rmr_v3/diagnostics/trajectory.py` | 18 lần `.item()` per sample → 3276 CUDA flush/eval cycle | `ebe2a44` |
+| BUG-PCIe | `rmr_core/evaluation.py` | 182 PCIe host→device transfer/eval cycle | `ebe2a44` |
+| BUG-TRAJ-SCALAR | `rmr_v3/diagnostics/trajectory.py:L77-88` | `solver_help_fraction` collapse cả batch về 1 scalar — metric vô nghĩa với batch>1 | `[next commit]` |
+| BUG-BB-NESTEROV | `rmr_v3/solver.py` | `prev_y = z_state.detach()` theo dõi extrapolate Nesterov thay vì iterate thực — BB-1 sai khi `use_nesterov_momentum=True` | `[next commit]` |
+| BUG-CHARBONNIER-BC | `rmr_core/operators/diffusion.py` | Charbonnier TV dùng zero-pad (Dirichlet BC) thay vì replicate (Neumann BC) — không bảo toàn khối lượng ở biên | `[next commit]` |
+
+### 8.3. Quy Chuẩn Về TV Diffusion
+
+Tất cả TV diffusion trong solver phải dùng **Neumann zero-flux boundary conditions** (replicate padding):
+- Bắt buộc: `F.pad(..., mode="replicate")` trước khi tính finite differences
+- Nghiêm cấm: `F.pad(..., (0,1,0,1))` (zero-pad Dirichlet BC)
+- Lý do: Neumann BC đảm bảo $\sum \Delta y = 0$, tức là tổng khối lượng $\sum y$ không thay đổi qua bước TV. Zero-pad (Dirichlet) cho phép khối lượng "chảy ra" khỏi biên ảnh.
+
+### 8.4. Quy Chuẩn Về BB-1 và Nesterov
+
+Khi cả `use_barzilai_borwein=True` và `use_nesterov_momentum=True` được bật đồng thời:
+- **`prev_y`** phải là `y_curr.detach()` (iterate thực), KHÔNG phải `z_state.detach()` (extrapolate Nesterov).
+- Lý do: BB-1 tính $s = y_t - y_{t-1}$ (sai phân iterate). Dùng extrapolate Nesterov liên tiếp nhau tạo ra sai phân không có ý nghĩa BB-1.
+- Hiện tại các config v32 đều có `use_nesterov_momentum: false` → không ảnh hưởng training hiện tại.
+
+### 8.5. Quy Chuẩn Về Diagnostics Batch-Aware
+
+Các metric trong `compute_solver_trajectory_diagnostics` phải tính per-image rồi lấy mean trên batch:
+- **Sai:** `float(tensor.sum().item())` — collapse toàn batch
+- **Đúng:** `tensor.sum(dim=(-1,-2,-3)).float().cpu()` → `[B]` vector → `.mean()`
+- Áp dụng cho: `solver_help_fraction`, `solver_harm_fraction`, `solver_neutral_fraction`, `solver_delta_e_mean`

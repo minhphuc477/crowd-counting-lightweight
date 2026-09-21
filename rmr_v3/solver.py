@@ -304,7 +304,7 @@ def unrolled_sirt_solver(
                 bound = bound * (0.25 + 0.75 * scale_confidence)
             step_delta = torch.clamp(step_delta, min=-bound, max=bound)
 
-        prev_y = z_state.detach()
+        prev_y = y_curr.detach()   # Track actual iterate (not Nesterov extrapolate) for BB-1 correctness
         prev_field = field.detach()
 
         y_step = z_state.float() - step_delta

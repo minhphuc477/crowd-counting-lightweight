@@ -74,17 +74,22 @@ def compute_solver_trajectory_diagnostics(
         results["energy_monotonic_fraction"] = 1.0
 
     # Image-level harmful correction rate: e_0 = |sum Y_0 - N*|, e_T = |sum Y_T - N*|
-    cnt0 = float(iterates[0].sum().item())
-    cnt_final = float(iterates[-1].sum().item())
-    gt_cnt = float(target_float.sum().item())
+    # Use per-image sums → [B] vectors so metrics are meaningful for any batch size.
+    cnt0 = iterates[0].sum(dim=(-1, -2, -3)).float().cpu()       # [B]
+    cnt_final = iterates[-1].sum(dim=(-1, -2, -3)).float().cpu()  # [B]
+    gt_cnt = target_float.sum(dim=(-1, -2, -3)).float().cpu()     # [B]
 
-    e0 = abs(cnt0 - gt_cnt)
-    e_final = abs(cnt_final - gt_cnt)
+    e0 = (cnt0 - gt_cnt).abs()
+    e_final = (cnt_final - gt_cnt).abs()
     delta_e = e_final - e0  # < 0 means solver helped, > 0 means solver hurt
 
-    results["solver_help_fraction"] = 1.0 if delta_e < -1e-4 else 0.0
-    results["solver_harm_fraction"] = 1.0 if delta_e > 1e-4 else 0.0
-    results["solver_neutral_fraction"] = 1.0 if abs(delta_e) <= 1e-4 else 0.0
-    results["solver_delta_e_mean"] = float(delta_e)
+    help_mask = delta_e < -1e-4
+    harm_mask = delta_e > 1e-4
+    neutral_mask = ~help_mask & ~harm_mask
+
+    results["solver_help_fraction"] = float(help_mask.float().mean().item())
+    results["solver_harm_fraction"] = float(harm_mask.float().mean().item())
+    results["solver_neutral_fraction"] = float(neutral_mask.float().mean().item())
+    results["solver_delta_e_mean"] = float(delta_e.mean().item())
 
     return results

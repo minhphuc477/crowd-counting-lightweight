@@ -41,11 +41,14 @@ def charbonnier_tv_step(
     cfl_bound = float(eps_c) / 4.0
     eff_lambda = min(float(lambda_tv), cfl_bound) if enforce_cfl else float(lambda_tv)
 
-    # Forward finite differences for gradient
-    # dy_dx: shift in column direction (right neighbour - current), pad right edge with 0
-    dy_dx = F.pad(y_f[..., 1:] - y_f[..., :-1], (0, 1))       # [B, C, H, W]
-    # dy_dy: shift in row direction (bottom neighbour - current), pad bottom edge with 0
-    dy_dy = F.pad(y_f[..., 1:, :] - y_f[..., :-1, :], (0, 0, 0, 1))  # [B, C, H, W]
+    # Neumann (zero-flux) boundary: replicate-pad before finite differencing,
+    # ensuring sum(div(g * grad y)) == 0 (mass conservation at image boundaries).
+    # This is consistent with laplacian_tv_diffusion which also uses replicate padding.
+    y_pad = F.pad(y_f, (1, 1, 1, 1), mode="replicate")  # [B, C, H+2, W+2]
+
+    # Forward finite differences for gradient (on padded tensor → valid interior)
+    dy_dx = y_pad[:, :, 1:-1, 2:] - y_pad[:, :, 1:-1, 1:-1]   # [B, C, H, W]
+    dy_dy = y_pad[:, :, 2:, 1:-1] - y_pad[:, :, 1:-1, 1:-1]   # [B, C, H, W]
 
     # Charbonnier diffusivity: g = 1 / sqrt(|grad|^2 + eps_c^2)
     grad_sq = dy_dx.pow(2) + dy_dy.pow(2)
@@ -55,11 +58,11 @@ def charbonnier_tv_step(
     flux_x = g * dy_dx  # [B, C, H, W]
     flux_y = g * dy_dy  # [B, C, H, W]
 
-    # Backward finite difference divergence: div(F) = dF_x/dx + dF_y/dy
-    # dF_x/dx = F_x(i) - F_x(i-1): pad left edge with 0
-    div_x = flux_x - F.pad(flux_x[..., :-1], (1, 0))
-    # dF_y/dy = F_y(i) - F_y(i-1): pad top edge with 0
-    div_y = flux_y - F.pad(flux_y[..., :-1, :], (0, 0, 1, 0))
+    # Backward finite difference divergence (Neumann BC: zero-flux at boundaries)
+    # dF_x/dx = F_x(i,j) - F_x(i,j-1): pad left with 0 (Neumann BC at left edge)
+    div_x = flux_x - F.pad(flux_x[:, :, :, :-1], (1, 0))
+    # dF_y/dy = F_y(i,j) - F_y(i-1,j): pad top with 0 (Neumann BC at top edge)
+    div_y = flux_y - F.pad(flux_y[:, :, :-1, :], (0, 0, 1, 0))
 
     divergence = div_x + div_y  # [B, C, H, W]
 

@@ -91,10 +91,10 @@ class TestModelIntegrationBB1:
     """Verifies end-to-end integration of BB-1 trust damping in RMRv3 model."""
 
     def test_model_config_bb_clamp_defaults(self) -> None:
-        """RMRv3Config must default bb_clamp_min=0.5 and bb_clamp_max=1.2."""
+        """RMRv3Config must default bb_clamp_min=0.2 and bb_clamp_max=2.0."""
         cfg = RMRv3Config()
-        assert cfg.bb_clamp_min == 0.5
-        assert cfg.bb_clamp_max == 1.2
+        assert cfg.bb_clamp_min == 0.2
+        assert cfg.bb_clamp_max == 2.0
         assert cfg.use_barzilai_borwein is False  # default before config overrides
         assert cfg.use_alternating_bb is False
 
