@@ -64,24 +64,38 @@ def regional_reliability_rows(
     else:
         region_indices = list(range(num_total_regions))
 
+    idx_t = torch.as_tensor(region_indices, device=mu.device, dtype=torch.long)
+    scale_id_arr = regions.scale_id[idx_t].detach().cpu().numpy()
+    area_arr = regions.area[idx_t].detach().cpu().numpy()
+    gt_arr = gt[:, 0, idx_t].detach().cpu().numpy()
+    mu_arr = mu[:, 0, idx_t].detach().cpu().numpy()
+    disp_arr = disp[:, 0, idx_t].detach().cpu().numpy()
+    count_var_arr = count_var[:, 0, idx_t].detach().cpu().numpy()
+    rate_var_arr = rate_var[:, 0, idx_t].detach().cpu().numpy()
+    weight_arr = weight[:, 0, idx_t].detach().cpu().numpy()
+    solver_weight_arr = solver_weight[:, 0, idx_t].detach().cpu().numpy()
+    abs_count_error_arr = abs_count_error[:, 0, idx_t].detach().cpu().numpy()
+    abs_rate_error_arr = abs_rate_error[:, 0, idx_t].detach().cpu().numpy()
+    std_residual_arr = std_residual[:, 0, idx_t].detach().cpu().numpy()
+
     for bi in range(bsz):
-        for ri in region_indices:
+        for j, ri in enumerate(region_indices):
             rows.append(
                 {
                     "batch_index": bi,
                     "region_index": ri,
-                    "scale_id": int(regions.scale_id[ri].item()),
-                    "area": float(regions.area[ri].item()),
-                    "gt_count": float(gt[bi, 0, ri].item()),
-                    "pred_count": float(mu[bi, 0, ri].item()),
-                    "dispersion": float(disp[bi, 0, ri].item()),
-                    "count_variance": float(count_var[bi, 0, ri].item()),
-                    "rate_variance": float(rate_var[bi, 0, ri].item()),
-                    "weight": float(weight[bi, 0, ri].item()),
-                    "solver_weight": float(solver_weight[bi, 0, ri].item()),
-                    "abs_count_error": float(abs_count_error[bi, 0, ri].item()),
-                    "abs_rate_error": float(abs_rate_error[bi, 0, ri].item()),
-                    "std_residual": float(std_residual[bi, 0, ri].item()),
+                    "scale_id": int(scale_id_arr[j]),
+                    "area": float(area_arr[j]),
+                    "gt_count": float(gt_arr[bi, j]),
+                    "pred_count": float(mu_arr[bi, j]),
+                    "dispersion": float(disp_arr[bi, j]),
+                    "count_variance": float(count_var_arr[bi, j]),
+                    "rate_variance": float(rate_var_arr[bi, j]),
+                    "weight": float(weight_arr[bi, j]),
+                    "solver_weight": float(solver_weight_arr[bi, j]),
+                    "abs_count_error": float(abs_count_error_arr[bi, j]),
+                    "abs_rate_error": float(abs_rate_error_arr[bi, j]),
+                    "std_residual": float(std_residual_arr[bi, j]),
                 }
             )
 

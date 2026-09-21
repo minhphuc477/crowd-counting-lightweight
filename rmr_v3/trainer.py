@@ -131,6 +131,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         shuffle=True,
         num_workers=workers,
         pin_memory=pin_mem,
+        persistent_workers=bool(workers > 0),
+        prefetch_factor=2 if workers > 0 else None,
         collate_fn=collate_train,
         drop_last=True,
         worker_init_fn=seed_worker if deterministic else None,
