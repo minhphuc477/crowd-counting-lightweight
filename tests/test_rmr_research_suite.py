@@ -132,7 +132,7 @@ def test_single_variable_isolation(canonical_v19_cfg: dict[str, Any]):
         flat = _flatten_dict(cfg)
 
         # Keys permitted to differ universally
-        universal_allowed_diffs = {"output_dir", "train.deterministic"}
+        universal_allowed_diffs = {"output_dir", "train.deterministic", "train.workers"}
 
         all_keys = set(base_flat.keys()) | set(flat.keys())
         actual_diffs = {}

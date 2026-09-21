@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import math
 import random
@@ -247,8 +248,7 @@ class CrowdManifestDataset(Dataset):
         self.gamma_jitter = (float(gamma_jitter[0]), float(gamma_jitter[1]))
         self.random_invert_prob = float(random_invert_prob)
         self.cache_images = bool(cache_images)
-        self._image_cache: dict[int, Image.Image] = {}
-        self._eval_cache: dict[int, dict] = {}
+        self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -290,37 +290,20 @@ class CrowdManifestDataset(Dataset):
                 p = Path(it["image"])
                 if not p.is_absolute():
                     p = self.root / p
-                with Image.open(p) as img:
-                    self._image_cache[i] = img.convert("RGB")
-            if not self.train:
-                for i in range(len(self.items)):
-                    _ = self[i]
+                self._raw_bytes_cache[i] = p.read_bytes()
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> dict:
-        if not self.train and self.cache_images and idx in self._eval_cache:
-            c = self._eval_cache[idx]
-            return {
-                "image": c["image"],
-                "target_y": c["target_y"],
-                "points": c["points"].clone(),
-                "id": c["id"],
-                "path": c["path"],
-                "height": c["height"],
-                "width": c["width"],
-            }
-
         item = self.items[idx]
         path = Path(item["image"])
         if not path.is_absolute():
             path = self.root / path
         if self.cache_images:
-            if idx not in self._image_cache:
-                with Image.open(path) as img:
-                    self._image_cache[idx] = img.convert("RGB")
-            image = self._image_cache[idx].copy()
+            if idx not in self._raw_bytes_cache:
+                self._raw_bytes_cache[idx] = path.read_bytes()
+            image = Image.open(io.BytesIO(self._raw_bytes_cache[idx])).convert("RGB")
         else:
             with Image.open(path) as img:
                 image = img.convert("RGB")
@@ -348,7 +331,7 @@ class CrowdManifestDataset(Dataset):
         h, w = image_t.shape[-2:]
         target_y = rasterize_points(pts, h, w, stride=self.output_stride)
         image_t = normalize_image(image_t)
-        res = {
+        return {
             "image": image_t,
             "target_y": target_y,
             "points": pts,
@@ -357,9 +340,6 @@ class CrowdManifestDataset(Dataset):
             "height": h,
             "width": w,
         }
-        if not self.train and self.cache_images:
-            self._eval_cache[idx] = res
-        return res
 
 
 def collate_train(batch: list[dict]) -> dict:
