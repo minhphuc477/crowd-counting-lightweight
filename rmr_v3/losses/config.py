@@ -111,8 +111,12 @@ class RMRv3LossConfig:
             raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{self.dm_target}'")
         if self.count_loss_mode not in ("nb", "log1p", "l1"):
             raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{self.count_loss_mode}'")
-        if self.cell_loss_mode not in ("balanced", "mass_weighted"):
-            raise ValueError(f"cell_loss_mode must be 'balanced' or 'mass_weighted', got '{self.cell_loss_mode}'")
+        if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell"):
+            raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', or 'count_invariant', got '{self.cell_loss_mode}'")
+        if self.cell_tau_head <= 0.0:
+            raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
+        if self.cell_alpha < 0.0:
+            raise ValueError(f"cell_alpha must be non-negative, got {self.cell_alpha}")
         if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
             raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
         if self.cell_mass_weight_gamma <= 0.0:
