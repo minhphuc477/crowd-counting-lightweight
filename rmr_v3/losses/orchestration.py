@@ -132,7 +132,7 @@ def _compute_core_losses(
             return count_invariant_cell_loss(
                 density_map, target_float,
                 beta=cfg.cell_beta, alpha=float(getattr(cfg, "cell_alpha", 2.0)),
-                tau_head=float(getattr(cfg, "cell_tau_head", 0.08)),
+                # tau_head deliberately omitted: deprecated in CI-Cell v2 (ignored)
                 stride=stride,
             )
         if cfg.cell_loss_mode == "mass_weighted":

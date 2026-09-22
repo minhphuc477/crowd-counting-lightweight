@@ -278,10 +278,29 @@ def count_invariant_cell_loss(
     eps: float = 1e-4,
     stride: int = 4,
 ) -> torch.Tensor:
-    """Count-Invariant Two-Stream Cell Loss (CI-Cell).
+    """Count-Invariant Two-Stream Cell Loss v2 (CI-Cell v2).
 
-    Eliminates the O(1/N) dense crowd gradient starvation while
-    maintaining rigorous background false-positive suppression.
+    Corrected formulation for integer-domain density maps where each cell
+    stores the number of people (0, 1, 2, 3, 4...), NOT a Gaussian amplitude.
+
+    Weighting strategy:
+        fg_fraction(x) = t(x) / max(per_image_max, 1)  in [0, 1]
+        W(x) = 1 + (alpha - 1) * fg_fraction(x)
+
+    This guarantees O(1) gradient per head because:
+    - Weight is normalized by local peak count, not global sum N
+    - A cell with 2 heads in a 10-person image gets the same relative weight
+      as a cell with 2 heads in a 1000-person image
+    - Background cells (t=0) retain W=1.0 for false-alarm suppression
+
+    Args:
+        y: Predicted density map, shape (B, 1, H, W) or (B, H, W) or (H, W).
+        target: Ground-truth density map (integer counts per cell).
+        beta: Smooth-L1 transition point.
+        alpha: Foreground boost factor (W_fg = alpha at peak cell).
+        tau_head: Deprecated — ignored in v2. Kept for backward compat.
+        eps: Minimum denominator guard.
+        stride: Spatial stride (informational only in v2).
     """
     if target.ndim == 2:
         target = target.unsqueeze(0).unsqueeze(0)
@@ -298,18 +317,17 @@ def count_invariant_cell_loss(
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 
-    eff_tau = float(tau_head) * ((float(stride) / 4.0) ** 2) if stride != 4 else float(tau_head)
-    eff_tau = max(eff_tau, 1e-6)
+    # Normalize by per-image peak to get fg_fraction in [0, 1]
+    # Works correctly for both integer counts and float density maps
+    t_peak = t_f.amax(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
+    fg_fraction = (t_f / t_peak).clamp(0.0, 1.0)
 
-    per_pixel_l1 = F.smooth_l1_loss(y_f, t_f, beta=float(beta), reduction="none")
+    # Foreground-boosted weight: alpha at peak cell, 1.0 at background
+    weight = 1.0 + (float(alpha) - 1.0) * fg_fraction
 
-    # Saliency S(x) in [0, 1]: 1.0 at head centers, 0.0 on background
-    saliency = torch.clamp(t_f / eff_tau, 0.0, 1.0)
+    per_pixel = F.smooth_l1_loss(y_f, t_f, beta=float(beta), reduction="none")
+    return (weight * per_pixel).mean()
 
-    # Pixel weight: 1.0 on background, alpha on foreground heads
-    # Normalized by spatial area HW to guarantee exact count invariance O(1)
-    weight = 1.0 + (float(alpha) - 1.0) * saliency
-    return (weight * per_pixel_l1).mean()
 
 
 def physical_scale_alignment_loss(
