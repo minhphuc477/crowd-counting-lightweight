@@ -1,0 +1,2 @@
+exp_key,mae,rmse,bias,sparse_mae,mod_mae,dense_mae,duration_sec,exit_code,desc
+h1_no_jitter,N/A,N/A,N/A,N/A,N/A,N/A,1.6,1,"Augmentation Entropy Isolation (scale [1.0, 1.0], no color jitter)"
