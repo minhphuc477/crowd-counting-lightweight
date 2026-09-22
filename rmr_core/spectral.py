@@ -20,7 +20,9 @@ def dct_1d(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     n = x.shape[dim]
     if n == 1:
         return x
-    x_move = x.movedim(dim, -1)
+    orig_dtype = x.dtype
+    x_f = x.float() if orig_dtype in (torch.float16, torch.bfloat16) else x
+    x_move = x_f.movedim(dim, -1)
     orig_shape = x_move.shape
     x_2d = x_move.reshape(-1, n)
 
@@ -32,13 +34,13 @@ def dct_1d(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     v = x_2d[:, idx]
 
     V = torch.fft.fft(v, dim=-1)
-    k = torch.arange(n, device=x.device, dtype=x.dtype)
+    k = torch.arange(n, device=x.device, dtype=x_f.dtype)
     phase = torch.exp(-1j * float(np.pi) * k / (2.0 * float(n)))
     X = (V * phase).real
 
-    scale = torch.full((n,), math.sqrt(2.0 / float(n)), device=x.device, dtype=x.dtype)
+    scale = torch.full((n,), math.sqrt(2.0 / float(n)), device=x.device, dtype=x_f.dtype)
     scale[0] = math.sqrt(1.0 / float(n))
-    res = X * scale
+    res = (X * scale).to(dtype=orig_dtype)
     return res.reshape(orig_shape).movedim(-1, dim)
 
 
@@ -150,7 +152,8 @@ def count_preserving_dct2_loss(
 
     diff_mag = torch.abs(dct_pred - dct_target)
     weighted_diff = diff_mag * spec_weights
-    ac_loss = weighted_diff.sum(dim=(-2, -1)).mean()
+    spec_weight_sum = spec_weights.sum().clamp_min(eps)
+    ac_loss = (weighted_diff.sum(dim=(-2, -1)) / spec_weight_sum * math.sqrt(h * w)).mean()
 
     total_loss = lambda_count * dc_loss + lambda_spectral * ac_loss
 
@@ -220,7 +223,8 @@ def count_preserving_spectral_loss(
     diff_mag = torch.abs(diff_complex)
 
     weighted_diff = diff_mag * spec_weights
-    ac_loss = weighted_diff.sum(dim=(-2, -1)).mean()
+    spec_weight_sum = spec_weights.sum().clamp_min(eps)
+    ac_loss = (weighted_diff.sum(dim=(-2, -1)) / spec_weight_sum * math.sqrt(h * w)).mean()
 
     total_loss = lambda_count * dc_loss + lambda_spectral * ac_loss
 
