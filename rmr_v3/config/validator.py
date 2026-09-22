@@ -334,6 +334,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             os_val = int(l_cfg_pre["output_stride"])
             if os_val not in (2, 4):
                 raise ValueError(f"output_stride in loss must be 2 or 4, got {os_val}")
+        if "regional_mass_weight_alpha" in l_cfg_pre:
+            rmwa = float(l_cfg_pre["regional_mass_weight_alpha"])
+            if rmwa < 0.0:
+                raise ValueError(f"regional_mass_weight_alpha must be non-negative, got {rmwa}")
 
     l_cfg = cfg.get("loss", {})
     if isinstance(l_cfg, dict):
@@ -422,6 +426,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             sr = int(t_cfg["solver_ramp_epochs"])
             if sr < 0:
                 raise ValueError(f"train.solver_ramp_epochs must be >= 0, got {sr}")
+        if "grad_scaler_init_scale" in t_cfg:
+            gsis = float(t_cfg["grad_scaler_init_scale"])
+            if gsis <= 0.0:
+                raise ValueError(f"train.grad_scaler_init_scale must be strictly positive, got {gsis}")
 
     # Validate eval configuration
     e_cfg = cfg.get("eval", {})

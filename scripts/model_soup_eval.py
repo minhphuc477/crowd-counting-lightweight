@@ -38,25 +38,36 @@ def compute_model_soup(checkpoint_paths: list[Path]) -> dict[str, Any]:
     base_state = first_ckpt[state_key] if state_key else first_ckpt
 
     soup_state = copy.deepcopy(base_state)
+    has_ema = isinstance(first_ckpt, dict) and "ema_model" in first_ckpt
+    soup_ema = copy.deepcopy(first_ckpt["ema_model"]) if has_ema else None
     k = len(checkpoint_paths)
 
     for p in checkpoint_paths[1:]:
         ckpt = torch.load(p, map_location="cpu", weights_only=False)
         state = ckpt[state_key] if state_key else ckpt
         for key in soup_state:
-            if key in state:
-                if soup_state[key].is_floating_point():
-                    soup_state[key] += state[key]
+            if key in state and soup_state[key].is_floating_point():
+                soup_state[key] += state[key]
+        if has_ema and "ema_model" in ckpt:
+            for key in soup_ema:
+                if key in ckpt["ema_model"] and soup_ema[key].is_floating_point():
+                    soup_ema[key] += ckpt["ema_model"][key]
 
     for key in soup_state:
         if soup_state[key].is_floating_point():
             soup_state[key] /= float(k)
+    if has_ema:
+        for key in soup_ema:
+            if soup_ema[key].is_floating_point():
+                soup_ema[key] /= float(k)
 
     soup_ckpt = copy.deepcopy(first_ckpt)
     if state_key:
         soup_ckpt[state_key] = soup_state
     else:
         soup_ckpt = soup_state
+    if has_ema:
+        soup_ckpt["ema_model"] = soup_ema
 
     return soup_ckpt
 

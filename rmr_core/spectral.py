@@ -24,7 +24,7 @@ def dct_1d(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     x_f = x.float() if orig_dtype in (torch.float16, torch.bfloat16) else x
     x_move = x_f.movedim(dim, -1)
     orig_shape = x_move.shape
-    x_2d = x_move.reshape(-1, n)
+    x_2d = x_move.contiguous().reshape(-1, n)
 
     idx = torch.empty(n, dtype=torch.long, device=x.device)
     n_even = (n + 1) // 2
@@ -41,12 +41,35 @@ def dct_1d(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     scale = torch.full((n,), math.sqrt(2.0 / float(n)), device=x.device, dtype=x_f.dtype)
     scale[0] = math.sqrt(1.0 / float(n))
     res = (X * scale).to(dtype=orig_dtype)
-    return res.reshape(orig_shape).movedim(-1, dim)
+    return res.reshape(orig_shape).movedim(-1, dim).contiguous()
 
 
 def dct_2d(x: torch.Tensor) -> torch.Tensor:
     """Compute orthonormal 2D Discrete Cosine Transform (DCT-II) over the last two dimensions."""
     return dct_1d(dct_1d(x, dim=-1), dim=-2)
+
+
+def idct_1d(X: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """Compute orthonormal 1D Inverse Discrete Cosine Transform (IDCT-II / DCT-III)."""
+    n = X.shape[dim]
+    if n == 1:
+        return X
+    orig_dtype = X.dtype
+    X_f = X.float() if orig_dtype in (torch.float16, torch.bfloat16) else X
+    k = torch.arange(n, device=X.device, dtype=X_f.dtype).unsqueeze(1)
+    idx_n = torch.arange(n, device=X.device, dtype=X_f.dtype).unsqueeze(0)
+    M = torch.cos(float(np.pi) * (2 * idx_n + 1) * k / (2.0 * float(n))) * math.sqrt(2.0 / float(n))
+    M[0, :] = 1.0 / math.sqrt(float(n))
+    X_move = X_f.movedim(dim, -1)
+    orig_shape = X_move.shape
+    X_2d = X_move.contiguous().reshape(-1, n)
+    res = torch.matmul(X_2d, M)
+    return res.reshape(orig_shape).movedim(-1, dim).contiguous().to(dtype=orig_dtype)
+
+
+def idct_2d(x: torch.Tensor) -> torch.Tensor:
+    """Compute orthonormal 2D Inverse Discrete Cosine Transform (IDCT) over the last two dimensions."""
+    return idct_1d(idct_1d(x, dim=-1), dim=-2)
 
 
 def compute_dct_spectral_weights(

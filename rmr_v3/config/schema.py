@@ -235,6 +235,7 @@ ALLOWED_TRAIN_KEYS = {
     "ema_decay",
     "teacher_ckpt",
     "min_lr_ratio",
+    "grad_scaler_init_scale",
 }
 
 ALLOWED_EVAL_KEYS = {
