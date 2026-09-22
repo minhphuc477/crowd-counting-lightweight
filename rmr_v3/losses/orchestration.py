@@ -16,6 +16,7 @@ from rmr_core.spectral import count_preserving_spectral_loss
 from .config import RMRv3LossConfig
 from .point_supervision import bayesian_loss, sinkhorn_ot_loss
 from .auxiliary import (
+    count_invariant_cell_loss,
     curvature_power_loss,
     hurdle_focal_bce_loss,
     mass_weighted_cell_loss,
@@ -127,6 +128,13 @@ def _compute_core_losses(
 
     def _compute_cell_loss(density_map: torch.Tensor) -> torch.Tensor:
         stride = int(getattr(cfg, "output_stride", 4))
+        if cfg.cell_loss_mode in ("count_invariant", "ci_cell"):
+            return count_invariant_cell_loss(
+                density_map, target_float,
+                beta=cfg.cell_beta, alpha=float(getattr(cfg, "cell_alpha", 2.0)),
+                tau_head=float(getattr(cfg, "cell_tau_head", 0.08)),
+                stride=stride,
+            )
         if cfg.cell_loss_mode == "mass_weighted":
             return mass_weighted_cell_loss(
                 density_map, target_float,

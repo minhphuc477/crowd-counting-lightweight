@@ -41,11 +41,13 @@ class RMRv3LossConfig:
     dm_kappas: tuple[float, ...] = (20.0, 20.0, 20.0)
 
     # Cell loss configuration
-    cell_loss_mode: str = "balanced"  # "balanced" | "mass_weighted"
+    cell_loss_mode: str = "balanced"  # "balanced" | "mass_weighted" | "count_invariant"
     cell_beta: float = 1.0
     cell_mass_weight_eps: float = 1e-3
     cell_mass_weight_alpha: float = 1.0  # relative crowd boost
     cell_mass_weight_gamma: float = 1.0  # exponent on normalized crowd mass distribution
+    cell_tau_head: float = 0.08          # canonical single head peak amplitude for CI-Cell
+    cell_alpha: float = 2.0             # relative foreground weight for CI-Cell
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize

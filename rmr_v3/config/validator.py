@@ -230,34 +230,24 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])
-            if clm not in ("balanced", "mass_weighted"):
-                raise ValueError(
-                    f"cell_loss_mode must be 'balanced' or 'mass_weighted', got '{clm}'"
-                )
-        if "cell_mass_weight_eps" in l_cfg_pre:
-            eps_mw = float(l_cfg_pre["cell_mass_weight_eps"])
-            if eps_mw <= 0.0:
-                raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {eps_mw}")
-        if "cell_mass_weight_gamma" in l_cfg_pre:
-            gamma_val = float(l_cfg_pre["cell_mass_weight_gamma"])
-            if gamma_val <= 0.0:
-                raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {gamma_val}")
-        if "lambda_curvature" in l_cfg_pre:
-            lam_curv = float(l_cfg_pre["lambda_curvature"])
-            if lam_curv < 0.0:
-                raise ValueError(f"lambda_curvature must be non-negative, got {lam_curv}")
-        if "lambda_hard_bg" in l_cfg_pre:
-            lam_hbg = float(l_cfg_pre["lambda_hard_bg"])
-            if lam_hbg < 0.0:
-                raise ValueError(f"lambda_hard_bg must be non-negative, got {lam_hbg}")
-        if "hard_bg_ratio" in l_cfg_pre:
-            hbg_ratio = float(l_cfg_pre["hard_bg_ratio"])
-            if not (0.0 < hbg_ratio <= 1.0):
-                raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {hbg_ratio}")
-        if "lambda_fg_gate" in l_cfg_pre:
-            lam_fg = float(l_cfg_pre["lambda_fg_gate"])
-            if lam_fg < 0.0:
-                raise ValueError(f"lambda_fg_gate must be non-negative, got {lam_fg}")
+            if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell"):
+                raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', or 'count_invariant', got '{clm}'")
+        if "cell_tau_head" in l_cfg_pre and float(l_cfg_pre["cell_tau_head"]) <= 0.0:
+            raise ValueError(f"cell_tau_head must be strictly positive, got {l_cfg_pre['cell_tau_head']}")
+        if "cell_alpha" in l_cfg_pre and float(l_cfg_pre["cell_alpha"]) < 0.0:
+            raise ValueError(f"cell_alpha must be non-negative, got {l_cfg_pre['cell_alpha']}")
+        if "cell_mass_weight_eps" in l_cfg_pre and float(l_cfg_pre["cell_mass_weight_eps"]) <= 0.0:
+            raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {l_cfg_pre['cell_mass_weight_eps']}")
+        if "cell_mass_weight_gamma" in l_cfg_pre and float(l_cfg_pre["cell_mass_weight_gamma"]) <= 0.0:
+            raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {l_cfg_pre['cell_mass_weight_gamma']}")
+        if "lambda_curvature" in l_cfg_pre and float(l_cfg_pre["lambda_curvature"]) < 0.0:
+            raise ValueError(f"lambda_curvature must be non-negative, got {l_cfg_pre['lambda_curvature']}")
+        if "lambda_hard_bg" in l_cfg_pre and float(l_cfg_pre["lambda_hard_bg"]) < 0.0:
+            raise ValueError(f"lambda_hard_bg must be non-negative, got {l_cfg_pre['lambda_hard_bg']}")
+        if "hard_bg_ratio" in l_cfg_pre and not (0.0 < float(l_cfg_pre["hard_bg_ratio"]) <= 1.0):
+            raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {l_cfg_pre['hard_bg_ratio']}")
+        if "lambda_fg_gate" in l_cfg_pre and float(l_cfg_pre["lambda_fg_gate"]) < 0.0:
+            raise ValueError(f"lambda_fg_gate must be non-negative, got {l_cfg_pre['lambda_fg_gate']}")
         if "lambda_carrier_cell" in l_cfg_pre:
             lam_cc = float(l_cfg_pre["lambda_carrier_cell"])
             if lam_cc < 0.0:

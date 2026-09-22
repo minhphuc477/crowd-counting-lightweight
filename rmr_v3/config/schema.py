@@ -213,6 +213,8 @@ ALLOWED_LOSS_KEYS = {
     "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
     "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
     "spectral_transform", "regional_mass_weight_alpha",
+    # CI-Cell Loss additions (H9 Harmonious)
+    "cell_tau_head", "cell_alpha",
 }
 
 ALLOWED_TRAIN_KEYS = {
