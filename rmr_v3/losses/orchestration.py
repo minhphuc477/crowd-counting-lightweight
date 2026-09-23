@@ -185,11 +185,16 @@ def _compute_core_losses(
 
     dm_components: dict[int, torch.Tensor] = {}
     if cfg.dm_target == "dual":
-        loss_alloc_y, dm_components = _compute_single_allocation(y)
-        loss_alloc_y0, _ = _compute_single_allocation(y0)
+        loss_alloc_y, dm_comps_y = _compute_single_allocation(y)
+        loss_alloc_y0, dm_comps_y0 = _compute_single_allocation(y0)
         loss_allocation = 0.5 * loss_alloc_y + 0.5 * loss_alloc_y0
         losses["allocation_y"] = loss_alloc_y
         losses["allocation_y0"] = loss_alloc_y0
+        dm_components = {
+            k: 0.5 * (dm_comps_y[k] + dm_comps_y0[k])
+            for k in dm_comps_y
+            if k in dm_comps_y0
+        }
     elif cfg.dm_target == "y":
         loss_allocation, dm_components = _compute_single_allocation(y)
     else:  # "y0"

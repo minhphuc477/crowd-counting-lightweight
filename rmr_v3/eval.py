@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from pathlib import Path
+import yaml
 
 # Ensure repository root is on sys.path and remove script dir to prevent shadowing stdlib modules (e.g. profile)
 _script_dir = str(Path(__file__).resolve().parent)
@@ -49,7 +50,10 @@ from rmr_v3.model import RMRv3, RMRv3Config
 
 
 def load_model_from_ckpt(
-    ckpt_path: Path, device: torch.device, use_ema: bool = True
+    ckpt_path: Path,
+    device: torch.device,
+    use_ema: bool = True,
+    config_path: Path | str | None = None,
 ) -> tuple[RMRv3, bool, dict, dict]:
     ckpt_path = Path(ckpt_path)
     if ckpt_path.is_dir():
@@ -72,6 +76,16 @@ def load_model_from_ckpt(
 
     ckpt = safe_torch_load(ckpt_path, map_location="cpu", weights_only=True)
     cfg = ckpt.get("config", {})
+    if config_path is not None:
+        c_path = Path(config_path)
+        if c_path.is_file():
+            with open(c_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            for k, v in file_cfg.items():
+                if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                    cfg[k].update(v)
+                else:
+                    cfg[k] = v
     m_cfg = cfg.get("model", {})
 
     config = RMRv3Config.from_dict(m_cfg, pretrained=False)
@@ -121,7 +135,9 @@ def main() -> None:
     ckpt_path = Path(args.checkpoint)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(ckpt_path, device, use_ema=args.use_ema)
+    model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(
+        ckpt_path, device, use_ema=args.use_ema, config_path=args.config
+    )
     uniform_reliability = ckpt_uniform if args.uniform_reliability is None else args.uniform_reliability
 
     if args.manifest is not None:

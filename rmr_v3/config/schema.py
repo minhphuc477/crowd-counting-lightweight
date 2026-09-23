@@ -363,6 +363,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "scale_align_mask_bg", "density_loss_scaling", "elementwise_dense_scaling",
         "output_stride", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count",
         "spectral_transform", "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
+        "regional_mass_weight_alpha", "cell_tau_head", "cell_alpha",
     ],
     "train": [
         "lr",
