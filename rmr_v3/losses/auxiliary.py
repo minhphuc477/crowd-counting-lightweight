@@ -181,8 +181,11 @@ def curvature_power_loss(
     else:
         raise ValueError(f"Unknown curvature gate mode: '{mode}'. Expected 'none', 'hard', or 'soft'.")
 
-    gate_sum = gate.sum()
-    return (gate * diff_sq).sum() / gate_sum.clamp_min(1.0)
+    gate_sum_sample = gate.sum(dim=(-2, -1), keepdim=True)
+    has_gate = (gate_sum_sample > 0).float()
+    sample_loss = (gate * diff_sq).sum(dim=(-2, -1), keepdim=True) / gate_sum_sample.clamp_min(1.0)
+    total_valid = has_gate.sum().clamp_min(1.0)
+    return (sample_loss * has_gate).sum() / total_valid
 
 
 def topk_hard_background_loss(
@@ -391,7 +394,10 @@ def physical_scale_alignment_loss(
 
     if mask_background:
         fg_mask = (local_density >= float(eff_tau_sparse)).float().squeeze(1)
-        fg_sum = fg_mask.sum()
-        return (kl_per_pixel * fg_mask).sum() / fg_sum.clamp_min(1.0)
+        fg_sum_sample = fg_mask.sum(dim=(-2, -1), keepdim=True)
+        has_fg = (fg_sum_sample > 0).float()
+        sample_loss = (kl_per_pixel * fg_mask).sum(dim=(-2, -1), keepdim=True) / fg_sum_sample.clamp_min(1.0)
+        total_valid = has_fg.sum().clamp_min(1.0)
+        return (sample_loss * has_fg).sum() / total_valid
 
     return kl_per_pixel.mean()

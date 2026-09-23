@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from .auxiliary import mass_weighted_cell_loss
+from .auxiliary import count_invariant_cell_loss, mass_weighted_cell_loss
 from rmr_core.losses import balanced_smooth_l1
 
 
@@ -29,6 +29,13 @@ def compute_dual_lattice_losses(
         )
         loss_fine = mass_weighted_cell_loss(
             y_fine, target_stride2, beta=beta, eps=eps, alpha=alpha, gamma=gamma, stride=2
+        )
+    elif cell_loss_mode in ("count_invariant", "ci_cell"):
+        loss_carrier = count_invariant_cell_loss(
+            y_carrier, target_stride4, beta=beta, alpha=alpha, stride=4
+        )
+        loss_fine = count_invariant_cell_loss(
+            y_fine, target_stride2, beta=beta, alpha=alpha, stride=2
         )
     else:
         loss_carrier = balanced_smooth_l1(y_carrier, target_stride4, beta=beta, stride=4)
