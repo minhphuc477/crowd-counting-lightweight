@@ -114,6 +114,7 @@ def main() -> None:
     ap.add_argument("--enable-tta", dest="enable_tta", action="store_true", default=False, help="Alias for --tta")
     ap.add_argument("--dataset", default=None, help="Dataset identifier (e.g. sha_a, sha_b, qnrf) to resolve data/<dataset>_<split>.jsonl")
     ap.add_argument("--split", default="test", help="Dataset split (default: test, e.g. test, val, train)")
+    ap.add_argument("--config", default=None, help="Optional config YAML path (overrides checkpoint config if provided)")
     ap.add_argument("--use-live-weights", dest="use_ema", action="store_false", default=True, help="Evaluate live checkpoint weights instead of EMA weights")
     args = ap.parse_args()
 
