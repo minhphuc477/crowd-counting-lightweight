@@ -149,6 +149,7 @@ ALLOWED_MODEL_KEYS = {
     "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
     "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
     "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
+    "curvature_alpha_init",
 }
 
 
@@ -351,6 +352,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
         "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
         "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
+        "subpixel_stride2", "curvature_alpha_init",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell", "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",
@@ -363,7 +365,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "scale_align_mask_bg", "density_loss_scaling", "elementwise_dense_scaling",
         "output_stride", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count",
         "spectral_transform", "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
+        "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
         "regional_mass_weight_alpha", "cell_tau_head", "cell_alpha",
+        "dense_loss_thresh", "dense_loss_norm", "dense_loss_alpha", "dense_loss_max_boost",
+        "bayesian_sigma", "bayesian_background_ratio", "ot_reg", "ot_num_iters", "dm_strict",
     ],
     "train": [
         "lr",

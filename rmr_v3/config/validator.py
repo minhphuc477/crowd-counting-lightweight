@@ -207,6 +207,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"morozov_gamma_under must be non-negative, got {m_cfg['morozov_gamma_under']}")
         if "morozov_rho" in m_cfg and float(m_cfg["morozov_rho"]) < 0.0:
             raise ValueError(f"morozov_rho must be non-negative, got {m_cfg['morozov_rho']}")
+        if "curvature_alpha_init" in m_cfg:
+            float(m_cfg["curvature_alpha_init"])
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})

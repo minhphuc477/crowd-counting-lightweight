@@ -144,6 +144,7 @@ class FineMeasureHead(nn.Module):
         curvature_pool_kernel: int = 8,
         subpixel_stride2: bool = False,
         floor_tau: float = 0.0,
+        curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
     ):
         super().__init__()
         self.subpixel_stride2 = bool(subpixel_stride2)
@@ -188,7 +189,7 @@ class FineMeasureHead(nn.Module):
         if self.density_curvature:
             # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
             # providing seamless Step 0 identity with vanilla softplus.
-            self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
+            self.curvature_alpha = nn.Parameter(torch.tensor(float(curvature_alpha_init)))
 
         self.scale_conditioned = bool(scale_conditioned)
         if self.scale_conditioned:
@@ -300,6 +301,7 @@ class ScaleConditionedFineHead(nn.Module):
         curvature_gate_beta: float = 0.03,
         curvature_pool_kernel: int = 8,
         floor_tau: float = 0.0,
+        curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
     ):
         super().__init__()
         self.floor_tau = float(floor_tau)
@@ -329,7 +331,7 @@ class ScaleConditionedFineHead(nn.Module):
         if self.density_curvature:
             # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
             # providing seamless Step 0 identity with vanilla softplus.
-            self.curvature_alpha = nn.Parameter(torch.tensor(_CURVATURE_ALPHA_INIT))
+            self.curvature_alpha = nn.Parameter(torch.tensor(float(curvature_alpha_init)))
 
     def activate(
         self,
@@ -407,6 +409,7 @@ def build_fine_head(
     curvature_pool_kernel: int = 8,
     subpixel_stride2: bool = False,
     floor_tau: float = 0.0,
+    curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     if scale_conditioned_fine_head:
@@ -421,6 +424,7 @@ def build_fine_head(
             curvature_gate_beta=curvature_gate_beta,
             curvature_pool_kernel=curvature_pool_kernel,
             floor_tau=floor_tau,
+            curvature_alpha_init=curvature_alpha_init,
         )
     return FineMeasureHead(
         width=width,
@@ -435,6 +439,7 @@ def build_fine_head(
         curvature_pool_kernel=curvature_pool_kernel,
         subpixel_stride2=subpixel_stride2,
         floor_tau=floor_tau,
+        curvature_alpha_init=curvature_alpha_init,
     )
 
 

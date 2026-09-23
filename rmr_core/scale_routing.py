@@ -128,6 +128,11 @@ class FactorizedRoutingHead(nn.Module):
             num_aspects = num_aspect_ratios
         self.num_scales = int(num_scales)
         self.num_aspects = int(num_aspects)
+        if self.num_scales != 3 or self.num_aspects != 2:
+            raise ValueError(
+                f"FactorizedRoutingHead currently supports exactly 3 marginal scales and 2 aspect ratios, "
+                f"got num_scales={self.num_scales}, num_aspects={self.num_aspects}"
+            )
         self.temperature = float(max(temperature, 0.1))
         self.perspective_bias = bool(perspective_bias)
 

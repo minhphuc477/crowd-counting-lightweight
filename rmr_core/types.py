@@ -21,7 +21,10 @@ class RMRModelOutput(dict):
     def __getattr__(self, key: str) -> Any:
         if key in self:
             return self[key]
-        if key in ("hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "solver_trust_alpha"):
+        if key in (
+            "hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "pi_aspect",
+            "solver_trust_alpha", "y_carrier", "y0_carrier", "carrier_energy",
+        ):
             return None
         raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
 

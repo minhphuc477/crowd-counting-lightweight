@@ -161,6 +161,7 @@ class RMRv3Config:
     curvature_dense_threshold: float = 0.15
     curvature_gate_beta: float = 0.03
     curvature_pool_kernel: int = 8
+    curvature_alpha_init: float = -8.0
 
     # Banned solver anti-patterns (retained for validator rejection)
     use_nesterov_momentum: bool = False
