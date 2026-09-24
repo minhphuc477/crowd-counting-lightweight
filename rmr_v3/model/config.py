@@ -134,7 +134,9 @@ class RMRv3Config:
     park_routing: bool = False
     park_altitude_bands: int = 3
 
-    # Dynamic Scale Routing
+    # Dynamic Scale Routing & DiAG (RMR-v34)
+    use_diag: bool = False
+    diag_persp_slope_init: str = "physical"
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
 

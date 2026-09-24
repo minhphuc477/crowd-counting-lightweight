@@ -27,8 +27,12 @@ from ..solver import unrolled_sirt_solver
 from .architecture import RMRv3
 from .config import RMRv3Config
 from .evidence import extract_regional_evidence
-from .perspective import MicroCoordAttn, MicroPerspectiveElevation
-from .perspective_geometry import PARKRoutingHead, PerspectiveGeometryHead
+from .perspective_geometry import (
+    DiAGScaleRoutingHead,
+    DynamicCameraAnglePredictor,
+    PARKRoutingHead,
+    PerspectiveGeometryHead,
+)
 from .solver_step import solve_inverse_measure
 from .dual_lattice import (
     push_forward_stride2_to_stride4,
@@ -40,6 +44,8 @@ __all__ = [
     "AdditiveFPNNeck",
     "ASPPLiteFPNNeck",
     "CoordinateAttention",
+    "DiAGScaleRoutingHead",
+    "DynamicCameraAnglePredictor",
     "FactorizedRoutingHead",
     "MicroCoordAttn",
     "MicroPerspectiveElevation",

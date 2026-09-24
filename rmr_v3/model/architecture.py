@@ -24,7 +24,12 @@ from .perspective import (
     MicroCoordAttn,
     ContinuousPerspectiveCarrierModulation,
 )
-from .perspective_geometry import PerspectiveGeometryHead, PARKRoutingHead
+from .perspective_geometry import (
+    PerspectiveGeometryHead,
+    PARKRoutingHead,
+    DynamicCameraAnglePredictor,
+    DiAGScaleRoutingHead,
+)
 from .solver_step import solve_inverse_measure
 from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2
 
@@ -127,66 +132,44 @@ class RMRv3(nn.Module):
         self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
         self.micro_coord_attn = MicroCoordAttn(channels=cfg.feature_width, reduction=cfg.micro_coord_reduction) if cfg.use_micro_coord_attn else None
         self.perspective_elevation = MicroPerspectiveElevation(channels=cfg.feature_width) if cfg.use_perspective_elevation else None
-        self.cpcm: ContinuousPerspectiveCarrierModulation | None = (
-            ContinuousPerspectiveCarrierModulation(channels=cfg.feature_width, hidden=cfg.cpcm_hidden)
-            if cfg.use_cpcm
-            else None
-        )
-        self.pgh: PerspectiveGeometryHead | None = (
-            PerspectiveGeometryHead(
-                in_channels=cfg.feature_width,
-                horizon_h_px=cfg.park_horizon_h,
-                foreground_h_px=cfg.park_foreground_h,
-                max_aspect_ratio=cfg.park_max_aspect,
-            )
-            if cfg.use_pgh
-            else None
-        )
+        self.cpcm = ContinuousPerspectiveCarrierModulation(channels=cfg.feature_width, hidden=cfg.cpcm_hidden) if cfg.use_cpcm else None
+        self.pgh = PerspectiveGeometryHead(cfg.feature_width, cfg.park_horizon_h, cfg.park_foreground_h, cfg.park_max_aspect) if cfg.use_pgh else None
 
-        # Dynamic Scale Routing
-        if cfg.park_routing:
-            self.scale_router: nn.Module | None = PARKRoutingHead(
-                in_channels=cfg.feature_width,
-                temperature=cfg.scale_router_temperature,
-            )
-        elif cfg.factorized_scale_routing:
-            self.scale_router = FactorizedRoutingHead(
-                in_channels=cfg.feature_width,
-                num_scales=cfg.num_marginal_scales,
-                num_aspect_ratios=cfg.num_aspect_ratios,
-                temperature=cfg.scale_router_temperature,
-                perspective_bias=cfg.perspective_scale_bias,
-            )
-        elif cfg.dynamic_scale_routing:
-            self.scale_router = ScaleRoutingHead(
-                in_channels=cfg.feature_width,
-                num_scales=len(cfg.region_sizes_px),
-                temperature=cfg.scale_router_temperature,
-                perspective_bias=cfg.perspective_scale_bias,
+        # Dynamic Scale Routing & DiAG
+        if cfg.use_diag:
+            self.dcap: DynamicCameraAnglePredictor | None = DynamicCameraAnglePredictor(cfg.feature_width, len(cfg.region_sizes_px))
+            self.scale_router: nn.Module | None = DiAGScaleRoutingHead(
+                cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature, getattr(cfg, "diag_persp_slope_init", "physical"),
             )
         else:
-            self.scale_router = None
+            self.dcap = None
+            if cfg.park_routing:
+                self.scale_router: nn.Module | None = PARKRoutingHead(cfg.feature_width, cfg.scale_router_temperature)
+            elif cfg.factorized_scale_routing:
+                self.scale_router = FactorizedRoutingHead(
+                    cfg.feature_width, cfg.num_marginal_scales, cfg.num_aspect_ratios, cfg.scale_router_temperature, cfg.perspective_scale_bias,
+                )
+            elif cfg.dynamic_scale_routing:
+                self.scale_router = ScaleRoutingHead(
+                    cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature, cfg.perspective_scale_bias,
+                )
+            else:
+                self.scale_router = None
 
-        if cfg.foreground_gate:
-            self.fg_gate: nn.Conv2d | None = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True)
+        self.fg_gate = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True) if cfg.foreground_gate else None
+        if self.fg_gate is not None:
             nn.init.normal_(self.fg_gate.weight, std=0.01)
             nn.init.constant_(self.fg_gate.bias, 2.0)
-        else:
-            self.fg_gate = None
 
-        if cfg.use_top_down_semantic_gate:
-            self.tdsg: nn.Conv2d | None = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True)
+        self.tdsg = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True) if cfg.use_top_down_semantic_gate else None
+        if self.tdsg is not None:
             nn.init.normal_(self.tdsg.weight, std=0.01)
             nn.init.constant_(self.tdsg.bias, 2.0)
-        else:
-            self.tdsg = None
 
-        if cfg.dynamic_trust_gate:
-            self.trust_gate: nn.Linear | None = nn.Linear(cfg.feature_width, 1)
+        self.trust_gate = nn.Linear(cfg.feature_width, 1) if cfg.dynamic_trust_gate else None
+        if self.trust_gate is not None:
             nn.init.zeros_(self.trust_gate.weight)
             nn.init.constant_(self.trust_gate.bias, float(cfg.trust_gate_init_bias))
-        else:
-            self.trust_gate = None
 
         self.solver_strength: float = 1.0
 
@@ -281,19 +264,26 @@ class RMRv3(nn.Module):
             p4 = self.cpcm(p4)
 
         if self.pgh is not None:
-            p4 = self.pgh(p4)
+            alpha = self.dcap(p16)[0] if self.dcap is not None else None
+            p4 = self.pgh(p4, alpha_persp=alpha)
 
         return p4, p8, p16
 
-    def _route_scales(self, p4: torch.Tensor) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    def _route_scales(
+        self,
+        p4: torch.Tensor,
+        alpha_persp: torch.Tensor | None = None,
+        v_horizon: torch.Tensor | None = None,
+        delta_scale: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         if self.scale_router is None:
-
             return None, None, None
-
-        router_out = self.scale_router(p4)
+        if isinstance(self.scale_router, DiAGScaleRoutingHead):
+            router_out = self.scale_router(p4, alpha_persp=alpha_persp, v_horizon=v_horizon, delta_scale=delta_scale)
+        else:
+            router_out = self.scale_router(p4)
         if isinstance(router_out, tuple):
-            scale_weights, pi_scale, pi_aspect = router_out
-            return scale_weights, pi_scale, pi_aspect
+            return router_out[0], router_out[1], router_out[2]
         return router_out, None, None
 
     def _predict_fine_density(
@@ -364,7 +354,12 @@ class RMRv3(nn.Module):
         x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
 
         p4, p8, p16 = self._extract_carrier_features(x_in)
-        scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
+        alpha_persp, v_horizon, delta_scale = None, None, None
+        if self.dcap is not None:
+            alpha_persp, v_horizon, delta_scale = self.dcap(p16)
+        scale_weights, pi_scale, pi_aspect = self._route_scales(
+            p4, alpha_persp=alpha_persp, v_horizon=v_horizon, delta_scale=delta_scale
+        )
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
         target_h4, target_w4 = (h_in + 3) // 4, (w_in + 3) // 4
@@ -427,6 +422,11 @@ class RMRv3(nn.Module):
         else:
             out["y_carrier"] = out.y
             out["y0_carrier"] = out.y0
+
+        if alpha_persp is not None:
+            out["alpha_persp"] = alpha_persp
+            out["v_horizon"] = v_horizon
+            out["delta_scale"] = delta_scale
 
         return out
 

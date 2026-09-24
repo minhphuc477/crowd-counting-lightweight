@@ -153,6 +153,8 @@ ALLOWED_MODEL_KEYS = {
     # PARK Perspective-Adaptive Regional Kernels & PGH
     "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
     "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
+    # DiAG Dynamic Image-Adaptive Geometry (RMR-v34)
+    "use_diag", "diag_persp_slope_init",
 }
 
 
