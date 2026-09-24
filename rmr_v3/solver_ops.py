@@ -17,8 +17,12 @@ def proximal_soft_threshold(y: torch.Tensor, tau: float | torch.Tensor) -> torch
     Provides a noise deadband in [0, tau] that completely suppresses background
     phantom mass accumulation without zero-absorbing barriers.
     """
-    if isinstance(tau, (int, float)) and tau <= 0.0:
-        return torch.clamp_min(y, 0.0)
+    if isinstance(tau, (int, float)):
+        if tau <= 0.0:
+            return torch.clamp_min(y, 0.0)
+    elif isinstance(tau, torch.Tensor):
+        if tau.numel() == 1 and tau.item() <= 0.0:
+            return torch.clamp_min(y, 0.0)
     return torch.clamp_min(y - tau, 0.0)
 
 

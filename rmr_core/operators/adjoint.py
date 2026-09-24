@@ -263,10 +263,10 @@ def weighted_normalized_adjoint_field(
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
         rate_residual = delta / eff_q.clamp_min(float(eps))
     else:
-        rate_residual = delta / area.clamp_min(1.0)
+        rate_residual = delta / eff_area.clamp_min(1.0)
 
     weighted_residual = weight32 * rate_residual
-    weighted_residual_leb = (weight32 * (delta / area.clamp_min(1.0))) if use_hybrid else None
+    weighted_residual_leb = (weight32 * (delta / eff_area.clamp_min(1.0))) if use_hybrid else None
 
     def _scatter_residual(w_res: torch.Tensor) -> torch.Tensor:
         if scale_routing_weights is not None:

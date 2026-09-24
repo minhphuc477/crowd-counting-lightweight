@@ -37,6 +37,13 @@ def charbonnier_tv_step(
     Returns:
         [B, C, H, W] diffused density map, clamped >= 0.
     """
+    if isinstance(lambda_tv, (int, float)):
+        if lambda_tv <= 0.0:
+            return y
+    elif isinstance(lambda_tv, torch.Tensor):
+        if lambda_tv.numel() == 1 and not (lambda_tv > 0.0):
+            return y
+
     y_f = y.float()
     cfl_bound = float(eps_c) / 4.0
     eff_lambda = min(float(lambda_tv), cfl_bound) if enforce_cfl else float(lambda_tv)
