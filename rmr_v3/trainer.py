@@ -356,7 +356,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             extra_keys = [
                 "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
                 "spearman_pred_weight_error", "spearman_rate_var_error_16", "spearman_rate_var_error_32",
-                "spearman_rate_var_error_64", "spearman_rate_var_error_128", "mean_std_residual",
+                "spearman_rate_var_error_64", "spearman_rate_var_error_128",
+                "spearman_rate_var_error_band_0", "spearman_rate_var_error_band_1", "spearman_rate_var_error_band_2",
+                "spearman_rate_var_error_band_3", "spearman_rate_var_error_band_4",
+                "mean_std_residual",
                 "coverage_50", "coverage_80", "coverage_95", "calib_gap_50", "calib_gap_80", "calib_gap_95",
                 "dispersion_sat_low_fraction", "dispersion_sat_high_fraction", "solver_help_fraction",
                 "solver_harm_fraction", "energy_monotonic_fraction", "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",

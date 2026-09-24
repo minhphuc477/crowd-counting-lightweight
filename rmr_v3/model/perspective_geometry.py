@@ -117,10 +117,12 @@ class PARKRoutingHead(nn.Module):
         self,
         in_channels: int = 32,
         temperature: float = 1.0,
+        num_modes: int = 2,
     ) -> None:
         super().__init__()
         self.in_channels = int(in_channels)
         self.temperature = float(max(temperature, 0.1))
+        self.num_modes = int(num_modes)
 
         self.dw = nn.Conv2d(
             self.in_channels,
@@ -132,9 +134,9 @@ class PARKRoutingHead(nn.Module):
         )
         self.norm = nn.GroupNorm(8, self.in_channels)
         self.act = nn.SiLU(inplace=True)
-        self.pw = nn.Conv2d(self.in_channels, 2, kernel_size=1, bias=True)
+        self.pw = nn.Conv2d(self.in_channels, self.num_modes, kernel_size=1, bias=True)
 
-        # Initialize to balanced split [0.5, 0.5]
+        # Initialize to balanced split
         nn.init.zeros_(self.pw.weight)
         nn.init.zeros_(self.pw.bias)
 

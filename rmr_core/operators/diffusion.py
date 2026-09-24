@@ -40,13 +40,21 @@ def charbonnier_tv_step(
     if isinstance(lambda_tv, (int, float)):
         if lambda_tv <= 0.0:
             return y
+        raw_lambda = max(float(lambda_tv), 0.0)
     elif isinstance(lambda_tv, torch.Tensor):
         if lambda_tv.numel() == 1 and not (lambda_tv > 0.0):
             return y
+        if not (lambda_tv > 0.0).any():
+            return y
+        raw_lambda = float(lambda_tv.clamp_min(0.0).mean().item()) if lambda_tv.numel() > 1 else max(float(lambda_tv.item()), 0.0)
+    else:
+        raw_lambda = max(float(lambda_tv), 0.0)
 
     y_f = y.float()
     cfl_bound = float(eps_c) / 4.0
-    eff_lambda = min(float(lambda_tv), cfl_bound) if enforce_cfl else float(lambda_tv)
+    eff_lambda = min(raw_lambda, cfl_bound) if enforce_cfl else raw_lambda
+    if eff_lambda <= 0.0:
+        return y
 
     # Neumann (zero-flux) boundary: replicate-pad before finite differencing,
     # ensuring sum(div(g * grad y)) == 0 (mass conservation at image boundaries).

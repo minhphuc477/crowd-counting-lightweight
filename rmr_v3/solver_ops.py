@@ -20,10 +20,16 @@ def proximal_soft_threshold(y: torch.Tensor, tau: float | torch.Tensor) -> torch
     if isinstance(tau, (int, float)):
         if tau <= 0.0:
             return torch.clamp_min(y, 0.0)
+        tau_val: float | torch.Tensor = float(tau)
     elif isinstance(tau, torch.Tensor):
         if tau.numel() == 1 and tau.item() <= 0.0:
             return torch.clamp_min(y, 0.0)
-    return torch.clamp_min(y - tau, 0.0)
+        if not (tau > 0.0).any():
+            return torch.clamp_min(y, 0.0)
+        tau_val = tau.clamp_min(0.0)
+    else:
+        tau_val = tau
+    return torch.clamp_min(y - tau_val, 0.0)
 
 
 def laplacian_tv_diffusion(
@@ -47,9 +53,15 @@ def laplacian_tv_diffusion(
     if isinstance(tv_lambda, (int, float)):
         if tv_lambda <= 0.0:
             return y
+        lam_val: float | torch.Tensor = float(tv_lambda)
     elif isinstance(tv_lambda, torch.Tensor):
         if tv_lambda.numel() == 1 and not (tv_lambda > 0.0):
             return y
+        if not (tv_lambda > 0.0).any():
+            return y
+        lam_val = tv_lambda.clamp_min(0.0)
+    else:
+        lam_val = tv_lambda
     if kernel is None:
         kernel = _LAPLACE_KERNEL.to(device=y.device, dtype=y.dtype)
     else:
@@ -71,9 +83,9 @@ def laplacian_tv_diffusion(
         y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
         y_effective = torch.maximum(y_4d.float(), y_smooth)
         gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
-        step_diff = tv_lambda * gate.to(dtype=y.dtype) * lap
+        step_diff = lam_val * gate.to(dtype=y.dtype) * lap
     else:
-        step_diff = tv_lambda * lap
+        step_diff = lam_val * lap
 
     out = torch.clamp_min(y_4d + step_diff, 0.0)
     if orig_ndim == 2:
@@ -179,13 +191,19 @@ def proximal_firm_threshold(
     if isinstance(tau, (int, float)):
         if tau <= 0.0:
             return torch.clamp_min(y, 0.0)
+        tau_val: float | torch.Tensor = float(tau)
     elif isinstance(tau, torch.Tensor):
         if tau.numel() == 1 and tau.item() <= 0.0:
             return torch.clamp_min(y, 0.0)
+        if not (tau > 0.0).any():
+            return torch.clamp_min(y, 0.0)
+        tau_val = tau.clamp_min(0.0)
+    else:
+        tau_val = tau
     mu_val = float(max(mu, 1.001))
-    mu_tau = mu_val * tau
+    mu_tau = mu_val * tau_val
     slope = mu_val / (mu_val - 1.0)
-    ramp = slope * (y - tau)
+    ramp = slope * (y - tau_val)
     out = torch.where(y > mu_tau, y, ramp)
     return torch.clamp_min(out, 0.0)
 

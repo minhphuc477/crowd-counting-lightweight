@@ -138,11 +138,10 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         feature_dim = int(p4.shape[1])
         out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
-        out = torch.zeros((b, m_total, out_dim), device=device, dtype=dtype)
-
         scale_specs = regions.scale_sizes_px if regions.scale_sizes_px is not None else [
             _canonicalize_region_size(s) for s in self.region_sizes_px
         ]
+        feature_parts: list[torch.Tensor] = []
         for sid, size_spec in enumerate(scale_specs):
             mask = regions.scale_id == sid
             boxes4 = regions.boxes[mask]
@@ -198,7 +197,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 fill_value=float(math.log(geom_scale_px / 32.0)),
             )
 
-            out[:, mask, :] = torch.cat([pooled, log_scale], dim=-1)
+            feature_parts.append(torch.cat([pooled, log_scale], dim=-1))
 
         # Collect full-image regions (scale_id == -1) if present
         mask_full = (regions.scale_id == -1)
@@ -221,9 +220,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 pooled_full[..., :1],
                 fill_value=float(math.log(max(geom_scale_px, 32.0) / 32.0)),
             )
-            out[:, mask_full, :] = torch.cat([pooled_full, log_scale_full], dim=-1)
+            feature_parts.append(torch.cat([pooled_full, log_scale_full], dim=-1))
 
-        return out
+        if not feature_parts:
+            return torch.zeros((b, 0, out_dim), device=device, dtype=dtype)
+
+        return torch.cat(feature_parts, dim=1)
 
     def forward(
         self,

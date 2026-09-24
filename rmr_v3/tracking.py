@@ -64,11 +64,15 @@ class DiagnosticTracker:
         self.e_befores: list[float] = []
         self.e_afters: list[float] = []
 
-        scale_sizes = tuple(model.cfg.region_sizes_px)
-        self.scale_map: dict[int, int | str] = {
-            sid: (f"{s[0]}_{s[1]}" if isinstance(s, (tuple, list)) else int(s))
-            for sid, s in enumerate(scale_sizes)
-        }
+        if getattr(model.cfg, "use_park", False):
+            n_bands = int(getattr(model.cfg, "park_altitude_bands", 3))
+            self.scale_map: dict[int, int | str] = {sid: f"band_{sid}" for sid in range(n_bands)}
+        else:
+            scale_sizes = tuple(model.cfg.region_sizes_px)
+            self.scale_map: dict[int, int | str] = {
+                sid: (f"{s[0]}_{s[1]}" if isinstance(s, (tuple, list)) else int(s))
+                for sid, s in enumerate(scale_sizes)
+            }
         self.w_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
         self.pi_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
 
