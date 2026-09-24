@@ -172,8 +172,12 @@ def proximal_firm_threshold(
       completely resolving the dense clump mass erosion caused by soft-thresholding.
     - tau < z <= mu * tau: Smooth monotonic linear transition.
     """
-    if isinstance(tau, (int, float)) and tau <= 0.0:
-        return torch.clamp_min(y, 0.0)
+    if isinstance(tau, (int, float)):
+        if tau <= 0.0:
+            return torch.clamp_min(y, 0.0)
+    elif isinstance(tau, torch.Tensor):
+        if tau.numel() == 1 and tau.item() <= 0.0:
+            return torch.clamp_min(y, 0.0)
     mu_val = float(max(mu, 1.001))
     mu_tau = mu_val * tau
     slope = mu_val / (mu_val - 1.0)

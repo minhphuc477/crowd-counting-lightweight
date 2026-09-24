@@ -77,7 +77,7 @@ def _build_perspective_regions_cached(
     for band_id, v_start, v_end, s_factor in band_defs:
         v_center = 0.5 * (v_start + v_end)
         hy_px = int(round(horizon_size_px + (foreground_size_px - horizon_size_px) * s_factor))
-        rho = 1.0 + (max_aspect_ratio - 1.0) * v_center
+        rho = 1.0 + (max_aspect_ratio - 1.0) * s_factor
         wx_px = max(8, int(round(hy_px / rho)))
         band_sizes.append((hy_px, wx_px))
 
