@@ -23,6 +23,7 @@ class RegionSet:
     area: torch.Tensor
     boxes_list: list[tuple[int, int, int, int]] | None = None
     num_scales: int = 3
+    scale_sizes_px: tuple[tuple[int, int], ...] | None = None
 
     @property
     def areas(self) -> torch.Tensor:
@@ -36,6 +37,7 @@ class RegionSet:
             area=self.area.to(device),
             boxes_list=self.boxes_list,
             num_scales=self.num_scales,
+            scale_sizes_px=self.scale_sizes_px,
         )
 
 
@@ -139,6 +141,7 @@ def build_multiscale_regions(
         area=area_t,
         boxes_list=list(boxes_list),
         num_scales=len(canonical_sizes),
+        scale_sizes_px=canonical_sizes,
     )
 
 

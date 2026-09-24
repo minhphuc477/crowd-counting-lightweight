@@ -124,6 +124,16 @@ class RMRv3Config:
     morozov_rho: float = 0.30
 
 
+    # Perspective-Adaptive Regional Kernels (PARK - RMR-v33)
+    use_park: bool = False
+    park_mode: str = "pcat"
+    park_horizon_h: int = 16
+    park_foreground_h: int = 128
+    park_max_aspect: float = 2.0
+    use_pgh: bool = False
+    park_routing: bool = False
+    park_altitude_bands: int = 3
+
     # Dynamic Scale Routing
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
@@ -203,6 +213,18 @@ class RMRv3Config:
             self.aspp_dilations = _deep_tuple(self.aspp_dilations)
         if self.context_dilations is not None:
             self.context_dilations = _deep_tuple(self.context_dilations)
+
+        if self.use_park:
+            if self.park_horizon_h <= 0:
+                raise ValueError(f"park_horizon_h must be > 0, got {self.park_horizon_h}")
+            if self.park_foreground_h <= self.park_horizon_h:
+                raise ValueError(
+                    f"park_foreground_h ({self.park_foreground_h}) must be > park_horizon_h ({self.park_horizon_h})"
+                )
+            if self.park_max_aspect <= 0.0:
+                raise ValueError(f"park_max_aspect must be > 0.0, got {self.park_max_aspect}")
+            if self.park_altitude_bands < 1:
+                raise ValueError(f"park_altitude_bands must be >= 1, got {self.park_altitude_bands}")
 
         # Permanently Banned Anti-Pattern Guards
         if self.use_coord_attn:

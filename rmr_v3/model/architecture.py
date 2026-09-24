@@ -14,6 +14,7 @@ from rmr_core.types import RMRModelOutput
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
+    build_perspective_regions,
 )
 from ..regional_head import ProbabilisticRegionalEvidenceHead
 from .config import RMRv3Config, _softplus_inverse, _deep_tuple
@@ -23,9 +24,9 @@ from .perspective import (
     MicroCoordAttn,
     ContinuousPerspectiveCarrierModulation,
 )
+from .perspective_geometry import PerspectiveGeometryHead, PARKRoutingHead
 from .solver_step import solve_inverse_measure
-
-from .dual_lattice import push_forward_stride2_to_stride4
+from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2
 
 
 class RMRv3(nn.Module):
@@ -131,10 +132,25 @@ class RMRv3(nn.Module):
             if cfg.use_cpcm
             else None
         )
+        self.pgh: PerspectiveGeometryHead | None = (
+            PerspectiveGeometryHead(
+                in_channels=cfg.feature_width,
+                horizon_h_px=cfg.park_horizon_h,
+                foreground_h_px=cfg.park_foreground_h,
+                max_aspect_ratio=cfg.park_max_aspect,
+            )
+            if cfg.use_pgh
+            else None
+        )
 
         # Dynamic Scale Routing
-        if cfg.factorized_scale_routing:
-            self.scale_router: FactorizedRoutingHead | ScaleRoutingHead | None = FactorizedRoutingHead(
+        if cfg.park_routing:
+            self.scale_router: nn.Module | None = PARKRoutingHead(
+                in_channels=cfg.feature_width,
+                temperature=cfg.scale_router_temperature,
+            )
+        elif cfg.factorized_scale_routing:
+            self.scale_router = FactorizedRoutingHead(
                 in_channels=cfg.feature_width,
                 num_scales=cfg.num_marginal_scales,
                 num_aspect_ratios=cfg.num_aspect_ratios,
@@ -195,22 +211,15 @@ class RMRv3(nn.Module):
     def set_solver_strength(self, strength: float) -> None:
         self.solver_strength = float(min(max(strength, 0.0), 1.0))
 
-    def _regions(
-        self,
-        h: int,
-        w: int,
-        device: torch.device,
-        stride: int | None = None,
-    ) -> RegionSet:
+    def _regions(self, h: int, w: int, device: torch.device, stride: int | None = None) -> RegionSet:
         effective_stride = self.cfg.output_stride if stride is None else stride
+        dev_idx = (device.index if device.index is not None else 0) if device.type == "cuda" else None
         key = (
-            h,
-            w,
-            effective_stride,
-            _deep_tuple(self.cfg.region_sizes_px),
-            self.cfg.region_overlap,
-            device.type,
-            device.index if device.type == "cuda" else None,
+            h, w, effective_stride, self.cfg.use_park,
+            self.cfg.park_horizon_h, self.cfg.park_foreground_h,
+            self.cfg.park_max_aspect, self.cfg.park_altitude_bands,
+            _deep_tuple(self.cfg.region_sizes_px), self.cfg.region_overlap,
+            device.type, dev_idx,
         )
 
         if key in self._region_cache:
@@ -220,21 +229,33 @@ class RMRv3(nn.Module):
         if len(self._region_cache) >= 32:
             self._region_cache.popitem(last=False)
 
-        region_set = build_multiscale_regions(
-            height=h,
-            width=w,
-            output_stride=effective_stride,
-            region_sizes_px=self.cfg.region_sizes_px,
-            overlap=self.cfg.region_overlap,
-            include_full_image=False,
-            device=device,
-        )
+        if self.cfg.use_park:
+            region_set = build_perspective_regions(
+                height=h,
+                width=w,
+                output_stride=effective_stride,
+                horizon_size_px=self.cfg.park_horizon_h,
+                foreground_size_px=self.cfg.park_foreground_h,
+                max_aspect_ratio=self.cfg.park_max_aspect,
+                overlap=self.cfg.region_overlap,
+                num_altitude_bands=self.cfg.park_altitude_bands,
+                device=device,
+            )
+        else:
+            region_set = build_multiscale_regions(
+                height=h,
+                width=w,
+                output_stride=effective_stride,
+                region_sizes_px=self.cfg.region_sizes_px,
+                overlap=self.cfg.region_overlap,
+                include_full_image=False,
+                device=device,
+            )
         self._region_cache[key] = region_set
         return region_set
 
-    def _extract_carrier_features(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _extract_carrier_features(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
         c4, c8, c16 = self.encoder(x)
         p4, p8, p16 = self.fusion(c4, c8, c16)
 
@@ -259,12 +280,14 @@ class RMRv3(nn.Module):
         if self.cpcm is not None:
             p4 = self.cpcm(p4)
 
+        if self.pgh is not None:
+            p4 = self.pgh(p4)
+
         return p4, p8, p16
 
-    def _route_scales(
-        self, p4: torch.Tensor
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    def _route_scales(self, p4: torch.Tensor) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         if self.scale_router is None:
+
             return None, None, None
 
         router_out = self.scale_router(p4)
@@ -293,25 +316,14 @@ class RMRv3(nn.Module):
         return z0, y0, fg_logit
 
     def _extract_regional_evidence(
-        self,
-        p4: torch.Tensor,
-        p8: torch.Tensor,
-        p16: torch.Tensor,
-        regions: RegionSet,
-        scale_weights: torch.Tensor | None,
-        uniform_reliability: bool,
-        grid_h: int,
+        self, p4: torch.Tensor, p8: torch.Tensor, p16: torch.Tensor,
+        regions: RegionSet, scale_weights: torch.Tensor | None,
+        uniform_reliability: bool, grid_h: int,
     ) -> dict[str, Any]:
         return extract_regional_evidence(
-            cfg=self.cfg,
-            region_head=self.region_head,
-            p4=p4,
-            p8=p8,
-            p16=p16,
-            regions=regions,
-            scale_weights=scale_weights,
-            uniform_reliability=uniform_reliability,
-            grid_h=grid_h,
+            cfg=self.cfg, region_head=self.region_head, p4=p4, p8=p8, p16=p16,
+            regions=regions, scale_weights=scale_weights,
+            uniform_reliability=uniform_reliability, grid_h=grid_h,
         )
 
     def _solve_inverse_measure(
@@ -346,14 +358,10 @@ class RMRv3(nn.Module):
         solver_strength: float | None = None,
     ) -> RMRModelOutput:
         h_in, w_in = x.shape[-2:]
-        if self.cfg.subpixel_stride2:
-            divisor = 16  # LCM of strides (2, 4, 8, 16)
-            pad_h = (divisor - h_in % divisor) % divisor
-            pad_w = (divisor - w_in % divisor) % divisor
-            x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
-        else:
-            pad_h = pad_w = 0
-            x_in = x
+        divisor = 16  # FPN reductions (4, 8, 16) require resolution divisibility
+        pad_h = (divisor - h_in % divisor) % divisor
+        pad_w = (divisor - w_in % divisor) % divisor
+        x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
 
         p4, p8, p16 = self._extract_carrier_features(x_in)
         scale_weights, pi_scale, pi_aspect = self._route_scales(p4)
@@ -379,21 +387,7 @@ class RMRv3(nn.Module):
                 y0 = y0[..., :target_h, :target_w]
                 z0 = z0[..., :target_h, :target_w]
             regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
-            b_s2 = regions_feat.boxes * 2
-            b_s2[:, [0, 2]] = b_s2[:, [0, 2]].clamp(0, target_h)
-            b_s2[:, [1, 3]] = b_s2[:, [1, 3]].clamp(0, target_w)
-            bl_s2 = [
-                (min(target_h, 2 * y1), min(target_w, 2 * x1), min(target_h, 2 * y2), min(target_w, 2 * x2))
-                for (y1, x1, y2, x2) in regions_feat.boxes_list
-            ] if regions_feat.boxes_list is not None else None
-            area_s2 = ((b_s2[:, 2] - b_s2[:, 0]) * (b_s2[:, 3] - b_s2[:, 1])).float()
-            regions_solver = RegionSet(
-                boxes=b_s2,
-                scale_id=regions_feat.scale_id,
-                area=area_s2,
-                boxes_list=bl_s2,
-                num_scales=regions_feat.num_scales,
-            )
+            regions_solver = scale_regions_to_stride2(regions_feat, target_h, target_w)
         else:
             if y0.shape[-2] != target_h4 or y0.shape[-1] != target_w4:
                 y0 = y0[..., :target_h4, :target_w4]

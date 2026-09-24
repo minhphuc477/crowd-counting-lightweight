@@ -150,6 +150,9 @@ ALLOWED_MODEL_KEYS = {
     "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
     "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
     "curvature_alpha_init",
+    # PARK Perspective-Adaptive Regional Kernels & PGH
+    "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
+    "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
 }
 
 
@@ -353,6 +356,9 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
         "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
         "subpixel_stride2", "curvature_alpha_init",
+        # PARK Perspective-Adaptive Regional Kernels
+        "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
+        "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell", "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",

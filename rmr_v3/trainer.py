@@ -122,6 +122,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        if not deterministic:
+            torch.backends.cudnn.benchmark = True
     workers = int(cfg.get("train", {}).get("workers", 0))
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", device.type == "cuda"))
     gen = make_generator(seed) if deterministic else None

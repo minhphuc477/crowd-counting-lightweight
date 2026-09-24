@@ -261,7 +261,8 @@ class TestCodebaseMonolithPrevention:
                         if line_count > 450:
                             violators.append((str(fpath.relative_to(REPO_ROOT)), line_count))
 
-        assert len(audited_files) == 58, f"Expected exactly 58 source files, found {len(audited_files)}"
+        # Exactly 60 source files across rmr_core and rmr_v3 (58 baseline + perspective_regions.py + perspective_geometry.py)
+        assert len(audited_files) == 60, f"Expected exactly 60 source files, found {len(audited_files)}"
         assert not violators, f"Monolith invariant violated! Files exceeding 450 lines: {violators}"
 
 

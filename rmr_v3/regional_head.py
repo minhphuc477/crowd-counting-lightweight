@@ -138,9 +138,12 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         feature_dim = int(p4.shape[1])
         out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 
-        feat_list = []
+        out = torch.zeros((b, m_total, out_dim), device=device, dtype=dtype)
 
-        for sid, size_spec in enumerate(self.region_sizes_px):
+        scale_specs = regions.scale_sizes_px if regions.scale_sizes_px is not None else [
+            _canonicalize_region_size(s) for s in self.region_sizes_px
+        ]
+        for sid, size_spec in enumerate(scale_specs):
             mask = regions.scale_id == sid
             boxes4 = regions.boxes[mask]
             if boxes4.shape[0] == 0:
@@ -189,20 +192,13 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                         boxes_level,
                     )
 
-            ms = pooled.shape[1]
-
             geom_scale_px = math.sqrt(float(hy_px) * float(wx_px))
             log_scale = torch.full_like(
                 pooled[..., :1],
                 fill_value=float(math.log(geom_scale_px / 32.0)),
             )
 
-            feat_list.append(
-                torch.cat(
-                    [pooled, log_scale],
-                    dim=-1,
-                )
-            )
+            out[:, mask, :] = torch.cat([pooled, log_scale], dim=-1)
 
         # Collect full-image regions (scale_id == -1) if present
         mask_full = (regions.scale_id == -1)
@@ -225,9 +221,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 pooled_full[..., :1],
                 fill_value=float(math.log(max(geom_scale_px, 32.0) / 32.0)),
             )
-            feat_list.append(torch.cat([pooled_full, log_scale_full], dim=-1))
-
-        out = torch.cat(feat_list, dim=1) if feat_list else torch.zeros((p4.shape[0], m_total, out_dim), device=device, dtype=dtype)
+            out[:, mask_full, :] = torch.cat([pooled_full, log_scale_full], dim=-1)
 
         return out
 
@@ -405,13 +399,12 @@ def apply_scale_consistency_gating(
 
         gate = (mean_pi_k + float(eps)).pow(float(power))
 
-        if perspective_horizon_gate and region_sizes_px is not None and k < len(region_sizes_px):
-            s_spec = region_sizes_px[k]
-            hy, wx = (int(s_spec[0]), int(s_spec[1])) if isinstance(s_spec, (tuple, list)) else (int(s_spec), int(s_spec))
-            if hy > wx and grid_h is not None and grid_h > 0:
+        if perspective_horizon_gate:
+            is_vert = (boxes_k[:, 2] - boxes_k[:, 0]) > (boxes_k[:, 3] - boxes_k[:, 1])
+            if is_vert.any() and grid_h is not None and grid_h > 0:
                 y_center = 0.5 * (boxes_k[:, 0].float() + boxes_k[:, 2].float()) / float(grid_h)
                 geo_gate = torch.sigmoid((y_center - float(horizon_cutoff)) / 0.05).view(1, 1, -1)
-                gate = gate * geo_gate.to(device=gate.device, dtype=gate.dtype)
+                gate = torch.where(is_vert.view(1, 1, -1), gate * geo_gate.to(device=gate.device, dtype=gate.dtype), gate)
 
         w_out[:, :, mask_k] = w_out[:, :, mask_k] * gate
 

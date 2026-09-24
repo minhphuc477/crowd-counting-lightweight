@@ -23,6 +23,11 @@ from .prefix_sums import (
     rectangle_sum_from_prefix,
     regional_sum,
 )
+from .perspective_regions import (
+    build_perspective_regions,
+    park_adjoint_operator,
+    park_forward_operator,
+)
 from .regions import (
     RegionSet,
     _axis_starts,
@@ -40,6 +45,7 @@ __all__ = [
     "_canonicalize_region_size",
     "_gather_prefix",
     "build_multiscale_regions",
+    "build_perspective_regions",
     "center_scatter",
     "charbonnier_tv_step",
     "continuous_prefix_eval",
@@ -47,6 +53,8 @@ __all__ = [
     "fractional_region_average_features",
     "fractional_region_mean_std_features",
     "multiplicative_gated_adjoint",
+    "park_adjoint_operator",
+    "park_forward_operator",
     "partition_regions_by_scale",
     "prefix2d",
     "rectangle_sum_from_prefix",

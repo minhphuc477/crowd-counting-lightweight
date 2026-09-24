@@ -88,3 +88,31 @@ def check_mass_conservation(
     max_abs = diff.max().item()
     max_rel = (diff / m_carrier.clamp_min(1e-6)).max().item()
     return (max_abs < eps) or (max_rel < eps)
+
+
+def scale_regions_to_stride2(
+    regions_feat: Any,
+    target_h: int,
+    target_w: int,
+) -> Any:
+    """Scale Stride 4 region boxes to Stride 2 solver grid."""
+    from rmr_core.operators import RegionSet
+    b_s2 = regions_feat.boxes * 2
+    b_s2[:, [0, 2]] = b_s2[:, [0, 2]].clamp(0, target_h)
+    b_s2[:, [1, 3]] = b_s2[:, [1, 3]].clamp(0, target_w)
+    bl_s2 = [
+        (min(target_h, 2 * y1), min(target_w, 2 * x1), min(target_h, 2 * y2), min(target_w, 2 * x2))
+        for (y1, x1, y2, x2) in regions_feat.boxes_list
+    ] if regions_feat.boxes_list is not None else None
+    dh = (b_s2[:, 2] - b_s2[:, 0]).clamp_min(1)
+    dw = (b_s2[:, 3] - b_s2[:, 1]).clamp_min(1)
+    area_s2 = (dh * dw).float()
+    return RegionSet(
+        boxes=b_s2,
+        scale_id=regions_feat.scale_id,
+        area=area_s2,
+        boxes_list=bl_s2,
+        num_scales=regions_feat.num_scales,
+        scale_sizes_px=regions_feat.scale_sizes_px,
+    )
+

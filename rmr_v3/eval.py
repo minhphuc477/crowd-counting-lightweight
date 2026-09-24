@@ -168,6 +168,14 @@ def main() -> None:
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
+    scale_map = None
+    if getattr(model.cfg, "use_park", False):
+        n_bands = int(getattr(model.cfg, "park_altitude_bands", 3))
+        scale_map = {sid: f"band_{sid}" for sid in range(n_bands)}
+    elif hasattr(model.cfg, "region_sizes_px"):
+        scale_sizes = tuple(model.cfg.region_sizes_px)
+        scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
+
     diag_rows: list[dict] = []
     traj_rows: list[dict] = []
 
@@ -179,7 +187,7 @@ def main() -> None:
             r["sample_id"] = row["id"]
         diag_rows.extend(d_rows)
 
-        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0))
+        t_diag = compute_solver_trajectory_diagnostics(out, target.unsqueeze(0), scale_map=scale_map)
         if t_diag:
             traj_rows.append(t_diag)
 
@@ -214,10 +222,10 @@ def main() -> None:
         use_tta=use_tta,
     )
 
-    corrs = compute_reliability_correlations(diag_rows)
+    corrs = compute_reliability_correlations(diag_rows, scale_map=scale_map)
     summary.update(corrs)
 
-    calib = compute_uncertainty_calibration_bins(diag_rows)
+    calib = compute_uncertainty_calibration_bins(diag_rows, scale_map=scale_map)
     summary["calibration"] = calib
 
     disp_min = float(model.cfg.dispersion_min)
@@ -225,7 +233,7 @@ def main() -> None:
     sat = compute_dispersion_saturation(diag_rows, disp_min=disp_min, disp_max=disp_max)
     summary.update(sat)
 
-    nb_cov = compute_nb_interval_coverage(diag_rows)
+    nb_cov = compute_nb_interval_coverage(diag_rows, scale_map=scale_map)
     summary["nb_interval_coverage"] = nb_cov
     summary.update(nb_cov)
 

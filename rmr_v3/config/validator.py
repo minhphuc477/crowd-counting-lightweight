@@ -209,6 +209,13 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"morozov_rho must be non-negative, got {m_cfg['morozov_rho']}")
         if "curvature_alpha_init" in m_cfg:
             float(m_cfg["curvature_alpha_init"])
+        if bool(m_cfg.get("use_park", False)):
+            h_min, h_max = int(m_cfg.get("park_horizon_h", 16)), int(m_cfg.get("park_foreground_h", 128))
+            asp, bands = float(m_cfg.get("park_max_aspect", 2.0)), int(m_cfg.get("park_altitude_bands", 3))
+            if h_min <= 0 or h_max <= h_min:
+                raise ValueError(f"Invalid park heights: horizon={h_min}, foreground={h_max}")
+            if asp <= 0.0 or bands < 1:
+                raise ValueError(f"Invalid park config: aspect={asp} (>0.0), bands={bands} (>=1)")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})

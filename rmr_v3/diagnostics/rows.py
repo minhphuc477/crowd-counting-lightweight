@@ -122,24 +122,32 @@ def resolve_scale_map(
     scale_map: dict[int, int | str] | None = None,
 ) -> dict[int, int | str]:
     """Resolve mapping from integer scale_id to physical pixel scale label (e.g. 16, 32, 64, 128)."""
-    if scale_map is not None:
-        return scale_map
+    res: dict[int, int | str] = dict(scale_map) if scale_map is not None else {}
     if scale_ids is None:
-        return {0: 32, 1: 64, 2: 128}
+        return res if res else {0: 32, 1: 64, 2: 128}
+
     if isinstance(scale_ids, torch.Tensor):
         sids = scale_ids.detach().cpu().numpy()
     else:
         sids = np.asarray(scale_ids)
     unique_sids = sorted([int(s) for s in np.unique(sids) if s >= 0])
-    if unique_sids == [0, 1, 2, 3, 4]:
-        return {0: 16, 1: 32, 2: 64, 3: "64_32", 4: 128}
-    if unique_sids == [0, 1, 2, 3]:
-        return {0: 16, 1: 32, 2: 64, 3: 128}
-    if unique_sids == [0, 1, 2]:
-        return {0: 32, 1: 64, 2: 128}
-    if not unique_sids:
-        return {0: 32, 1: 64, 2: 128}
-    return {sid: sid for sid in unique_sids}
+
+    if not res:
+        if unique_sids == [0, 1, 2, 3, 4]:
+            res = {0: 16, 1: 32, 2: 64, 3: "64_32", 4: 128}
+        elif unique_sids == [0, 1, 2, 3]:
+            res = {0: 16, 1: 32, 2: 64, 3: 128}
+        elif unique_sids == [0, 1, 2]:
+            res = {0: 32, 1: 64, 2: 128}
+        elif not unique_sids:
+            return {0: 32, 1: 64, 2: 128}
+        else:
+            res = {sid: sid for sid in unique_sids}
+
+    for sid in unique_sids:
+        if sid not in res:
+            res[sid] = f"band_{sid}"
+    return res
 
 
 def compute_reliability_correlations(
