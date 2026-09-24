@@ -219,7 +219,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     scheduler = make_scheduler(optimizer, epochs, warmup_epochs, min_lr_ratio=min_lr_ratio)
     amp = bool(cfg.get("train", {}).get("amp", True) and device.type == "cuda")
     scaler_init_scale = float(cfg.get("train", {}).get("grad_scaler_init_scale", 1024.0))
-    scaler = torch.amp.GradScaler("cuda", enabled=amp, init_scale=scaler_init_scale)
+    scaler = torch.amp.GradScaler("cuda" if device.type == "cuda" else "cpu", enabled=amp, init_scale=scaler_init_scale)
     loss_cfg = make_loss_cfg(cfg)
     grad_clip = float(cfg.get("train", {}).get("grad_clip", 500.0))
     eval_every = int(cfg.get("train", {}).get("eval_every", 10))

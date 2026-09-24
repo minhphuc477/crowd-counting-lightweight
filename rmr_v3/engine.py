@@ -163,7 +163,7 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
 
-        with torch.amp.autocast("cuda", enabled=amp):
+        with torch.amp.autocast("cuda" if device.type == "cuda" else "cpu", enabled=amp):
             outputs = model(images, uniform_reliability=uniform_reliability, solver_strength=solver_strength)
             losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
             loss = losses["total"]

@@ -44,8 +44,8 @@ def compute_solver_trajectory_diagnostics(
         abs_err = (reg_t - gt_reg).abs()
         disagree = (reg_t - b_region).abs()
 
-        abs_err_np = abs_err[0, 0].detach().cpu().numpy()
-        disagree_np = disagree[0, 0].detach().cpu().numpy()
+        abs_err_np = abs_err.mean(dim=(0, 1)).detach().cpu().numpy()
+        disagree_np = disagree.mean(dim=(0, 1)).detach().cpu().numpy()
 
         results[f"mae_reg_y{t_idx}"] = float(np.mean(abs_err_np))
 
