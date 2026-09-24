@@ -104,7 +104,7 @@ def _build_perspective_regions_cached(
                 scale_ids.append(band_id)
 
     # Sort boxes deterministically by (scale_id, y1, x1, y2, x2) to maintain scale-grouping parity
-    combined = sorted(zip(boxes, scale_ids, strict=False), key=lambda item: (item[1], item[0]))
+    combined = sorted(zip(boxes, scale_ids), key=lambda item: (item[1], item[0]))
     sorted_boxes = [c[0] for c in combined]
     sorted_scales = [c[1] for c in combined]
 
