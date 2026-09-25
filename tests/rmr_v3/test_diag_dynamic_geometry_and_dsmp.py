@@ -190,3 +190,34 @@ def test_diag_dcap_active_gradient_flow() -> None:
 
     assert grad_tilt > 0.0, f"scene_tilt received zero gradient: {grad_tilt}"
     assert grad_delta > 0.0, f"delta_scale received zero gradient: {grad_delta}"
+
+
+def test_dcap_vdp_parameters_and_active_gradients() -> None:
+    """Verify VDP DCAP has exactly 260 parameters and active gradients through both mean and diff."""
+    dcap = DynamicCameraAnglePredictor(in_channels=32, num_scales=3, use_vertical_gradient=True)
+    num_params = sum(p.numel() for p in dcap.parameters())
+    assert num_params == 260, f"Expected 260 params for VDP DCAP, got {num_params}"
+
+    # Step 0 Identity Parity
+    p16 = torch.randn(2, 32, 16, 16, requires_grad=True)
+    scene_tilt, delta_scale = dcap(p16)
+    assert scene_tilt.shape == (2, 1, 1, 1)
+    assert delta_scale.shape == (2, 3, 1, 1)
+    assert torch.allclose(scene_tilt, torch.full_like(scene_tilt, 0.5), atol=1e-5)
+    assert torch.allclose(delta_scale, torch.zeros_like(delta_scale), atol=1e-5)
+
+    router = DiAGScaleRoutingHead(in_channels=32, num_scales=3)
+    with torch.no_grad():
+        router.pw.weight.normal_(std=0.1)
+
+    p4 = torch.randn(2, 32, 64, 64, requires_grad=True)
+    pi = router(p4, delta_scale=delta_scale, scene_tilt=scene_tilt)
+    loss = (pi[:, 0] * 2.0).sum()
+    loss.backward()
+
+    assert dcap.proj.weight.grad is not None
+    # Both first 32 weights (mean) and last 32 weights (vertical diff) must receive active gradients
+    grad_mean = dcap.proj.weight.grad[:, :32].abs().sum().item()
+    grad_diff = dcap.proj.weight.grad[:, 32:].abs().sum().item()
+    assert grad_mean > 0.0, f"Mean branch received zero gradient: {grad_mean}"
+    assert grad_diff > 0.0, f"Diff branch received zero gradient: {grad_diff}"

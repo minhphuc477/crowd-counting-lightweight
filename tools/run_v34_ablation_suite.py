@@ -51,10 +51,15 @@ ABLATION_CATALOG: dict[str, dict[str, str]] = {
         "category": "DiAG Routing",
         "desc": "Ablate Scale Alignment Loss (lambda_scale_align = 0.0)",
     },
-    "rmr_v34_abl_vdp_dcap": {
-        "config": "configs/rmr_v34/rmr_v34_abl_vdp_dcap.yaml",
+    "rmr_v34_abl_no_vdp": {
+        "config": "configs/rmr_v34/rmr_v34_abl_no_vdp.yaml",
         "category": "DiAG Routing",
-        "desc": "Upgrade DCAP with Vertical Differential Pooling (VDP, 104,701 params)",
+        "desc": "Ablate VDP DCAP (Revert to 2D GAP DCAP, 104,573 params)",
+    },
+    "rmr_v34_abl_scale_prior": {
+        "config": "configs/rmr_v34/rmr_v34_abl_scale_prior.yaml",
+        "category": "DiAG Routing",
+        "desc": "Scale-Conditioned Fine Head Prior Coupling (+6 params, 104,707 params)",
     },
     # DSMP Discrete Measure Protection
     "rmr_v34_abl_no_hurdle": {

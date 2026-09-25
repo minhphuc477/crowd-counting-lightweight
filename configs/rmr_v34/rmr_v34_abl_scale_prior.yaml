@@ -1,4 +1,4 @@
-# Scale Alignment Supervision Ablation (lambda_scale_align: 0.0)
+# Scale-Conditioned Fine Head Prior Coupling (+6 params, 104,707 params)
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -46,7 +46,7 @@ model:
   foreground_gate: false
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
-  scale_conditioned_prior: false
+  scale_conditioned_prior: true
   enable_solver: true
   solver_mode: additive
   iterations: 6
@@ -105,7 +105,7 @@ loss:
   cell_loss_mode: count_invariant
   cell_alpha: 2.0
   cell_beta: 1.0
-  lambda_scale_align: 0.0
+  lambda_scale_align: 0.05
   scale_align_tau_dense: 0.12
   scale_align_tau_sparse: 0.03
   scale_align_kernel: 5
@@ -140,4 +140,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/rmr_v34_abl_no_scale_align
+output_dir: runs/sha_a/rmr_v34_abl_scale_prior

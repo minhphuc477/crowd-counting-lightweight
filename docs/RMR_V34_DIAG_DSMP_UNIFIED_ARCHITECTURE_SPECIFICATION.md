@@ -9,7 +9,7 @@ This document serves as the permanent, authoritative architectural and mathemati
 2. The **forensic autopsy** of all prior iterations—specifically explaining why the earlier H11 baseline achieved **71.20 MAE (TTA)** while the v33 PARK iteration regressed to **80.52 MAE**.
 3. The complete design of **Dynamic Image-Adaptive Geometry (DiAG)**, which eliminates static spatial coordinates and elevation bands in favor of translation-equivariant, feature-driven scale routing.
 4. The formulation of **Discrete Sparse Measure Protection (DSMP)**, unifying count-invariant cell supervision, top-$K$ hard background mining, hurdle occupancy masking, and minimax concave penalty (MCP) proximal thresholding.
-5. Strict adherence to scientific constraints: parameter budget $\le 105,000$ (exact: **104,573** parameters), zero knowledge distillation, modular files $\le 450$ lines, and zero static spatial coordinate grids (`torch.linspace`).
+5. Strict adherence to scientific constraints: parameter budget $\le 105,000$ (exact: **104,701** parameters with Vertical Differential Pooling DCAP; **104,573** without VDP), zero knowledge distillation, modular files $\le 450$ lines, and zero static spatial coordinate grids (`torch.linspace`).
 
 ---
 
@@ -171,18 +171,14 @@ Every parameter in RMR-v34 is tracked and budgeted as shown in Table 2:
 ### Table 2: Complete Module Parameter Inventory
 | Component | Module Name | Trainable Parameters | Description |
 |---|---|---|---|
-| **Backbone Stem** | `backbone.stem` | 848 | $3\times 3$ Conv (stride 2) + DWConv + PWConv |
-| **Backbone Stage 1** | `backbone.stage1` | 4,224 | Inverted residual blocks with squeeze-excitation |
-| **Backbone Stage 2** | `backbone.stage2` | 16,896 | Depthwise separable downsampling to stride 8 |
-| **Backbone Stage 3** | `backbone.stage3` | 45,056 | High-capacity semantic stage to stride 16 |
-| **Feature Pyramid Neck** | `neck` | 18,432 | Multiscale feature aggregation with lateral connections |
-| **Carrier Head** | `carrier_head` | 4,640 | $P_4$ carrier feature refinement |
-| **Density Head** | `density_head` | 1,057 | $1\times 1$ prediction to continuous density map |
-| **Hurdle Head** | `hurdle_head` | 1,057 | Regional occupancy prediction |
-| **DCAP Perspective** | `dcap` | 132 | GAP + Linear(32, 4) for scene tilt and scale bias |
-| **DiAG Scale Router** | `scale_router` | 417 | DWConv $3\times 3$ (32 ch) + GN + SiLU + PWConv $1\times 1$ (3 ch) |
-| **Resonant Adjoint** | `adjoint_engine` | 11,814 | Unrolled Landweber solver with resonant momentum |
-| **Total Trainable** | **Full Model** | **104,573** | **Budget: $\le 105,000$ (Margin: 427 params)** |
+| **Backbone Stem & Stages** | `backbone` | 87,568 | Inverted residual MobileNetV4 / ConvNeXt-Femto blocks |
+| **ASPP-Lite Neck** | `neck` | 10,784 | Dilated multiscale receptive field fusion at stride 4 |
+| **Fine Density Head** | `fine_head` | 1,475 | Continuous density anchor generator ($y_0$) with curvature |
+| **Region Head (DSMP)** | `region_head` | 4,131 | Probabilistic regional evidence and Hurdle occupancy head |
+| **DCAP Perspective (VDP)** | `dcap` | 260 | Vertical Differential Pooling + GAP + Linear(64, 4) |
+| **DiAG Scale Router** | `scale_router` | 483 | Depthwise-separable $3\times 3$ Conv + GroupNorm + $1\times 1$ Conv |
+| **Iterative Inversion Solver** | Algorithmic (`rmr_core`) | 0 (Shared / Non-Param) | Unrolled Landweber solver with resonant momentum |
+| **Total Trainable** | **Full Canonical Model** | **104,701** | **Budget: $\le 105,000$ (Margin: 299 params)** |
 
 ### 6.2 Code Quality & Engineering Invariants
 - **File Line Length Ceiling**: Every Python source file in `rmr_core/` and `rmr_v3/` must strictly not exceed 450 lines. Current maximum line count across all 58 source files is **446 lines** (`rmr_v3/model/architecture.py`).
@@ -208,24 +204,25 @@ To guarantee publication-grade empirical rigor, the RMR-v34 suite isolates each 
 
 | Config Key | Category | Trainable Params | Targeted Hypothesis / Variable |
 |---|---|---|---|
-| `rmr_v34_diag_canonical.yaml` | Baseline | 104,573 | Canonical reference (DiAG, DSMP, $T=6$, SNR Weighting, MCP Firm). |
-| `rmr_v34_shb_canonical.yaml` | Cross-Dataset | 104,573 | ShanghaiTech Part B benchmark evaluation (316 test images). |
+| `rmr_v34_diag_canonical.yaml` | Baseline | 104,701 | Canonical reference (DiAG with VDP DCAP, DSMP, $T=6$, SNR Weighting, MCP Firm). |
+| `rmr_v34_shb_canonical.yaml` | Cross-Dataset | 104,701 | ShanghaiTech Part B benchmark evaluation (316 test images). |
+| `rmr_v34_abl_no_vdp.yaml` | DCAP Upgrade | 104,573 | Ablate Vertical Differential Pooling (`use_vertical_gradient_dcap: false`, 2D GAP). |
+| `rmr_v34_abl_scale_prior.yaml` | Prior Coupling | 104,707 | Test scale-conditioned FineHead prior coupling (`scale_conditioned_prior: true`). |
 | `rmr_v34_abl_no_diag.yaml` | DiAG Routing | 103,958 | Ablate DiAG routing (`use_diag: false`, uniform isotropic multiscale weights). |
-| `rmr_v34_abl_no_dcap_tilt.yaml` | DiAG Routing | 104,573 | Ablate scene tilt contrast scaling (`use_dcap_tilt: false`). |
-| `rmr_v34_abl_no_scale_align.yaml` | DiAG Routing | 104,573 | Ablate scale alignment loss (`lambda_scale_align: 0.0`). |
-| `rmr_v34_abl_vdp_dcap.yaml` | DiAG Upgrade | 104,701 | Upgrade DCAP with Vertical Differential Pooling (`use_vertical_gradient_dcap: true`). |
-| `rmr_v34_abl_no_hurdle.yaml` | DSMP Protection | 104,524 | Ablate hurdle occupancy gating (`hurdle_head: false, lambda_hurdle: 0.0`). |
-| `rmr_v34_abl_no_hard_bg.yaml` | DSMP Protection | 104,573 | Ablate top-K hard background mining (`lambda_hard_bg: 0.0`). |
-| `rmr_v34_abl_no_ci_cell.yaml` | DSMP Protection | 104,573 | Ablate CI-Cell v2 count-invariance (`cell_loss_mode: balanced`). |
-| `rmr_v34_abl_no_proximal.yaml` | DSMP Protection | 104,573 | Ablate proximal thresholding (`proximal_mode: none`). |
-| `rmr_v34_abl_soft_proximal.yaml` | DSMP Protection | 104,573 | Test soft thresholding vs firm MCP (`proximal_mode: soft`). |
-| `rmr_v34_abl_no_solver.yaml` | Inverse Solver | 104,573 | Ablate unrolled solver ($T=0$, `enable_solver: false`, direct anchor $y_0$). |
-| `rmr_v34_abl_solver_t2.yaml` | Inverse Solver | 104,573 | Contraction depth ablation ($T=2$ iterations vs canonical $T=6$). |
-| `rmr_v34_abl_no_resonant.yaml` | Inverse Solver | 104,573 | Ablate carrier Laplacian momentum (`resonant_adjoint: false`). |
-| `rmr_v34_abl_no_curvature.yaml` | Inverse Solver | 104,572 | Ablate density curvature regularization (`lambda_curvature: 0.0`). |
-| `rmr_v34_abl_uniform_reliability.yaml` | Inverse Solver | 104,573 | Ablate SNR reliability weighting (`uniform_reliability: true`). |
-| `rmr_v34_seed123.yaml` | Multi-Seed | 104,573 | Statistical variance verification (`seed: 123`). |
-| `rmr_v34_seed456.yaml` | Multi-Seed | 104,573 | Statistical variance verification (`seed: 456`). |
+| `rmr_v34_abl_no_dcap_tilt.yaml` | DiAG Routing | 104,701 | Ablate scene tilt contrast scaling (`use_dcap_tilt: false`). |
+| `rmr_v34_abl_no_scale_align.yaml` | DiAG Routing | 104,701 | Ablate scale alignment loss (`lambda_scale_align: 0.0`). |
+| `rmr_v34_abl_no_hurdle.yaml` | DSMP Protection | 104,652 | Ablate hurdle occupancy gating (`hurdle_head: false, lambda_hurdle: 0.0`). |
+| `rmr_v34_abl_no_hard_bg.yaml` | DSMP Protection | 104,701 | Ablate top-K hard background mining (`lambda_hard_bg: 0.0`). |
+| `rmr_v34_abl_no_ci_cell.yaml` | DSMP Protection | 104,701 | Ablate CI-Cell v2 count-invariance (`cell_loss_mode: balanced`). |
+| `rmr_v34_abl_no_proximal.yaml` | DSMP Protection | 104,701 | Ablate proximal thresholding (`proximal_mode: none`). |
+| `rmr_v34_abl_soft_proximal.yaml` | DSMP Protection | 104,701 | Test soft thresholding vs firm MCP (`proximal_mode: soft`). |
+| `rmr_v34_abl_no_solver.yaml` | Inverse Solver | 104,701 | Ablate unrolled solver ($T=0$, `enable_solver: false`, direct anchor $y_0$). |
+| `rmr_v34_abl_solver_t2.yaml` | Inverse Solver | 104,701 | Contraction depth ablation ($T=2$ iterations vs canonical $T=6$). |
+| `rmr_v34_abl_no_resonant.yaml` | Inverse Solver | 104,701 | Ablate carrier Laplacian momentum (`resonant_adjoint: false`). |
+| `rmr_v34_abl_no_curvature.yaml` | Inverse Solver | 104,700 | Ablate density curvature regularization (`lambda_curvature: 0.0`). |
+| `rmr_v34_abl_uniform_reliability.yaml` | Inverse Solver | 104,701 | Ablate SNR reliability weighting (`uniform_reliability: true`). |
+| `rmr_v34_seed123.yaml` | Multi-Seed | 104,701 | Statistical variance verification (`seed: 123`). |
+| `rmr_v34_seed456.yaml` | Multi-Seed | 104,701 | Statistical variance verification (`seed: 456`). |
 
 ---
 

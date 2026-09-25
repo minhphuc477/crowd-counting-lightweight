@@ -56,11 +56,18 @@ ABLATIONS: dict[str, dict] = {
             c.update({"output_dir": "runs/sha_a/rmr_v34_abl_no_scale_align"}),
         ),
     },
-    "rmr_v34_abl_vdp_dcap.yaml": {
-        "desc": "Vertical Differential Pooling (VDP) Upgrade for DCAP (104,701 params)",
+    "rmr_v34_abl_no_vdp.yaml": {
+        "desc": "Ablate VDP DCAP (Revert to 2D GAP DCAP, 104,573 params)",
         "mod": lambda c: (
-            c["model"].update({"use_vertical_gradient_dcap": True}),
-            c.update({"output_dir": "runs/sha_a/rmr_v34_abl_vdp_dcap"}),
+            c["model"].update({"use_vertical_gradient_dcap": False}),
+            c.update({"output_dir": "runs/sha_a/rmr_v34_abl_no_vdp"}),
+        ),
+    },
+    "rmr_v34_abl_scale_prior.yaml": {
+        "desc": "Scale-Conditioned Fine Head Prior Coupling (+6 params, 104,707 params)",
+        "mod": lambda c: (
+            c["model"].update({"scale_conditioned_prior": True}),
+            c.update({"output_dir": "runs/sha_a/rmr_v34_abl_scale_prior"}),
         ),
     },
     # 3. DSMP Measure Protection Pillar Isolation

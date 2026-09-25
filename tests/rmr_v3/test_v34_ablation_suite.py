@@ -85,7 +85,8 @@ def test_v34_ablation_forward_backward_gradient_integrity() -> None:
     """Run forward and backward pass on key ablation model variants to verify active gradients."""
     test_configs = [
         "rmr_v34_diag_canonical.yaml",
-        "rmr_v34_abl_vdp_dcap.yaml",
+        "rmr_v34_abl_no_vdp.yaml",
+        "rmr_v34_abl_scale_prior.yaml",
         "rmr_v34_abl_no_diag.yaml",
         "rmr_v34_abl_no_dcap_tilt.yaml",
         "rmr_v34_abl_no_solver.yaml",

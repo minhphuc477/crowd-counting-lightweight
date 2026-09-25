@@ -1,4 +1,4 @@
-# Vertical Differential Pooling (VDP) Upgrade for DCAP (104,701 params)
+# Ablate VDP DCAP (Revert to 2D GAP DCAP, 104,573 params)
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -29,6 +29,7 @@ model:
   - 3
   - 6
   use_diag: true
+  use_vertical_gradient_dcap: false
   region_sizes_px:
   - 32
   - 64
@@ -88,7 +89,6 @@ model:
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
   floor_tau: 0.0
-  use_vertical_gradient_dcap: true
 loss:
   allocation_loss_type: flat_dm16
   kappa_flat16: 20.0
@@ -140,4 +140,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/rmr_v34_abl_vdp_dcap
+output_dir: runs/sha_a/rmr_v34_abl_no_vdp

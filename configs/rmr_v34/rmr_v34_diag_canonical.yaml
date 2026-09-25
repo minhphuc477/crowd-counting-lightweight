@@ -28,6 +28,7 @@ model:
   - 3
   - 6
   use_diag: true
+  use_vertical_gradient_dcap: true
   region_sizes_px:
   - 32
   - 64
