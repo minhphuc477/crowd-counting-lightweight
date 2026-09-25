@@ -137,6 +137,8 @@ class RMRv3Config:
     # Dynamic Scale Routing & DiAG (RMR-v34)
     use_diag: bool = False
     diag_persp_slope_init: str = "physical"
+    use_vertical_gradient_dcap: bool = False
+    use_dcap_tilt: bool = True
     dynamic_scale_routing: bool = False
     scale_router_temperature: float = 1.0
 

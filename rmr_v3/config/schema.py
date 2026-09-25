@@ -155,6 +155,7 @@ ALLOWED_MODEL_KEYS = {
     "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
     # DiAG Dynamic Image-Adaptive Geometry (RMR-v34)
     "use_diag", "diag_persp_slope_init",
+    "use_vertical_gradient_dcap", "use_dcap_tilt",
 }
 
 

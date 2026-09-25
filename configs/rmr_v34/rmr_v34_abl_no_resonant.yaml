@@ -1,0 +1,142 @@
+# Resonant Adjoint Carrier Momentum Ablation (resonant_adjoint: false)
+seed: 42
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
+  crop_size: 512
+  scale_range:
+  - 0.7
+  - 1.35
+  hflip_prob: 0.5
+  brightness_jitter: 0.2
+  contrast_jitter: 0.2
+  gamma_jitter:
+  - 0.6
+  - 1.5
+  preload: true
+  random_invert_prob: 0.0
+model:
+  output_stride: 4
+  feature_width: 32
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+  init_m0: 0.015763
+  neck_type: aspp_lite
+  use_aspp_gap: true
+  aspp_dilations:
+  - 1
+  - 3
+  - 6
+  use_diag: true
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  regional_feature_stats: mean
+  region_head_hidden: 48
+  dynamic_scale_routing: false
+  factorized_scale_routing: false
+  scale_router_temperature: 1.0
+  pre_solver_scale_gating: true
+  scale_gating_power: 1.0
+  foreground_gate: false
+  dynamic_trust_gate: false
+  use_top_down_semantic_gate: false
+  scale_conditioned_prior: false
+  enable_solver: true
+  solver_mode: additive
+  iterations: 6
+  omega: 1.0
+  residual_clip: 0.0
+  eps: 1.0e-06
+  adjoint_mode: radon_nikodym
+  resonant_adjoint: false
+  resonant_adjoint_lambda: 0.5
+  morozov_gamma: 0.75
+  anscombe_morozov: false
+  asymmetric_morozov: false
+  crest_discovery_flux: false
+  reliability_mode: snr
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+  trust_region_kappa: 0.35
+  trust_region_floor: 0.005
+  tv_lambda: 0.02
+  tv_type: laplacian
+  proximal_tau: 0.015
+  proximal_mode: firm
+  proximal_mu: 3.0
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+  hurdle_head: true
+  temp_softplus: true
+  use_coord_attn: false
+  ema_decay: 0.999
+  density_curvature: true
+  gated_density_curvature: true
+  curvature_dense_threshold: 0.15
+  curvature_gate_beta: 0.03
+  curvature_pool_kernel: 8
+  use_barzilai_borwein: true
+  use_scale_entropy_trust: true
+  floor_tau: 0.0
+loss:
+  allocation_loss_type: flat_dm16
+  kappa_flat16: 20.0
+  normalize_flat_dm16: true
+  dm_target: dual
+  lambda_count: 1.0
+  lambda_flat_dm16: 1.0
+  lambda_cell: 0.5
+  lambda_region_nb: 0.2
+  lambda_hurdle: 0.1
+  lambda_trunc_nb: 0.2
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+  cell_loss_mode: count_invariant
+  cell_alpha: 2.0
+  cell_beta: 1.0
+  lambda_scale_align: 0.05
+  scale_align_tau_dense: 0.12
+  scale_align_tau_sparse: 0.03
+  scale_align_kernel: 5
+  scale_align_mask_bg: true
+  lambda_curvature: 0.5
+  curvature_gate_threshold: 0.08
+  curvature_gate_kernel: 5
+  curvature_gate_mode: hard
+  curvature_gate_scale: 0.02
+  lambda_hard_bg: 0.15
+  hard_bg_ratio: 0.05
+  lambda_fg_gate: 0.0
+train:
+  deterministic: true
+  epochs: 1000
+  batch_size: 8
+  workers: 4
+  pin_memory: true
+  lr: 0.0001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.0001
+  warmup_epochs: 10
+  min_lr_ratio: 0.05
+  grad_clip: 1.0
+  amp: true
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 20
+  early_stopping: false
+  patience: 0
+  eval_every: 5
+eval:
+  density_bins:
+  - 100.0
+  - 500.0
+output_dir: runs/sha_a/rmr_v34_abl_no_resonant

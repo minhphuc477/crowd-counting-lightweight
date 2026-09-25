@@ -1,7 +1,8 @@
+# Solver Contraction Depth Ablation (iterations: 2 vs T=6)
 seed: 42
 data:
-  train_manifest: data/shb_train_all.jsonl
-  val_manifest: data/shb_test.jsonl
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
   crop_size: 512
   scale_range:
   - 0.7
@@ -47,7 +48,7 @@ model:
   scale_conditioned_prior: false
   enable_solver: true
   solver_mode: additive
-  iterations: 6
+  iterations: 2
   omega: 1.0
   residual_clip: 0.0
   eps: 1.0e-06
@@ -136,6 +137,6 @@ train:
   eval_every: 5
 eval:
   density_bins:
-  - 50.0
-  - 200.0
-output_dir: runs/shb/rmr_v34_shb_canonical
+  - 100.0
+  - 500.0
+output_dir: runs/sha_a/rmr_v34_abl_solver_t2

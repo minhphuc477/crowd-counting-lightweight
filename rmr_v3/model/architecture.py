@@ -120,10 +120,15 @@ class RMRv3(nn.Module):
         # Dynamic Scale Routing & DiAG (100% Feature-Driven, Zero Coordinate Linspace)
         if cfg.use_diag:
             self.dcap: DynamicCameraAnglePredictor | None = DynamicCameraAnglePredictor(
-                cfg.feature_width, len(cfg.region_sizes_px)
+                cfg.feature_width,
+                len(cfg.region_sizes_px),
+                use_vertical_gradient=getattr(cfg, "use_vertical_gradient_dcap", False),
             )
             self.scale_router: nn.Module | None = DiAGScaleRoutingHead(
-                cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
+                cfg.feature_width,
+                len(cfg.region_sizes_px),
+                cfg.scale_router_temperature,
+                use_tilt=getattr(cfg, "use_dcap_tilt", True),
             )
         else:
             self.dcap = None

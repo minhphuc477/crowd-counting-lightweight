@@ -192,15 +192,40 @@ Every parameter in RMR-v34 is tracked and budgeted as shown in Table 2:
 
 ---
 
-## 7. Multi-Dataset Evaluation Protocol
+## 7. Multi-Dataset Evaluation & Systematic Ablation Suite
 
-Evaluation must be performed uniformly across standard public benchmarks using official metrics (MAE, RMSE, and Game(4)):
+### 7.1 Evaluation Benchmarks
+Evaluation is performed uniformly across standard public benchmarks using official metrics (MAE, RMSE, and Game(4)):
 1. **ShanghaiTech Part A (SHA)**:
    - High-density, extreme perspective variations ($N = 300$ train, $182$ test).
    - Validates small-scale resolution and dense clump de-aggregation.
 2. **ShanghaiTech Part B (SHB)**:
    - Sparse, wide-angle outdoor surveillance ($N = 400$ train, $316$ test).
    - Validates false-positive suppression via DSMP top-$K$ hard background mining.
+
+### 7.2 The 17-Experiment RMR-v34 Ablation Matrix
+To guarantee publication-grade empirical rigor, the RMR-v34 suite isolates each constituent mechanism via single-variable hypothesis testing:
+
+| Config Key | Category | Trainable Params | Targeted Hypothesis / Variable |
+|---|---|---|---|
+| `rmr_v34_diag_canonical.yaml` | Baseline | 104,573 | Canonical reference (DiAG, DSMP, $T=6$, SNR Weighting, MCP Firm). |
+| `rmr_v34_shb_canonical.yaml` | Cross-Dataset | 104,573 | ShanghaiTech Part B benchmark evaluation (316 test images). |
+| `rmr_v34_abl_no_diag.yaml` | DiAG Routing | 103,958 | Ablate DiAG routing (`use_diag: false`, uniform isotropic multiscale weights). |
+| `rmr_v34_abl_no_dcap_tilt.yaml` | DiAG Routing | 104,573 | Ablate scene tilt contrast scaling (`use_dcap_tilt: false`). |
+| `rmr_v34_abl_no_scale_align.yaml` | DiAG Routing | 104,573 | Ablate scale alignment loss (`lambda_scale_align: 0.0`). |
+| `rmr_v34_abl_vdp_dcap.yaml` | DiAG Upgrade | 104,701 | Upgrade DCAP with Vertical Differential Pooling (`use_vertical_gradient_dcap: true`). |
+| `rmr_v34_abl_no_hurdle.yaml` | DSMP Protection | 104,524 | Ablate hurdle occupancy gating (`hurdle_head: false, lambda_hurdle: 0.0`). |
+| `rmr_v34_abl_no_hard_bg.yaml` | DSMP Protection | 104,573 | Ablate top-K hard background mining (`lambda_hard_bg: 0.0`). |
+| `rmr_v34_abl_no_ci_cell.yaml` | DSMP Protection | 104,573 | Ablate CI-Cell v2 count-invariance (`cell_loss_mode: balanced`). |
+| `rmr_v34_abl_no_proximal.yaml` | DSMP Protection | 104,573 | Ablate proximal thresholding (`proximal_mode: none`). |
+| `rmr_v34_abl_soft_proximal.yaml` | DSMP Protection | 104,573 | Test soft thresholding vs firm MCP (`proximal_mode: soft`). |
+| `rmr_v34_abl_no_solver.yaml` | Inverse Solver | 104,573 | Ablate unrolled solver ($T=0$, `enable_solver: false`, direct anchor $y_0$). |
+| `rmr_v34_abl_solver_t2.yaml` | Inverse Solver | 104,573 | Contraction depth ablation ($T=2$ iterations vs canonical $T=6$). |
+| `rmr_v34_abl_no_resonant.yaml` | Inverse Solver | 104,573 | Ablate carrier Laplacian momentum (`resonant_adjoint: false`). |
+| `rmr_v34_abl_no_curvature.yaml` | Inverse Solver | 104,572 | Ablate density curvature regularization (`lambda_curvature: 0.0`). |
+| `rmr_v34_abl_uniform_reliability.yaml` | Inverse Solver | 104,573 | Ablate SNR reliability weighting (`uniform_reliability: true`). |
+| `rmr_v34_seed123.yaml` | Multi-Seed | 104,573 | Statistical variance verification (`seed: 123`). |
+| `rmr_v34_seed456.yaml` | Multi-Seed | 104,573 | Statistical variance verification (`seed: 456`). |
 
 ---
 

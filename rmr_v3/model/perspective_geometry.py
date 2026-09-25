@@ -34,11 +34,18 @@ class DynamicCameraAnglePredictor(nn.Module):
       - Zero-initialization: Step 0 Identity Parity (delta_scale = 0.0, scene_tilt = 0.5).
     """
 
-    def __init__(self, in_channels: int = 32, num_scales: int = 3) -> None:
+    def __init__(
+        self,
+        in_channels: int = 32,
+        num_scales: int = 3,
+        use_vertical_gradient: bool = False,
+    ) -> None:
         super().__init__()
         self.in_channels = int(in_channels)
         self.num_scales = int(num_scales)
-        self.proj = nn.Linear(self.in_channels, 1 + self.num_scales, bias=True)
+        self.use_vertical_gradient = bool(use_vertical_gradient)
+        feat_dim = self.in_channels * 2 if self.use_vertical_gradient else self.in_channels
+        self.proj = nn.Linear(feat_dim, 1 + self.num_scales, bias=True)
         # Step 0 Identity Parity: zero-init guarantees uniform, unbiased initialization
         nn.init.zeros_(self.proj.weight)
         nn.init.zeros_(self.proj.bias)
@@ -54,7 +61,16 @@ class DynamicCameraAnglePredictor(nn.Module):
             delta_scale: [B, num_scales, 1, 1] global scale logit adjustment.
         """
         gap = p16.mean(dim=(-2, -1))  # [B, C]
-        out = self.proj(gap)  # [B, 1 + num_scales]
+        if self.use_vertical_gradient:
+            h = p16.shape[-2]
+            h_mid = max(1, h // 2)
+            top = p16[..., :h_mid, :].mean(dim=(-2, -1))
+            bot = p16[..., h_mid:, :].mean(dim=(-2, -1))
+            v_diff = bot - top
+            feat = torch.cat([gap, v_diff], dim=-1)
+        else:
+            feat = gap
+        out = self.proj(feat)  # [B, 1 + num_scales]
 
         scene_tilt = torch.sigmoid(out[:, 0:1]).view(-1, 1, 1, 1)
         delta_scale = out[:, 1: 1 + self.num_scales].view(-1, self.num_scales, 1, 1)
@@ -91,11 +107,13 @@ class DiAGScaleRoutingHead(nn.Module):
         in_channels: int = 32,
         num_scales: int = 3,
         temperature: float = 1.0,
+        use_tilt: bool = True,
     ) -> None:
         super().__init__()
         self.in_channels = int(in_channels)
         self.num_scales = int(num_scales)
         self.temperature = float(max(temperature, 0.1))
+        self.use_tilt = bool(use_tilt)
 
         self.dw = nn.Conv2d(
             self.in_channels,
@@ -133,7 +151,7 @@ class DiAGScaleRoutingHead(nn.Module):
         logits = self.pw(feat)  # [B, K, H, W]
 
         # Dynamic perspective contrast modulation: steep camera angle sharpens local scale transitions
-        if scene_tilt is not None:
+        if scene_tilt is not None and self.use_tilt:
             logits = logits * (0.5 + scene_tilt.to(dtype=logits.dtype))
 
         if delta_scale is not None:
