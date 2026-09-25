@@ -98,6 +98,16 @@ ABLATION_CATALOG: dict[str, dict[str, str]] = {
         "category": "Inverse Solver",
         "desc": "Fast Solver Contraction Depth (T=2 iterations vs canonical T=6)",
     },
+    "rmr_v34_abl_solver_t8": {
+        "config": "configs/rmr_v34/rmr_v34_abl_solver_t8.yaml",
+        "category": "Inverse Solver",
+        "desc": "Deep Solver Contraction Depth (T=8 iterations vs canonical T=6)",
+    },
+    "rmr_v34_abl_asym_morozov": {
+        "config": "configs/rmr_v34/rmr_v34_abl_asym_morozov.yaml",
+        "category": "Inverse Solver",
+        "desc": "Asymmetric Morozov Discrepancy Principle (asymmetric_morozov = true)",
+    },
     "rmr_v34_abl_no_resonant": {
         "config": "configs/rmr_v34/rmr_v34_abl_no_resonant.yaml",
         "category": "Inverse Solver",

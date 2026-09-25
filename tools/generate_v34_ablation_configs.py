@@ -122,6 +122,20 @@ ABLATIONS: dict[str, dict] = {
             c.update({"output_dir": "runs/sha_a/rmr_v34_abl_solver_t2"}),
         ),
     },
+    "rmr_v34_abl_solver_t8.yaml": {
+        "desc": "Deep Solver Contraction Depth Ablation (iterations: 8 vs T=6)",
+        "mod": lambda c: (
+            c["model"].update({"iterations": 8}),
+            c.update({"output_dir": "runs/sha_a/rmr_v34_abl_solver_t8"}),
+        ),
+    },
+    "rmr_v34_abl_asym_morozov.yaml": {
+        "desc": "Asymmetric Morozov Poisson Discrepancy (asymmetric_morozov: true)",
+        "mod": lambda c: (
+            c["model"].update({"asymmetric_morozov": True}),
+            c.update({"output_dir": "runs/sha_a/rmr_v34_abl_asym_morozov"}),
+        ),
+    },
     "rmr_v34_abl_no_resonant.yaml": {
         "desc": "Resonant Adjoint Carrier Momentum Ablation (resonant_adjoint: false)",
         "mod": lambda c: (

@@ -217,7 +217,9 @@ To guarantee publication-grade empirical rigor, the RMR-v34 suite isolates each 
 | `rmr_v34_abl_no_proximal.yaml` | DSMP Protection | 104,701 | Ablate proximal thresholding (`proximal_mode: none`). |
 | `rmr_v34_abl_soft_proximal.yaml` | DSMP Protection | 104,701 | Test soft thresholding vs firm MCP (`proximal_mode: soft`). |
 | `rmr_v34_abl_no_solver.yaml` | Inverse Solver | 104,701 | Ablate unrolled solver ($T=0$, `enable_solver: false`, direct anchor $y_0$). |
-| `rmr_v34_abl_solver_t2.yaml` | Inverse Solver | 104,701 | Contraction depth ablation ($T=2$ iterations vs canonical $T=6$). |
+| `rmr_v34_abl_solver_t2.yaml` | Inverse Solver | 104,701 | Fast solver contraction depth ($T=2$ iterations vs canonical $T=6$). |
+| `rmr_v34_abl_solver_t8.yaml` | Inverse Solver | 104,701 | Deep solver contraction depth ($T=8$ iterations vs canonical $T=6$). |
+| `rmr_v34_abl_asym_morozov.yaml` | Inverse Solver | 104,701 | Asymmetric Morozov discrepancy principle (`asymmetric_morozov: true`). |
 | `rmr_v34_abl_no_resonant.yaml` | Inverse Solver | 104,701 | Ablate carrier Laplacian momentum (`resonant_adjoint: false`). |
 | `rmr_v34_abl_no_curvature.yaml` | Inverse Solver | 104,700 | Ablate density curvature regularization (`lambda_curvature: 0.0`). |
 | `rmr_v34_abl_uniform_reliability.yaml` | Inverse Solver | 104,701 | Ablate SNR reliability weighting (`uniform_reliability: true`). |
