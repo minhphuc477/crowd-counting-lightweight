@@ -199,7 +199,7 @@ def main() -> None:
         out_path.write_text(content, encoding="utf-8")
         print(f"  [OK] {fname:<34} | Params: {params:>7,} | {spec['desc']}")
 
-    print("\nAll 17 ablation configurations generated and verified successfully!")
+    print(f"\nAll {len(ABLATIONS)} ablation configurations generated and verified successfully!")
 
 
 if __name__ == "__main__":
