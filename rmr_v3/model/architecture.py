@@ -6,30 +6,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from rmr_core.backbones import TimmPyramidBackbone, MobileNetV4Backbone
+from rmr_core.backbones import TimmPyramidBackbone
 from rmr_core.heads import build_fine_head
 from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput
-from rmr_core.operators import (
-    RegionSet,
-    build_multiscale_regions,
-    build_perspective_regions,
-)
+from rmr_core.operators import RegionSet, build_multiscale_regions
 from ..regional_head import ProbabilisticRegionalEvidenceHead
 from .config import RMRv3Config, _softplus_inverse, _deep_tuple
 from .evidence import extract_regional_evidence
-from .perspective import (
-    MicroPerspectiveElevation,
-    MicroCoordAttn,
-    ContinuousPerspectiveCarrierModulation,
-)
-from .perspective_geometry import (
-    PerspectiveGeometryHead,
-    PARKRoutingHead,
-    DynamicCameraAnglePredictor,
-    DiAGScaleRoutingHead,
-)
+from .perspective_geometry import DynamicCameraAnglePredictor, DiAGScaleRoutingHead
 from .solver_step import solve_inverse_measure
 from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2
 
@@ -112,7 +98,7 @@ class RMRv3(nn.Module):
             curvature_pool_kernel=cfg.curvature_pool_kernel,
             subpixel_stride2=cfg.subpixel_stride2,
             floor_tau=cfg.floor_tau,
-            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
+            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -4.0),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -130,28 +116,24 @@ class RMRv3(nn.Module):
         )
 
         self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
-        self.micro_coord_attn = MicroCoordAttn(channels=cfg.feature_width, reduction=cfg.micro_coord_reduction) if cfg.use_micro_coord_attn else None
-        self.perspective_elevation = MicroPerspectiveElevation(channels=cfg.feature_width) if cfg.use_perspective_elevation else None
-        self.cpcm = ContinuousPerspectiveCarrierModulation(channels=cfg.feature_width, hidden=cfg.cpcm_hidden) if cfg.use_cpcm else None
-        self.pgh = PerspectiveGeometryHead(cfg.feature_width, cfg.park_horizon_h, cfg.park_foreground_h, cfg.park_max_aspect) if cfg.use_pgh else None
 
-        # Dynamic Scale Routing & DiAG
+        # Dynamic Scale Routing & DiAG (100% Feature-Driven, Zero Coordinate Linspace)
         if cfg.use_diag:
-            self.dcap: DynamicCameraAnglePredictor | None = DynamicCameraAnglePredictor(cfg.feature_width, len(cfg.region_sizes_px))
+            self.dcap: DynamicCameraAnglePredictor | None = DynamicCameraAnglePredictor(
+                cfg.feature_width, len(cfg.region_sizes_px)
+            )
             self.scale_router: nn.Module | None = DiAGScaleRoutingHead(
-                cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature, getattr(cfg, "diag_persp_slope_init", "physical"),
+                cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
             )
         else:
             self.dcap = None
-            if cfg.park_routing:
-                self.scale_router: nn.Module | None = PARKRoutingHead(cfg.feature_width, cfg.scale_router_temperature)
-            elif cfg.factorized_scale_routing:
+            if cfg.factorized_scale_routing:
                 self.scale_router = FactorizedRoutingHead(
-                    cfg.feature_width, cfg.num_marginal_scales, cfg.num_aspect_ratios, cfg.scale_router_temperature, cfg.perspective_scale_bias,
+                    cfg.feature_width, cfg.num_marginal_scales, cfg.num_aspect_ratios, cfg.scale_router_temperature
                 )
             elif cfg.dynamic_scale_routing:
                 self.scale_router = ScaleRoutingHead(
-                    cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature, cfg.perspective_scale_bias,
+                    cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
                 )
             else:
                 self.scale_router = None
@@ -198,9 +180,7 @@ class RMRv3(nn.Module):
         effective_stride = self.cfg.output_stride if stride is None else stride
         dev_idx = (device.index if device.index is not None else 0) if device.type == "cuda" else None
         key = (
-            h, w, effective_stride, self.cfg.use_park,
-            self.cfg.park_horizon_h, self.cfg.park_foreground_h,
-            self.cfg.park_max_aspect, self.cfg.park_altitude_bands,
+            h, w, effective_stride,
             _deep_tuple(self.cfg.region_sizes_px), self.cfg.region_overlap,
             device.type, dev_idx,
         )
@@ -212,33 +192,19 @@ class RMRv3(nn.Module):
         if len(self._region_cache) >= 32:
             self._region_cache.popitem(last=False)
 
-        if self.cfg.use_park:
-            region_set = build_perspective_regions(
-                height=h,
-                width=w,
-                output_stride=effective_stride,
-                horizon_size_px=self.cfg.park_horizon_h,
-                foreground_size_px=self.cfg.park_foreground_h,
-                max_aspect_ratio=self.cfg.park_max_aspect,
-                overlap=self.cfg.region_overlap,
-                num_altitude_bands=self.cfg.park_altitude_bands,
-                device=device,
-            )
-        else:
-            region_set = build_multiscale_regions(
-                height=h,
-                width=w,
-                output_stride=effective_stride,
-                region_sizes_px=self.cfg.region_sizes_px,
-                overlap=self.cfg.region_overlap,
-                include_full_image=False,
-                device=device,
-            )
+        region_set = build_multiscale_regions(
+            height=h,
+            width=w,
+            output_stride=effective_stride,
+            region_sizes_px=self.cfg.region_sizes_px,
+            overlap=self.cfg.region_overlap,
+            include_full_image=False,
+            device=device,
+        )
         self._region_cache[key] = region_set
         return region_set
 
     def _extract_carrier_features(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
         c4, c8, c16 = self.encoder(x)
         p4, p8, p16 = self.fusion(c4, c8, c16)
 
@@ -254,32 +220,18 @@ class RMRv3(nn.Module):
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
-        if self.micro_coord_attn is not None:
-            p4 = self.micro_coord_attn(p4)
-
-        if self.perspective_elevation is not None:
-            p4 = self.perspective_elevation(p4)
-
-        if self.cpcm is not None:
-            p4 = self.cpcm(p4)
-
-        if self.pgh is not None:
-            alpha = self.dcap(p16)[0] if self.dcap is not None else None
-            p4 = self.pgh(p4, alpha_persp=alpha)
-
         return p4, p8, p16
 
     def _route_scales(
         self,
         p4: torch.Tensor,
-        alpha_persp: torch.Tensor | None = None,
-        v_horizon: torch.Tensor | None = None,
         delta_scale: torch.Tensor | None = None,
+        scene_tilt: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         if self.scale_router is None:
             return None, None, None
         if isinstance(self.scale_router, DiAGScaleRoutingHead):
-            router_out = self.scale_router(p4, alpha_persp=alpha_persp, v_horizon=v_horizon, delta_scale=delta_scale)
+            router_out = self.scale_router(p4, delta_scale=delta_scale, scene_tilt=scene_tilt)
         else:
             router_out = self.scale_router(p4)
         if isinstance(router_out, tuple):
@@ -354,11 +306,11 @@ class RMRv3(nn.Module):
         x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
 
         p4, p8, p16 = self._extract_carrier_features(x_in)
-        alpha_persp, v_horizon, delta_scale = None, None, None
+        scene_tilt, delta_scale = None, None
         if self.dcap is not None:
-            alpha_persp, v_horizon, delta_scale = self.dcap(p16)
+            scene_tilt, delta_scale = self.dcap(p16)
         scale_weights, pi_scale, pi_aspect = self._route_scales(
-            p4, alpha_persp=alpha_persp, v_horizon=v_horizon, delta_scale=delta_scale
+            p4, delta_scale=delta_scale, scene_tilt=scene_tilt
         )
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
@@ -403,7 +355,6 @@ class RMRv3(nn.Module):
         carrier_energy = None
         if self.cfg.resonant_adjoint:
             b_c, c_p4, h_p4, w_p4 = p4.shape
-            # Defensive Float32 execution prevents HalfTensor/FloatTensor mismatch and AMP overflow
             p4_flat_f32 = p4.float().view(b_c * c_p4, 1, h_p4, w_p4)
             kernel_f32 = self._laplace_kernel.to(device=p4.device, dtype=torch.float32)
             lap_p4 = F.conv2d(p4_flat_f32, kernel_f32, padding=1).view(b_c, c_p4, h_p4, w_p4)
@@ -412,8 +363,9 @@ class RMRv3(nn.Module):
         out = self._solve_inverse_measure(
             y0=y0, z0=z0, regional_evidence=regional_evidence, regions=regions_solver,
             scale_weights=scale_weights, solver_strength=solver_strength,
-            uniform_reliability=uniform_reliability, p16=p16, fg_logit=fg_logit,
-            pi_scale=pi_scale, pi_aspect=pi_aspect, carrier_energy=carrier_energy,
+            uniform_reliability=uniform_reliability,
+            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
+            carrier_energy=carrier_energy,
         )
 
         if self.cfg.subpixel_stride2:
@@ -423,10 +375,10 @@ class RMRv3(nn.Module):
             out["y_carrier"] = out.y
             out["y0_carrier"] = out.y0
 
-        if alpha_persp is not None:
-            out["alpha_persp"] = alpha_persp
-            out["v_horizon"] = v_horizon
+        if delta_scale is not None:
             out["delta_scale"] = delta_scale
+        if scene_tilt is not None:
+            out["scene_tilt"] = scene_tilt
 
         return out
 

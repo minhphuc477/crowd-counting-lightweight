@@ -21,13 +21,13 @@ def test_rmr_v19_parameter_budget():
     model = RMRv3(model_cfg)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    assert n_params == 104509, f"Expected 104509 params, got {n_params}"
+    assert n_params == 104507, f"Expected 104507 params, got {n_params}"
     assert n_params <= 105000, f"Exceeded budget: {n_params} > 105000"
-    assert 105000 - n_params == 491, f"Headroom should be exactly 491 params, got {105000 - n_params}"
+    assert 105000 - n_params == 493, f"Headroom should be exactly 493 params, got {105000 - n_params}"
 
 
 def test_factorized_routing_parameters():
-    """Verify exact parameter count of FactorizedRoutingHead (551 parameters)."""
+    """Verify exact parameter count of FactorizedRoutingHead (549 parameters without static bias)."""
     router = FactorizedRoutingHead(
         in_channels=32,
         num_scales=3,
@@ -39,9 +39,8 @@ def test_factorized_routing_parameters():
     # GN: 32*2 = 64
     # PW scale: 32*3 + 3 = 99
     # PW aspect: 32*2 + 2 = 66
-    # Persp bias: 2
-    # Total = 320 + 64 + 99 + 66 + 2 = 551
-    assert router_params == 551, f"Expected 551 parameters for FactorizedRoutingHead, got {router_params}"
+    # Total = 320 + 64 + 99 + 66 = 549
+    assert router_params == 549, f"Expected 549 parameters for FactorizedRoutingHead, got {router_params}"
 
 
 def test_factorized_routing_forward_properties():
@@ -113,27 +112,21 @@ def test_factorized_routing_perspective_modulation():
         num_aspect_ratios=2,
         perspective_bias=True,
     )
-    # Set positive perspective bias on aspect 1 (vertical rectangle: 2:1)
+    # Set feature bias on aspect 1 (vertical rectangle: 2:1)
     # and negative on aspect 0 (square: 1:1)
     with torch.no_grad():
-        router.persp_weight_aspect.copy_(torch.tensor([-2.0, 2.0]))
+        router.pw_aspect.bias.copy_(torch.tensor([-2.0, 2.0]))
 
     x = torch.zeros(1, 32, 64, 64)
     joint_pi, pi_scale, pi_aspect = router(x)
 
-    # Top rows (v ≈ -0.5, horizon): square (aspect 0) should dominate
-    top_aspect_0 = pi_aspect[0, 0, 0, :].mean().item()
-    top_aspect_1 = pi_aspect[0, 1, 0, :].mean().item()
-    assert top_aspect_0 > top_aspect_1, f"At horizon, expected square > vertical, got {top_aspect_0} vs {top_aspect_1}"
-
-    # Bottom rows (v ≈ +0.5, foreground): vertical rectangle (aspect 1) should dominate
-    bottom_aspect_0 = pi_aspect[0, 0, -1, :].mean().item()
-    bottom_aspect_1 = pi_aspect[0, 1, -1, :].mean().item()
-    assert bottom_aspect_1 > bottom_aspect_0, f"At foreground, expected vertical > square, got {bottom_aspect_1} vs {bottom_aspect_0}"
+    aspect_0 = pi_aspect[0, 0].mean().item()
+    aspect_1 = pi_aspect[0, 1].mean().item()
+    assert aspect_1 > aspect_0, f"Expected vertical > square, got {aspect_1} vs {aspect_0}"
 
 
 def test_factorized_routing_gradient_flow():
-    """Verify gradients propagate back into both scale and aspect branches and perspective bias."""
+    """Verify gradients propagate back into both scale and aspect branches."""
     router = FactorizedRoutingHead(
         in_channels=32,
         num_scales=3,
@@ -148,14 +141,13 @@ def test_factorized_routing_gradient_flow():
 
     assert router.pw_scale.weight.grad is not None
     assert router.pw_aspect.weight.grad is not None
-    assert router.persp_weight_aspect.grad is not None
     assert router.dw.weight.grad is not None
     assert x.grad is not None
 
     assert torch.isfinite(router.pw_scale.weight.grad).all()
     assert torch.isfinite(router.pw_aspect.weight.grad).all()
-    assert torch.isfinite(router.persp_weight_aspect.grad).all()
-    assert (router.persp_weight_aspect.grad != 0).any(), "Gradient to persp_weight_aspect is identically zero"
+    assert (router.pw_scale.weight.grad != 0).any(), "Gradient to pw_scale is identically zero"
+    assert (router.pw_aspect.weight.grad != 0).any(), "Gradient to pw_aspect is identically zero"
 
 
 def test_physical_scale_alignment_loss_monotonicity():
@@ -316,7 +308,6 @@ def test_rmr_v19_full_pipeline_forward_and_backward():
     assert model.fine_head.curvature_alpha.grad is not None
     assert model.scale_router.pw_scale.weight.grad is not None
     assert model.scale_router.pw_aspect.weight.grad is not None
-    assert model.scale_router.persp_weight_aspect.grad is not None
 
 
 def test_rmr_v19_numerical_stability_edge_cases():
@@ -356,13 +347,13 @@ def test_rmr_v19_numerical_stability_edge_cases():
 def test_rmr_v19_all_suite_configs_load_and_parameter_check():
     """Verify all 5 configs in the RMR-v19 experimental suite load cleanly and satisfy budget."""
     expected_budgets = {
-        "configs/rmr_v19/rmr_v19_factorized_aspect.yaml": 104509,
+        "configs/rmr_v19/rmr_v19_factorized_aspect.yaml": 104507,
         "configs/rmr_v19/rmr_v19_canonical_isotropic.yaml": 104441,
-        "configs/rmr_v19/rmr_v19_ablation_no_gated_curv.yaml": 104509,
-        "configs/rmr_v19/rmr_v19_ablation_no_curvature.yaml": 104508,
+        "configs/rmr_v19/rmr_v19_ablation_no_gated_curv.yaml": 104507,
+        "configs/rmr_v19/rmr_v19_ablation_no_curvature.yaml": 104506,
         "configs/rmr_v19/rmr_v19_ablation_no_persp.yaml": 104507,
-        "configs/rmr_v19/rmr_v19_ablation_no_scale_align.yaml": 104509,
-        "configs/rmr_v19/rmr_v19_control_no_solver.yaml": 104509,
+        "configs/rmr_v19/rmr_v19_ablation_no_scale_align.yaml": 104507,
+        "configs/rmr_v19/rmr_v19_control_no_solver.yaml": 104507,
     }
 
     for cfg_path, exp_params in expected_budgets.items():

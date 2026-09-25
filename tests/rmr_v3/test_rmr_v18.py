@@ -20,9 +20,9 @@ def test_rmr_v18_parameter_budget():
     model = RMRv3(model_cfg)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    assert n_params == 104512, f'Expected 104512 params, got {n_params}'
+    assert n_params == 104507, f'Expected 104507 params, got {n_params}'
     assert n_params <= 105000, f'Exceeded budget: {n_params} > 105000'
-    assert 105000 - n_params == 488, 'Headroom should be exactly 488 params'
+    assert 105000 - n_params == 493, 'Headroom should be exactly 493 params'
 
 
 def test_rmr_v18_perspective_scale_bias_step0_identity():
@@ -38,7 +38,7 @@ def test_rmr_v18_perspective_scale_bias_step0_identity():
     pi_base = head_base(x)
     pi_persp = head_persp(x)
 
-    # At step 0 (persp_weight == 0), outputs must be identical
+    # At step 0, outputs must be identical
     assert torch.allclose(pi_base, pi_persp, atol=1e-7), 'Step 0 identity violated in ScaleRoutingHead'
 
 
@@ -47,12 +47,12 @@ def test_rmr_v18_perspective_scale_bias_gradient_flow():
     x = torch.randn(2, 32, 32, 32, requires_grad=True)
     pi = head(x)
 
-    loss = (pi[:, 3] * torch.linspace(0, 1, 32).view(1, 32, 1)).sum()
+    loss = pi[:, 3].sum()
     loss.backward()
 
-    assert head.persp_weight.grad is not None
-    assert torch.isfinite(head.persp_weight.grad).all()
-    assert (head.persp_weight.grad != 0).any(), 'Gradient to persp_weight is identically zero'
+    assert head.pw.weight.grad is not None
+    assert torch.isfinite(head.pw.weight.grad).all()
+    assert (head.pw.weight.grad != 0).any(), 'Gradient to pw.weight is identically zero'
 
 
 def test_rmr_v18_perspective_horizon_gating():

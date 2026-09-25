@@ -19,7 +19,6 @@ from rmr_core.operators import (
     weighted_normalized_adjoint_field,
 )
 from rmr_v3.regional_head import ProbabilisticRegionalEvidenceHead, reliability_from_nb
-from rmr_v3.model.perspective import ContinuousPerspectiveCarrierModulation, MicroPerspectiveElevation
 from rmr_v3.solver_ops import (
     proximal_soft_threshold,
     proximal_firm_threshold,
@@ -146,34 +145,27 @@ def test_module3_regional_evidence_head_invariants():
 
 
 # =========================================================================
-# Module 4: Perspective Modules (CPCM & MPE)
+# Module 4: Dynamic Scale Routing Modules (DiAG & DCAP)
 # =========================================================================
 
-def test_module4_cpcm_invariants():
-    """Verify CPCM zero-init identity warm-start and spatial mass conservation."""
-    cpcm = ContinuousPerspectiveCarrierModulation(channels=32, hidden=8)
-    # 1. Zero-init identity check
-    x = torch.randn(2, 32, 64, 64)
-    out = cpcm(x)
-    assert torch.allclose(out, x, atol=1e-6)
+def test_module4_diag_routing_and_dcap_invariants():
+    """Verify DiAG zero-init identity parity and pure feature-driven routing."""
+    from rmr_v3.model.perspective_geometry import DynamicCameraAnglePredictor, DiAGScaleRoutingHead
 
-    # 2. Trainable gradient flow
-    loss = out.sum()
-    loss.backward()
-    for p in cpcm.parameters():
-        assert p.grad is not None
-        assert not torch.isnan(p.grad).any()
+    # 1. DCAP zero-init check
+    dcap = DynamicCameraAnglePredictor(in_channels=32, num_scales=3)
+    p16 = torch.randn(2, 32, 16, 16)
+    scene_tilt, delta_scale = dcap(p16)
+    assert delta_scale.shape == (2, 3, 1, 1)
+    assert torch.allclose(delta_scale, torch.zeros_like(delta_scale), atol=1e-6)
 
-
-def test_module4_mpe_vertical_mass_conservation():
-    """Verify MicroPerspectiveElevation conserves vertical mean mass."""
-    mpe = MicroPerspectiveElevation(channels=32)
-    x = torch.ones(2, 32, 64, 64)
-    out = mpe(x)
-    # Vertical mean of modulation should be exactly 1.0
-    mod_ratio = out / x
-    vertical_mean = mod_ratio.mean(dim=-2)
-    assert torch.allclose(vertical_mean, torch.ones_like(vertical_mean), atol=1e-5)
+    # 2. DiAG zero-init uniform partition of unity check
+    router = DiAGScaleRoutingHead(in_channels=32, num_scales=3)
+    p4 = torch.randn(2, 32, 64, 64)
+    pi = router(p4, delta_scale=delta_scale)
+    assert pi.shape == (2, 3, 64, 64)
+    assert torch.allclose(pi, torch.full_like(pi, 1.0 / 3.0), atol=1e-5)
+    assert torch.allclose(pi.sum(dim=1), torch.ones(2, 64, 64), atol=1e-5)
 
 
 # =========================================================================
@@ -264,7 +256,7 @@ def test_module7_holistic_odd_dimensions():
     cfg = RMRv3Config(
         output_stride=4, feature_width=32, pretrained=False,
         neck_type="aspp_lite", dynamic_scale_routing=True,
-        enable_solver=True, iterations=2, use_cpcm=True, floor_tau=0.008,
+        enable_solver=True, iterations=2, use_diag=True, floor_tau=0.008,
     )
     model = RMRv3(cfg)
     model.train()

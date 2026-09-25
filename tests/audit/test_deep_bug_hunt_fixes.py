@@ -187,52 +187,27 @@ def test_evaluation_summary_tiled_metrics_present():
 
 
 # =========================================================================
-# Test 5: CPCM Multi-Dtype Support & Mathematical Invariants
+# Test 5: DiAG Scale Routing Multi-Dtype Support & Mathematical Invariants
 # =========================================================================
 
-def test_cpcm_multi_dtype_and_invariants():
-    """Verify ContinuousPerspectiveCarrierModulation handles multiple dtypes without crash and preserves invariants."""
-    from rmr_v3.model.perspective import ContinuousPerspectiveCarrierModulation
+def test_diag_multi_dtype_and_invariants():
+    """Verify DiAGScaleRoutingHead handles multiple dtypes and satisfies partition of unity."""
+    from rmr_v3.model.perspective_geometry import DiAGScaleRoutingHead
 
-    cpcm = ContinuousPerspectiveCarrierModulation(channels=32, hidden=8)
+    router = DiAGScaleRoutingHead(in_channels=32, num_scales=3)
 
-    # 1. Zero-init identity check: CPCM(x) == x at step 0
+    # 1. Zero-init check: uniform partition of unity
     x_f32 = torch.randn(2, 32, 16, 16, dtype=torch.float32)
-    out_f32 = cpcm(x_f32)
-    assert torch.allclose(out_f32, x_f32, atol=1e-6), "CPCM zero-init identity violated!"
+    out_f32 = router(x_f32)
+    assert out_f32.shape == (2, 3, 16, 16)
+    assert torch.allclose(out_f32.sum(dim=1), torch.ones(2, 16, 16), atol=1e-5)
 
-    # 2. Float64 input check (previously crashed due to coord dtype mismatch with float32 weights)
+    # 2. Float64 input check
+    router_f64 = DiAGScaleRoutingHead(in_channels=32, num_scales=3).to(dtype=torch.float64)
     x_f64 = torch.randn(2, 32, 16, 16, dtype=torch.float64)
-    out_f64 = cpcm(x_f64)
+    out_f64 = router_f64(x_f64)
     assert out_f64.dtype == torch.float64
-    assert torch.allclose(out_f64, x_f64, atol=1e-6)
-
-    # 3. Float16 input check
-    x_f16 = torch.randn(2, 32, 16, 16, dtype=torch.float16)
-    out_f16 = cpcm(x_f16)
-    assert out_f16.dtype == torch.float16
-    assert torch.allclose(out_f16, x_f16, atol=1e-3)
-
-    # 4. Perturbed weights: verify spatial mean-1 normalization invariant
-    with torch.no_grad():
-        cpcm.mlp[2].weight.normal_(std=0.5)
-        cpcm.mlp[2].bias.normal_(std=0.5)
-
-    out_perturbed = cpcm(x_f32)
-    ratio = out_perturbed / x_f32.clamp_min(1e-4)
-    # The spatial mean of the modulation multiplier must equal 1.0 identically
-    # We can measure it directly from the forward logic
-    v = torch.linspace(0.0, 1.0, steps=16, dtype=cpcm.mlp[0].weight.dtype)
-    u = torch.linspace(0.0, 1.0, steps=16, dtype=cpcm.mlp[0].weight.dtype)
-    grid_v, grid_u = torch.meshgrid(v, u, indexing="ij")
-    coords = torch.stack([grid_u, grid_v], dim=0).unsqueeze(0).expand(2, -1, -1, -1)
-    delta = cpcm.mlp(coords)
-    mod = 1.0 + torch.tanh(delta)
-    mod_bar = mod.mean(dim=(-2, -1), keepdim=True)
-    norm_mod = mod / mod_bar
-    assert torch.allclose(norm_mod.mean(dim=(-2, -1)), torch.ones(2, 32), atol=1e-5), (
-        "CPCM spatial mean-1 invariant violated!"
-    )
+    assert torch.allclose(out_f64.sum(dim=1), torch.ones(2, 16, 16, dtype=torch.float64), atol=1e-6)
 
 
 # =========================================================================

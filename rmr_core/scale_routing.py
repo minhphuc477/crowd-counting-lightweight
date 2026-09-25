@@ -56,11 +56,6 @@ class ScaleRoutingHead(nn.Module):
         nn.init.zeros_(self.pw.weight)
         nn.init.zeros_(self.pw.bias)
 
-        if self.perspective_bias:
-            # Learnable linear vertical perspective bias (initialized to 0)
-            # Modulates scale logits based on normalized vertical coordinate v = y/H in [-0.5, 0.5]
-            self.persp_weight = nn.Parameter(torch.zeros(self.num_scales))
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
@@ -72,10 +67,6 @@ class ScaleRoutingHead(nn.Module):
         """
         feats = self.act(self.norm(self.dw(x)))
         logits = self.pw(feats)  # [B, num_scales, H, W]
-        if self.perspective_bias:
-            h = x.shape[-2]
-            v_grid = torch.linspace(-0.5, 0.5, h, device=x.device, dtype=logits.dtype).view(1, 1, h, 1)
-            logits = logits + self.persp_weight.view(1, self.num_scales, 1, 1).to(dtype=logits.dtype) * v_grid
         temp = float(self.temperature)
         pi = F.softmax(logits / temp, dim=1)
         return pi
@@ -168,11 +159,6 @@ class FactorizedRoutingHead(nn.Module):
         nn.init.zeros_(self.pw_aspect.weight)
         nn.init.zeros_(self.pw_aspect.bias)
 
-        if self.perspective_bias:
-            # Aspect-specific vertical perspective bias
-            # Positive weight on aspect 1 (2:1 vertical) increases vertical probability in foreground (v > 0)
-            self.persp_weight_aspect = nn.Parameter(torch.zeros(self.num_aspects))
-
     def forward(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -189,12 +175,6 @@ class FactorizedRoutingHead(nn.Module):
         feats = self.act(self.norm(self.dw(x)))
         logits_scale = self.pw_scale(feats)   # [B, 3, H, W]
         logits_aspect = self.pw_aspect(feats) # [B, 2, H, W]
-
-        if self.perspective_bias:
-            h = x.shape[-2]
-            # Normalized vertical coordinate v in [-0.5, 0.5]: top is -0.5 (horizon), bottom is +0.5 (foreground)
-            v_grid = torch.linspace(-0.5, 0.5, h, device=x.device, dtype=logits_aspect.dtype).view(1, 1, h, 1)
-            logits_aspect = logits_aspect + self.persp_weight_aspect.view(1, self.num_aspects, 1, 1).to(dtype=logits_aspect.dtype) * v_grid
 
         temp = float(self.temperature)
         pi_scale = F.softmax(logits_scale / temp, dim=1)   # [B, 3, H, W]

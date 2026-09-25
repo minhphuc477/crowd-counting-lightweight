@@ -327,6 +327,7 @@ def evaluate_dataset(
     summary["rmse"] = summary["RMSE"]
     summary["nae"] = summary["NAE"]
     summary["bias"] = summary["Bias"]
+    summary["num_samples"] = len(rows)
 
     # Bootstrap 95% confidence intervals
     aes = [r["abs_err"] for r in rows]

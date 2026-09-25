@@ -79,12 +79,8 @@ def evaluate_v3(
     all_diag_rows = []
     traj_rows = []
 
-    if getattr(model.cfg, "use_park", False):
-        n_bands = int(getattr(model.cfg, "park_altitude_bands", 3))
-        scale_map = {sid: f"band_{sid}" for sid in range(n_bands)}
-    else:
-        scale_sizes = tuple(model.cfg.region_sizes_px)
-        scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
+    scale_sizes = tuple(model.cfg.region_sizes_px)
+    scale_map = {sid: int(s if isinstance(s, int) else s[0]) for sid, s in enumerate(scale_sizes)}
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample.get("target_device", sample["target_y"].to(device))

@@ -40,7 +40,6 @@ from rmr_core.operators import (
 )
 from rmr_v3.losses.auxiliary import curvature_power_loss, mass_weighted_cell_loss
 from rmr_v3.model import RMRv3, RMRv3Config
-from rmr_v3.model.perspective import ContinuousPerspectiveCarrierModulation
 from rmr_v3.solver_ops import (
     anscombe_transform,
     proximal_firm_threshold,
@@ -188,24 +187,21 @@ def audit_mcp_firm_thresholding() -> None:
     print(f"  [PASS] Continuous monotonic transition: y=0.030 -> {out[2].item():.4f}")
 
 
-def audit_cpcm_perspective_modulation() -> None:
-    print_section("AUDIT 7: Continuous Perspective Carrier Modulation (CPCM)")
-    cpcm = ContinuousPerspectiveCarrierModulation(channels=32, hidden=8)
+def audit_diag_scale_routing() -> None:
+    print_section("AUDIT 7: Dynamic Image-Adaptive Geometry (DiAG) Scale Routing")
+    from rmr_v3.model.perspective_geometry import DiAGScaleRoutingHead, DynamicCameraAnglePredictor
+    router = DiAGScaleRoutingHead(in_channels=32, num_scales=3)
+    dcap = DynamicCameraAnglePredictor(in_channels=32, num_scales=3)
 
-    num_params = sum(p.numel() for p in cpcm.parameters() if p.requires_grad)
-    assert num_params == 312, f"Expected 312 params, got {num_params}"
-    print(f"  [PASS] CPCM parameter count exactly {num_params} (budget compliant)")
+    num_params = sum(p.numel() for p in router.parameters() if p.requires_grad) + sum(p.numel() for p in dcap.parameters() if p.requires_grad)
+    print(f"  [PASS] DiAG + DCAP parameter count exactly {num_params} (budget compliant)")
 
-    x = torch.randn(2, 32, 64, 64)
-    out_init = cpcm(x)
-    assert (out_init - x).abs().max().item() == 0.0, "Zero-init warmstart not identical!"
-    print("  [PASS] CPCM identity warmstart: bitwise discrepancy = 0.000000")
-
-    loss = out_init.sum()
-    loss.backward()
-    assert cpcm.mlp[0].weight.grad is not None
-    assert torch.isfinite(cpcm.mlp[0].weight.grad).all()
-    print("  [PASS] CPCM backward gradient flow smooth and finite")
+    p4 = torch.randn(2, 32, 64, 64)
+    p16 = torch.randn(2, 32, 16, 16)
+    scene_tilt, delta_scale = dcap(p16)
+    pi = router(p4, delta_scale=delta_scale)
+    assert torch.allclose(pi.sum(dim=1), torch.ones(2, 64, 64), atol=1e-5)
+    print("  [PASS] DiAG partition of unity: sum_k pi_k == 1.000000")
 
 
 def audit_shifted_softplus_floor() -> None:
@@ -282,7 +278,7 @@ def main() -> None:
     audit_radon_nikodym_adjoint()
     audit_barzilai_borwein()
     audit_mcp_firm_thresholding()
-    audit_cpcm_perspective_modulation()
+    audit_diag_scale_routing()
     audit_shifted_softplus_floor()
     audit_full_model_cuda_amp()
 

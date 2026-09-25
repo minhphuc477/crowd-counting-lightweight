@@ -217,16 +217,23 @@ class RMRv3Config:
             self.context_dilations = _deep_tuple(self.context_dilations)
 
         if self.use_park:
-            if self.park_horizon_h <= 0:
-                raise ValueError(f"park_horizon_h must be > 0, got {self.park_horizon_h}")
-            if self.park_foreground_h <= self.park_horizon_h:
-                raise ValueError(
-                    f"park_foreground_h ({self.park_foreground_h}) must be > park_horizon_h ({self.park_horizon_h})"
-                )
-            if self.park_max_aspect <= 0.0:
-                raise ValueError(f"park_max_aspect must be > 0.0, got {self.park_max_aspect}")
-            if self.park_altitude_bands < 1:
-                raise ValueError(f"park_altitude_bands must be >= 1, got {self.park_altitude_bands}")
+            raise ValueError(
+                "use_park=True is permanently BANNED (PARK static altitude bands cause spatial starvation "
+                "and +32 Dense MAE degradation). Use dynamic DiAG instead."
+            )
+        if self.use_cpcm:
+            raise ValueError(
+                "use_cpcm=True is permanently BANNED (CPCM static linspace coordinate aliasing under crops). "
+                "Use dynamic DiAG instead."
+            )
+        if self.use_perspective_elevation:
+            raise ValueError(
+                "use_perspective_elevation=True is permanently BANNED (MPE static linspace coordinate aliasing)."
+            )
+        if getattr(self, "use_pgh", False):
+            raise ValueError(
+                "use_pgh=True is permanently BANNED (PGH static linspace coordinate aliasing)."
+            )
 
         # Permanently Banned Anti-Pattern Guards
         if self.use_coord_attn:

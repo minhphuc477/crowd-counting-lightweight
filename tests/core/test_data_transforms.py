@@ -15,7 +15,7 @@ from rmr_core.data import (
     resolve_manifest_path,
     train_transform,
 )
-from rmr_v2.losses import block_sum_2d, flat_dm16_loss
+from rmr_core.losses import block_sum_2d, flat_dm16_loss
 from rmr_v3.config import (
     compute_config_hash,
     compute_file_sha256,

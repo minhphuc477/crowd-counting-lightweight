@@ -10,7 +10,7 @@ from rmr_core.operators import (
     fractional_region_mean_std_features,
     prefix2d,
 )
-from rmr_v2.losses import flat_dm16_loss, flat_dm_block_loss, hierarchical_dm_loss
+from rmr_core.losses import flat_dm16_loss, flat_dm_block_loss, hierarchical_dm_loss
 from rmr_v3.config import validate_v3_config
 from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
 from rmr_v3.model import (
@@ -262,7 +262,7 @@ def test_native_pooling_full_image_odd_forward_pass():
 
 def test_multiscale_dm_components_and_alias():
     """Verify multiscale_dm_loss returns correct granular components and hierarchical alias matches."""
-    from rmr_v2.losses import multiscale_dm_loss
+    from rmr_core.losses import multiscale_dm_loss
 
     pred = torch.rand(2, 64, 64) * 3.0
     target = torch.randint(0, 4, (2, 64, 64)).float()

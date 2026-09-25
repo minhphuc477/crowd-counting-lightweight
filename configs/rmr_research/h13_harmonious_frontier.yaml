@@ -47,7 +47,7 @@ model:
   region_head_hidden:     48
 
   # FRONTIER PILLAR 1: Continuous Perspective Carrier Modulation (CPCM, 312 params vs coord_attn 456)
-  use_cpcm:    true
+  use_cpcm:    false
   cpcm_hidden: 8
 
   dynamic_scale_routing:    true

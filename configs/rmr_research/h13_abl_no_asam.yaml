@@ -33,7 +33,7 @@ model:
   regional_feature_stats: mean
   region_head_hidden:     48
 
-  use_cpcm:    true
+  use_cpcm:    false
   cpcm_hidden: 8
 
   dynamic_scale_routing:    true

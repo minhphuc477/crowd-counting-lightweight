@@ -30,8 +30,6 @@ from .evidence import extract_regional_evidence
 from .perspective_geometry import (
     DiAGScaleRoutingHead,
     DynamicCameraAnglePredictor,
-    PARKRoutingHead,
-    PerspectiveGeometryHead,
 )
 from .solver_step import solve_inverse_measure
 from .dual_lattice import (
@@ -47,11 +45,7 @@ __all__ = [
     "DiAGScaleRoutingHead",
     "DynamicCameraAnglePredictor",
     "FactorizedRoutingHead",
-    "MicroCoordAttn",
-    "MicroPerspectiveElevation",
     "MobileNetV4Backbone",
-    "PARKRoutingHead",
-    "PerspectiveGeometryHead",
     "ProbabilisticRegionalEvidenceHead",
     "RMRModelOutput",
     "RMRv3",

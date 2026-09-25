@@ -287,10 +287,9 @@ def test_loss_function_and_shapes():
 # ---------------------------------------------------------------------------
 def test_parameter_budget():
     """Total trainable parameters must remain strictly < 105,000."""
-    from rmr_v2.model import count_parameters
     cfg = RMRv3Config(pretrained=False)
     model = RMRv3(cfg)
-    n = count_parameters(model)
+    n = sum(p.numel() for p in model.parameters() if p.requires_grad)
     assert n < 105_000, f"OVER BUDGET: {n:,} >= 105,000"
     assert n == 101_763, f"Expected exactly 101,763 parameters, got {n:,}"
 

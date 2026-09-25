@@ -26,63 +26,57 @@ def test_dcap_parameters_and_step0_parity() -> None:
     num_scales = 3
     dcap = DynamicCameraAnglePredictor(in_channels=in_channels, num_scales=num_scales)
 
-    # Parameter count: Linear(32, 2 + 3) -> 32 * 5 + 5 = 165 parameters
+    # Parameter count: Linear(32, 1 + 3) -> 32 * 4 + 4 = 132 parameters
     num_params = sum(p.numel() for p in dcap.parameters())
-    assert num_params == 165, f"Expected 165 params for DCAP, got {num_params}"
+    assert num_params == 132, f"Expected 132 params for DCAP, got {num_params}"
 
     # Step 0 Identity Parity: With zero-initialized weights, outputs neutral state
     p16 = torch.randn(2, 32, 32, 32)
-    alpha, v_horizon, delta_scale = dcap(p16)
+    scene_tilt, delta_scale = dcap(p16)
 
-    assert alpha.shape == (2, 1, 1, 1)
-    assert v_horizon.shape == (2, 1, 1, 1)
+    assert scene_tilt.shape == (2, 1, 1, 1)
     assert delta_scale.shape == (2, 3, 1, 1)
 
-    # alpha should be sigmoid(0) = 0.5
-    assert torch.allclose(alpha, torch.full_like(alpha, 0.5), atol=1e-5)
-    # v_horizon should be 0.3 * tanh(0) = 0.0
-    assert torch.allclose(v_horizon, torch.zeros_like(v_horizon), atol=1e-5)
-    # delta_scale should be 0.0
+    # scene_tilt should be sigmoid(0) = 0.5
+    assert torch.allclose(scene_tilt, torch.full_like(scene_tilt, 0.5), atol=1e-5)
+    # delta_scale should be 0.0 identically
     assert torch.allclose(delta_scale, torch.zeros_like(delta_scale), atol=1e-5)
 
 
-def test_diag_scale_routing_overhead_invariance() -> None:
-    """When alpha_persp = 0 (overhead drone/aerial view), vertical perspective gradient vanishes."""
+def test_diag_scale_routing_translation_equivariance_and_partition() -> None:
+    """Verify DiAG preserves exact translation equivariance and partition of unity."""
     in_channels = 32
     num_scales = 3
-    router = DiAGScaleRoutingHead(in_channels=in_channels, num_scales=num_scales, persp_slope_init="physical")
+    router = DiAGScaleRoutingHead(in_channels=in_channels, num_scales=num_scales)
 
     b, c, h, w = 1, 32, 64, 64
-    x = torch.zeros(b, c, h, w)  # zero carrier feature
+    x = torch.randn(b, c, h, w)
 
-    # Case 1: alpha_persp = 0.0 (Pure Overhead view)
-    alpha_overhead = torch.zeros(b, 1, 1, 1)
-    pi_overhead = router(x, alpha_persp=alpha_overhead)
+    # 1. Step 0 uniform partition
+    pi = router(x)
+    assert pi.shape == (b, num_scales, h, w)
+    assert torch.allclose(pi, torch.full_like(pi, 1.0 / num_scales), atol=1e-5)
+    assert torch.allclose(pi.sum(dim=1), torch.ones(b, h, w), atol=1e-5)
 
-    # The routing weights across all y scanlines must be perfectly identical (zero vertical bias)
-    for y_idx in range(h):
-        assert torch.allclose(pi_overhead[:, :, y_idx, :], pi_overhead[:, :, 0, :], atol=1e-5), (
-            f"Overhead view (alpha=0) must be vertically invariant, but scanline {y_idx} differs from 0!"
-        )
+    # 2. Perturb router weights to non-zero
+    with torch.no_grad():
+        router.pw.weight.normal_(std=0.1)
+        router.pw.bias.normal_(std=0.1)
 
-    # Case 2: alpha_persp = 1.0 (Steep oblique ground view)
-    alpha_oblique = torch.ones(b, 1, 1, 1)
-    pi_oblique = router(x, alpha_persp=alpha_oblique)
+    pi_pert = router(x)
+    # Partition of unity must hold identically regardless of weights
+    assert torch.allclose(pi_pert.sum(dim=1), torch.ones(b, h, w), atol=1e-5)
 
-    # Near horizon (y=0, top): fine scale (k=0) must have higher probability than near foreground (y=H-1, bottom)
-    prob_top_fine = pi_oblique[0, 0, 0, w // 2].item()
-    prob_bottom_fine = pi_oblique[0, 0, h - 1, w // 2].item()
-    assert prob_top_fine > prob_bottom_fine, (
-        f"In oblique view, top (horizon) fine scale prob ({prob_top_fine:.3f}) "
-        f"must be higher than bottom fine scale prob ({prob_bottom_fine:.3f})"
-    )
-
-    # Near foreground (y=H-1, bottom): coarse scale (k=2) must have higher probability than near horizon (y=0, top)
-    prob_top_coarse = pi_oblique[0, 2, 0, w // 2].item()
-    prob_bottom_coarse = pi_oblique[0, 2, h - 1, w // 2].item()
-    assert prob_bottom_coarse > prob_top_coarse, (
-        f"In oblique view, bottom coarse scale prob ({prob_bottom_coarse:.3f}) "
-        f"must be higher than top coarse scale prob ({prob_top_coarse:.3f})"
+    # 3. Translation Equivariance: Pure dynamic convolution preserves translation equivariance
+    x_supp = torch.zeros(1, 32, 64, 64)
+    x_supp[:, :, 16:48, 16:48] = torch.randn(1, 32, 32, 32)
+    shift_y, shift_x = 2, 3
+    x_supp_shifted = torch.roll(x_supp, shifts=(shift_y, shift_x), dims=(-2, -1))
+    pi_supp = router(x_supp)
+    pi_supp_shifted = router(x_supp_shifted)
+    expected_shifted = torch.roll(pi_supp, shifts=(shift_y, shift_x), dims=(-2, -1))
+    assert torch.allclose(pi_supp_shifted, expected_shifted, atol=1e-5), (
+        "Pure dynamic router must be strictly translation-equivariant!"
     )
 
 
@@ -91,7 +85,6 @@ def test_rmr_v34_total_trainable_parameters() -> None:
     cfg = RMRv3Config(
         use_diag=True,
         dynamic_scale_routing=False,
-        park_routing=False,
         hurdle_head=True,
         resonant_adjoint=True,
         resonant_adjoint_lambda=0.5,
@@ -106,7 +99,6 @@ def test_rmr_v34_total_trainable_parameters() -> None:
 
     print(f"Total trainable parameters: {total_params}")
     assert total_params <= 105000, f"Exceeded strict ceiling of 105,000: got {total_params}"
-    # Verify headroom
     headroom = 105000 - total_params
     assert headroom >= 300, f"Expected at least 300 params headroom, got {headroom}"
 
@@ -146,7 +138,7 @@ def test_dsmp_empty_background_suppression() -> None:
 
 
 def test_model_forward_diag_outputs() -> None:
-    """Verify complete forward pass with DiAG outputs alpha_persp, v_horizon, delta_scale."""
+    """Verify complete forward pass with DiAG outputs scene_tilt and delta_scale."""
     cfg = RMRv3Config(
         use_diag=True,
         region_sizes_px=(32, 64, 128),
@@ -163,11 +155,38 @@ def test_model_forward_diag_outputs() -> None:
 
     assert "y" in out
     assert "y0" in out
-    assert "alpha_persp" in out
-    assert "v_horizon" in out
+    assert "scene_tilt" in out
     assert "delta_scale" in out
 
-    assert out["alpha_persp"].shape == (2, 1, 1, 1)
-    assert out["v_horizon"].shape == (2, 1, 1, 1)
+    assert out["scene_tilt"].shape == (2, 1, 1, 1)
     assert out["delta_scale"].shape == (2, 3, 1, 1)
-    assert (out["alpha_persp"] >= 0.0).all() and (out["alpha_persp"] <= 1.0).all()
+    assert (out["scene_tilt"] >= 0.0).all() and (out["scene_tilt"] <= 1.0).all()
+
+
+def test_diag_dcap_active_gradient_flow() -> None:
+    """Verify that both scene_tilt (row 0) and delta_scale (rows 1-3) receive active gradients."""
+    dcap = DynamicCameraAnglePredictor(in_channels=32, num_scales=3)
+    router = DiAGScaleRoutingHead(in_channels=32, num_scales=3)
+
+    # Initialize router with non-zero weights so logits != 0
+    with torch.no_grad():
+        router.pw.weight.normal_(std=0.1)
+
+    p16 = torch.randn(2, 32, 16, 16, requires_grad=True)
+    p4 = torch.randn(2, 32, 64, 64, requires_grad=True)
+
+    scene_tilt, delta_scale = dcap(p16)
+    pi = router(p4, delta_scale=delta_scale, scene_tilt=scene_tilt)
+
+    loss = (pi[:, 0] * 2.0).sum()
+    loss.backward()
+
+    assert dcap.proj.weight.grad is not None
+    assert torch.isfinite(dcap.proj.weight.grad).all()
+
+    # Row 0 is scene_tilt; rows 1-3 are delta_scale
+    grad_tilt = dcap.proj.weight.grad[0].abs().sum().item()
+    grad_delta = dcap.proj.weight.grad[1:].abs().sum().item()
+
+    assert grad_tilt > 0.0, f"scene_tilt received zero gradient: {grad_tilt}"
+    assert grad_delta > 0.0, f"delta_scale received zero gradient: {grad_delta}"
