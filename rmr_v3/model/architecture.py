@@ -98,7 +98,7 @@ class RMRv3(nn.Module):
             curvature_pool_kernel=cfg.curvature_pool_kernel,
             subpixel_stride2=cfg.subpixel_stride2,
             floor_tau=cfg.floor_tau,
-            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -4.0),
+            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(

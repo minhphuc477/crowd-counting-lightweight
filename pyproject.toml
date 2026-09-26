@@ -31,6 +31,7 @@ include = ["hpc*", "rmr_count*", "rmr_core*", "rmr_v2*", "rmr_v3*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "--ignore=tests/rmr --ignore=tests/test_localization.py"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]

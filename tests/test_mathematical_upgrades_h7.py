@@ -178,6 +178,11 @@ def test_research_configs_parameter_ceiling():
         "configs/rmr_research/h7f_asymmetric_morozov.yaml",
         "configs/rmr_research/h7g_dct_spectral.yaml",
         "configs/rmr_research/h8_harmonious_composite.yaml",
+        "configs/rmr_sub60/sub60_v19_anchor.yaml",
+        "configs/rmr_sub60/sub60_active_curvature.yaml",
+        "configs/rmr_sub60/sub60_count_harmonized.yaml",
+        "configs/rmr_sub60/sub60_peak_composite.yaml",
+        "configs/rmr_sub60/sub60_resonant_peak.yaml",
     ]
 
     for cfg_rel in configs_to_test:

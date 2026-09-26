@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import torch
-from .auxiliary import count_invariant_cell_loss, mass_weighted_cell_loss
+from .auxiliary import (
+    count_harmonized_cell_loss,
+    count_invariant_cell_loss,
+    mass_weighted_cell_loss,
+)
 from rmr_core.losses import balanced_smooth_l1
 
 
@@ -17,13 +21,21 @@ def compute_dual_lattice_losses(
     eps: float = 1e-3,
     alpha: float = 2.0,
     gamma: float = 1.25,
+    fg_ratio: float = 0.67,
 ) -> dict[str, torch.Tensor]:
     """Supervise Stride 4 carrier with canonical v19 convex loss, and Stride 2 with sub-pixel loss.
 
     Prevents quadratic loss gradient starvation in dense regions by anchoring
     the carrier density on Stride 4, while allowing Stride 2 to resolve sparse heads.
     """
-    if cell_loss_mode == "mass_weighted":
+    if cell_loss_mode == "count_harmonized":
+        loss_carrier = count_harmonized_cell_loss(
+            y_carrier, target_stride4, beta=beta, eps=eps, gamma=gamma, fg_ratio=fg_ratio, stride=4
+        )
+        loss_fine = count_harmonized_cell_loss(
+            y_fine, target_stride2, beta=beta, eps=eps, gamma=gamma, fg_ratio=fg_ratio, stride=2
+        )
+    elif cell_loss_mode == "mass_weighted":
         loss_carrier = mass_weighted_cell_loss(
             y_carrier, target_stride4, beta=beta, eps=eps, alpha=alpha, gamma=gamma, stride=4
         )

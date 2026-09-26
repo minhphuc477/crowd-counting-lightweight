@@ -50,12 +50,11 @@ def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
 
 
 def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
-    """C1-continuous quadratic floor suppression with strictly non-zero gradients.
-
-    Eliminates the Dying ReLU trap of F.relu(y_base - tau) where dz == 0 on background.
-    """
+    """C1-continuous quadratic floor suppression with strictly non-zero gradients."""
     tau = float(floor_tau)
-    return torch.where(y_base > tau, y_base - 0.5 * tau, y_base.square() / (2.0 * tau))
+    if tau <= 0.0:
+        return y_base
+    return torch.where(y_base > tau, y_base - 0.5 * tau, y_base.square() / (2.0 * max(tau, 1e-8)))
 
 
 def _density_activate(

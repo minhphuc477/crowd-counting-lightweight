@@ -16,6 +16,7 @@ from rmr_core.spectral import count_preserving_spectral_loss
 from .config import RMRv3LossConfig
 from .point_supervision import bayesian_loss, sinkhorn_ot_loss
 from .auxiliary import (
+    count_harmonized_cell_loss,
     count_invariant_cell_loss,
     curvature_power_loss,
     hurdle_focal_bce_loss,
@@ -140,6 +141,14 @@ def _compute_core_losses(
                 density_map, target_float,
                 beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
                 alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma),
+                stride=stride,
+            )
+        if cfg.cell_loss_mode == "count_harmonized":
+            return count_harmonized_cell_loss(
+                density_map, target_float,
+                beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+                gamma=float(cfg.cell_mass_weight_gamma),
+                fg_ratio=float(getattr(cfg, "cell_fg_ratio", 0.67)),
                 stride=stride,
             )
         return balanced_smooth_l1(density_map, target_float, beta=cfg.cell_beta, stride=stride)

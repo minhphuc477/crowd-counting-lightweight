@@ -49,6 +49,7 @@ class RMRv3LossConfig:
     # DEPRECATED: cell_tau_head was used in CI-Cell v1 (broken). Ignored in v2.
     cell_tau_head: float = 0.08
     cell_alpha: float = 2.0             # foreground boost multiplier for CI-Cell v2
+    cell_fg_ratio: float = 0.67         # foreground loss weight in count_harmonized cell loss (0 to 1)
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
@@ -112,8 +113,8 @@ class RMRv3LossConfig:
             raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{self.dm_target}'")
         if self.count_loss_mode not in ("nb", "log1p", "l1"):
             raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{self.count_loss_mode}'")
-        if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell"):
-            raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', or 'count_invariant', got '{self.cell_loss_mode}'")
+        if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
+            raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', or 'count_harmonized', got '{self.cell_loss_mode}'")
         if self.cell_tau_head <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
         if self.cell_alpha < 0.0:
@@ -122,6 +123,8 @@ class RMRv3LossConfig:
             raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
         if self.cell_mass_weight_gamma <= 0.0:
             raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {self.cell_mass_weight_gamma}")
+        if not (0.0 <= self.cell_fg_ratio <= 1.0):
+            raise ValueError(f"cell_fg_ratio must be in [0.0, 1.0], got {self.cell_fg_ratio}")
         if self.curvature_gate_mode not in ("none", "hard", "soft"):
             raise ValueError(f"curvature_gate_mode must be 'none', 'hard', or 'soft', got '{self.curvature_gate_mode}'")
         if self.lambda_curvature < 0.0:

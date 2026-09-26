@@ -332,6 +332,48 @@ def count_invariant_cell_loss(
     return (weight * per_pixel).mean()
 
 
+def count_harmonized_cell_loss(
+    y: torch.Tensor,
+    target: torch.Tensor,
+    beta: float = 1.0,
+    eps: float = 1e-4,
+    gamma: float = 1.25,
+    fg_ratio: float = 0.67,
+    stride: int = 4,
+) -> torch.Tensor:
+    """Count-Harmonized Cell Allocation Loss.
+    Equalizes dense and sparse crowd loss contribution by decoupling foreground from background.
+    """
+    if target.ndim == 2:
+        target = target.unsqueeze(0).unsqueeze(0)
+    elif target.ndim == 3:
+        target = target.unsqueeze(1)
+    if y.ndim == 2:
+        y = y.unsqueeze(0).unsqueeze(0)
+    elif y.ndim == 3:
+        y = y.unsqueeze(1)
+    work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
+    y_f, t_f = y.to(dtype=work_dtype), target.to(dtype=work_dtype)
+    if y_f.numel() == 0 or t_f.numel() == 0:
+        return (y_f.sum() + t_f.sum()) * 0.0
+
+    per_pixel = F.smooth_l1_loss(y_f, t_f, beta=float(beta), reduction="none")
+    b_sz = y_f.shape[0]
+    sample_losses = []
+    for i in range(b_sz):
+        tgt_i, per_i = t_f[i, 0], per_pixel[i, 0]
+        pos_mask, neg_mask = tgt_i > 0, ~(tgt_i > 0)
+        neg_loss = per_i[neg_mask].mean() if neg_mask.any() else per_i.new_tensor(0.0)
+        if pos_mask.any():
+            pos_t, pos_per = tgt_i[pos_mask], per_i[pos_mask]
+            w_pos = pos_t.pow(float(gamma)) if abs(float(gamma) - 1.0) > 1e-5 else pos_t
+            pos_loss = (w_pos / w_pos.sum().clamp_min(float(eps)) * pos_per).sum()
+            sample_losses.append(float(1.0 - fg_ratio) * neg_loss + float(fg_ratio) * pos_loss if neg_mask.any() else pos_loss)
+        else:
+            sample_losses.append(neg_loss)
+    return torch.stack(sample_losses).mean()
+
+
 
 def physical_scale_alignment_loss(
     scale_weights: torch.Tensor,

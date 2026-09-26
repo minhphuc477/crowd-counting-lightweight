@@ -239,8 +239,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])
-            if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell"):
-                raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', or 'count_invariant', got '{clm}'")
+            if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
+                raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', or 'count_harmonized', got '{clm}'")
         if "cell_tau_head" in l_cfg_pre and float(l_cfg_pre["cell_tau_head"]) <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {l_cfg_pre['cell_tau_head']}")
         if "cell_alpha" in l_cfg_pre and float(l_cfg_pre["cell_alpha"]) < 0.0:
@@ -255,24 +255,11 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"lambda_hard_bg must be non-negative, got {l_cfg_pre['lambda_hard_bg']}")
         if "hard_bg_ratio" in l_cfg_pre and not (0.0 < float(l_cfg_pre["hard_bg_ratio"]) <= 1.0):
             raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {l_cfg_pre['hard_bg_ratio']}")
-        if "lambda_fg_gate" in l_cfg_pre and float(l_cfg_pre["lambda_fg_gate"]) < 0.0:
-            raise ValueError(f"lambda_fg_gate must be non-negative, got {l_cfg_pre['lambda_fg_gate']}")
-        if "lambda_carrier_cell" in l_cfg_pre:
-            lam_cc = float(l_cfg_pre["lambda_carrier_cell"])
-            if lam_cc < 0.0:
-                raise ValueError(f"lambda_carrier_cell must be non-negative, got {lam_cc}")
-        if "lambda_fine_cell" in l_cfg_pre:
-            lam_fc = float(l_cfg_pre["lambda_fine_cell"])
-            if lam_fc < 0.0:
-                raise ValueError(f"lambda_fine_cell must be non-negative, got {lam_fc}")
-        if "lambda_kd_spatial" in l_cfg_pre:
-            lam_kds = float(l_cfg_pre["lambda_kd_spatial"])
-            if lam_kds < 0.0:
-                raise ValueError(f"lambda_kd_spatial must be non-negative, got {lam_kds}")
-        if "lambda_kd_count" in l_cfg_pre:
-            lam_kdc = float(l_cfg_pre["lambda_kd_count"])
-            if lam_kdc < 0.0:
-                raise ValueError(f"lambda_kd_count must be non-negative, got {lam_kdc}")
+        if "cell_fg_ratio" in l_cfg_pre and not (0.0 <= float(l_cfg_pre["cell_fg_ratio"]) <= 1.0):
+            raise ValueError(f"cell_fg_ratio must be in [0.0, 1.0], got {l_cfg_pre['cell_fg_ratio']}")
+        for key in ("lambda_fg_gate", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count"):
+            if key in l_cfg_pre and float(l_cfg_pre[key]) < 0.0:
+                raise ValueError(f"{key} must be non-negative, got {l_cfg_pre[key]}")
         if "lambda_spectral" in l_cfg_pre and float(l_cfg_pre["lambda_spectral"]) < 0.0:
             raise ValueError(f"lambda_spectral must be non-negative, got {l_cfg_pre['lambda_spectral']}")
         if "lambda_spectral_dc" in l_cfg_pre and float(l_cfg_pre["lambda_spectral_dc"]) < 0.0:

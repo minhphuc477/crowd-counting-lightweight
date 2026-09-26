@@ -192,7 +192,9 @@ def generate_table() -> None:
         cfg_path = Path(item["config"])
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8-sig"))
         out_dir = Path(raw.get("output_dir", f"runs/sha_a/{key}"))
-        summary_path = out_dir / "summary.json"
+        summary_path = out_dir / "eval_val" / "summary.json"
+        if not summary_path.exists():
+            summary_path = out_dir / "summary.json"
 
         m_cfg = RMRv3Config.from_dict(raw.get("model", {}))
         m_cfg.pretrained = False
@@ -201,11 +203,11 @@ def generate_table() -> None:
 
         if summary_path.exists():
             data = json.loads(summary_path.read_text(encoding="utf-8"))
-            mae = f"{data.get('best_val_mae', 0.0):.2f}"
-            rmse = f"{data.get('best_val_rmse', 0.0):.2f}"
-            g0 = f"{data.get('best_val_game0', 0.0):.2f}"
-            g3 = f"{data.get('best_val_game3', 0.0):.2f}"
-            dense = f"{data.get('best_val_mae_dense', 0.0):.2f}"
+            mae = f"{float(data.get('MAE', data.get('best_val_mae', 0.0))):.2f}"
+            rmse = f"{float(data.get('RMSE', data.get('best_val_rmse', 0.0))):.2f}"
+            g0 = f"{float(data.get('GAME0', data.get('best_val_game0', 0.0))):.2f}"
+            g3 = f"{float(data.get('GAME3', data.get('best_val_game3', 0.0))):.2f}"
+            dense = f"{float(data.get('mae_dense', data.get('best_val_mae_dense', 0.0))):.2f}"
         else:
             mae, rmse, g0, g3, dense = "Pending", "Pending", "Pending", "Pending", "Pending"
 
