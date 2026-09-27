@@ -68,8 +68,8 @@ def sanitize_run_id(run_id: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train RMR-v3 (RW-RMR)")
-    ap.add_argument("--config", required=True, help="Path to config YAML")
-    ap.add_argument("--resume", default=None, help="Resume from checkpoint path")
+    ap.add_argument("-c", "--config", required=True, help="Path to config YAML")
+    ap.add_argument("-r", "--resume", default=None, help="Resume from checkpoint path")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--output-dir", default=None)
@@ -80,7 +80,7 @@ def main() -> None:
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
     ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism (default: enabled)")
     ap.add_argument("--non-deterministic", action="store_true", default=False, help="Disable strict determinism")
-    ap.add_argument("--overwrite", action="store_true", default=False)
+    ap.add_argument("-o", "--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
     ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
