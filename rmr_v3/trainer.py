@@ -315,6 +315,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             "solver_strength": solver_strength,
             "train_total": loss_avgs.get("total", 0.0),
             "train_count": loss_avgs.get("count", 0.0),
+            "train_count_l1": loss_avgs.get("count_l1", 0.0),
             "train_flat_dm16": loss_avgs.get("allocation", 0.0),
             "train_allocation": loss_avgs.get("allocation", 0.0),
             "train_dm16": loss_avgs.get("dm_16", loss_avgs.get("allocation", 0.0) if "dm_32" not in loss_avgs else 0.0),

@@ -5,7 +5,7 @@ from rmr_v3.losses import RMRv3LossConfig
 
 TRAIN_LOG_FIELDNAMES: list[str] = [
     "epoch", "lr_backbone", "lr_main", "solver_strength",
-    "train_total", "train_count", "train_flat_dm16", "train_allocation",
+    "train_total", "train_count", "train_count_l1", "train_flat_dm16", "train_allocation",
     "train_dm16", "train_dm32", "train_dm64",
     "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
     "train_curvature", "train_hard_bg", "train_fg_bce", "train_scale_align",
@@ -72,9 +72,13 @@ def format_epoch_row(
     if loss_avgs.get("spectral", 0.0) > 0:
         v11_str += f" | spec: {loss_avgs.get('spectral', 0.0):.4f}"
 
+    cnt_repr = f"cnt: {row_log['train_count']:.2f}"
+    if float(row_log.get("train_count_l1", 0.0)) > 0:
+        cnt_repr += f", cnt_l1: {float(row_log['train_count_l1']):.2f}"
+
     return (
         f"[{epoch+1:04d}/{epochs:04d}] "
-        f"Loss: {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}] | "
+        f"Loss: {row_log['train_total']:.4f} [{cnt_repr}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}] | "
         f"SolvStr: {solver_strength:.2f} | "
         f"Disp: {row_log['region_dispersion_p50']:.1f} | "
         f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}"

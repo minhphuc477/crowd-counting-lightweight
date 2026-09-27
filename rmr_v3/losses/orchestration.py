@@ -405,7 +405,7 @@ def compute_rmr_v3_losses(
 
     if target_y.shape[0] == 0 or target_y.numel() == 0:
         return {
-            "total": zero_val, "count": zero_val, "cell": zero_val,
+            "total": zero_val, "count": zero_val, "count_l1": zero_val, "cell": zero_val,
             "allocation": zero_val, "flat_dm16": zero_val, "region_nb": zero_val,
             "curvature": zero_val, "hard_bg": zero_val, "fg_bce": zero_val,
             "hurdle_bce": zero_val, "trunc_nb": zero_val, "scale_align": zero_val,
