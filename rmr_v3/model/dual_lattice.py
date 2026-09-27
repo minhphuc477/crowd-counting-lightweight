@@ -116,3 +116,40 @@ def scale_regions_to_stride2(
         scale_sizes_px=regions_feat.scale_sizes_px,
     )
 
+
+class SubpixelAllocationHead(torch.nn.Module):
+    """Sub-pixel Dirichlet-Multinomial Mass-Preserving Allocation Head (DM-DL).
+
+    Resolves multi-head collisions (up to 4 heads per Stride 4 cell) at Stride 2:
+      z_alloc = PW(SiLU(DW(P4)))  in R^{B x 4 x H_4 x W_4}
+      pi = Softmax(z_alloc, dim=1)  in Delta^3
+      Y_alloc = Y_4 * pi
+      Y_2 = PixelShuffle(2)(Y_alloc)  in R^{B x 1 x 2H_4 x 2W_4}
+
+    Guarantees:
+      1. Strict Mass Conservation: sum(Y_2) == sum(Y_4) across each 2x2 fine block.
+      2. Step 0 Parity: Zero-initialized PW conv ensures exact uniform [0.25, 0.25, 0.25, 0.25]
+         allocation at initialization, preserving initial calibrated rate.
+      3. Ultra-lightweight: Exactly 452 trainable parameters.
+    """
+
+    def __init__(self, in_channels: int = 32) -> None:
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, groups=in_channels),
+            torch.nn.SiLU(inplace=True),
+            torch.nn.Conv2d(in_channels, 4, kernel_size=1),
+        )
+        # Step 0 Parity: zero-init guarantees uniform 0.25 allocation
+        torch.nn.init.zeros_(self.conv[-1].weight)
+        torch.nn.init.zeros_(self.conv[-1].bias)
+        self.pixel_shuffle = torch.nn.PixelShuffle(upscale_factor=2)
+
+    def forward(self, p4: torch.Tensor, y4: torch.Tensor) -> torch.Tensor:
+        """Project coarse Stride 4 measure y4 to fine Stride 2 measure y2."""
+        logits = self.conv(p4)
+        pi = F.softmax(logits, dim=1)
+        y_alloc = y4 * pi
+        return self.pixel_shuffle(y_alloc)
+
+

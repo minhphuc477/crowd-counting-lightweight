@@ -17,7 +17,7 @@ from .config import RMRv3Config, _softplus_inverse, _deep_tuple
 from .evidence import extract_regional_evidence
 from .perspective_geometry import DynamicCameraAnglePredictor, DiAGScaleRoutingHead
 from .solver_step import solve_inverse_measure
-from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2
+from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2, SubpixelAllocationHead
 
 
 class RMRv3(nn.Module):
@@ -32,8 +32,11 @@ class RMRv3(nn.Module):
         if cfg is None:
             cfg = RMRv3Config()
 
-        if cfg.output_stride != 4 and not (cfg.subpixel_stride2 and cfg.output_stride == 2):
-            raise ValueError("RMR-v3 requires output_stride=4 (or output_stride=2 when subpixel_stride2=True)")
+        has_subpixel = cfg.subpixel_stride2 or getattr(cfg, "subpixel_dm", False)
+        if cfg.output_stride != 4 and not (has_subpixel and cfg.output_stride == 2):
+            raise ValueError(
+                "RMR-v3 requires output_stride=4 (or output_stride=2 when subpixel_stride2=True or subpixel_dm=True)"
+            )
         if cfg.include_full_image:
             raise ValueError("RMR-v3 registered method requires include_full_image=False")
         if cfg.enable_solver and cfg.iterations < 1:
@@ -159,6 +162,10 @@ class RMRv3(nn.Module):
             nn.init.constant_(self.trust_gate.bias, float(cfg.trust_gate_init_bias))
 
         self.solver_strength: float = 1.0
+
+        self.subpixel_allocator = (
+            SubpixelAllocationHead(cfg.feature_width) if getattr(cfg, "subpixel_dm", False) else None
+        )
 
         self.register_buffer(
             "_laplace_kernel",
@@ -373,7 +380,14 @@ class RMRv3(nn.Module):
             carrier_energy=carrier_energy,
         )
 
-        if self.cfg.subpixel_stride2:
+        if self.subpixel_allocator is not None:
+            target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
+            out["y_carrier"] = out.y
+            out["y0_carrier"] = out.y0
+            out["y"] = self.subpixel_allocator(p4, out.y)[..., :target_h2, :target_w2]
+            out["y0"] = self.subpixel_allocator(p4, out.y0)[..., :target_h2, :target_w2]
+            out["regions"] = scale_regions_to_stride2(regions_solver, target_h2, target_w2)
+        elif self.cfg.subpixel_stride2:
             out["y_carrier"] = push_forward_stride2_to_stride4(out.y)
             out["y0_carrier"] = push_forward_stride2_to_stride4(out.y0)
         else:

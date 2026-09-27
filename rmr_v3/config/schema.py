@@ -132,6 +132,7 @@ ALLOWED_MODEL_KEYS = {
     "cyclic_bb_length",
     # RMR-v29 additions
     "subpixel_stride2",
+    "subpixel_dm",
     # RMR-v30 additions
     "use_anscombe_sirt",
     "anscombe_c",
@@ -358,7 +359,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "resonant_adjoint", "resonant_adjoint_lambda", "anscombe_morozov",
         "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
         "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
-        "subpixel_stride2", "curvature_alpha_init",
+        "subpixel_stride2", "subpixel_dm", "curvature_alpha_init",
         # PARK Perspective-Adaptive Regional Kernels
         "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",

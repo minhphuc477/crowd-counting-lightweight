@@ -111,8 +111,8 @@ class RMRv3LossConfig:
             self.use_multiscale_dm = True
         if self.dm_target not in ("y", "y0", "dual"):
             raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{self.dm_target}'")
-        if self.count_loss_mode not in ("nb", "log1p", "l1"):
-            raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{self.count_loss_mode}'")
+        if self.count_loss_mode not in ("nb", "log1p", "l1", "anscombe"):
+            raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', or 'anscombe', got '{self.count_loss_mode}'")
         if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
             raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', or 'count_harmonized', got '{self.cell_loss_mode}'")
         if self.cell_tau_head <= 0.0:

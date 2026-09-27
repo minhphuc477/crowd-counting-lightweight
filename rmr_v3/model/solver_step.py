@@ -121,7 +121,7 @@ def solve_inverse_measure(
         density_gated_diffusion=cfg.density_gated_diffusion,
         diffusion_dense_threshold=cfg.diffusion_dense_threshold,
         diffusion_gate_beta=cfg.diffusion_gate_beta,
-        output_stride=cfg.output_stride,
+        output_stride=4 if getattr(cfg, "subpixel_dm", False) else cfg.output_stride,
         use_anscombe=getattr(cfg, "use_anscombe_sirt", False) or (cfg.adjoint_mode == "anscombe_vst"),
         anscombe_c=getattr(cfg, "anscombe_c", 0.375),
         adaptive_tau=getattr(cfg, "adaptive_tau", False),

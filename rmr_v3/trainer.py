@@ -44,11 +44,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     seed_everything(seed, deterministic=deterministic)
 
     m_cfg = cfg.setdefault("model", {})
-    eff_stride = 2 if m_cfg.get("subpixel_stride2", False) else int(m_cfg.get("output_stride", 4))
+    eff_stride = 2 if (m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False)) else int(m_cfg.get("output_stride", 4))
+    init_m0_stride = 4 if m_cfg.get("subpixel_dm", False) else eff_stride
     if "init_m0" not in m_cfg and "train_manifest" in cfg.get("data", {}):
         m_cfg["init_m0"] = compute_manifest_density(
             cfg["data"]["train_manifest"],
-            output_stride=eff_stride,
+            output_stride=init_m0_stride,
             data_root=cfg["data"].get("data_root"),
         )
 

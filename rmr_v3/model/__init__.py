@@ -36,6 +36,7 @@ from .dual_lattice import (
     push_forward_stride2_to_stride4,
     pullback_stride4_to_stride2_rn,
     check_mass_conservation,
+    SubpixelAllocationHead,
 )
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "RegionSet",
     "RepWeightedFPNNeck",
     "ScaleRoutingHead",
+    "SubpixelAllocationHead",
     "apply_scale_consistency_gating",
     "build_fine_head",
     "build_multiscale_regions",

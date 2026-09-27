@@ -85,14 +85,18 @@ def count_magnitude_loss(
     """Total crop count loss using Negative Binomial NLL or log1p smooth L1."""
     if pred.numel() == 0 or target.numel() == 0:
         return (pred.sum() + target.sum()) * 0.0
-    pn = pred.float().sum(dim=(-2, -1)).view(-1)
-    tn = target.float().sum(dim=(-2, -1)).view(-1)
+    pn = pred.float().sum(dim=(-2, -1)).view(-1) if pred.ndim >= 2 else pred.float().view(-1)
+    tn = target.float().sum(dim=(-2, -1)).view(-1) if target.ndim >= 2 else target.float().view(-1)
     if mode == "nb":
         return negative_binomial_nll_mean_dispersion(tn, pn, dispersion=dispersion, reduction="mean")
     elif mode == "log1p":
         return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
     elif mode == "l1":
         return F.l1_loss(pn, tn, reduction="mean")
+    elif mode == "anscombe":
+        g_pn = 2.0 * torch.sqrt(torch.clamp_min(pn, 0.0) + 0.375)
+        g_tn = 2.0 * torch.sqrt(torch.clamp_min(tn, 0.0) + 0.375)
+        return F.smooth_l1_loss(g_pn, g_tn, reduction="mean", beta=0.2)
     raise ValueError(f"Unsupported count loss mode: {mode}")
 
 

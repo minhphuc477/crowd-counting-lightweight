@@ -608,7 +608,7 @@ def test_config_validation_guards():
         validate_v3_config({"loss": {"dm_target": "invalid"}})
 
     # Invalid count_loss_mode rejected
-    with pytest.raises(ValueError, match="count_loss_mode must be 'nb', 'log1p', or 'l1'"):
+    with pytest.raises(ValueError, match="count_loss_mode must be"):
         validate_v3_config({"loss": {"count_loss_mode": "mse"}})
 
     # Invalid allocation_loss_type rejected

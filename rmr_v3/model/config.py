@@ -30,6 +30,8 @@ class RMRv3Config:
 
     # RMR-v29: Sub-pixel Stride-2 Reconstruction Head (+99 params)
     subpixel_stride2: bool = False
+    # Sub-60: Sub-pixel Dirichlet-Multinomial Mass-Preserving Allocation Head (DM-DL, +452 params)
+    subpixel_dm: bool = False
 
     # Neck
     neck_type: str = "additive"  # "additive" | "aspp_lite" | "rep_weighted"
@@ -198,9 +200,9 @@ class RMRv3Config:
     cyclic_bb_length: int = 1
 
     def __post_init__(self) -> None:
-        if self.subpixel_stride2 and self.output_stride != 2:
+        if (self.subpixel_stride2 or self.subpixel_dm) and self.output_stride != 2:
             warnings.warn(
-                f"subpixel_stride2=True requires output_stride=2; "
+                f"subpixel_stride2/subpixel_dm requires output_stride=2; "
                 f"overriding output_stride={self.output_stride} → 2. "
                 "Set output_stride: 2 in your YAML to suppress this warning.",
                 UserWarning,

@@ -58,14 +58,15 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 "Conflicting alias keys in model config: cannot declare both 'omega' and 'sirt_omega'."
             )
-        if bool(m_cfg.get("subpixel_stride2", False)) and int(m_cfg.get("output_stride", 4)) != 2:
+        has_subpixel = bool(m_cfg.get("subpixel_stride2", False)) or bool(m_cfg.get("subpixel_dm", False))
+        if has_subpixel and int(m_cfg.get("output_stride", 4)) != 2:
             raise ValueError(
-                f"Inconsistent config: subpixel_stride2=True requires output_stride=2, "
+                f"Inconsistent config: subpixel_stride2=True or subpixel_dm=True requires output_stride=2, "
                 f"got output_stride={m_cfg.get('output_stride')}"
             )
-        if int(m_cfg.get("output_stride", 4)) == 2 and not bool(m_cfg.get("subpixel_stride2", False)):
+        if int(m_cfg.get("output_stride", 4)) == 2 and not has_subpixel:
             raise ValueError(
-                "Inconsistent config: output_stride=2 requires subpixel_stride2=True."
+                "Inconsistent config: output_stride=2 requires subpixel_stride2=True or subpixel_dm=True."
             )
         if "reliability_weight_min" in m_cfg:
             w_min = float(m_cfg["reliability_weight_min"])
@@ -229,8 +230,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"dm_strict must be a boolean, got {type(l_cfg_pre['dm_strict']).__name__}")
         if "count_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["count_loss_mode"])
-            if clm not in ("nb", "log1p", "l1"):
-                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', or 'l1', got '{clm}'")
+            if clm not in ("nb", "log1p", "l1", "anscombe"):
+                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', or 'anscombe', got '{clm}'")
         if "allocation_loss_type" in l_cfg_pre:
             alt = str(l_cfg_pre["allocation_loss_type"])
             if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
