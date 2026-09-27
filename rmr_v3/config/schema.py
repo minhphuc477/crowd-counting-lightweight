@@ -162,6 +162,7 @@ ALLOWED_MODEL_KEYS = {
 
 ALLOWED_LOSS_KEYS = {
     "lambda_count",
+    "lambda_count_l1",
     "lambda_flat_dm16",
     "lambda_cell",
     "lambda_region_nb",

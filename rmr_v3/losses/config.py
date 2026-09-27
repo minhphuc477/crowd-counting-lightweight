@@ -9,6 +9,7 @@ from typing import Any
 class RMRv3LossConfig:
     # Primary loss weights
     lambda_count: float = 1.0
+    lambda_count_l1: float = 0.0
     lambda_flat_dm16: float = 1.0
     lambda_cell: float = 0.50
     lambda_region_nb: float = 0.20
@@ -127,6 +128,8 @@ class RMRv3LossConfig:
             raise ValueError(f"cell_fg_ratio must be in [0.0, 1.0], got {self.cell_fg_ratio}")
         if self.curvature_gate_mode not in ("none", "hard", "soft"):
             raise ValueError(f"curvature_gate_mode must be 'none', 'hard', or 'soft', got '{self.curvature_gate_mode}'")
+        if self.lambda_count_l1 < 0.0:
+            raise ValueError(f"lambda_count_l1 must be non-negative, got {self.lambda_count_l1}")
         if self.lambda_curvature < 0.0:
             raise ValueError(f"lambda_curvature must be non-negative, got {self.lambda_curvature}")
         if self.lambda_hard_bg < 0.0:
