@@ -84,6 +84,8 @@ def main() -> None:
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
     ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
+    ap.add_argument("--num-threads", type=int, default=None, help="PyTorch CPU intra-op thread count (recommended: 2 for parallel runs)")
+    ap.add_argument("--no-cudnn-benchmark", action="store_true", default=False, help="Disable cuDNN benchmark to eliminate multi-process stalls")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8-sig"))
@@ -99,6 +101,10 @@ def main() -> None:
         cfg.setdefault("train", {})["patience"] = args.patience
     if args.workers is not None:
         cfg.setdefault("train", {})["workers"] = args.workers
+    if args.num_threads is not None:
+        cfg.setdefault("train", {})["num_threads"] = args.num_threads
+    if args.no_cudnn_benchmark:
+        cfg.setdefault("train", {})["cudnn_benchmark"] = False
     if args.disable_early_stopping:
         cfg.setdefault("train", {})["early_stopping"] = False
         cfg.setdefault("train", {})["patience"] = 0

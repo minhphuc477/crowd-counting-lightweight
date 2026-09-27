@@ -43,6 +43,11 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     cfg.setdefault("train", {})["deterministic"] = deterministic
     seed_everything(seed, deterministic=deterministic)
 
+    num_threads = cfg.get("train", {}).get("num_threads")
+    if num_threads is not None and int(num_threads) > 0:
+        torch.set_num_threads(int(num_threads))
+        torch.set_num_interop_threads(max(1, int(num_threads) // 2))
+
     m_cfg = cfg.setdefault("model", {})
     eff_stride = 2 if (m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False)) else int(m_cfg.get("output_stride", 4))
     init_m0_stride = 4 if m_cfg.get("subpixel_dm", False) else eff_stride
@@ -123,7 +128,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        if not deterministic:
+        if not deterministic and bool(cfg.get("train", {}).get("cudnn_benchmark", True)):
             torch.backends.cudnn.benchmark = True
     workers = int(cfg.get("train", {}).get("workers", 0))
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", device.type == "cuda"))
