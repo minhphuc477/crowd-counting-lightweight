@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pytest
 import torch
 import torch.nn.functional as F
@@ -96,6 +97,43 @@ def test_subpixel_dm_model_forward_backward():
     losses["total"].backward()
     grad_norm = sum(p.grad.norm().item() for p in model.parameters() if p.grad is not None)
     assert grad_norm > 0.0, "Total gradient norm must be non-zero"
+
+
+def test_subpixel_dm_odd_dimensions_and_trajectory_diagnostics():
+    """Verify exact mass conservation on non-divisible odd dimensions and trajectory diagnostics."""
+    from rmr_v3.diagnostics.trajectory import compute_solver_trajectory_diagnostics
+
+    cfg = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        pretrained=False,
+        output_stride=2,
+        subpixel_dm=True,
+        iterations=2,
+        max_trainable_params=105000,
+    )
+    model = RMRv3(cfg)
+
+    for h_odd, w_odd in [(255, 257), (513, 515)]:
+        x = torch.randn(1, 3, h_odd, w_odd)
+        out = model(x)
+        expected_h2 = (h_odd + 1) // 2
+        expected_w2 = (w_odd + 1) // 2
+        assert out.y.shape == (1, 1, expected_h2, expected_w2)
+
+        # Exact mass conservation check on odd dimensions
+        m_fine = out.y.sum().item()
+        m_carrier = out["y_carrier"].sum().item()
+        assert abs(m_fine - m_carrier) < 1e-4, (
+            f"Mass mismatch on {h_odd}x{w_odd}: fine {m_fine} vs carrier {m_carrier}"
+        )
+
+        # Trajectory diagnostics check
+        target_odd = torch.rand(1, 1, expected_h2, expected_w2).abs()
+        diag = compute_solver_trajectory_diagnostics(dict(out), target_odd)
+        assert "mae_reg_y0" in diag and math.isfinite(diag["mae_reg_y0"])
+        assert "mae_reg_y1" in diag and math.isfinite(diag["mae_reg_y1"])
+        assert diag["mae_reg_y0"] > 0.0
+
 
 
 @pytest.mark.parametrize(

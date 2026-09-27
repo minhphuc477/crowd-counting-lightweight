@@ -24,6 +24,7 @@ class RMRModelOutput(dict):
         if key in (
             "hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "pi_aspect",
             "solver_trust_alpha", "y_carrier", "y0_carrier", "carrier_energy",
+            "regions_carrier",
         ):
             return None
         raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None

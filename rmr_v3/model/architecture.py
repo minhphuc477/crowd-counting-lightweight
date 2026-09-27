@@ -384,8 +384,16 @@ class RMRv3(nn.Module):
             target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
             out["y_carrier"] = out.y
             out["y0_carrier"] = out.y0
-            out["y"] = self.subpixel_allocator(p4, out.y)[..., :target_h2, :target_w2]
-            out["y0"] = self.subpixel_allocator(p4, out.y0)[..., :target_h2, :target_w2]
+            out["regions_carrier"] = regions_solver
+            y2_alloc = self.subpixel_allocator(p4, out.y)[..., :target_h2, :target_w2]
+            y02_alloc = self.subpixel_allocator(p4, out.y0)[..., :target_h2, :target_w2]
+            # Exact boundary mass reconciliation for odd spatial dimensions
+            m4_y = out.y.sum(dim=(-2, -1), keepdim=True)
+            m2_y = y2_alloc.sum(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
+            out["y"] = y2_alloc * (m4_y / m2_y)
+            m4_y0 = out.y0.sum(dim=(-2, -1), keepdim=True)
+            m2_y0 = y02_alloc.sum(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
+            out["y0"] = y02_alloc * (m4_y0 / m2_y0)
             out["regions"] = scale_regions_to_stride2(regions_solver, target_h2, target_w2)
         elif self.cfg.subpixel_stride2:
             out["y_carrier"] = push_forward_stride2_to_stride4(out.y)
