@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from rmr_v3.config import validate_v3_config
 from rmr_v3.engine import make_loss_cfg, make_model
-from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
+from rmr_v3.losses import RMRv3LossConfig
 from rmr_v3.reporting import TRAIN_LOG_FIELDNAMES
 
 

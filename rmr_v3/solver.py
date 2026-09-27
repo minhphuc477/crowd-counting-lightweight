@@ -16,7 +16,6 @@ from rmr_core.operators import (
     weighted_regional_energy,
 )
 from .solver_ops import (
-    _LAPLACE_KERNEL,
     anscombe_discrepancy,
     compute_adaptive_tau,
     density_gated_anscombe_discrepancy,

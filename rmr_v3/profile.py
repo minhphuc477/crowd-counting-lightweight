@@ -180,16 +180,18 @@ def main() -> None:
     stride = int(model.cfg.output_stride)
 
     if args.tiling:
-        forward_call = lambda inp: predict_tiled(
-            model,
-            inp[0],
-            output_stride=stride,
-            tile_size=args.tile_size,
-            halo=args.halo,
-            forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
-        )
+        def forward_call(inp: torch.Tensor) -> torch.Tensor:
+            return predict_tiled(
+                model,
+                inp[0],
+                output_stride=stride,
+                tile_size=args.tile_size,
+                halo=args.halo,
+                forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
+            )
     else:
-        forward_call = lambda inp: model(inp, uniform_reliability=uniform_reliability, solver_strength=1.0)
+        def forward_call(inp: torch.Tensor) -> Any:
+            return model(inp, uniform_reliability=uniform_reliability, solver_strength=1.0)
 
     # Clean single-forward peak memory measurement
     peak_mem_fp32 = measure_clean_peak_memory(model, x, use_amp=False, forward_fn=forward_call)

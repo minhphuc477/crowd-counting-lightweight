@@ -5,7 +5,6 @@ import csv
 import datetime
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 import yaml
@@ -103,11 +102,11 @@ def load_model_from_ckpt(
             if k not in cast_sd:
                 cast_sd[k] = ckpt["model"][k]
         model.load_state_dict(cast_sd)
-        print(f"Loaded EMA weights from checkpoint (ema_model key found).")
+        print("Loaded EMA weights from checkpoint (ema_model key found).")
     else:
         model.load_state_dict(ckpt["model"])
         if not use_ema and "ema_model" in ckpt:
-            print(f"Loaded live weights from checkpoint (--use-live-weights specified).")
+            print("Loaded live weights from checkpoint (--use-live-weights specified).")
 
     model.switch_to_deploy()
     model.set_solver_strength(1.0)
@@ -299,7 +298,7 @@ def main() -> None:
             writer.writeheader()
             writer.writerows(diag_rows)
 
-    print(f"\nEvaluation Results:")
+    print("\nEvaluation Results:")
     print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}")
     if "mae_y0" in summary:
         print(f"  Iterates Full-Image MAE: Y0={summary['mae_y0']:.2f} -> Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}")

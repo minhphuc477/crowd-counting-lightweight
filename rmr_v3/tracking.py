@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 """Loss and Diagnostic Tracking for RMR-v3 / RMR-v11 Training.
 
 Tracks multi-task training loss components across mini-batches, and collects
 fine-grained solver energy reduction traces, dispersion dynamics, and regional
 reliability metrics.
 """
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -317,7 +316,7 @@ def format_dynamic_training_banner(
 
     banner = [
         "=" * 80,
-        f"  RMR Training Initialized [Dynamic Architecture Engine]",
+        "  RMR Training Initialized [Dynamic Architecture Engine]",
         f"  Run: {run_label} | Parameters: {n_params:,} / 105,000 budget ({budget_pct:.1f}% used, +{headroom:,} headroom)",
         f"  Carrier: {carrier_line}",
         f"  Geometry: {reg_desc} | Pooling: {pooling_desc}",

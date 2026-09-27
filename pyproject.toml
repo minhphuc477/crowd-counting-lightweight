@@ -35,3 +35,11 @@ addopts = "--ignore=tests/rmr --ignore=tests/test_localization.py"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"rmr_v3/eval.py" = ["E402"]
+"rmr_v3/profile.py" = ["E402"]
+"rmr_v3/train.py" = ["E402"]
+"scripts/*" = ["E402"]
+"tests/*" = ["E402"]
+

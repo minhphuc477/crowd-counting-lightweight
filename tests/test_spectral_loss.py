@@ -293,7 +293,7 @@ def test_all_codebase_files_line_count_invariant():
         if len(lines) > 450:
             violations.append(f"{p.relative_to(_REPO_ROOT)}: {len(lines)} lines")
 
-    assert not violations, f"The following files violate the <= 450 lines protocol invariant:\n" + "\n".join(violations)
+    assert not violations, "The following files violate the <= 450 lines protocol invariant:\n" + "\n".join(violations)
 
 
 if __name__ == "__main__":

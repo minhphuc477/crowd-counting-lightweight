@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 """Probabilistic Regional Evidence Head and Reliability Modeling for RMR.
 
 Predicts regional Negative-Binomial count distributions, dispersion parameters,
 and occupancy probabilities (Hurdle model), while deriving physics-based precision
 and reliability weights for the inverse solver.
 """
+from __future__ import annotations
 
 import math
 from typing import Sequence
@@ -134,7 +133,6 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
 
         src_hw = p4.shape[-2:]
 
-        m_total = int(regions.boxes.shape[0])
         feature_dim = int(p4.shape[1])
         out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
 

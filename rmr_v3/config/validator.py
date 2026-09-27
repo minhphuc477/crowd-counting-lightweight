@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from .schema import (
-    ALLOWED_MODEL_KEYS,
     ALLOWED_TOP_LEVEL,
     SECTION_ALLOWED_KEYS,
 )

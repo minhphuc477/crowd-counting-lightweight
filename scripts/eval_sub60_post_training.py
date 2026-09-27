@@ -167,7 +167,7 @@ def main() -> None:
         mae_dense = float(np.mean(aes[dense_mask])) if np.any(dense_mask) else 0.0
 
         print(f"Blend Weights: {norm_weights}")
-        print(f"ENSEMBLE RESULTS (+TTA):")
+        print("ENSEMBLE RESULTS (+TTA):")
         print(f"  MAE:      {ens_summary['MAE']:.2f}")
         print(f"  RMSE:     {ens_summary['RMSE']:.2f}")
         print(f"  NAE:      {ens_summary['NAE']:.3f}")

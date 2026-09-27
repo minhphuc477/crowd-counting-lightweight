@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Dynamic Image-Adaptive Geometry (DiAG) & Scale Routing Modules for RMR-v3.
 
 Provides:
@@ -14,6 +12,7 @@ Mathematical Principles:
 - Preserves the Universal Multi-Scale Observation Dictionary ([32, 64, 128] px, 1,235 boxes).
 - Step 0 Identity Parity: Zero-initialized weights guarantee uniform distribution (1/K, 1/K, ...) at Step 0.
 """
+from __future__ import annotations
 
 import torch
 import torch.nn as nn

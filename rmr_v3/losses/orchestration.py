@@ -231,7 +231,7 @@ def _compute_core_losses(
         losses["count_l1"] = loss_l1
         losses["total"] = losses["total"] + cfg.lambda_count_l1 * loss_l1
     else:
-        losses["count_l1"] = losses["total"] * 0.0
+        losses["count_l1"] = torch.zeros((), device=y.device, dtype=y.dtype)
     return losses
 
 

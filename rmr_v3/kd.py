@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Knowledge Distillation Module for RMR-v8 (Stage 3).
 
 Transfers high-capacity crowd spatial representations from a heavy teacher
@@ -14,6 +12,7 @@ Design Principles:
 4. Ephemeral Feature Hints (optional): 1x1 conv adapter projecting teacher feature maps
    to student channel width (32) with cosine distance loss.
 """
+from __future__ import annotations
 
 import torch
 import torch.nn as nn

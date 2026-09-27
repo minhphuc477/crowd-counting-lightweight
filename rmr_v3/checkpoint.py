@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 """Checkpoint and EMA Shadow Parameter Management for RMR.
 
 Handles atomic checkpoint saving, EMA weight tracking and evaluation context swapping,
 and validation-driven early stopping.
 """
+from __future__ import annotations
 
 from contextlib import contextmanager
 import json
