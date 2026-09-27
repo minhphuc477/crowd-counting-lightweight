@@ -12,6 +12,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
