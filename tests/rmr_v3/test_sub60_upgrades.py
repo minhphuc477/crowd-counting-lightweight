@@ -144,6 +144,10 @@ def test_subpixel_dm_odd_dimensions_and_trajectory_diagnostics():
         ("sub60_anscombe_count_t8.yaml", 104474),
         ("sub60_quad_scale_fg75_t8.yaml", 104474),
         ("sub60_dual_lattice_t8.yaml", 104926),
+        ("sub60_abl_no_solver.yaml", 104441),
+        ("sub60_abl_symmetric_morozov.yaml", 104441),
+        ("sub60_abl_flat_adjoint.yaml", 104441),
+        ("sub60_zenith_composite_t8.yaml", 104926),
     ],
 )
 def test_all_sub60_configs_validation_and_budgets(config_name: str, expected_params: int):
