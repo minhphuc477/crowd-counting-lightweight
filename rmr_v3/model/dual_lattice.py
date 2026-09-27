@@ -147,9 +147,25 @@ class SubpixelAllocationHead(torch.nn.Module):
 
     def forward(self, p4: torch.Tensor, y4: torch.Tensor) -> torch.Tensor:
         """Project coarse Stride 4 measure y4 to fine Stride 2 measure y2."""
+        orig_ndim = y4.ndim
+        if orig_ndim == 2:
+            y4_in = y4.unsqueeze(0).unsqueeze(0)
+        elif orig_ndim == 3:
+            y4_in = y4.unsqueeze(1)
+        else:
+            y4_in = y4
+
         logits = self.conv(p4)
+        if logits.shape[-2:] != y4_in.shape[-2:]:
+            logits = F.interpolate(logits, size=y4_in.shape[-2:], mode="bilinear", align_corners=False)
         pi = F.softmax(logits, dim=1)
-        y_alloc = y4 * pi
-        return self.pixel_shuffle(y_alloc)
+        y_alloc = y4_in * pi
+        y2 = self.pixel_shuffle(y_alloc)
+
+        if orig_ndim == 2:
+            return y2.squeeze(0).squeeze(0)
+        if orig_ndim == 3:
+            return y2.squeeze(1)
+        return y2
 
 
