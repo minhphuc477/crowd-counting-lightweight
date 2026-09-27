@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
                         help="Evaluate live noisy SGD weights instead of smoothed EMA shadow weights")
     parser.add_argument("--tiling", action="store_true", default=False,
                         help="Enable 512px sliding-window tiling during evaluation (default: False)")
+    parser.add_argument("--runs", nargs="*", default=None,
+                        help="Optional list of run IDs or paths to checkpoints (e.g. sub60_dense_breakthrough)")
     return parser.parse_args()
 
 
@@ -79,18 +81,31 @@ def main() -> None:
     loader = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
     print(f"Loaded test dataset: {len(test_ds)} samples from {args.test_manifest}\n")
 
-    top_runs = {
-        "Count-Harmonized (Single Best)": Path("runs/sha_a/sub60_count_harmonized/best_val_mae.pt"),
-        "Resonant-Peak (Sparse Champion)": Path("runs/sha_a/sub60_resonant_peak/best_val_mae.pt"),
-        "Unified-T8 (Dense Champion)": Path("runs/sha_a/sub60_unified_t8/best_val_mae.pt"),
-    }
+    if args.runs:
+        candidate_runs = {}
+        for r in args.runs:
+            p = Path(r)
+            if p.is_file():
+                candidate_runs[p.parent.name] = p
+            else:
+                candidate_runs[r] = Path(f"runs/sha_a/{r}/best_val_mae.pt")
+    else:
+        candidate_runs = {
+            "Dense-Breakthrough": Path("runs/sha_a/sub60_dense_breakthrough/best_val_mae.pt"),
+            "Crop256+Count-L1": Path("runs/sha_a/sub60_abl_crop256_plus_count_l1/best_val_mae.pt"),
+            "Crop256-Only": Path("runs/sha_a/sub60_abl_crop256_only/best_val_mae.pt"),
+            "Count-L1-Only": Path("runs/sha_a/sub60_abl_count_l1_only/best_val_mae.pt"),
+            "Count-Harmonized (Single Best)": Path("runs/sha_a/sub60_count_harmonized/best_val_mae.pt"),
+            "Resonant-Peak (Sparse Champion)": Path("runs/sha_a/sub60_resonant_peak/best_val_mae.pt"),
+            "Unified-T8 (Dense Champion)": Path("runs/sha_a/sub60_unified_t8/best_val_mae.pt"),
+        }
 
     models = {}
-    for name, path in top_runs.items():
+    for name, path in candidate_runs.items():
         if path.exists():
             models[name] = load_model_from_ckpt(path, device, use_ema=args.use_ema)
-        else:
-            print(f"Warning: Checkpoint not found: {path}")
+        elif args.runs:
+            print(f"Warning: Specified checkpoint not found: {path}")
 
     print("\n" + "=" * 80)
     print("  PHASE 1: INDIVIDUAL MODEL EVALUATION (RAW vs FLIP TTA)")
@@ -128,13 +143,14 @@ def main() -> None:
         print("  PHASE 2: HETEROGENEOUS PREDICTION BLEND ENSEMBLE")
         print("=" * 80)
 
-        # Weighting: 40% Count-Harmonized, 30% Resonant-Peak, 30% Unified-T8
         weights = {
-            "Count-Harmonized (Single Best)": 0.40,
-            "Resonant-Peak (Sparse Champion)": 0.30,
-            "Unified-T8 (Dense Champion)": 0.30,
+            "Dense-Breakthrough": 0.35,
+            "Count-Harmonized (Single Best)": 0.25,
+            "Resonant-Peak (Sparse Champion)": 0.20,
+            "Unified-T8 (Dense Champion)": 0.20,
+            "Crop256+Count-L1": 0.25,
         }
-        active_weights = {k: weights[k] for k in models.keys()}
+        active_weights = {k: weights.get(k, 1.0) for k in models.keys()}
         tot_w = sum(active_weights.values())
         norm_weights = {k: v / tot_w for k, v in active_weights.items()}
 
