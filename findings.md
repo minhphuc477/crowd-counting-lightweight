@@ -77,6 +77,10 @@ Between v20 and v32, the research fell into the classic **over-engineering and s
    Replacing isotropic Laplacian TV with Perona-Malik anisotropic diffusion introduced negative diffusion coefficients whenever $|\nabla y| > K$, creating an ill-posed backward heat equation that formed false edge artifacts.
 8. **v32 (Deterministic Algorithm Lockdown on 300 Images):**
    Enabling `torch.use_deterministic_algorithms(True)` and deterministic DataLoader worker seeds starved data augmentation entropy. Over 1000 epochs, the network repeatedly memorized the exact same crops, degrading the v19 anchor from **72.84 to 80.92**.
+9. **sub60_abl_crop256 (Regional Operator Starvation):**
+   Reducing crop size to 256x256 severely damaged RMR's Fredholm integral operator $A$. The largest box scale $B_{128}$ covered 50% of the entire image, reducing total 128px boxes from 36 down to 4! The 72px boundary margin engulfed 81% of the crop area, while dense crowd clumps of 500-2000 people were severed, breaking continuous measure conservation. Test MAE collapsed to **86.86** (Dense MAE exploded to **190.63**).
+10. **sub60_abl_count_l1 (Zero Spatial Selectivity Flat DC Offset):**
+    Unnormalized global Count L1 loss $\frac{1}{B}|\sum \hat{y} - N|$ produces an unselective derivative $\frac{\partial \mathcal{L}}{\partial \hat{y}(u)} = \pm \frac{1}{B}$ across all 16,384 pixels, including empty sky, roads, and trees. The model found the degenerate shortcut of raising the global background floor everywhere instead of resolving high-frequency crowd heads. Moderate MAE exploded to **76.42**, Bias flipped from -9.01 to **+6.22**, and Test MAE collapsed to **94.54**.
 
 ---
 
@@ -84,6 +88,8 @@ Between v20 and v32, the research fell into the classic **over-engineering and s
 
 | Myth / Misconception | Mathematical & Empirical Reality |
 | :--- | :--- |
+| **"Train Crop 256 avoids upscaling and helps small heads"** | **False.** Borrowed from standard CNNs, it violates RMR's regional operators. In a 256px crop, a 128px box covers 50% of the image, starving the adjoint back-projection $A^*$ of spatial redundancy and truncating clumps. MAE regressed from 73.13 to 86.86 (Dense MAE 190.63). |
+| **"Unnormalized Count L1 loss solves dense undercounting"** | **False.** Global Count L1 has zero spatial selectivity. Its gradient is a uniform DC offset across all 16,384 cells, causing severe false positive hallucinations in background. MAE regressed from 73.13 to 94.54 (Bias +6.22). |
 | **"Stride 4 causes undercounting slope (0.57x) due to pixel overlapping"** | **False.** MAE is a global integral $\int y(x)dx$. A single Stride-4 cell can easily represent a count of 3.0 or 10.0. Canonical SOTA models (CSRNet, DM-Count) operate at Stride 8 and achieve 52–68 MAE. The slope compression stems from $L_1$ loss dilution, not spatial stride. |
 | **"TTA dropped v19 to 61 MAE"** | **False.** v19 achieved 72.84 direct MAE and 72.61 TTA MAE. 61.13 was the *lower bound of the 95% bootstrap confidence interval*, conflated in early agent reports. |
 | **"Anscombe VST stabilizes Poisson variance in unrolled SIRT"** | **False.** Anscombe stabilizes Poisson observation noise in feedforward regression, but inside an unrolled iterative solver, its derivative $1/\sqrt{Ay}$ blows up in empty background regions. |

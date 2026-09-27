@@ -72,6 +72,31 @@ hypotheses_queue:
     config: "configs/rmr_research/h6_spectral_composite.yaml"
     description: "Fuses canonical v19 with Count-Preserving Spectral Loss to target sub-70 MAE."
     status: "READY"
+  - id: ABL_CROP256
+    name: "Ablation: Crop 256 Only"
+    config: "configs/rmr_sub60/sub60_abl_crop256_only.yaml"
+    status: "FAILED_REGRESSION"
+    result: "MAE 86.86, Dense 190.63. Regional operator starvation (128px boxes reduced from 36 to 4)."
+  - id: ABL_COUNT_L1
+    name: "Ablation: Unnormalized Count L1 Only"
+    config: "configs/rmr_sub60/sub60_abl_count_l1_only.yaml"
+    status: "FAILED_REGRESSION"
+    result: "MAE 94.54, Mod 76.42, Bias +6.22. Zero spatial selectivity adds uniform DC offset to background."
+  - id: ABL_CROP256_COUNT_L1
+    name: "Ablation: Crop 256 + Count L1"
+    config: "configs/rmr_sub60/sub60_abl_crop256_plus_count_l1.yaml"
+    status: "FAILED_REGRESSION"
+    result: "MAE 89.81, RMSE 152.51. Compounded regression."
+  - id: SUB60_BREAKTHROUGH_PILOT
+    name: "Sub60 Dense Breakthrough Pilot"
+    config: "configs/rmr_sub60/sub60_dense_breakthrough.yaml"
+    status: "FAILED_REGRESSION"
+    result: "MAE 95.71, Dense 188.87. Failed due to combining Crop 256 and Unnormalized Count L1."
+  - id: SUB60_CANONICAL_RECONCILIATION
+    name: "Sub60 Canonical Reconciliation Model"
+    config: "configs/rmr_sub60/sub60_canonical_reconciliation.yaml"
+    status: "READY"
+    description: "Unifies proven physical operators: Crop 512 + CI-Cell v2 (O(1) gradient) + Asymmetric Morozov (0.15) + Resonant Adjoint (0.50) + T=8 SIRT + Hard BG (0.15)."
 
-active_iteration: "A* Experiment Suite Ready"
-last_updated: "2026-09-21T17:35:00+07:00"
+active_iteration: "Sub-60 Canonical Reconciliation Ready"
+last_updated: "2026-09-28T06:23:00+07:00"
