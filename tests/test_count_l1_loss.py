@@ -64,3 +64,20 @@ def test_breakthrough_config_and_parameters():
     assert cfg["train"]["batch_size"] == 16
     assert cfg["model"]["asymmetric_morozov"] is True
     assert cfg["model"]["resonant_adjoint"] is True
+
+
+def test_all_sub60_suite_configs_and_parameters():
+    """Verify all 4 sub60 suite configs validate and produce exactly 104,441 parameters."""
+    cfgs = [
+        "configs/rmr_sub60/sub60_abl_crop256_only.yaml",
+        "configs/rmr_sub60/sub60_abl_count_l1_only.yaml",
+        "configs/rmr_sub60/sub60_abl_crop256_plus_count_l1.yaml",
+        "configs/rmr_sub60/sub60_dense_breakthrough.yaml",
+    ]
+    for path in cfgs:
+        with open(path) as f:
+            c = yaml.safe_load(f)
+        validate_v3_config(c)
+        m, _ = make_model(c)
+        n = sum(p.numel() for p in m.parameters() if p.requires_grad)
+        assert n == 104441, f"{path} expected 104,441 params, got {n}"
