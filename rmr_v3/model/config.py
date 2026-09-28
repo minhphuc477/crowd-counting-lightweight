@@ -75,6 +75,7 @@ class RMRv3Config:
 
     # Hurdle NB head
     hurdle_head: bool = False
+    hurdle_gating_mode: str = "occupancy"
     tv_lambda: float = 0.0
     ema_decay: float = 0.0
     temp_softplus: bool = False
@@ -169,6 +170,8 @@ class RMRv3Config:
     trust_dense_kappa: float = 0.80
     density_scale_gating: bool = False
     density_scale_tau: float = 0.15
+    asymmetric_trust: bool = True
+    trust_pos_kappa: float = 1.0
 
     # Curvature warping & BB solver
     density_curvature: bool = False

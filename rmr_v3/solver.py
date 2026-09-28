@@ -92,6 +92,8 @@ def unrolled_sirt_solver(
     density_adaptive_trust: bool = False,
     trust_dense_tau: float = 0.10,
     trust_dense_kappa: float = 0.80,
+    asymmetric_trust: bool = True,
+    trust_pos_kappa: float = 1.0,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -346,8 +348,12 @@ def unrolled_sirt_solver(
                 eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
             base_bound = torch.clamp_min(z_state.float(), float(effective_trust_floor))
             bound = eff_kappa * base_bound
-            eff_pos = torch.clamp_min(eff_kappa, 1.0) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), 1.0)
-            bound_pos = eff_pos * base_bound
+            if asymmetric_trust:
+                pos_k = float(trust_pos_kappa)
+                eff_pos = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
+                bound_pos = eff_pos * base_bound
+            else:
+                bound_pos = bound
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 conf_mod = 0.25 + 0.75 * scale_confidence

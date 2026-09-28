@@ -161,6 +161,7 @@ ALLOWED_MODEL_KEYS = {
     "shifted_carrier", "shifted_carrier_eps",
     "density_adaptive_trust", "trust_dense_tau", "trust_dense_kappa",
     "density_scale_gating", "density_scale_tau",
+    "hurdle_gating_mode", "asymmetric_trust", "trust_pos_kappa",
 }
 
 

@@ -145,6 +145,8 @@ def solve_inverse_measure(
         density_adaptive_trust=getattr(cfg, "density_adaptive_trust", False),
         trust_dense_tau=getattr(cfg, "trust_dense_tau", 0.10),
         trust_dense_kappa=getattr(cfg, "trust_dense_kappa", 0.80),
+        asymmetric_trust=getattr(cfg, "asymmetric_trust", True),
+        trust_pos_kappa=getattr(cfg, "trust_pos_kappa", 1.0),
     )
 
     y = solver_res["y"]
