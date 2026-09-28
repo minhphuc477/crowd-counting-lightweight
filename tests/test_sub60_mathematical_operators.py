@@ -178,3 +178,29 @@ def test_rmrv3_forward_with_all_sub60_operators():
     assert "y0" in out
     assert torch.isfinite(out["y"]).all()
     assert (out["y"] >= 0.0).all()
+
+
+def test_sub60_operator_validation_and_bypass_guards():
+    """Verify that validator catches negative/invalid parameters and prevents silent bypass."""
+    from rmr_v3.config import load_config, validate_v3_config
+    import pytest
+
+    # Invalid shifted_carrier_eps
+    c1 = load_config("configs/rmr_sub60/sub60_canonical_reconciliation.yaml")
+    c1["model"]["shifted_carrier_eps"] = -0.05
+    with pytest.raises(ValueError, match="shifted_carrier_eps"):
+        validate_v3_config(c1)
+
+    # Invalid trust_dense_kappa
+    c2 = load_config("configs/rmr_sub60/sub60_canonical_reconciliation.yaml")
+    c2["model"]["trust_dense_kappa"] = 0.0
+    with pytest.raises(ValueError, match="trust_dense_kappa"):
+        validate_v3_config(c2)
+
+    # Density scale gating requires dynamic scale routing
+    c3 = load_config("configs/rmr_sub60/sub60_canonical_reconciliation.yaml")
+    c3["model"]["density_scale_gating"] = True
+    c3["model"]["dynamic_scale_routing"] = False
+    with pytest.raises(ValueError, match="dynamic_scale_routing"):
+        validate_v3_config(c3)
+

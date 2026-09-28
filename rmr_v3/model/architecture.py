@@ -365,7 +365,7 @@ class RMRv3(nn.Module):
         )
 
         carrier_energy = None
-        if self.cfg.resonant_adjoint:
+        if self.cfg.resonant_adjoint or getattr(self.cfg, "crest_discovery_flux", False):
             b_c, c_p4, h_p4, w_p4 = p4.shape
             p4_flat_f32 = p4.float().view(b_c * c_p4, 1, h_p4, w_p4)
             kernel_f32 = self._laplace_kernel.to(device=p4.device, dtype=torch.float32)

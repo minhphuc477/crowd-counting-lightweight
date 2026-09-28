@@ -132,7 +132,7 @@ def solve_inverse_measure(
         anscombe_tau_dense=getattr(cfg, "anscombe_tau_dense", 0.08),
         area_normalized_adjoint=getattr(cfg, "area_normalized_adjoint", False),
         carrier_energy=carrier_energy,
-        resonant_lambda=getattr(cfg, "resonant_adjoint_lambda", 0.5),
+        resonant_lambda=float(cfg.resonant_adjoint_lambda) if getattr(cfg, "resonant_adjoint", False) else 0.0,
         anscombe_morozov=getattr(cfg, "anscombe_morozov", False),
         crest_discovery_flux=getattr(cfg, "crest_discovery_flux", False),
         crest_kappa_0=getattr(cfg, "crest_kappa_0", 2.0),

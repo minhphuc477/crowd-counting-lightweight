@@ -207,6 +207,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"morozov_gamma_under must be non-negative, got {m_cfg['morozov_gamma_under']}")
         if "morozov_rho" in m_cfg and float(m_cfg["morozov_rho"]) < 0.0:
             raise ValueError(f"morozov_rho must be non-negative, got {m_cfg['morozov_rho']}")
+        if "shifted_carrier_eps" in m_cfg and float(m_cfg["shifted_carrier_eps"]) <= 0.0:
+            raise ValueError(f"shifted_carrier_eps must be strictly positive, got {m_cfg['shifted_carrier_eps']}")
+        if "trust_dense_tau" in m_cfg and float(m_cfg["trust_dense_tau"]) <= 0.0:
+            raise ValueError(f"trust_dense_tau must be strictly positive, got {m_cfg['trust_dense_tau']}")
+        if "trust_dense_kappa" in m_cfg and float(m_cfg["trust_dense_kappa"]) <= 0.0:
+            raise ValueError(f"trust_dense_kappa must be strictly positive, got {m_cfg['trust_dense_kappa']}")
+        if "density_scale_tau" in m_cfg and float(m_cfg["density_scale_tau"]) <= 0.0:
+            raise ValueError(f"density_scale_tau must be strictly positive, got {m_cfg['density_scale_tau']}")
+        if bool(m_cfg.get("density_scale_gating", False)) and not bool(m_cfg.get("dynamic_scale_routing", True)):
+            raise ValueError("density_scale_gating=True requires dynamic_scale_routing=True.")
         if "curvature_alpha_init" in m_cfg:
             float(m_cfg["curvature_alpha_init"])
         if bool(m_cfg.get("use_park", False)):

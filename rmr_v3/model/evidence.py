@@ -61,8 +61,12 @@ def extract_regional_evidence(
     if cfg.detach_reliability_in_solver:
         weight_solver = weight_solver.detach()
 
-    if cfg.pre_solver_scale_gating and scale_weights is not None:
-        power = float(cfg.scale_gating_power)
+    should_gate = (
+        cfg.pre_solver_scale_gating
+        or getattr(cfg, "density_scale_gating", False)
+    ) and scale_weights is not None
+    if should_gate:
+        power = float(cfg.scale_gating_power) if cfg.pre_solver_scale_gating else 0.0
         weight_solver = apply_scale_consistency_gating(
             weight_solver,
             regions,

@@ -367,7 +367,8 @@ def count_harmonized_cell_loss(
             pos_t, pos_per = tgt_i[pos_mask], per_i[pos_mask]
             w_pos = pos_t.pow(float(gamma)) if abs(float(gamma) - 1.0) > 1e-5 else pos_t
             pos_loss = (w_pos / w_pos.sum().clamp_min(float(eps)) * pos_per).sum()
-            sample_losses.append(float(1.0 - fg_ratio) * neg_loss + float(fg_ratio) * pos_loss if neg_mask.any() else pos_loss)
+            comb_loss = float(1.0 - fg_ratio) * neg_loss + float(fg_ratio) * pos_loss
+            sample_losses.append(comb_loss if neg_mask.any() else pos_loss)
         else:
             sample_losses.append(neg_loss)
     return torch.stack(sample_losses).mean()

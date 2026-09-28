@@ -385,6 +385,14 @@ class RMRv3Config:
             raise ValueError(f"morozov_gamma_under must be non-negative, got {self.morozov_gamma_under}")
         if self.morozov_rho < 0.0:
             raise ValueError(f"morozov_rho must be non-negative, got {self.morozov_rho}")
+        if self.shifted_carrier_eps <= 0.0:
+            raise ValueError(f"shifted_carrier_eps must be strictly positive, got {self.shifted_carrier_eps}")
+        if self.trust_dense_tau <= 0.0:
+            raise ValueError(f"trust_dense_tau must be strictly positive, got {self.trust_dense_tau}")
+        if self.trust_dense_kappa <= 0.0:
+            raise ValueError(f"trust_dense_kappa must be strictly positive, got {self.trust_dense_kappa}")
+        if self.density_scale_tau <= 0.0:
+            raise ValueError(f"density_scale_tau must be strictly positive, got {self.density_scale_tau}")
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
