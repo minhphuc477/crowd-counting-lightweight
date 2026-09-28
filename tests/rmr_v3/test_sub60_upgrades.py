@@ -165,3 +165,44 @@ def test_all_sub60_configs_validation_and_budgets(config_name: str, expected_par
     total_params = sum(p.numel() for p in m.parameters() if p.requires_grad)
     assert total_params <= 105000, f"Config {config_name} params {total_params} must be <= 105,000"
     assert total_params == expected_params, f"Config {config_name} expected {expected_params} params, got {total_params}"
+
+
+def test_physical_scale_alignment_loss_nan_safety():
+    """Verify physical_scale_alignment_loss never generates NaNs under zero eps or zero predictions."""
+    from rmr_v3.losses.auxiliary import physical_scale_alignment_loss
+
+    b, k, h, w = 2, 3, 16, 16
+    # Extreme edge cases: exact zero scale weights and zero targets
+    scale_weights = torch.zeros(b, k, h, w, requires_grad=True)
+    target_y = torch.zeros(b, 1, h, w)
+
+    loss_zero = physical_scale_alignment_loss(scale_weights, target_y, eps=0.0)
+    assert torch.isfinite(loss_zero), f"Loss must be finite, got {loss_zero}"
+    loss_zero.backward()
+    assert torch.isfinite(scale_weights.grad).all(), "Gradients must be finite"
+
+    # Extreme edge case: one-hot scale weights with zero eps
+    scale_weights2 = torch.zeros(b, k, h, w, requires_grad=True)
+    with torch.no_grad():
+        scale_weights2[:, 0] = 1.0
+    target_y2 = torch.ones(b, 1, h, w) * 5.0
+    loss_onehot = physical_scale_alignment_loss(scale_weights2, target_y2, eps=0.0)
+    assert torch.isfinite(loss_onehot), f"Onehot loss must be finite, got {loss_onehot}"
+    loss_onehot.backward()
+    assert torch.isfinite(scale_weights2.grad).all(), "Onehot gradients must be finite"
+
+
+def test_sinkhorn_ot_loss_numerical_stability():
+    """Verify sinkhorn_ot_loss handles empty points and zero mass predictions gracefully."""
+    from rmr_v3.losses.point_supervision import sinkhorn_ot_loss
+
+    b, h, w = 2, 16, 16
+    prob_y0 = torch.zeros(b, 1, h, w, requires_grad=True)
+    # Empty point sets
+    points_list = [torch.empty((0, 2)), torch.empty((0, 2))]
+
+    loss_empty = sinkhorn_ot_loss(prob_y0, points_list)
+    assert torch.isfinite(loss_empty)
+    loss_empty.backward()
+    assert torch.isfinite(prob_y0.grad).all()
+

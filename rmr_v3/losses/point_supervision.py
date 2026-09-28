@@ -111,7 +111,7 @@ def sinkhorn_ot_loss(
         # Source and target marginal distributions
         mu = torch.ones(n, device=device, dtype=torch.float32) / float(n)  # [N]
         nu = (y_flat / total_pred.clamp_min(eps)).clamp_min(eps)  # [M]
-        nu = nu / nu.sum()
+        nu = nu / nu.sum().clamp_min(eps)
 
         # Log-domain stabilized Sinkhorn iterations
         u = torch.zeros(n, device=device, dtype=torch.float32)

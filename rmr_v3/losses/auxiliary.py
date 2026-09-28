@@ -122,7 +122,6 @@ def scale_balanced_regional_nb_nll(
     return torch.where(total_weight > 0, total_loss / total_weight.clamp_min(1.0), (per_region.sum()) * 0.0)
 
 
-
 def curvature_power_loss(
     y: torch.Tensor,
     target: torch.Tensor,
@@ -374,7 +373,6 @@ def count_harmonized_cell_loss(
     return torch.stack(sample_losses).mean()
 
 
-
 def physical_scale_alignment_loss(
     scale_weights: torch.Tensor,
     target_y: torch.Tensor,
@@ -431,7 +429,11 @@ def physical_scale_alignment_loss(
         target_pi * torch.log(target_pi.clamp_min(1e-6)),
         torch.zeros_like(target_pi),
     )
-    target_log_pred = target_pi * torch.log(pred_pi)
+    target_log_pred = torch.where(
+        target_pi > 1e-6,
+        target_pi * torch.log(pred_pi.clamp_min(max(float(eps), 1e-7))),
+        torch.zeros_like(target_pi),
+    )
     kl_per_pixel = (target_log_target - target_log_pred).sum(dim=1)
 
     if mask_background:
