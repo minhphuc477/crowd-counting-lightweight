@@ -419,6 +419,11 @@ def compute_rmr_v3_losses(
         return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)
 
     target_float = target_y.float()
+    if target_float.shape[-2:] != y.shape[-2:]:
+        dh, dw = y.shape[-2] - target_float.shape[-2], y.shape[-1] - target_float.shape[-1]
+        if dh > 0 or dw > 0:
+            target_float = F.pad(target_float, (0, max(0, dw), 0, max(0, dh)))
+        target_float = target_float[..., :y.shape[-2], :y.shape[-1]]
     regions: RegionSet = outputs["regions"]
     mean_region = outputs["b_region"].float()
     dispersion_region = outputs["region_dispersion"].float()
