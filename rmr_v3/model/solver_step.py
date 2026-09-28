@@ -140,6 +140,11 @@ def solve_inverse_measure(
         asymmetric_morozov=getattr(cfg, "asymmetric_morozov", False),
         morozov_gamma_under=getattr(cfg, "morozov_gamma_under", 0.20),
         morozov_rho=getattr(cfg, "morozov_rho", 0.30),
+        shifted_carrier=getattr(cfg, "shifted_carrier", False),
+        shifted_carrier_eps=getattr(cfg, "shifted_carrier_eps", 0.02),
+        density_adaptive_trust=getattr(cfg, "density_adaptive_trust", False),
+        trust_dense_tau=getattr(cfg, "trust_dense_tau", 0.10),
+        trust_dense_kappa=getattr(cfg, "trust_dense_kappa", 0.80),
     )
 
     y = solver_res["y"]

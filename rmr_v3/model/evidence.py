@@ -73,6 +73,9 @@ def extract_regional_evidence(
             horizon_cutoff=float(cfg.horizon_cutoff),
             region_sizes_px=cfg.region_sizes_px,
             grid_h=grid_h,
+            regional_rate=regional["rate"],
+            density_scale_gating=getattr(cfg, "density_scale_gating", False),
+            density_scale_tau=float(getattr(cfg, "density_scale_tau", 0.15)),
         )
 
     return {

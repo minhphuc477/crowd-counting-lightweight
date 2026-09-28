@@ -161,6 +161,15 @@ class RMRv3Config:
     dynamic_trust_gate: bool = False
     trust_gate_init_bias: float = 1.73
 
+    # Sub-60 Mathematical Operators (Zero-Parameter Measure Enhancements)
+    shifted_carrier: bool = False
+    shifted_carrier_eps: float = 0.02
+    density_adaptive_trust: bool = False
+    trust_dense_tau: float = 0.10
+    trust_dense_kappa: float = 0.80
+    density_scale_gating: bool = False
+    density_scale_tau: float = 0.15
+
     # Curvature warping & BB solver
     density_curvature: bool = False
     use_barzilai_borwein: bool = False

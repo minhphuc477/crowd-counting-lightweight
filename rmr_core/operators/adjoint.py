@@ -187,6 +187,9 @@ def weighted_normalized_adjoint_field(
     asymmetric_morozov: bool = False,
     morozov_gamma_under: float = 0.20,
     morozov_rho: float = 0.30,
+    shifted_carrier: bool = False,
+    shifted_carrier_eps: float = 0.02,
+    y_initial: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
@@ -255,7 +258,11 @@ def weighted_normalized_adjoint_field(
 
     # Radon-Nikodym Measure-Modulated Adjoint vs Flat Lebesgue Adjoint
     if adjoint_mode == "radon_nikodym":
-        if carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
+        if shifted_carrier and y_initial is not None:
+            m_base = m_carrier + float(shifted_carrier_eps) * y_initial.float()
+            q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
+            eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
+        elif carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
             m_base = m_carrier + (float(crest_eps_seed) * psi_crest if (crest_discovery_flux and psi_crest is not None) else 0.0)
             q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
             eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
@@ -330,7 +337,9 @@ def weighted_normalized_adjoint_field(
     back = _scatter_residual(weighted_residual)
 
     if adjoint_mode == "radon_nikodym":
-        if crest_discovery_flux and psi_crest is not None:
+        if shifted_carrier and y_initial is not None:
+            m_eff = m_carrier + float(shifted_carrier_eps) * y_initial.float()
+        elif crest_discovery_flux and psi_crest is not None:
             m_eff = m_carrier + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
         else:
             m_eff = m_carrier

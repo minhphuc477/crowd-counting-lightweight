@@ -87,6 +87,11 @@ def unrolled_sirt_solver(
     asymmetric_morozov: bool = False,
     morozov_gamma_under: float = 0.20,
     morozov_rho: float = 0.30,
+    shifted_carrier: bool = False,
+    shifted_carrier_eps: float = 0.02,
+    density_adaptive_trust: bool = False,
+    trust_dense_tau: float = 0.10,
+    trust_dense_kappa: float = 0.80,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
 
@@ -252,6 +257,9 @@ def unrolled_sirt_solver(
                 crest_kappa_0=float(crest_kappa_0),
                 crest_eps_seed=float(crest_eps_seed),
                 asymmetric_morozov=False,
+                shifted_carrier=shifted_carrier,
+                shifted_carrier_eps=float(shifted_carrier_eps),
+                y_initial=y0,
             )
         else:
             field = weighted_normalized_adjoint_field(
@@ -282,6 +290,9 @@ def unrolled_sirt_solver(
                 asymmetric_morozov=asymmetric_morozov,
                 morozov_gamma_under=float(morozov_gamma_under),
                 morozov_rho=float(morozov_rho),
+                shifted_carrier=shifted_carrier,
+                shifted_carrier_eps=float(shifted_carrier_eps),
+                y_initial=y0,
             )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
@@ -328,7 +339,12 @@ def unrolled_sirt_solver(
         step_omegas.append(current_omega)
         step_delta = current_omega * field
         if trust_region_kappa > 0.0:
-            bound = float(trust_region_kappa) * torch.clamp_min(z_state.float(), float(effective_trust_floor))
+            eff_kappa = float(trust_region_kappa)
+            if density_adaptive_trust:
+                z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
+                dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
+                eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
+            bound = eff_kappa * torch.clamp_min(z_state.float(), float(effective_trust_floor))
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 bound = bound * (0.25 + 0.75 * scale_confidence)

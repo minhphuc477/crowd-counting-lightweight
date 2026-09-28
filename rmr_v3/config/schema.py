@@ -157,6 +157,10 @@ ALLOWED_MODEL_KEYS = {
     # DiAG Dynamic Image-Adaptive Geometry (RMR-v34)
     "use_diag", "diag_persp_slope_init",
     "use_vertical_gradient_dcap", "use_dcap_tilt",
+    # Sub-60 Mathematical Operators (Shifted Carrier, Density-Adaptive Trust, Scale-Gated Topology)
+    "shifted_carrier", "shifted_carrier_eps",
+    "density_adaptive_trust", "trust_dense_tau", "trust_dense_kappa",
+    "density_scale_gating", "density_scale_tau",
 }
 
 

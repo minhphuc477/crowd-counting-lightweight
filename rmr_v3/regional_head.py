@@ -367,6 +367,9 @@ def apply_scale_consistency_gating(
     horizon_cutoff: float = 0.35,
     region_sizes_px: Sequence[Sequence[int] | int] | None = None,
     grid_h: int | None = None,
+    regional_rate: torch.Tensor | None = None,
+    density_scale_gating: bool = False,
+    density_scale_tau: float = 0.15,
 ) -> torch.Tensor:
     """Pre-Solver Scale-Consistency Reliability Gating (RMR-v15/v18).
 
@@ -379,6 +382,10 @@ def apply_scale_consistency_gating(
         boxes near the horizon (y_center / H < horizon_cutoff) are smoothly suppressed:
         w_R <- w_R * sigmoid((y_center/H - horizon_cutoff) / 0.05)
         This physically guarantees zero false positive mass bleeding from vertical boxes at the horizon.
+
+    When density_scale_gating=True (Sub-60):
+        The largest box scale (e.g. 128px) is smoothly suppressed in dense crowd regions (rate >= tau)
+        to prevent ill-conditioned low-frequency fog from blurring sharp Dirac clusters.
     """
     orig_ndim = weight.ndim
     if orig_ndim == 2:
@@ -405,6 +412,12 @@ def apply_scale_consistency_gating(
                 y_center = 0.5 * (boxes_k[:, 0].float() + boxes_k[:, 2].float()) / float(grid_h)
                 geo_gate = torch.sigmoid((y_center - float(horizon_cutoff)) / 0.05).view(1, 1, -1)
                 gate = torch.where(is_vert.view(1, 1, -1), gate * geo_gate.to(device=gate.device, dtype=gate.dtype), gate)
+
+        if density_scale_gating and k == (k_scales - 1) and regional_rate is not None:
+            r_rate = regional_rate.unsqueeze(1) if regional_rate.ndim == 2 else regional_rate
+            rate_k = r_rate[:, :, mask_k].float()
+            dense_suppression = torch.sigmoid(-(rate_k - float(density_scale_tau)) / 0.03)
+            gate = gate * dense_suppression.to(device=gate.device, dtype=gate.dtype)
 
         w_out[:, :, mask_k] = w_out[:, :, mask_k] * gate
 
