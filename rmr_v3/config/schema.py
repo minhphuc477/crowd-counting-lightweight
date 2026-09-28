@@ -227,7 +227,7 @@ ALLOWED_LOSS_KEYS = {
     "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
     "spectral_transform", "regional_mass_weight_alpha",
     # CI-Cell Loss & Count-Harmonized Cell Loss additions
-    "cell_tau_head", "cell_alpha", "cell_fg_ratio",
+    "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref",
 }
 
 ALLOWED_TRAIN_KEYS = {

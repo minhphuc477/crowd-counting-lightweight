@@ -90,6 +90,8 @@ model:
   proximal_tau:    0.015
   proximal_mode:   firm
   proximal_mu:     3.0
+  adaptive_tau:    true
+  adaptive_tau_rho0: 0.05
 
   dispersion_init: 50.0
   dispersion_min:  0.5
@@ -131,6 +133,8 @@ loss:
   cell_mass_weight_alpha: 2.0
   cell_mass_weight_gamma: 1.25
   cell_beta:      1.0
+  cell_norm_power: 0.5
+  cell_norm_ref:  100.0
 
   lambda_scale_align:     0.05
   scale_align_tau_dense:  0.12

@@ -344,11 +344,16 @@ def unrolled_sirt_solver(
                 z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
                 dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
                 eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
-            bound = eff_kappa * torch.clamp_min(z_state.float(), float(effective_trust_floor))
+            base_bound = torch.clamp_min(z_state.float(), float(effective_trust_floor))
+            bound = eff_kappa * base_bound
+            eff_pos = torch.clamp_min(eff_kappa, 1.0) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), 1.0)
+            bound_pos = eff_pos * base_bound
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
-                bound = bound * (0.25 + 0.75 * scale_confidence)
-            step_delta = torch.clamp(step_delta, min=-bound, max=bound)
+                conf_mod = 0.25 + 0.75 * scale_confidence
+                bound = bound * conf_mod
+                bound_pos = bound_pos * conf_mod
+            step_delta = torch.clamp(step_delta, min=-bound_pos, max=bound)
 
         prev_y = y_curr.detach()   # Track actual iterate (not Nesterov extrapolate) for BB-1 correctness
         prev_field = field.detach()

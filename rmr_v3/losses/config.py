@@ -50,6 +50,8 @@ class RMRv3LossConfig:
     cell_tau_head: float = 0.08
     cell_alpha: float = 2.0             # foreground boost multiplier for CI-Cell v2
     cell_fg_ratio: float = 0.67         # foreground loss weight in count_harmonized cell loss (0 to 1)
+    cell_norm_power: float = 1.0        # power exponent for positive mass normalization (1.0 = standard, 0.5 = square-root balanced)
+    cell_norm_ref: float = 100.0        # reference count for balanced normalization anchor
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize

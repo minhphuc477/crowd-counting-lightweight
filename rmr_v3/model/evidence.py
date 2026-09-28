@@ -53,8 +53,14 @@ def extract_regional_evidence(
 
     if cfg.hurdle_head and "hurdle_logit" in regional:
         pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
-        b_solver = pi_r * b_solver_raw
-        b_variance = pi_r.square() * b_variance
+        # Principled Occupancy Gating:
+        # Hurdle is an occupancy classifier P(Y > 0) meant to extinguish background phantom noise.
+        # For occupied regions (mu >= 1.0), occupancy is physically certain (P = 1.0), so b_solver
+        # retains 100% of mu_count without artificial fractional attenuation.
+        # For borderline/empty regions (mu < 1.0), gate smoothly attenuates with pi_r.
+        occ_gate = 1.0 - (1.0 - pi_r) * torch.clamp(1.0 - b_solver_raw, min=0.0, max=1.0)
+        b_solver = occ_gate * b_solver_raw
+        b_variance = occ_gate.square() * b_variance
     else:
         b_solver = b_solver_raw
 

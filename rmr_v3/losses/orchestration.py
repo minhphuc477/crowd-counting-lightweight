@@ -150,6 +150,8 @@ def _compute_core_losses(
                 gamma=float(cfg.cell_mass_weight_gamma),
                 fg_ratio=float(getattr(cfg, "cell_fg_ratio", 0.67)),
                 stride=stride,
+                norm_power=float(getattr(cfg, "cell_norm_power", 1.0)),
+                norm_ref=float(getattr(cfg, "cell_norm_ref", 100.0)),
             )
         return balanced_smooth_l1(density_map, target_float, beta=cfg.cell_beta, stride=stride)
 
