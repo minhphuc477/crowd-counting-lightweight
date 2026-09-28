@@ -203,3 +203,18 @@ Các metric trong `compute_solver_trajectory_diagnostics` phải tính per-image
 - **Sai:** `float(tensor.sum().item())` — collapse toàn batch
 - **Đúng:** `tensor.sum(dim=(-1,-2,-3)).float().cpu()` → `[B]` vector → `.mean()`
 - Áp dụng cho: `solver_help_fraction`, `solver_harm_fraction`, `solver_neutral_fraction`, `solver_delta_e_mean`
+
+### 8.6. Quy Chuẩn Về Văn Phong Khoa Học & Cấm Dự Đoán MAE Ảo (Cardinal Rule)
+
+1. **Tuyệt đối cấm dùng từ ngữ sáo rỗng, phóng đại (Anti-Buzzwords):**
+   - Nghiêm cấm dùng các từ như "đột phá", "thần thánh", "kỳ tích", "đột phá toàn diện" trong mọi báo cáo, proposal, log, hoặc tài liệu kỹ thuật.
+   - Mọi cải tiến phải được mô tả chính xác bằng toán tử giải tích, hàm mục tiêu, và số liệu thực nghiệm đo đạc được.
+
+2. **Tuyệt đối cấm suy đoán hay dự đoán MAE ảo (Anti-Speculation):**
+   - Nghiêm cấm thêu dệt, tiên tri các con số MAE chưa chạy thực nghiệm (ví dụ: "MAE dự kiến 67.5", "tiến tới Sub-60 MAE").
+   - Trong nghiên cứu khoa học, MAE là đại lượng đo đạc khách quan sau khi hoàn thành huấn luyện và đánh giá trên benchmark chính thức (`summary.json`), không phải công cụ tiếp thị. Chỉ báo cáo các số liệu đã đo được từ checkpoint thực tế.
+
+3. **Tính Đúng Đắn Toán Học và Bản Chất Vật Lý:**
+   - Mọi giả thuyết kiến trúc phải xác định rõ không gian định nghĩa, tính chất của toán tử, không gian triệt tiêu $\ker(A)$, và các ràng buộc độ đo Radon trước khi viết code.
+   - Tuyệt đối không ngụy trang việc thay đổi siêu tham số (parameter tuning) thành các khám phá bản chất cấu trúc.
+

@@ -52,17 +52,17 @@ model:
 
   enable_solver:   true
   solver_mode:     additive
-  iterations:      8
+  iterations:      6
   omega:           1.0
   residual_clip:   0.0
   eps:             1.0e-6
 
   adjoint_mode:    radon_nikodym
-  resonant_adjoint: true
-  resonant_adjoint_lambda: 0.50
-  asymmetric_morozov: true
+  resonant_adjoint: false
+  resonant_adjoint_lambda: 0.0
+  asymmetric_morozov: false
   morozov_gamma:   0.75
-  morozov_gamma_under: 0.15
+  morozov_gamma_under: 0.20
   morozov_rho: 0.30
 
   reliability_mode: snr
@@ -98,7 +98,7 @@ model:
   curvature_dense_threshold:  0.15
   curvature_gate_beta:        0.03
   curvature_pool_kernel:      8
-  curvature_alpha_init:       -2.0
+  curvature_alpha_init:       -8.0
 
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
@@ -119,9 +119,10 @@ loss:
   count_loss_mode:    nb
   count_nb_dispersion: 50.0
 
-  # Count-Invariant Cell Loss: Peak-normalized foreground weighting eliminates 1/N gradient choke
-  cell_loss_mode: count_invariant
-  cell_alpha:     2.0
+  # Count-Harmonized Cell Loss: Balanced foreground-background allocation (proven 72.20 MAE foundation)
+  cell_loss_mode: count_harmonized
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.25
   cell_beta:      1.0
 
   lambda_scale_align:     0.05
