@@ -225,8 +225,8 @@ class CrowdManifestDataset(Dataset):
         cache_images: bool = True,
         preload: bool = False,
     ):
-        manifest_str = str(manifest).replace("\\", "/")
-        if manifest_str.endswith("sha_a_train.jsonl") or manifest_str.endswith("sha_a_val.jsonl"):
+        manifest_path = Path(manifest)
+        if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
             raise ValueError(
                 f"Ad-hoc split manifest '{manifest}' has been deleted and is strictly forbidden "
                 f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples) "
@@ -261,8 +261,9 @@ class CrowdManifestDataset(Dataset):
                     f"Duplicate sample ID '{sid}' in manifest '{self.manifest}' at index {idx}."
                 )
             seen_ids.add(sid)
-            img_p = str(it.get("image", "")).replace("\\", "/")
-            if img_p:
+            img_raw = it.get("image", "")
+            if img_raw:
+                img_p = Path(img_raw).as_posix()
                 if img_p in seen_images:
                     raise ValueError(
                         f"Duplicate image path '{img_p}' in manifest '{self.manifest}' at index {idx}."
@@ -367,8 +368,8 @@ def compute_manifest_density(
     m0 = total_valid_points / total_stride4_cells.
     Points outside [0, w) x [0, h) are filtered identically to rasterize_points.
     """
-    manifest_str = str(manifest).replace("\\", "/")
-    if manifest_str.endswith("sha_a_train.jsonl") or manifest_str.endswith("sha_a_val.jsonl"):
+    manifest_path_obj = Path(manifest) if manifest is not None else None
+    if manifest_path_obj is not None and manifest_path_obj.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
         raise ValueError(
             f"Ad-hoc split manifest '{manifest}' has been deleted and is strictly forbidden "
             f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples)."

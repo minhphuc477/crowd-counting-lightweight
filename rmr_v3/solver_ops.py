@@ -82,8 +82,28 @@ def laplacian_tv_diffusion(
         y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
         y_effective = torch.maximum(y_4d.float(), y_smooth)
         gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
-        step_diff = lam_val * gate.to(dtype=y.dtype) * lap
+        gate_pad = F.pad(gate.to(dtype=y.dtype), (1, 1, 1, 1), mode="replicate")
+        
+        y_c = y_pad[:, :, 1:-1, 1:-1]
+        y_n = y_pad[:, :, 0:-2, 1:-1]
+        y_s = y_pad[:, :, 2:, 1:-1]
+        y_w = y_pad[:, :, 1:-1, 0:-2]
+        y_e = y_pad[:, :, 1:-1, 2:]
+        
+        g_c = gate_pad[:, :, 1:-1, 1:-1]
+        g_n = gate_pad[:, :, 0:-2, 1:-1]
+        g_s = gate_pad[:, :, 2:, 1:-1]
+        g_w = gate_pad[:, :, 1:-1, 0:-2]
+        g_e = gate_pad[:, :, 1:-1, 2:]
+        
+        flux_n = 0.5 * (g_c + g_n) * (y_n - y_c)
+        flux_s = 0.5 * (g_c + g_s) * (y_s - y_c)
+        flux_w = 0.5 * (g_c + g_w) * (y_w - y_c)
+        flux_e = 0.5 * (g_c + g_e) * (y_e - y_c)
+        
+        step_diff = lam_val * (flux_n + flux_s + flux_w + flux_e)
     else:
+        lap = F.conv2d(y_pad, kernel, padding=0)
         step_diff = lam_val * lap
 
     out = torch.clamp_min(y_4d + step_diff, 0.0)
@@ -199,6 +219,9 @@ def proximal_firm_threshold(
         tau_val = tau.clamp_min(0.0)
     else:
         tau_val = tau
+    if mu <= 1.0:
+        return torch.where(y > tau_val, y, torch.zeros_like(y))
+        
     mu_val = float(max(mu, 1.001))
     mu_tau = mu_val * tau_val
     slope = mu_val / (mu_val - 1.0)

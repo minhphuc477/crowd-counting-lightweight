@@ -45,25 +45,30 @@ def bayesian_loss(
 
         # Compute posterior probabilities under torch.no_grad() without autograd overhead
         with torch.no_grad():
-            dx = pts[:, 0:1] - grid_xy[:, 0].unsqueeze(0)  # [N, M]
-            dy = pts[:, 1:2] - grid_xy[:, 1].unsqueeze(0)  # [N, M]
-            dist_sq = dx.square().add_(dy.square())  # [N, M]
+            denom = torch.full((grid_xy.shape[0],), tau, device=device, dtype=torch.float32)
+            for chunk_idx in range(0, n, 500):
+                pts_chunk = pts[chunk_idx:chunk_idx+500]
+                dx = pts_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
+                dy = pts_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                dist_sq = dx.square().add_(dy.square())
+                p_y_given_x = torch.exp(-dist_sq * inv_two_sigma_sq)
+                denom.add_(p_y_given_x.sum(dim=0))
+            denom.clamp_min_(1e-8)
+            post_bg = tau / denom
+            c_hat_bg = torch.dot(post_bg, y_flat)
 
-            # Gaussian likelihood
-            p_y_given_x = torch.exp(-dist_sq * inv_two_sigma_sq)  # [N, M]
+        person_err = 0.0
+        for chunk_idx in range(0, n, 500):
+            pts_chunk = pts[chunk_idx:chunk_idx+500]
+            with torch.no_grad():
+                dx = pts_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
+                dy = pts_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                dist_sq = dx.square().add_(dy.square())
+                p_y_given_x = torch.exp(-dist_sq * inv_two_sigma_sq)
+                post_person_chunk = p_y_given_x / denom.unsqueeze(0)
+            c_hat_person_chunk = torch.matmul(post_person_chunk, y_flat)
+            person_err = person_err + torch.abs(c_hat_person_chunk - 1.0).sum()
 
-            # Denominator with background likelihood
-            denom = p_y_given_x.sum(dim=0, keepdim=True).add_(tau).clamp_min_(1e-8)  # [1, M]
-
-            # Posterior probability
-            post_person = p_y_given_x / denom  # [N, M]
-            post_bg = (tau / denom).squeeze(0)  # [M]
-
-        # Predicted count assigned to each person and background
-        c_hat_person = torch.matmul(post_person, y_flat)  # [N]
-        c_hat_bg = torch.dot(post_bg, y_flat)  # scalar
-
-        person_err = torch.abs(c_hat_person - 1.0).sum()
         bg_err = c_hat_bg
 
         sample_loss = (person_err + bg_err) / float(max(n, 1))
@@ -124,8 +129,13 @@ def sinkhorn_ot_loss(
             inv_reg = 1.0 / max(float(reg), 1e-4)
 
             for _ in range(num_iters):
+                u_prev, v_prev = u.clone(), v.clone()
                 u = torch.log(mu) - torch.logsumexp((-c_mat * inv_reg) + v.unsqueeze(0), dim=1)
+                u = torch.nan_to_num(u, nan=0.0, posinf=100.0, neginf=-100.0).clamp(-100.0, 100.0)
                 v = torch.log(nu) - torch.logsumexp((-c_mat * inv_reg) + u.unsqueeze(1), dim=0)
+                v = torch.nan_to_num(v, nan=0.0, posinf=100.0, neginf=-100.0).clamp(-100.0, 100.0)
+                if torch.max(torch.abs(u - u_prev)) < 1e-4 and torch.max(torch.abs(v - v_prev)) < 1e-4:
+                    break
 
             log_p = (-c_mat * inv_reg) + u.unsqueeze(1) + v.unsqueeze(0)
             p_mat = torch.exp(torch.clamp(log_p, max=50.0))  # [N, M]

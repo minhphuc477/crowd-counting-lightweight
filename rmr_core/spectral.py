@@ -243,7 +243,7 @@ def count_preserving_spectral_loss(
     )
 
     diff_complex = fft_pred - fft_target
-    diff_mag = torch.abs(diff_complex)
+    diff_mag = torch.sqrt(diff_complex.real.square() + diff_complex.imag.square() + eps)
 
     weighted_diff = diff_mag * spec_weights
     spec_weight_sum = spec_weights.sum().clamp_min(eps)

@@ -221,6 +221,9 @@ def topk_hard_background_loss(
         bg_preds = torch.clamp_min(y_b[bg_mask], 0.0)
         num_bg = bg_preds.numel()
         k = min(num_bg, max(1, int(float(ratio) * num_bg)))
+        if k == 0:
+            sample_losses.append((y_b.sum() + t_b.sum()) * 0.0)
+            continue
         topk_vals, _ = torch.topk(bg_preds, k=k, largest=True, sorted=False)
         sample_losses.append(torch.mean(topk_vals.square()))
 
@@ -320,7 +323,7 @@ def count_invariant_cell_loss(
 
     # Normalize by per-image peak to get fg_fraction in [0, 1]
     # Works correctly for both integer counts and float density maps
-    t_peak = t_f.amax(dim=(-2, -1), keepdim=True).clamp_min(float(eps))
+    t_peak = t_f.amax(dim=(-2, -1), keepdim=True).clamp_min(1.0)
     fg_fraction = (t_f / t_peak).clamp(0.0, 1.0)
 
     # Foreground-boosted weight: alpha at peak cell, 1.0 at background

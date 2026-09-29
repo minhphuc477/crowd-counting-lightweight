@@ -75,6 +75,17 @@ class DiagnosticTracker:
         self.w_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
         self.pi_scales: dict[int | str, list[float]] = {s: [] for s in self.scale_map.values()}
 
+    def reset(self) -> None:
+        self.mu_means.clear()
+        self.disp_means.clear()
+        self.all_disps.clear()
+        self.all_pred_weights.clear()
+        self.all_solver_weights.clear()
+        self.e_befores.clear()
+        self.e_afters.clear()
+        for v in self.w_scales.values(): v.clear()
+        for v in self.pi_scales.values(): v.clear()
+
     @property
     def w_scale_32(self) -> list[float]:
         return self.w_scales.get(32, [])
