@@ -47,32 +47,50 @@ def test_fine_measure_head_temperature_softplus():
 
 def test_hurdle_head_architecture_and_forward():
     """Verify Hurdle NB head produces hurdle_logit and modulates solver target."""
-    cfg = RMRv3Config(
+    # 1. Product gating mode
+    cfg_prod = RMRv3Config(
         output_stride=4,
         feature_width=32,
         pretrained=False,
         region_sizes_px=(32, 64, 128),
         iterations=2,
         hurdle_head=True,
+        hurdle_gating_mode="product",
         temp_softplus=True,
     )
-    model = RMRv3(cfg)
-    model.eval()
+    model_prod = RMRv3(cfg_prod)
+    model_prod.eval()
 
     x = torch.randn(2, 3, 128, 128)
     with torch.no_grad():
-        out = model(x)
+        out_prod = model_prod(x)
 
-    assert "hurdle_logit" in out
-    assert out["hurdle_logit"] is not None
-    b_solver = out["b_solver"]
-    b_region = out["b_region"]
+    assert "hurdle_logit" in out_prod
+    assert out_prod["hurdle_logit"] is not None
+    pi_r = torch.sigmoid(out_prod["hurdle_logit"])
+    assert torch.allclose(out_prod["b_solver"], pi_r * out_prod["b_region"], atol=1e-5)
+    assert out_prod["z0"] is not None
+    assert (out_prod["y0"] >= 0.0).all()
 
-    # π_R = sigmoid(hurdle_logit)
-    pi_r = torch.sigmoid(out["hurdle_logit"])
-    assert torch.allclose(b_solver, pi_r * b_region, atol=1e-5)
-    assert out["z0"] is not None
-    assert (out["y0"] >= 0.0).all()
+    # 2. Occupancy gating mode (default)
+    cfg_occ = RMRv3Config(
+        output_stride=4,
+        feature_width=32,
+        pretrained=False,
+        region_sizes_px=(32, 64, 128),
+        iterations=2,
+        hurdle_head=True,
+        hurdle_gating_mode="occupancy",
+        temp_softplus=True,
+    )
+    model_occ = RMRv3(cfg_occ)
+    model_occ.eval()
+    with torch.no_grad():
+        out_occ = model_occ(x)
+    pi_occ = torch.sigmoid(out_occ["hurdle_logit"])
+    occ_gate = 1.0 - (1.0 - pi_occ) * torch.clamp(1.0 - out_occ["b_region"].detach(), min=0.0, max=1.0)
+    assert torch.allclose(out_occ["b_solver"], occ_gate * out_occ["b_region"], atol=1e-5)
+
 
 
 def test_hurdle_losses_focal_bce_and_truncated_nb():

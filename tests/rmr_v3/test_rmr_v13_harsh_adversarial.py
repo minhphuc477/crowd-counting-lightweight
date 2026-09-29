@@ -710,6 +710,7 @@ def test_harsh_hurdle_variance_scaling_and_empty_batch():
         morozov_gamma=0.75,
         reliability_mode="snr",
         hurdle_head=True,
+        hurdle_gating_mode="product",
         temp_softplus=True,
     )
     model = RMRv3(cfg)

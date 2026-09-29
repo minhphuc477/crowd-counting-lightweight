@@ -453,6 +453,7 @@ class TestCompleteAblationMatrix:
         """Ablation 2: Compare Radon-Nikodym measure adjoint vs standard Linear adjoint."""
         cfg_rn = _get_default_v14_cfg()
         cfg_rn.adjoint_mode = "radon_nikodym"
+        cfg_rn.morozov_gamma = 0.0
         model_rn = RMRv3(cfg_rn)
 
         cfg_lin = copy.deepcopy(cfg_rn)
