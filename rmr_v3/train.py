@@ -72,8 +72,10 @@ def main() -> None:
     ap.add_argument("-r", "--resume", default=None, help="Resume from checkpoint path")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
-    ap.add_argument("--output-dir", default=None)
-    ap.add_argument("--run-id", default=None, help="Run identifier (sets output_dir to runs/sha_a/<run_id>)")
+    ap.add_argument("--output-dir", "--output_dir", default=None, help="Explicit output directory")
+    ap.add_argument("--save-dir", "--save_dir", default=None, help="Base save directory for runs (default: runs/sha_a)")
+    ap.add_argument("--run-id", "--run_id", default=None, help="Run identifier (sets output_dir to <save_dir>/<run_id>)")
+    ap.add_argument("--device", default=None, help="Computation device (e.g. cuda, cuda:0, cpu)")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
@@ -115,12 +117,16 @@ def main() -> None:
     elif "deterministic" not in cfg.get("train", {}):
         cfg.setdefault("train", {})["deterministic"] = True
 
+    if args.device is not None:
+        cfg.setdefault("train", {})["device"] = args.device
+
+    base_save = args.save_dir or "runs/sha_a"
     if args.output_dir is not None:
         cfg["output_dir"] = str(args.output_dir)
     elif args.run_id is not None:
-        cfg["output_dir"] = f"runs/sha_a/{sanitize_run_id(args.run_id)}"
+        cfg["output_dir"] = f"{base_save}/{sanitize_run_id(args.run_id)}"
     elif "output_dir" not in cfg:
-        cfg["output_dir"] = f"runs/sha_a/{Path(args.config).stem}"
+        cfg["output_dir"] = f"{base_save}/{Path(args.config).stem}"
 
     run_training_loop(cfg, args)
 

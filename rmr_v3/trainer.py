@@ -124,7 +124,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         preload=bool(cfg.get("data", {}).get("preload", False)),
     )
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    dev_req = cfg.get("train", {}).get("device")
+    device = torch.device(dev_req if (dev_req and (torch.cuda.is_available() or "cpu" in str(dev_req))) else ("cuda:0" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True

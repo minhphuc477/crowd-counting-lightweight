@@ -252,6 +252,9 @@ ALLOWED_TRAIN_KEYS = {
     "teacher_ckpt",
     "min_lr_ratio",
     "grad_scaler_init_scale",
+    "device",
+    "num_threads",
+    "cudnn_benchmark",
 }
 
 ALLOWED_EVAL_KEYS = {
