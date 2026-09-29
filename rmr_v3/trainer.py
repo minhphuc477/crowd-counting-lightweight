@@ -352,9 +352,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             with ema_manager.swap_into(model, device):
                 val_metrics = evaluate_v3(
                     model, val_loader, device,
-                    uniform_reliability=uniform_reliability,
-                    density_bins=density_bins,
+                    uniform_reliability=uniform_reliability, density_bins=density_bins,
                 )
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
             eval_map = {
                 "val_mae": "MAE", "val_rmse": "RMSE", "val_nae": "NAE", "val_bias": "Bias",
