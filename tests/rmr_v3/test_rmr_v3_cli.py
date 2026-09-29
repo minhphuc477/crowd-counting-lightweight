@@ -218,3 +218,79 @@ def test_rmr_v3_cli_profile_override(tmp_path: Path) -> None:
     data2 = json.loads(out_json.read_text(encoding="utf-8"))
     assert data2["reliability_mode"] == "uniform", f"Expected uniform override, got {data2['reliability_mode']}"
 
+
+def test_rmr_v3_cli_aliases(tmp_path: Path) -> None:
+    """Verify that CLI flags accept underscores and aliases (--run_id, --save_dir, --device, --ckpt)."""
+    train_manifest, val_manifest = _create_synthetic_dataset(tmp_path)
+    output_dir = tmp_path / "run_aliases"
+
+    cfg = {
+        "model": {
+            "output_stride": 4,
+            "feature_width": 32,
+            "pretrained": False,
+            "region_sizes_px": [32, 64, 128],
+            "iterations": 1,
+            "omega": 1.0,
+            "residual_clip": 0.0,
+            "dispersion_init": 50.0,
+            "dispersion_min": 0.5,
+            "dispersion_max": 500.0,
+            "reliability_mode": "nb_rate_variance",
+            "reliability_weight_min": 0.25,
+            "reliability_weight_max": 4.0,
+            "reliability_rate_std_floor": 0.01,
+            "init_m0": 0.015763,
+            "include_full_image": False,
+        },
+        "data": {
+            "train_manifest": str(train_manifest),
+            "val_manifest": str(val_manifest),
+            "crop_size": 64,
+            "scale_range": [0.9, 1.1],
+        },
+        "train": {
+            "epochs": 1,
+            "batch_size": 2,
+            "workers": 0,
+            "lr": 1e-4,
+            "eval_every": 1,
+            "solver_warmup_epochs": 0,
+            "solver_ramp_epochs": 1,
+            "amp": False,
+            "deterministic": True,
+            "early_stopping": False,
+        },
+        "output_dir": str(output_dir),
+    }
+
+    cfg_file = tmp_path / "alias_cfg.yaml"
+    cfg_file.write_text(yaml.safe_dump(cfg, sort_keys=False))
+
+    # Test train.py with --run_id, --save_dir, and --device
+    cmd_train = [
+        sys.executable, "-m", "rmr_v3.train",
+        "--config", str(cfg_file),
+        "--run_id", "test_alias_run",
+        "--save_dir", str(output_dir),
+        "--device", "cpu",
+    ]
+    res_train = subprocess.run(cmd_train, capture_output=True, text=True)
+    assert res_train.returncode == 0, f"Train CLI with aliases failed:\n{res_train.stderr}\n{res_train.stdout}"
+    run_ckpt = output_dir / "test_alias_run" / "best_val_mae.pt"
+    assert run_ckpt.exists(), f"Checkpoint {run_ckpt} does not exist!"
+
+    # Test eval.py with --ckpt, --save_dir, and --device
+    eval_out = output_dir / "eval_alias"
+    cmd_eval = [
+        sys.executable, "-m", "rmr_v3.eval",
+        "--ckpt", str(run_ckpt),
+        "--manifest", str(val_manifest),
+        "--save_dir", str(eval_out),
+        "--device", "cpu",
+        "--no-tiling",
+    ]
+    res_eval = subprocess.run(cmd_eval, capture_output=True, text=True)
+    assert res_eval.returncode == 0, f"Eval CLI with aliases failed:\n{res_eval.stderr}\n{res_eval.stdout}"
+    assert (eval_out / "summary.json").exists()
+

@@ -116,9 +116,10 @@ def load_model_from_ckpt(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate RMR-v3 checkpoint")
-    ap.add_argument("--checkpoint", required=True, help="Path to .pt checkpoint")
+    ap.add_argument("--checkpoint", "--ckpt", required=True, help="Path to .pt checkpoint")
     ap.add_argument("--manifest", default=None, help="Path to eval manifest jsonl")
-    ap.add_argument("--output-dir", default=None, help="Directory to save evaluation artifacts")
+    ap.add_argument("--output-dir", "--output_dir", "--save-dir", "--save_dir", dest="output_dir", default=None, help="Directory to save evaluation artifacts")
+    ap.add_argument("--device", default=None, help="Device to run evaluation on (e.g. cuda, cuda:0, cpu)")
     ap.add_argument("--uniform-reliability", dest="uniform_reliability", action="store_true", default=None, help="Force uniform reliability (W=I)")
     ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Force weighted reliability (W=diag(w_R))")
     ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
@@ -132,7 +133,10 @@ def main() -> None:
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model, ckpt_uniform, cfg, ckpt = load_model_from_ckpt(
         ckpt_path, device, use_ema=args.use_ema, config_path=args.config
