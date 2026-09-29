@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .config import RMRv3LossConfig
-from .point_supervision import bayesian_loss, sinkhorn_ot_loss
+from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
 from .auxiliary import (
     curvature_power_loss,
     hurdle_focal_bce_loss,
@@ -20,6 +20,7 @@ __all__ = [
     "compute_dual_lattice_losses",
     "TargetSupervisionRouter",
     "bayesian_loss",
+    "fidt_loss",
     "sinkhorn_ot_loss",
     "curvature_power_loss",
     "topk_hard_background_loss",

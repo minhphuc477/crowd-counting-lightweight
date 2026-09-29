@@ -243,9 +243,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', or 'anscombe', got '{clm}'")
         if "allocation_loss_type" in l_cfg_pre:
             alt = str(l_cfg_pre["allocation_loss_type"])
-            if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
+            if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt"):
                 raise ValueError(
-                    f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{alt}'"
+                    f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', or 'fidt', got '{alt}'"
                 )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])

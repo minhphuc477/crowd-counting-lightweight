@@ -50,6 +50,7 @@ class RMRv3Config:
     omega: float = 1.0
     residual_clip: float = 0.0
     eps: float = 1e-6
+    detach_y0_for_solver: bool = False
 
     # Negative-Binomial regional uncertainty
     dispersion_init: float = 50.0

@@ -162,6 +162,7 @@ ALLOWED_MODEL_KEYS = {
     "density_adaptive_trust", "trust_dense_tau", "trust_dense_kappa",
     "density_scale_gating", "density_scale_tau",
     "hurdle_gating_mode", "asymmetric_trust", "trust_pos_kappa",
+    "detach_y0_for_solver",
 }
 
 
@@ -229,6 +230,9 @@ ALLOWED_LOSS_KEYS = {
     "spectral_transform", "regional_mass_weight_alpha",
     # CI-Cell Loss & Count-Harmonized Cell Loss additions
     "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref",
+    # FIDT (H1) & ChfL (H2) additions
+    "fidt_k", "fidt_loss_type", "fidt_normalize_by_count",
+    "use_chfl_loss", "lambda_chfl", "chfl_num_frequencies", "chfl_omega_max",
 }
 
 ALLOWED_TRAIN_KEYS = {

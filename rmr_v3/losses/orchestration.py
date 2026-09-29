@@ -12,9 +12,9 @@ from rmr_core.losses import (
     flat_dm16_loss,
     multiscale_dm_loss,
 )
-from rmr_core.spectral import count_preserving_spectral_loss
+from rmr_core.spectral import characteristic_function_loss, count_preserving_spectral_loss
 from .config import RMRv3LossConfig
-from .point_supervision import bayesian_loss, sinkhorn_ot_loss
+from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
 from .auxiliary import (
     count_harmonized_cell_loss,
     count_invariant_cell_loss,
@@ -39,23 +39,13 @@ class TargetSupervisionRouter:
         self.mode = target_mode
 
     def dispatch(
-        self,
-        fn: Any,
-        y: torch.Tensor,
-        y0: torch.Tensor,
-        *args: Any,
-        **kwargs: Any,
+        self, fn: Any, y: torch.Tensor, y0: torch.Tensor, *args: Any, **kwargs: Any
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         if self.mode == "dual":
-            l_y = fn(y, *args, **kwargs)
-            l_y0 = fn(y0, *args, **kwargs)
-            return 0.5 * l_y + 0.5 * l_y0, {"y": l_y, "y0": l_y0}
-        elif self.mode == "y0":
-            l_y0 = fn(y0, *args, **kwargs)
-            return l_y0, {"y0": l_y0}
-        else:
-            l_y = fn(y, *args, **kwargs)
-            return l_y, {"y": l_y}
+            l_y, l_y0 = fn(y, *args, **kwargs), fn(y0, *args, **kwargs)
+            return 0.5 * (l_y + l_y0), {"y": l_y, "y0": l_y0}
+        l_out = fn(y0 if self.mode == "y0" else y, *args, **kwargs)
+        return l_out, {self.mode: l_out}
 
 
 def _compute_elementwise_dense_scaling(
@@ -175,6 +165,12 @@ def _compute_core_losses(
                 inp, points, sigma=cfg.bayesian_sigma,
                 background_ratio=cfg.bayesian_background_ratio, stride=stride,
             )
+        elif cfg.allocation_loss_type == "fidt":
+            loss_val = fidt_loss(
+                inp, points, k=getattr(cfg, "fidt_k", 6.0), stride=stride,
+                loss_type=getattr(cfg, "fidt_loss_type", "smooth_l1"),
+                normalize_by_count=getattr(cfg, "fidt_normalize_by_count", True),
+            )
         elif cfg.allocation_loss_type == "ot_sinkhorn":
             loss_val = sinkhorn_ot_loss(inp, points, reg=cfg.ot_reg, num_iters=cfg.ot_num_iters, stride=stride)
         elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
@@ -201,15 +197,9 @@ def _compute_core_losses(
         loss_allocation = 0.5 * loss_alloc_y + 0.5 * loss_alloc_y0
         losses["allocation_y"] = loss_alloc_y
         losses["allocation_y0"] = loss_alloc_y0
-        dm_components = {
-            k: 0.5 * (dm_comps_y[k] + dm_comps_y0[k])
-            for k in dm_comps_y
-            if k in dm_comps_y0
-        }
-    elif cfg.dm_target == "y":
-        loss_allocation, dm_components = _compute_single_allocation(y)
-    else:  # "y0"
-        loss_allocation, dm_components = _compute_single_allocation(y0)
+        dm_components = {k: 0.5 * (dm_comps_y[k] + dm_comps_y0[k]) for k in dm_comps_y if k in dm_comps_y0}
+    else:
+        loss_allocation, dm_components = _compute_single_allocation(y if cfg.dm_target == "y" else y0)
 
     losses["allocation"] = loss_allocation
     losses["flat_dm16"] = loss_allocation
@@ -249,6 +239,7 @@ def _compute_auxiliary_losses(
     cfg: RMRv3LossConfig,
     zero_val: torch.Tensor,
     router: TargetSupervisionRouter,
+    points: list[torch.Tensor] | None = None,
 ) -> dict[str, torch.Tensor]:
     if cfg.lambda_curvature > 0.0:
         stride = int(getattr(cfg, "output_stride", 4))
@@ -291,19 +282,12 @@ def _compute_auxiliary_losses(
 
     hurdle_logit = outputs.get("hurdle_logit", None)
     if hurdle_logit is not None:
-        if cfg.lambda_hurdle > 0.0:
-            losses["hurdle_bce"] = hurdle_focal_bce_loss(hurdle_logit.float(), target_region)
-            losses["total"] = losses["total"] + cfg.lambda_hurdle * losses["hurdle_bce"]
-        else:
-            losses["hurdle_bce"] = zero_val
-        if cfg.lambda_trunc_nb > 0.0:
-            losses["trunc_nb"] = truncated_nb_nll_loss(mean_region, dispersion_region, target_region)
-            losses["total"] = losses["total"] + cfg.lambda_trunc_nb * losses["trunc_nb"]
-        else:
-            losses["trunc_nb"] = zero_val
+        h_bce = hurdle_focal_bce_loss(hurdle_logit.float(), target_region) if cfg.lambda_hurdle > 0.0 else zero_val
+        t_nb = truncated_nb_nll_loss(mean_region, dispersion_region, target_region) if cfg.lambda_trunc_nb > 0.0 else zero_val
+        losses["hurdle_bce"], losses["trunc_nb"] = h_bce, t_nb
+        losses["total"] = losses["total"] + cfg.lambda_hurdle * h_bce + cfg.lambda_trunc_nb * t_nb
     else:
-        losses["hurdle_bce"] = zero_val
-        losses["trunc_nb"] = zero_val
+        losses["hurdle_bce"] = losses["trunc_nb"] = zero_val
 
     scale_weights = outputs.get("pi_scale", outputs.get("scale_weights", None))
     if scale_weights is not None and cfg.lambda_scale_align > 0.0:
@@ -378,9 +362,23 @@ def _compute_auxiliary_losses(
         losses["spectral_ac"] = loss_spec_ac
         losses["total"] = losses["total"] + cfg.lambda_spectral * loss_spec
     else:
-        losses["spectral"] = zero_val
-        losses["spectral_dc"] = zero_val
-        losses["spectral_ac"] = zero_val
+        losses["spectral"] = losses["spectral_dc"] = losses["spectral_ac"] = zero_val
+
+    # Characteristic Function Loss (H2: ChfL)
+    if getattr(cfg, "use_chfl_loss", False) and getattr(cfg, "lambda_chfl", 0.0) > 0.0:
+        stride = int(getattr(cfg, "output_stride", 4))
+        def _compute_chfl(dmap: torch.Tensor) -> torch.Tensor:
+            return characteristic_function_loss(
+                dmap, points,
+                omega_max=getattr(cfg, "chfl_omega_max", 0.5),
+                num_frequencies=getattr(cfg, "chfl_num_frequencies", 64),
+                stride=stride,
+            )
+        loss_chfl, _ = router.dispatch(_compute_chfl, y, y0)
+        losses["chfl"] = loss_chfl
+        losses["total"] = losses["total"] + cfg.lambda_chfl * loss_chfl
+    else:
+        losses["chfl"] = zero_val
 
     return losses
 
@@ -413,6 +411,7 @@ def compute_rmr_v3_losses(
             "hurdle_bce": zero_val, "trunc_nb": zero_val, "scale_align": zero_val,
             "cell_carrier": zero_val, "cell_fine": zero_val,
             "spectral": zero_val, "spectral_dc": zero_val, "spectral_ac": zero_val,
+            "chfl": zero_val,
         }
 
     if cfg.elementwise_dense_scaling or cfg.density_loss_scaling:
@@ -441,5 +440,5 @@ def compute_rmr_v3_losses(
         losses=losses, outputs=outputs, target_float=target_float,
         target_region=target_region, mean_region=mean_region,
         dispersion_region=dispersion_region, y=y, y0=y0,
-        cfg=cfg, zero_val=zero_val, router=router,
+        cfg=cfg, zero_val=zero_val, router=router, points=points,
     )

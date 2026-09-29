@@ -150,3 +150,84 @@ def sinkhorn_ot_loss(
 
     # Always return float32 for AMP gradient scaler stability
     return torch.stack(losses).mean().float()
+
+
+def fidt_loss(
+    prob_y0: torch.Tensor,
+    points_list: list[torch.Tensor] | None,
+    k: float = 6.0,
+    stride: int = 4,
+    loss_type: str = "smooth_l1",
+    normalize_by_count: bool = True,
+) -> torch.Tensor:
+    """Focal Inverse Distance Transform (FIDT) Loss (Liang et al. TPAMI 2022).
+
+    Constructs a bounded continuous representation F(x) = 1 / (1 + min_i ||x - x_i||^2 / k^2).
+    When normalize_by_count=True, scales F(x) into an exact Radon probability density measure
+    whose spatial integral equals N, ensuring zero conflict with count loss and unrolled SIRT iterates.
+    Uses foreground-background balanced Smooth L1 loss to prevent gradient starvation over sparse pixels.
+    Evaluated under torch.no_grad() for target generation; returns AMP-safe float32.
+    """
+    b, _, h, w = prob_y0.shape
+    device = prob_y0.device
+
+    y_coords = torch.arange(h, device=device, dtype=torch.float32) + 0.5
+    x_coords = torch.arange(w, device=device, dtype=torch.float32) + 0.5
+    grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
+    grid_xy = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)  # [M, 2] in grid units
+    x_norm_sq = (grid_xy ** 2).sum(dim=-1, keepdim=True)  # [M, 1]
+    m_total = grid_xy.shape[0]
+
+    k_val = float(max(k, 0.1))
+    inv_k_sq = 1.0 / (k_val * k_val)
+    losses: list[torch.Tensor] = []
+
+    for i in range(b):
+        pred_map = prob_y0[i, 0].float()  # [H, W]
+        pts = points_list[i] if points_list is not None and i < len(points_list) else None
+
+        if pts is None or pts.numel() == 0:
+            target_map = torch.zeros_like(pred_map)
+            l_val = pred_map.sum() if normalize_by_count else F.smooth_l1_loss(pred_map, target_map)
+            losses.append(l_val)
+            continue
+
+        pts = pts.to(device=device, dtype=torch.float32)
+        # Convert points from pixel coordinates to feature grid coordinates
+        pts_grid = pts / float(stride)
+        n = pts_grid.shape[0]
+
+        with torch.no_grad():
+            y_norm_sq = (pts_grid ** 2).sum(dim=-1, keepdim=True)  # [N, 1]
+            min_dist_sq = torch.empty((m_total,), device=device, dtype=torch.float32)
+            # cuBLAS GEMM distance expansion: ||x - y||^2 = ||x||^2 + ||y||^2 - 2 x y^T
+            # Processed in 4096-cell spatial blocks to minimize VRAM footprint to < 16MB
+            block_sz = 4096
+            for m_start in range(0, m_total, block_sz):
+                m_end = min(m_start + block_sz, m_total)
+                sub_x = grid_xy[m_start:m_end]
+                sub_x_norm = x_norm_sq[m_start:m_end]
+                d2_block = sub_x_norm + y_norm_sq.t() - 2.0 * torch.mm(sub_x, pts_grid.t())
+                min_dist_sq[m_start:m_end] = d2_block.clamp_min(0.0).min(dim=-1).values
+
+            target_flat = 1.0 / (1.0 + min_dist_sq * inv_k_sq)
+            raw_field = target_flat.view(h, w)
+            if normalize_by_count:
+                count_tgt = float(max(n, 1))
+                norm_flat = (target_flat / target_flat.sum().clamp_min(1e-6)) * count_tgt
+                target_map = norm_flat.view(h, w)
+            else:
+                target_map = raw_field
+
+        if loss_type == "mse":
+            l_val = F.mse_loss(pred_map, target_map)
+        else:
+            pos = raw_field > 0.05
+            neg = ~pos
+            per = F.smooth_l1_loss(pred_map, target_map, beta=0.1, reduction="none")
+            pos_loss = per[pos].mean() if pos.any() else per.new_tensor(0.0)
+            neg_loss = per[neg].mean() if neg.any() else per.new_tensor(0.0)
+            l_val = 0.5 * (pos_loss + neg_loss)
+        losses.append(l_val)
+
+    return torch.stack(losses).mean().float()

@@ -15,7 +15,11 @@ from rmr_core.operators import RegionSet, build_multiscale_regions
 from ..regional_head import ProbabilisticRegionalEvidenceHead
 from .config import RMRv3Config, _softplus_inverse, _deep_tuple
 from .evidence import extract_regional_evidence
-from .perspective_geometry import DynamicCameraAnglePredictor, DiAGScaleRoutingHead
+from .perspective_geometry import (
+    DynamicCameraAnglePredictor,
+    DiAGScaleRoutingHead,
+    DiAGFactorizedRoutingHead,
+)
 from .solver_step import solve_inverse_measure
 from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2, SubpixelAllocationHead
 
@@ -127,12 +131,21 @@ class RMRv3(nn.Module):
                 len(cfg.region_sizes_px),
                 use_vertical_gradient=getattr(cfg, "use_vertical_gradient_dcap", False),
             )
-            self.scale_router: nn.Module | None = DiAGScaleRoutingHead(
-                cfg.feature_width,
-                len(cfg.region_sizes_px),
-                cfg.scale_router_temperature,
-                use_tilt=getattr(cfg, "use_dcap_tilt", True),
-            )
+            if cfg.factorized_scale_routing:
+                self.scale_router: nn.Module | None = DiAGFactorizedRoutingHead(
+                    cfg.feature_width,
+                    cfg.num_marginal_scales,
+                    cfg.num_aspect_ratios,
+                    cfg.scale_router_temperature,
+                    use_tilt=getattr(cfg, "use_dcap_tilt", True),
+                )
+            else:
+                self.scale_router = DiAGScaleRoutingHead(
+                    cfg.feature_width,
+                    len(cfg.region_sizes_px),
+                    cfg.scale_router_temperature,
+                    use_tilt=getattr(cfg, "use_dcap_tilt", True),
+                )
         else:
             self.dcap = None
             if cfg.factorized_scale_routing:
@@ -242,7 +255,7 @@ class RMRv3(nn.Module):
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         if self.scale_router is None:
             return None, None, None
-        if isinstance(self.scale_router, DiAGScaleRoutingHead):
+        if isinstance(self.scale_router, (DiAGScaleRoutingHead, DiAGFactorizedRoutingHead)):
             router_out = self.scale_router(p4, delta_scale=delta_scale, scene_tilt=scene_tilt)
         else:
             router_out = self.scale_router(p4)

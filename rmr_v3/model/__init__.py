@@ -28,6 +28,7 @@ from .architecture import RMRv3
 from .config import RMRv3Config
 from .evidence import extract_regional_evidence
 from .perspective_geometry import (
+    DiAGFactorizedRoutingHead,
     DiAGScaleRoutingHead,
     DynamicCameraAnglePredictor,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "AdditiveFPNNeck",
     "ASPPLiteFPNNeck",
     "CoordinateAttention",
+    "DiAGFactorizedRoutingHead",
     "DiAGScaleRoutingHead",
     "DynamicCameraAnglePredictor",
     "FactorizedRoutingHead",

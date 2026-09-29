@@ -298,3 +298,84 @@ class CountPreservingSpectralLoss(nn.Module):
             transform=self.transform,
         )
         return loss
+
+
+_CHFL_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+
+
+def _get_chfl_templates(
+    h: int, w: int, stride: int, omega_max: float, num_frequencies: int, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    key = (h, w, stride, float(omega_max), int(num_frequencies), str(device))
+    if key not in _CHFL_CACHE:
+        y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
+        x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
+        grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
+        grid_coords = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)  # [M, 2] in pixels
+
+        k_side = max(2, int(round(math.sqrt(num_frequencies))))
+        freq_1d = torch.linspace(-float(omega_max), float(omega_max), k_side, device=device, dtype=torch.float32)
+        fy, fx = torch.meshgrid(freq_1d, freq_1d, indexing="ij")
+        freqs = torch.stack([fx.flatten(), fy.flatten()], dim=-1)  # [K, 2]
+        nonzero_mask = freqs.abs().sum(dim=-1) > 1e-5
+        if nonzero_mask.any():
+            freqs = freqs[nonzero_mask]
+
+        t_dot_grid = torch.matmul(freqs, grid_coords.t())  # [K, M]
+        cos_grid = torch.cos(t_dot_grid)
+        sin_grid = torch.sin(t_dot_grid)
+        _CHFL_CACHE[key] = (cos_grid, sin_grid, freqs)
+    return _CHFL_CACHE[key]
+
+
+def characteristic_function_loss(
+    pred: torch.Tensor,
+    points_list: list[torch.Tensor] | None,
+    omega_max: float = 0.5,
+    num_frequencies: int = 64,
+    stride: int = 4,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Characteristic Function Loss (ChfL) for Crowd Counting (Shu et al. CVPR 2022).
+
+    Supervises spatial distribution in the continuous Fourier characteristic domain:
+        phi_gt(t) = (1/N) * sum_k exp(i * t^T x_k)
+        phi_pred(t) = sum_u (pred(u) / (sum pred + eps)) * exp(i * t^T u)
+    Matches empirical characteristic functions over a deterministic 2D frequency grid in [-omega_max, omega_max]^2.
+    Zero-parameter loss function; eliminates density map blurring and cell saturation.
+    Cached trigonometric templates eliminate per-batch overhead; returns AMP-safe float32.
+    """
+    b, _, h, w = pred.shape
+    device = pred.device
+
+    cos_grid, sin_grid, freqs = _get_chfl_templates(h, w, stride, omega_max, num_frequencies, device)
+
+    # Vectorized batch prediction characteristic function
+    p_flat = pred[:, 0].flatten(1).float().clamp_min(0.0)  # [B, M]
+    total_p = p_flat.sum(dim=-1, keepdim=True).clamp_min(eps)  # [B, 1]
+    w_pred = p_flat / total_p  # [B, M]
+    phi_pred_real = torch.matmul(w_pred, cos_grid.t())  # [B, K]
+    phi_pred_imag = torch.matmul(w_pred, sin_grid.t())  # [B, K]
+
+    losses: list[torch.Tensor] = []
+
+    for i in range(b):
+        pts = points_list[i] if points_list is not None and i < len(points_list) else None
+        if pts is None or pts.numel() == 0:
+            losses.append(p_flat[i].sum())
+            continue
+
+        pts_pixels = pts.to(device=device, dtype=torch.float32)
+
+        with torch.no_grad():
+            t_dot_pts = torch.matmul(freqs, pts_pixels.t())  # [K, N]
+            phi_gt_real = torch.cos(t_dot_pts).mean(dim=-1)  # [K]
+            phi_gt_imag = torch.sin(t_dot_pts).mean(dim=-1)  # [K]
+
+        diff_real = phi_pred_real[i] - phi_gt_real
+        diff_imag = phi_pred_imag[i] - phi_gt_imag
+        loss_i = (diff_real.square() + diff_imag.square()).mean()
+        losses.append(loss_i)
+
+    return torch.stack(losses).mean().float()
+

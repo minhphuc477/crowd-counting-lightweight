@@ -159,3 +159,94 @@ class DiAGScaleRoutingHead(nn.Module):
         if self.temperature != 1.0:
             logits = logits / self.temperature
         return F.softmax(logits, dim=1)
+
+
+class DiAGFactorizedRoutingHead(nn.Module):
+    """Dynamic Image-Adaptive Geometry (DiAG) Factorized Scale & Aspect Routing Head.
+
+    Combines:
+    1. Multi-scale receptive carrier sensing (local DW-Conv 3x3 + 5x5 context pooling).
+    2. Decoupled marginal scale distribution pi_scale in Delta^2 over [32, 64, 128] px.
+    3. Decoupled aspect ratio distribution pi_aspect in Delta^1 over [1:1 square, 2:1 vertical rectangle].
+    4. Global DCAP perspective conditioning:
+       - delta_scale modulates marginal scale logits.
+       - scene_tilt modulates scale & aspect transition contrast (steeper tilt favors vertical elongation).
+    5. Step 0 Identity Parity: zero-initialized weights guarantee exact uniform distributions at Step 0.
+    6. 100% translation-equivariant, zero static coordinate grids (no torch.linspace).
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 32,
+        num_scales: int = 3,
+        num_aspects: int = 2,
+        temperature: float = 1.0,
+        use_tilt: bool = True,
+    ) -> None:
+        super().__init__()
+        self.in_channels = int(in_channels)
+        self.num_scales = int(num_scales)
+        self.num_aspects = int(num_aspects)
+        self.temperature = float(max(temperature, 0.1))
+        self.use_tilt = bool(use_tilt)
+
+        # Context-aware depthwise carrier
+        self.dw = nn.Conv2d(
+            self.in_channels,
+            self.in_channels,
+            kernel_size=3,
+            padding=1,
+            groups=self.in_channels,
+            bias=True,
+        )
+        self.norm = nn.GroupNorm(8, self.in_channels)
+        self.act = nn.SiLU(inplace=True)
+
+        # Branch 1: Marginal Scale Head (S=3: 32, 64, 128)
+        self.pw_scale = nn.Conv2d(self.in_channels, self.num_scales, kernel_size=1, bias=True)
+        nn.init.zeros_(self.pw_scale.weight)
+        nn.init.zeros_(self.pw_scale.bias)
+
+        # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
+        self.pw_aspect = nn.Conv2d(self.in_channels, self.num_aspects, kernel_size=1, bias=True)
+        nn.init.zeros_(self.pw_aspect.weight)
+        nn.init.zeros_(self.pw_aspect.bias)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        delta_scale: torch.Tensor | None = None,
+        scene_tilt: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Context-enhanced receptive field (local + 5x5 pooling)
+        x_ctx = 0.5 * (x + F.avg_pool2d(x, kernel_size=5, stride=1, padding=2))
+        feat = self.act(self.norm(self.dw(x_ctx)))
+
+        logits_scale = self.pw_scale(feat)
+        logits_aspect = self.pw_aspect(feat)
+
+        if scene_tilt is not None and self.use_tilt:
+            tilt_f = scene_tilt.to(dtype=logits_scale.dtype)
+            # Steep camera tilt sharpens scale transitions
+            logits_scale = logits_scale * (0.5 + tilt_f)
+            # Tilt provides a differential prior favoring vertical elongation (2:1 aspect) when tilt > 0.5
+            tilt_delta = tilt_f - 0.5
+            aspect_tilt_bias = torch.cat([-tilt_delta, tilt_delta], dim=1)
+            logits_aspect = logits_aspect + aspect_tilt_bias
+
+        if delta_scale is not None:
+            logits_scale = logits_scale + delta_scale.to(dtype=logits_scale.dtype)
+
+        temp = float(self.temperature)
+        pi_scale = F.softmax(logits_scale / temp, dim=1)
+        pi_aspect = F.softmax(logits_aspect / temp, dim=1)
+
+        # 4-window joint partition of unity
+        pi_0 = pi_scale[:, 0:1]
+        pi_1 = pi_scale[:, 1:2] * pi_aspect[:, 0:1]
+        pi_2 = pi_scale[:, 1:2] * pi_aspect[:, 1:2]
+        pi_3 = pi_scale[:, 2:3]
+        joint_pi = torch.cat([pi_0, pi_1, pi_2, pi_3], dim=1)
+
+        return joint_pi, pi_scale, pi_aspect
+

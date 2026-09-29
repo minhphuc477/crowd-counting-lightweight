@@ -16,11 +16,14 @@ class RMRv3LossConfig:
     lambda_trunc_nb: float = 0.20
 
     # Loss mode selection
-    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn"
+    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt"
     bayesian_sigma: float = 8.0
     bayesian_background_ratio: float = 0.10
     ot_reg: float = 10.0
     ot_num_iters: int = 20
+    fidt_k: float = 6.0
+    fidt_loss_type: str = "smooth_l1"
+    fidt_normalize_by_count: bool = True
 
     # Count loss configuration
     count_loss_mode: str = "nb"  # "nb" | "log1p" | "l1"
@@ -95,6 +98,12 @@ class RMRv3LossConfig:
     spectral_omega_high: float = 0.35
     spectral_transform: str = "fft"
 
+    # Characteristic Function Loss (ChfL - Shu et al. CVPR 2022)
+    use_chfl_loss: bool = False
+    lambda_chfl: float = 0.0
+    chfl_num_frequencies: int = 64
+    chfl_omega_max: float = 0.5
+
     # Mass-Weighted Regional Loss (Hypothesis H8)
     regional_mass_weight_alpha: float = 0.0
 
@@ -121,8 +130,14 @@ class RMRv3LossConfig:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
         if self.cell_alpha < 0.0:
             raise ValueError(f"cell_alpha must be non-negative, got {self.cell_alpha}")
-        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn"):
-            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', or 'ot_sinkhorn', got '{self.allocation_loss_type}'")
+        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt"):
+            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', or 'fidt', got '{self.allocation_loss_type}'")
+        if self.fidt_k <= 0.0:
+            raise ValueError(f"fidt_k must be strictly positive, got {self.fidt_k}")
+        if self.lambda_chfl < 0.0:
+            raise ValueError(f"lambda_chfl must be non-negative, got {self.lambda_chfl}")
+        if self.chfl_omega_max <= 0.0:
+            raise ValueError(f"chfl_omega_max must be strictly positive, got {self.chfl_omega_max}")
         if self.cell_mass_weight_gamma <= 0.0:
             raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {self.cell_mass_weight_gamma}")
         if not (0.0 <= self.cell_fg_ratio <= 1.0):
