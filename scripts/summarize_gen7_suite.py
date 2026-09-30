@@ -74,7 +74,9 @@ def main() -> None:
         }
 
         if rd.exists():
-            eval_file = rd / "test_eval.json"
+            eval_file = rd / "eval_val" / "summary.json"
+            if not eval_file.exists():
+                eval_file = rd / "test_eval.json"
             if not eval_file.exists():
                 eval_file = rd / "eval_val.json"
             if not eval_file.exists():
@@ -83,9 +85,9 @@ def main() -> None:
             if eval_file.exists():
                 try:
                     data = json.loads(eval_file.read_text(encoding="utf-8"))
-                    mae = data.get("mae") or data.get("val_mae")
-                    rmse = data.get("rmse") or data.get("val_rmse")
-                    bias = data.get("bias")
+                    mae = data.get("MAE") or data.get("mae") or data.get("val_mae")
+                    rmse = data.get("RMSE") or data.get("rmse") or data.get("val_rmse")
+                    bias = data.get("Bias") or data.get("bias")
                     if mae is not None:
                         row["mae"] = f"{float(mae):.2f}"
                         row["delta_ref_direct"] = f"{float(mae) - REF_DIRECT_MAE:+.2f}"
@@ -94,11 +96,17 @@ def main() -> None:
                     if bias is not None:
                         row["bias"] = f"{float(bias):+.2f}"
 
-                    row["sparse_mae"] = f"{float(data.get('sparse_mae', 0.0)):.2f}" if data.get("sparse_mae") is not None else "-"
-                    row["moderate_mae"] = f"{float(data.get('moderate_mae', 0.0)):.2f}" if data.get("moderate_mae") is not None else "-"
-                    row["dense_mae"] = f"{float(data.get('dense_mae', 0.0)):.2f}" if data.get("dense_mae") is not None else "-"
-                    row["game0"] = f"{float(data.get('game_0', 0.0)):.2f}" if data.get("game_0") is not None else "-"
-                    row["game1"] = f"{float(data.get('game_1', 0.0)):.2f}" if data.get("game_1") is not None else "-"
+                    sp_mae = data.get("mae_sparse") or data.get("sparse_mae")
+                    mod_mae = data.get("mae_moderate") or data.get("moderate_mae")
+                    dn_mae = data.get("mae_dense") or data.get("dense_mae")
+                    g0 = data.get("GAME0") or data.get("game_0")
+                    g1 = data.get("GAME1") or data.get("game_1")
+
+                    row["sparse_mae"] = f"{float(sp_mae):.2f}" if sp_mae is not None else "-"
+                    row["moderate_mae"] = f"{float(mod_mae):.2f}" if mod_mae is not None else "-"
+                    row["dense_mae"] = f"{float(dn_mae):.2f}" if dn_mae is not None else "-"
+                    row["game0"] = f"{float(g0):.2f}" if g0 is not None else "-"
+                    row["game1"] = f"{float(g1):.2f}" if g1 is not None else "-"
                 except Exception:
                     pass
 
