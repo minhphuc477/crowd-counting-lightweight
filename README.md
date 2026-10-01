@@ -85,7 +85,7 @@ $$ Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega^{(t)} \cdot D_{c,w}^{-1} A^\top W D
 
 where:
 1. **Lipschitz Contraction Damping**: $b_{\text{solver}} = \pi_R \odot b_{\text{raw}}$ prevents carrier field explosion in dense crowd clusters.
-2. **Morozov Discrepancy Filter**: $\mathcal{M}_\gamma(r) = \operatorname{sign}(r) \max(|r| - \gamma \sigma(b), 0)$ stops gradient updates below the heteroscedastic noise floor.
+2. **Morozov Discrepancy Filter**: $\mathcal{M}_\gamma(r) = \mathrm{sign}(r) \max(|r| - \gamma \sigma(b), 0)$ stops gradient updates below the heteroscedastic noise floor.
 3. **Barzilai-Borwein Rayleigh Step Size**: $\omega^{(t)} = \frac{\langle s^{(t)}, y^{(t)} \rangle}{\|y^{(t)}\|^2}$ guarantees fast non-monotone convergence.
 
 ---
@@ -96,9 +96,10 @@ Official 300-train / 182-test partition (full-image direct inference, strictly $
 
 | Generation | Model Run ID | Params | **MAE** | **RMSE** | **MedianAE** | **Bias** | Key Scientific Contribution |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Gen 5** | `m04_iso_fractional_loss` | 104,441 | **71.03** | **111.29** | **44.50** | **-13.57** | **All-Time Project Record**: Fractional Cell Loss $p=0.5$ ($N^{0.5}$ normalization) |
+| **Anchor** | `sub60_e5` / `g10_anchor_sub60_e5` | 104,441 | **71.51** | **114.88** | 45.80 | -8.12 | **Robust Anchor**: Flat DM16 + Product Gating ($\lambda_{\text{cell}}=0.0$) |
 | **Gen 10** | `g10_subpixel_stride2_chfl` | 104,441 | **76.07** | **115.96** | **44.00** | **-2.96** | **Gen 10 Champion**: Subpixel Stride-2 + ChfL $\lambda=0.35$ |
 | **Gen 10** | `g10_clean_asym_morozov` | 104,441 | **77.47** | **114.60** | 46.12 | +1.26 | **Lowest RMSE**: Asymmetric Morozov deadband |
-| **Anchor** | `sub60_e5` / `g10_anchor_sub60_e5` | 104,441 | **71.51** | **114.88** | 45.80 | -8.12 | **Historical Record**: Flat DM16 + Product Gating |
 | **Gen 7** | `g7_champion_synthesis` | 104,441 | 74.72 | 110.08 | 49.30 | +4.12 | Continuous Dynamic Windowing + Curvature Control |
 | **Stage C**| `V3-B` (Stage C Champion) | 101,763 | 83.22 | 141.14 | 52.10 | -2.97 | Initial Reliability-Weighted Reconciliation record |
 | **Stage C**| `B5-P` (Predecessor Baseline) | 101,714 | 94.83 | 166.88 | 61.40 | +11.59 | Unweighted projected SIRT baseline |
