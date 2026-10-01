@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import torch
 
-from tools.eval_micf_comprehensive import (
+from tools.archive.eval_micf_comprehensive import (
     aggregate_validity_metrics,
     compute_cancellation_ratio,
     count_metric_summary,

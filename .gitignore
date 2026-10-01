@@ -48,4 +48,7 @@ Thumbs.db
 .licenses/
 scratch/
 v19_snapshot/
-
+*.egg-info/
+build/
+dist/
+*.egg

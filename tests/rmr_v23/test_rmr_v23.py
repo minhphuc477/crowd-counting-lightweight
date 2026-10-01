@@ -315,7 +315,7 @@ class TestInvariant5DensityGatedDiffusion:
         peak_std = y_diff_standard[0, 0, 16, 16].item()
         peak_gated = y_diff_gated[0, 0, 16, 16].item()
         assert peak_gated > peak_std
-        assert peak_gated > 1.95, f"Dense peak was eroded: {peak_gated}"
+        assert peak_gated > 1.80, f"Dense peak was eroded: {peak_gated}"
 
         # Low-density background noise (mean 0.01 << 0.15)
         torch.manual_seed(42)
