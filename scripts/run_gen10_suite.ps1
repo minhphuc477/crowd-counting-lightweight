@@ -6,17 +6,26 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 if (-not $env:OMP_NUM_THREADS) { $env:OMP_NUM_THREADS = "2" }
 
 $models = @(
+    # 0. Canonical Anchor: Exact sub60_e5 Reproduction Baseline (104,441 params)
+    @{ RunId = "g10_anchor_sub60_e5";           Config = "configs/rmr_research/gen10/g10_anchor_sub60_e5.yaml" },
+
     # 1. Structural Resolution: Stride 2 Sub-pixel Dirichlet-Multinomial (104,893 params)
-    @{ RunId = "g10_subpixel_dm_stride2";     Config = "configs/rmr_research/gen10/g10_subpixel_dm_stride2.yaml" },
+    @{ RunId = "g10_subpixel_dm_stride2";       Config = "configs/rmr_research/gen10/g10_subpixel_dm_stride2.yaml" },
 
     # 2. Deadband Calibration: Clean Isolated Asymmetric Morozov (104,441 params)
-    @{ RunId = "g10_clean_asym_morozov";     Config = "configs/rmr_research/gen10/g10_clean_asym_morozov.yaml" },
+    @{ RunId = "g10_clean_asym_morozov";       Config = "configs/rmr_research/gen10/g10_clean_asym_morozov.yaml" },
 
     # 3. Frequency Regularization: Calibrated ChfL lambda=0.35 (104,441 params)
-    @{ RunId = "g10_chfl_calibrated_lam035"; Config = "configs/rmr_research/gen10/g10_chfl_calibrated_lam035.yaml" },
+    @{ RunId = "g10_chfl_calibrated_lam035";   Config = "configs/rmr_research/gen10/g10_chfl_calibrated_lam035.yaml" },
 
-    # 4. Orthogonal Synthesis: Subpixel Stride 2 + Calibrated ChfL (104,893 params)
-    @{ RunId = "g10_subpixel_stride2_chfl";  Config = "configs/rmr_research/gen10/g10_subpixel_stride2_chfl.yaml" }
+    # 4. Architectural Control: Stride 2 Subpixel Without Solver (104,893 params)
+    @{ RunId = "g10_subpixel_stride2_no_solver"; Config = "configs/rmr_research/gen10/g10_subpixel_stride2_no_solver.yaml" },
+
+    # 5. Spatial + Solver Synergy: Stride 2 Subpixel + Asymmetric Morozov (104,893 params)
+    @{ RunId = "g10_subpixel_stride2_asym";    Config = "configs/rmr_research/gen10/g10_subpixel_stride2_asym.yaml" },
+
+    # 6. Spatial + Frequency Synergy: Stride 2 Subpixel + Calibrated ChfL (104,893 params)
+    @{ RunId = "g10_subpixel_stride2_chfl";    Config = "configs/rmr_research/gen10/g10_subpixel_stride2_chfl.yaml" }
 )
 
 $logDir = "runs/sha_a/suite_logs_gen10"
@@ -26,8 +35,8 @@ if (-not (Test-Path $logDir)) {
 
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host "  RMR GEN 10 ANTI-REGRESSION BREAKTHROUGH SUITE (PowerShell)" -ForegroundColor Cyan
-Write-Host "  4 Targeted Experiments | Target: Breakthrough Sub-60 MAE (< 60.0)" -ForegroundColor Cyan
-Write-Host "  Baseline: sub60_e5 (71.51 MAE) | Strict Budget: <= 105k Params, Zero KD" -ForegroundColor Cyan
+Write-Host "  7 Targeted Experiments | Complete Causal Isolation & Synthesis" -ForegroundColor Cyan
+Write-Host "  Target: Breakthrough Sub-60 MAE (< 60.0) | Strict Budget: <= 105k Params, Zero KD" -ForegroundColor Cyan
 Write-Host "================================================================================" -ForegroundColor Cyan
 
 $py = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } else { "python" }

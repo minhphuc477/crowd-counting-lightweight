@@ -12,6 +12,9 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
 
 declare -a MODELS=(
+    # 0. Canonical Anchor: Exact sub60_e5 Reproduction Baseline (104,441 params)
+    "g10_anchor_sub60_e5:configs/rmr_research/gen10/g10_anchor_sub60_e5.yaml"
+
     # 1. Structural Resolution: Stride 2 Sub-pixel Dirichlet-Multinomial (104,893 params)
     "g10_subpixel_dm_stride2:configs/rmr_research/gen10/g10_subpixel_dm_stride2.yaml"
 
@@ -21,7 +24,13 @@ declare -a MODELS=(
     # 3. Frequency Regularization: Calibrated ChfL lambda=0.35 (104,441 params)
     "g10_chfl_calibrated_lam035:configs/rmr_research/gen10/g10_chfl_calibrated_lam035.yaml"
 
-    # 4. Orthogonal Synthesis Champion: Subpixel Stride 2 + Calibrated ChfL (104,893 params)
+    # 4. Architectural Control: Stride 2 Subpixel Without Solver (104,893 params)
+    "g10_subpixel_stride2_no_solver:configs/rmr_research/gen10/g10_subpixel_stride2_no_solver.yaml"
+
+    # 5. Spatial + Solver Synergy: Stride 2 Subpixel + Asymmetric Morozov (104,893 params)
+    "g10_subpixel_stride2_asym:configs/rmr_research/gen10/g10_subpixel_stride2_asym.yaml"
+
+    # 6. Spatial + Frequency Synergy: Stride 2 Subpixel + Calibrated ChfL (104,893 params)
     "g10_subpixel_stride2_chfl:configs/rmr_research/gen10/g10_subpixel_stride2_chfl.yaml"
 )
 
@@ -30,13 +39,15 @@ mkdir -p "$LOG_DIR"
 
 echo "================================================================================"
 echo "  RMR GEN 10 ANTI-REGRESSION BREAKTHROUGH SUITE (Bash)"
-echo "  4 Targeted Experiments | Target: Breakthrough Sub-60 MAE"
-echo "  Baseline: sub60_e5 (71.51 MAE) | Strict Budget: <= 105k Params, Zero KD"
+echo "  7 Targeted Experiments | Complete Causal Isolation & Synthesis"
+echo "  Target: Breakthrough Sub-60 MAE | Strict Budget: <= 105k Params, Zero KD"
 echo "================================================================================"
 
 PYTHON_BIN="python"
 if [ -f ".venv/bin/python" ]; then
     PYTHON_BIN=".venv/bin/python"
+elif [ -f ".venv/Scripts/python.exe" ]; then
+    PYTHON_BIN=".venv/Scripts/python.exe"
 fi
 
 for ENTRY in "${MODELS[@]}"; do
