@@ -9,6 +9,7 @@ from rmr_core.operators import RegionSet, regional_sum
 from rmr_core.losses import (
     balanced_smooth_l1,
     count_magnitude_loss,
+    flat_dm_block_loss,
     flat_dm16_loss,
     multiscale_dm_loss,
 )
@@ -183,11 +184,14 @@ def _compute_core_losses(
                 strict=cfg.dm_strict, return_components=True,
             )
         else:
-            loss_val = flat_dm16_loss(
-                inp, target_float, kappa=cfg.kappa_flat16, stride=stride,
+            b_px = int(getattr(cfg, "dm_block_px", 16))
+            auto_k = bool(getattr(cfg, "auto_scale_kappa", True))
+            loss_val = flat_dm_block_loss(
+                inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
                 normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
+                auto_scale_kappa=auto_k,
             )
-            comps[16] = loss_val
+            comps[b_px] = loss_val
         return loss_val, comps
 
     dm_components: dict[int, torch.Tensor] = {}

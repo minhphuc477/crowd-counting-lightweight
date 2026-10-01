@@ -31,6 +31,8 @@ class RMRv3LossConfig:
 
     # Allocation loss configuration
     output_stride: int = 4
+    dm_block_px: int = 16
+    auto_scale_kappa: bool = True
     kappa_flat16: float = 20.0
     normalize_flat_dm16: bool = True
     dm_strict: bool = False

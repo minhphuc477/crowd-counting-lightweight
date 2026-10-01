@@ -233,6 +233,8 @@ ALLOWED_LOSS_KEYS = {
     # FIDT (H1) & ChfL (H2) additions
     "fidt_k", "fidt_loss_type", "fidt_normalize_by_count",
     "use_chfl_loss", "lambda_chfl", "chfl_num_frequencies", "chfl_omega_max",
+    # DM block resolution and concentration scaling
+    "dm_block_px", "auto_scale_kappa",
 }
 
 ALLOWED_TRAIN_KEYS = {
