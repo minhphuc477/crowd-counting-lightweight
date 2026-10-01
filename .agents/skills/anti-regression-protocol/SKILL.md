@@ -63,6 +63,9 @@ Before any new experiment configuration is submitted, run, or merged, verify all
 - [ ] **Gate 6: Zero Knowledge Distillation & Benchmark Invariants**
   - Is the run strictly $0.0\%$ KD?
   - Are the splits strictly $300$ train (`sha_a_train_all.jsonl`) and $182$ test (`sha_a_test.jsonl`)?
+- [ ] **Gate 7: Script Immutability Invariant**
+  - Tuyệt đối KHÔNG tự ý tạo hay sửa bất kỳ file `.sh` hoặc `.ps1` nào nếu không có yêu cầu cụ thể từ người dùng.
+  - Luôn in trực tiếp từng lệnh riêng lẻ ra text phản hồi để người dùng tự copy và chạy.
 
 ---
 

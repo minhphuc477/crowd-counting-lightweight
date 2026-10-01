@@ -53,7 +53,7 @@ model:
   scale_conditioned_prior: false
   enable_solver: false
   solver_mode: additive
-  iterations: 0
+  iterations: 6
   omega: 1.0
   residual_clip: 0.0
   eps: 1.0e-06

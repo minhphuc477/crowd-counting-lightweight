@@ -77,8 +77,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"dispersion_min must be strictly positive, got {d_min}")
         if "iterations" in m_cfg:
             iters = int(m_cfg["iterations"])
-            if iters < 1:
-                raise ValueError(f"iterations must be >= 1, got {iters}")
+            if iters < 1 and bool(m_cfg.get("enable_solver", True)):
+                raise ValueError(f"iterations must be >= 1 when enable_solver is True, got {iters}")
         if "regional_feature_stats" in m_cfg:
             stats = str(m_cfg["regional_feature_stats"])
             if stats not in ("mean", "mean_std"):
