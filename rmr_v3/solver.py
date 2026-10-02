@@ -94,15 +94,13 @@ def unrolled_sirt_solver(
     trust_dense_kappa: float = 0.80,
     asymmetric_trust: bool = False,
     trust_pos_kappa: float = 1.0,
+    spatial_morozov: bool = False,
+    morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75),
+    scale_routed_trust: bool = False,
+    scale_seeded_carrier: bool = False,
+    scale_seed_eps: float = 0.02,
 ) -> dict[str, Any]:
-    """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation.
-
-    Solves the continuous-discrete inverse problem:
-        min_{y >= 0} || W^{1/2} (A y - b) ||_2^2 + lambda_TV * TV(y) + tau * ||y||_1
-
-    via T unrolled projected Richardson-Lucy / SIRT steps with dynamic relaxation:
-        y_{t+1} = S_{tau}^+ ( y_t - omega * D_w^{-1} A^T W (A y_t - b) ) + TV_diff(y_{t+1})
-    """
+    """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
         b_solver = b_solver.unsqueeze(1)
     if weight_solver.ndim == 2:
@@ -111,6 +109,10 @@ def unrolled_sirt_solver(
         b_variance = b_variance.unsqueeze(1)
 
     b, _, h, w = y0.shape
+    if scale_routing_weights is not None and scale_routing_weights.shape[-2:] != (h, w):
+        scale_routing_weights = F.interpolate(
+            scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
+        )
     area_scale = (float(output_stride) / 4.0) ** 2
     strength = min(max(float(solver_strength), 0.0), 1.0)
     effective_omega = float(omega) * strength
@@ -122,15 +124,9 @@ def unrolled_sirt_solver(
     effective_relax_thresh = float(adaptive_relax_threshold) * area_scale
     effective_relax_scale = float(adaptive_relax_scale) * area_scale
     effective_trust_floor = float(trust_region_floor) * area_scale
-    # tau_step and tv_step are per-iteration budgets.
-    # Divide by T so that total shrinkage/diffusion over all iterations equals the hyperparameter,
-    # making tau and tv_lambda strictly T-invariant hyperparameters.
     tau_step = (effective_omega * effective_tau) / max(int(iterations), 1)
     tv_step = effective_tv_lambda / max(int(iterations), 1)
 
-    # Short-circuit: When solver strength is 0.0 (e.g. during warmup epochs) or iterations <= 0,
-    # y remains identically y0. Bypassing the unrolled loop completely eliminates wasted
-    # forward/adjoint passes and GPU allocations during the warmup phase.
     if iterations <= 0 or (effective_omega == 0.0 and effective_tv_lambda == 0.0 and tau_step == 0.0):
         return {
             "y": y0,
@@ -262,6 +258,8 @@ def unrolled_sirt_solver(
                 shifted_carrier=shifted_carrier,
                 shifted_carrier_eps=float(shifted_carrier_eps),
                 y_initial=y0,
+                scale_seeded_carrier=scale_seeded_carrier,
+                scale_seed_eps=float(scale_seed_eps),
             )
         else:
             field = weighted_normalized_adjoint_field(
@@ -295,6 +293,10 @@ def unrolled_sirt_solver(
                 shifted_carrier=shifted_carrier,
                 shifted_carrier_eps=float(shifted_carrier_eps),
                 y_initial=y0,
+                spatial_morozov=spatial_morozov,
+                morozov_gamma_scales=morozov_gamma_scales,
+                scale_seeded_carrier=scale_seeded_carrier,
+                scale_seed_eps=float(scale_seed_eps),
             )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
@@ -342,13 +344,18 @@ def unrolled_sirt_solver(
         step_delta = current_omega * field
         if trust_region_kappa > 0.0:
             eff_kappa = float(trust_region_kappa)
-            if density_adaptive_trust:
+            if scale_routed_trust and scale_routing_weights is not None:
+                pi_fine = scale_routing_weights[:, 0:1, :, :].float()
+                eff_pos_kappa = eff_kappa + (float(trust_pos_kappa) - eff_kappa) * pi_fine
+            elif density_adaptive_trust:
                 z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
                 dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
                 eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
             base_bound = torch.clamp_min(z_state.float(), float(effective_trust_floor))
             bound = eff_kappa * base_bound
-            if asymmetric_trust:
+            if scale_routed_trust and scale_routing_weights is not None:
+                bound_pos = eff_pos_kappa * base_bound
+            elif asymmetric_trust:
                 pos_k = float(trust_pos_kappa)
                 eff_pos = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
                 bound_pos = eff_pos * base_bound

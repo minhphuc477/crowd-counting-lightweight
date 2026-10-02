@@ -71,37 +71,8 @@ def multiplicative_gated_adjoint(
     gate_floor: float = 0.0,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    """Multiplicative Gated SIRT adjoint step with recovery floor.
-
-    Suppresses the correction signal on near-zero pixels via a tanh gate,
-    preventing background pixels from being lifted off zero during repeated
-    SIRT iterations (the "background lift" degradation observed at T>=2 with
-    the plain additive adjoint).
-
-    A small gate_floor > 0 (default: 0.02) prevents the "zero-absorbing state"
-    where a false-negative zero prediction in y_0 can never receive a positive
-    correction from regional evidence.
-
-    The gate is:
-        gate(i) = (1.0 - floor) * tanh(|y_current(i)| / rho0) + floor
-
-    Where:
-        - At y ~ 0: gate = floor (default 0.02, suppressing background lift by 98%
-          while allowing false-negative regions to recover).
-        - At y >> rho0: gate = 1.0 (full correction for crowd clusters).
-
-    Args:
-        values:     [B, C, M]  residual values to scatter (same as regional_adjoint).
-        boxes:      [M, 4]     half-open box coordinates (y1, x1, y2, x2).
-        y_current:  [B, 1, H, W]  current density iterate for gate computation.
-        height:     output height H.
-        width:      output width W.
-        rho0:       gate threshold; default 0.02 matches the empirical mean cell density prior.
-        gate_floor: lower floor for gate to prevent permanent zero traps (default: 0.02).
-        out_dtype:  output dtype (default: values.dtype).
-
-    Returns:
-        [B, C, H, W] multiplicatively gated correction field.
+    """Multiplicatively gated adjoint field: suppresses correction on near-zero pixels via tanh gate.
+    gate = (1.0 - floor) * tanh(|y| / rho0) + floor.
     """
     # Compute the standard additive adjoint field in fp32
     field_additive = regional_adjoint(values, boxes, height, width, out_dtype=torch.float32)
@@ -190,9 +161,17 @@ def weighted_normalized_adjoint_field(
     shifted_carrier: bool = False,
     shifted_carrier_eps: float = 0.02,
     y_initial: torch.Tensor | None = None,
+    spatial_morozov: bool = False,
+    morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75),
+    scale_seeded_carrier: bool = False,
+    scale_seed_eps: float = 0.02,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
+    if scale_routing_weights is not None and scale_routing_weights.shape[-2:] != (h, w):
+        scale_routing_weights = F.interpolate(
+            scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
+        )
 
     if b_region.ndim == 2:
         b_region = b_region.unsqueeze(1)
@@ -208,28 +187,42 @@ def weighted_normalized_adjoint_field(
     q = regional_sum(y32, regions.boxes, out_dtype=torch.float32)
     delta = q - b32
 
-    # Morozov Discrepancy Shrinkage (Symmetric or Asymmetric SNR-Adaptive A-SAM)
-    if morozov_gamma > 0.0 and b_variance is not None:
+    # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, or Scale-Routed Spatial)
+    if (morozov_gamma > 0.0 or spatial_morozov) and b_variance is not None:
+        if spatial_morozov and scale_routing_weights is not None:
+            pi_sum = regional_sum(scale_routing_weights.float(), regions.boxes, out_dtype=torch.float32)
+            reg_area = regions.area.float().view(1, 1, -1).clamp_min(1.0)
+            pi_box = pi_sum / reg_area
+            if len(morozov_gamma_scales) == pi_box.shape[1]:
+                gamma_s = torch.as_tensor(morozov_gamma_scales, dtype=torch.float32, device=q.device).view(1, -1, 1)
+                base_gamma = (pi_box * gamma_s).sum(dim=1, keepdim=True)
+            else:
+                base_gamma = float(morozov_gamma)
+        else:
+            base_gamma = float(morozov_gamma)
+
         if anscombe_morozov:
             c = 0.375
             g_q = 2.0 * torch.sqrt(q.clamp_min(0.0) + c)
             g_b = 2.0 * torch.sqrt(b32.clamp_min(0.0) + c)
             g_delta = g_q - g_b
             if asymmetric_morozov:
-                gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-                gamma_eff = torch.where(g_delta > 0.0, float(morozov_gamma), gamma_under)
+                gamma_u_base = base_gamma if spatial_morozov else float(morozov_gamma_under)
+                gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+                gamma_eff = torch.where(g_delta > 0.0, base_gamma, gamma_under)
             else:
-                gamma_eff = float(morozov_gamma)
+                gamma_eff = base_gamma
             g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - gamma_eff, 0.0)
             scale_symm = 0.5 * (torch.sqrt(q.clamp_min(0.0) + c) + torch.sqrt(b32.clamp_min(0.0) + c))
             delta = g_shrunk * scale_symm
         else:
             sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
             if asymmetric_morozov:
-                gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-                gamma_eff = torch.where(delta > 0.0, float(morozov_gamma), gamma_under)
+                gamma_u_base = base_gamma if spatial_morozov else float(morozov_gamma_under)
+                gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+                gamma_eff = torch.where(delta > 0.0, base_gamma, gamma_under)
             else:
-                gamma_eff = float(morozov_gamma)
+                gamma_eff = base_gamma
             deadband = gamma_eff * sigma_b
             delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
@@ -337,12 +330,13 @@ def weighted_normalized_adjoint_field(
     back = _scatter_residual(weighted_residual)
 
     if adjoint_mode == "radon_nikodym":
+        m_eff = m_carrier
         if shifted_carrier and y_initial is not None:
-            m_eff = m_carrier + float(shifted_carrier_eps) * y_initial.float()
+            m_eff = m_eff + float(shifted_carrier_eps) * y_initial.float()
+        if scale_seeded_carrier and scale_routing_weights is not None:
+            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float() * (back < 0.0).float()
         elif crest_discovery_flux and psi_crest is not None:
-            m_eff = m_carrier + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
-        else:
-            m_eff = m_carrier
+            m_eff = m_eff + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)
             back = (1.0 - alpha_recov) * (m_eff * back) + alpha_recov * back_leb

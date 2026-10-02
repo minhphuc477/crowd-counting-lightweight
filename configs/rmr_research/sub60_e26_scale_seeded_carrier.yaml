@@ -1,11 +1,11 @@
-# SUB60-E23: Single-Variable Control - Pure Asymmetric Morozov Discrepancy
+# SUB60-E26: Single-Variable Control - Scale-Seeded Carrier (Anti-Trapping State)
 # Scientific Purpose:
 # Directly isolates the mathematical hypothesis:
-# "Does reducing the undercounting deadband from 108.75 persons to 19.6 persons in dense clusters
-# (via gamma_under = 0.35 / (1 + 0.05 * sqrt(b))) eliminate the -7.98 negative bias and resolve Dense crowd
-# stalling, while preserving the conservative gamma=0.75 deadband for overcounting/background?"
-# Base: Exactly sub60_e5 champion (70.26 MAE).
-# Single Change: asymmetric_morozov: true (gamma_under: 0.35, rho: 0.05).
+# "When the fine carrier head misses a dense crowd cluster (y(x) ≈ 0), does seeding the carrier
+# field via m_eff(x) = y(x) + eps_seed * pi_32(x) * (back < 0.0) break the Radon-Nikodym zero-support
+# trapping state and recover mass in dense crowds, without creating background false alarms?"
+# Base: Exactly sub60_e5 champion (71.51 MAE).
+# Single Change: scale_seeded_carrier: true (scale_seed_eps: 0.02).
 # Total Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -60,13 +60,8 @@ model:
   eps: 1.0e-06
   adjoint_mode: radon_nikodym
   morozov_gamma: 0.75
-  spatial_morozov: true
-  morozov_gamma_scales:
-  - 0.25
-  - 0.50
-  - 0.75
-  asymmetric_morozov: true
-  morozov_rho: 0.05
+  scale_seeded_carrier: true
+  scale_seed_eps: 0.02
   reliability_mode: snr
   reliability_rate_std_floor: 0.01
   reliability_weight_min: 0.25
@@ -147,4 +142,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e23_asym_morozov
+output_dir: runs/sha_a/sub60_e26_scale_seeded_carrier

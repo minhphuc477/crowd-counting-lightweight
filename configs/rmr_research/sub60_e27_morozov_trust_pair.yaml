@@ -1,11 +1,10 @@
-# SUB60-E23: Single-Variable Control - Pure Asymmetric Morozov Discrepancy
+# SUB60-E27: Factorial Pairwise Control - Spatial Morozov + Scale-Routed Trust Region
 # Scientific Purpose:
-# Directly isolates the mathematical hypothesis:
-# "Does reducing the undercounting deadband from 108.75 persons to 19.6 persons in dense clusters
-# (via gamma_under = 0.35 / (1 + 0.05 * sqrt(b))) eliminate the -7.98 negative bias and resolve Dense crowd
-# stalling, while preserving the conservative gamma=0.75 deadband for overcounting/background?"
-# Base: Exactly sub60_e5 champion (70.26 MAE).
-# Single Change: asymmetric_morozov: true (gamma_under: 0.35, rho: 0.05).
+# Directly isolates the pairwise interaction effect between:
+# 1. Scale-Routed Spatial Morozov (narrows deadband in dense regions to eliminate -7.98 bias)
+# 2. Scale-Routed Continuous Trust Region (widens positive step ceiling to kappa=0.70 in dense regions)
+# Base: Exactly sub60_e5 champion (71.51 MAE).
+# Combined Changes: spatial_morozov: true (gamma_scales=[0.25, 0.50, 0.75], asym: true) + scale_routed_trust: true (trust_pos_kappa: 0.70).
 # Total Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -76,8 +75,8 @@ model:
   detach_reliability_in_solver: true
   trust_region_kappa: 0.35
   trust_region_floor: 0.005
-  density_adaptive_trust: false
-  asymmetric_trust: false
+  scale_routed_trust: true
+  trust_pos_kappa: 0.70
   tv_lambda: 0.02
   tv_type: laplacian
   proximal_tau: 0.015
@@ -147,4 +146,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e23_asym_morozov
+output_dir: runs/sha_a/sub60_e27_morozov_trust_pair

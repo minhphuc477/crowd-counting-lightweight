@@ -71,9 +71,8 @@ model:
   detach_reliability_in_solver: true
   trust_region_kappa: 0.35
   trust_region_floor: 0.005
-  density_adaptive_trust: false
-  asymmetric_trust: true
-  trust_pos_kappa: 0.65
+  scale_routed_trust: true
+  trust_pos_kappa: 0.70
   tv_lambda: 0.02
   tv_type: laplacian
   proximal_tau: 0.015

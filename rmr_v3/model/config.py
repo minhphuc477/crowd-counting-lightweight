@@ -174,6 +174,13 @@ class RMRv3Config:
     asymmetric_trust: bool = True
     trust_pos_kappa: float = 1.0
 
+    # Scale-Routed Spatial Operators (Gen 12)
+    spatial_morozov: bool = False
+    morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75)
+    scale_routed_trust: bool = False
+    scale_seeded_carrier: bool = False
+    scale_seed_eps: float = 0.02
+
     # Curvature warping & BB solver
     density_curvature: bool = False
     use_barzilai_borwein: bool = False
@@ -232,32 +239,21 @@ class RMRv3Config:
             self.aspp_dilations = _deep_tuple(self.aspp_dilations)
         if self.context_dilations is not None:
             self.context_dilations = _deep_tuple(self.context_dilations)
+        if self.morozov_gamma_scales is not None:
+            self.morozov_gamma_scales = _deep_tuple(self.morozov_gamma_scales)
 
         if self.use_park:
-            raise ValueError(
-                "use_park=True is permanently BANNED (PARK static altitude bands cause spatial starvation "
-                "and +32 Dense MAE degradation). Use dynamic DiAG instead."
-            )
+            raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
         if self.use_cpcm:
-            raise ValueError(
-                "use_cpcm=True is permanently BANNED (CPCM static linspace coordinate aliasing under crops). "
-                "Use dynamic DiAG instead."
-            )
+            raise ValueError("use_cpcm=True is permanently BANNED. Use dynamic DiAG instead.")
         if self.use_perspective_elevation:
-            raise ValueError(
-                "use_perspective_elevation=True is permanently BANNED (MPE static linspace coordinate aliasing)."
-            )
+            raise ValueError("use_perspective_elevation=True is permanently BANNED.")
         if getattr(self, "use_pgh", False):
-            raise ValueError(
-                "use_pgh=True is permanently BANNED (PGH static linspace coordinate aliasing)."
-            )
+            raise ValueError("use_pgh=True is permanently BANNED.")
 
         # Permanently Banned Anti-Pattern Guards
         if self.use_coord_attn:
-            raise ValueError(
-                "use_coord_attn=True is permanently BANNED (Anti-Pattern #2: Rank-1 phantom Dirac spikes). "
-                "Remove this field from your config."
-            )
+            raise ValueError("use_coord_attn=True is permanently BANNED (Anti-Pattern #2). Remove this field.")
         if getattr(self, "use_micro_coord_attn", False):
             raise ValueError(
                 "use_micro_coord_attn=True is permanently BANNED (Anti-Pattern #2: Coordinate Attention family). "

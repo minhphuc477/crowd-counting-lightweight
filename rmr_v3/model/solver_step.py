@@ -149,6 +149,11 @@ def solve_inverse_measure(
         trust_dense_kappa=getattr(cfg, "trust_dense_kappa", 0.80),
         asymmetric_trust=getattr(cfg, "asymmetric_trust", True),
         trust_pos_kappa=getattr(cfg, "trust_pos_kappa", 1.0),
+        spatial_morozov=getattr(cfg, "spatial_morozov", False),
+        morozov_gamma_scales=getattr(cfg, "morozov_gamma_scales", (0.25, 0.50, 0.75)),
+        scale_routed_trust=getattr(cfg, "scale_routed_trust", False),
+        scale_seeded_carrier=getattr(cfg, "scale_seeded_carrier", False),
+        scale_seed_eps=getattr(cfg, "scale_seed_eps", 0.02),
     )
 
     y = solver_res["y"]
