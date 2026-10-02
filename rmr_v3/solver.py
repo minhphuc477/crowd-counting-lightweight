@@ -345,7 +345,7 @@ def unrolled_sirt_solver(
         if trust_region_kappa > 0.0:
             eff_kappa = float(trust_region_kappa)
             if scale_routed_trust and scale_routing_weights is not None:
-                pi_fine = scale_routing_weights[:, 0:1, :, :].float()
+                pi_fine = scale_routing_weights[:, 0:1, :, :].float().detach()
                 eff_pos_kappa = eff_kappa + (float(trust_pos_kappa) - eff_kappa) * pi_fine
             elif density_adaptive_trust:
                 z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
@@ -353,14 +353,19 @@ def unrolled_sirt_solver(
                 eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
             base_bound = torch.clamp_min(z_state.float(), float(effective_trust_floor))
             bound = eff_kappa * base_bound
+            if scale_seeded_carrier and scale_routing_weights is not None:
+                seed_supp = float(scale_seed_eps) * scale_routing_weights[:, 0:1, :, :].float().detach()
+                base_bound_pos = torch.clamp_min(torch.maximum(z_state.float(), seed_supp), float(effective_trust_floor))
+            else:
+                base_bound_pos = base_bound
             if scale_routed_trust and scale_routing_weights is not None:
-                bound_pos = eff_pos_kappa * base_bound
+                bound_pos = eff_pos_kappa * base_bound_pos
             elif asymmetric_trust:
                 pos_k = float(trust_pos_kappa)
                 eff_pos = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
-                bound_pos = eff_pos * base_bound
+                bound_pos = eff_pos * base_bound_pos
             else:
-                bound_pos = bound
+                bound_pos = eff_kappa * base_bound_pos
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 conf_mod = 0.25 + 0.75 * scale_confidence

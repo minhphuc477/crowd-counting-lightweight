@@ -378,7 +378,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
         "subpixel_stride2", "subpixel_dm", "curvature_alpha_init",
         "spatial_morozov", "morozov_gamma_scales", "scale_routed_trust",
-        "scale_seeded_carrier", "scale_seed_eps",
+        "scale_seeded_carrier", "scale_seed_eps", "detach_y0_for_solver",
         # PARK Perspective-Adaptive Regional Kernels
         "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",

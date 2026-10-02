@@ -156,3 +156,33 @@ def test_gen12_configs_pass_validator():
             cfg = yaml.safe_load(f)
         validate_v3_config(cfg)
 
+
+def test_scale_seeded_carrier_in_unrolled_solver_breaks_choke():
+    """Verify that scale-seeded carrier enables unrolled SIRT solver to escape zero carrier choke."""
+    b, h, w = 1, 32, 32
+    regions = build_multiscale_regions(h, w, 4, region_sizes_px=(32,), overlap=0.5, include_full_image=False)
+    m = regions.boxes.shape[0]
+
+    y_zero = torch.zeros((b, 1, h, w), dtype=torch.float32)
+    b_solver = torch.full((b, 1, m), 100.0, dtype=torch.float32)
+    weight_solver = torch.ones((b, 1, m), dtype=torch.float32)
+
+    sc_weights = torch.zeros((b, 3, h, w), dtype=torch.float32)
+    sc_weights[:, 0, :, :] = 1.0  # Dense region
+
+    res_seeded = unrolled_sirt_solver(
+        y0=y_zero,
+        b_solver=b_solver,
+        weight_solver=weight_solver,
+        regions=regions,
+        iterations=6,
+        omega=1.0,
+        scale_routing_weights=sc_weights,
+        adjoint_mode="radon_nikodym",
+        trust_region_kappa=0.35,
+        scale_seeded_carrier=True,
+        scale_seed_eps=0.08,
+    )
+    y_out = res_seeded["y"]
+    assert y_out.mean().item() > 0.01, f"Expected escape from zero choke (>0.01), got {y_out.mean().item()}"
+
