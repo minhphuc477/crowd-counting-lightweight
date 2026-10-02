@@ -139,3 +139,20 @@ def test_scale_seeded_carrier_support_recovery():
         scale_seed_eps=0.05,
     )
     assert field_seeded.min().item() < -1e-4, "Scale-seeded carrier must produce non-zero recovery field"
+
+
+def test_gen12_configs_pass_validator():
+    """Verify that all 5 Gen 12 YAML configs pass validate_v3_config without error."""
+    from rmr_v3.config.validator import validate_v3_config
+    configs = [
+        "configs/rmr_research/sub60_e23_asym_morozov.yaml",
+        "configs/rmr_research/sub60_e24_asym_trust.yaml",
+        "configs/rmr_research/sub60_e25_morozov_asym_trust_synthesis.yaml",
+        "configs/rmr_research/sub60_e26_scale_seeded_carrier.yaml",
+        "configs/rmr_research/sub60_e27_morozov_trust_pair.yaml",
+    ]
+    for p in configs:
+        with open(p) as f:
+            cfg = yaml.safe_load(f)
+        validate_v3_config(cfg)
+

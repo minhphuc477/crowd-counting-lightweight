@@ -157,12 +157,14 @@ ALLOWED_MODEL_KEYS = {
     # DiAG Dynamic Image-Adaptive Geometry (RMR-v34)
     "use_diag", "diag_persp_slope_init",
     "use_vertical_gradient_dcap", "use_dcap_tilt",
-    # Sub-60 Mathematical Operators (Shifted Carrier, Density-Adaptive Trust, Scale-Gated Topology)
+    # Sub-60 & Gen 12 Mathematical Operators
     "shifted_carrier", "shifted_carrier_eps",
     "density_adaptive_trust", "trust_dense_tau", "trust_dense_kappa",
     "density_scale_gating", "density_scale_tau",
     "hurdle_gating_mode", "asymmetric_trust", "trust_pos_kappa",
     "detach_y0_for_solver",
+    "spatial_morozov", "morozov_gamma_scales",
+    "scale_routed_trust", "scale_seeded_carrier", "scale_seed_eps",
 }
 
 
@@ -375,6 +377,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "crest_discovery_flux", "crest_kappa_0", "crest_eps_seed",
         "asymmetric_morozov", "morozov_gamma_under", "morozov_rho",
         "subpixel_stride2", "subpixel_dm", "curvature_alpha_init",
+        "spatial_morozov", "morozov_gamma_scales", "scale_routed_trust",
+        "scale_seeded_carrier", "scale_seed_eps",
         # PARK Perspective-Adaptive Regional Kernels
         "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
