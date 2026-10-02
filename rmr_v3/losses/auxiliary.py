@@ -368,7 +368,9 @@ def count_harmonized_cell_loss(
             denom = w_sum if abs(float(norm_power) - 1.0) <= 1e-5 else (w_sum.pow(float(norm_power)) * (float(norm_ref) ** (1.0 - float(norm_power)))).clamp_min(float(eps))
             pos_loss = (w_pos / denom * pos_per).sum()
             comb_loss = float(1.0 - fg_ratio) * neg_loss + float(fg_ratio) * pos_loss
-            sample_losses.append(comb_loss if neg_mask.any() else pos_loss)
+            # Always use comb_loss: when neg_mask is empty, neg_loss=0.0, so
+            # comb_loss = fg_ratio * pos_loss — consistent scaling for all-crowd images.
+            sample_losses.append(comb_loss)
         else:
             sample_losses.append(neg_loss)
     return torch.stack(sample_losses).mean()
