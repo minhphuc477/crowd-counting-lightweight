@@ -107,8 +107,8 @@ def test_rmr_v9_profiling_utilities():
 
 
 def test_rmr_v9_onnx_export_and_runtime_parity():
-    """Verify RMRv3 model exports to ONNX in deploy mode with <1e-4 parity against PyTorch."""
-    ort = pytest.importorskip("onnxruntime")
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("onnxscript")
 
     cfg_path = str(CONFIG_DIR / "rmr_v9_canonical.yaml")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -188,6 +188,7 @@ def test_summarize_rmr_v9_suite_script():
 def test_rmr_v9_aq_rmr_onnx_export_parity():
     """Verify rmr_v9_aq_rmr (anisotropic boxes, mean_std stats, tau=0.015) exports to ONNX cleanly."""
     pytest.importorskip("onnxruntime")
+    pytest.importorskip("onnxscript")
 
     cfg_path = str(CONFIG_DIR / "rmr_v9_aq_rmr.yaml")
     with tempfile.TemporaryDirectory() as tmpdir:

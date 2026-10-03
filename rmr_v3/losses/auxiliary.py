@@ -143,8 +143,8 @@ def curvature_power_loss(
         y = y.unsqueeze(1)
 
     work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
-    y_f = y.to(dtype=work_dtype).clamp_min(0.0)
-    t_f = target.to(dtype=work_dtype).clamp_min(0.0)
+    y_f = torch.where(y >= 0.0, y, torch.zeros_like(y)).to(dtype=work_dtype)
+    t_f = torch.where(target >= 0.0, target, torch.zeros_like(target)).to(dtype=work_dtype)
     if y_f.numel() == 0 or t_f.numel() == 0:
         return (y_f.sum() + t_f.sum()) * 0.0
 

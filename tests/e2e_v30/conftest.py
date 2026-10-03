@@ -35,7 +35,9 @@ def anscombe_transform_oracle(y: torch.Tensor, c: float = 0.375) -> torch.Tensor
     With c = 3/8 = 0.375, Poisson count error variance is asymptotically normalized:
         Var(T(Y)) = 1.0 + O(1/mu^2)
     """
-    return 2.0 * torch.sqrt(torch.clamp_min(y.float(), 0.0) + float(c))
+    y32 = y.float()
+    y_safe = torch.where(y32 >= 0.0, y32, torch.zeros_like(y32))
+    return 2.0 * torch.sqrt(y_safe + float(c))
 
 
 def inverse_anscombe_oracle(z: torch.Tensor, c: float = 0.375) -> torch.Tensor:
