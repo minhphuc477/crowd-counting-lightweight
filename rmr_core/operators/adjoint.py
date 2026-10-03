@@ -168,10 +168,12 @@ def weighted_normalized_adjoint_field(
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
-    if scale_routing_weights is not None and scale_routing_weights.shape[-2:] != (h, w):
-        scale_routing_weights = F.interpolate(
-            scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
-        )
+    if scale_routing_weights is not None:
+        if scale_routing_weights.shape[-2:] != (h, w):
+            scale_routing_weights = F.interpolate(
+                scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
+            )
+        scale_routing_weights = scale_routing_weights.detach()
 
     if b_region.ndim == 2:
         b_region = b_region.unsqueeze(1)
