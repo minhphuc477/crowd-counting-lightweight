@@ -34,10 +34,11 @@ class RMRv3Config:
     subpixel_dm: bool = False
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "aspp_lite" | "rep_weighted"
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted"
     context_dilations: tuple[int, ...] = (1, 2, 3)
     use_aspp_gap: bool = True
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
+    hdc_dilations: tuple[int, ...] = (1, 2, 3)
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
@@ -199,6 +200,9 @@ class RMRv3Config:
     curvature_gate_beta: float = 0.03
     curvature_pool_kernel: int = 8
     curvature_alpha_init: float = -8.0
+    density_adaptive_scale: bool = False
+    density_scale_gamma: float = 0.0
+    density_scale_learnable: bool = False
 
     # Banned solver anti-patterns (retained for validator rejection)
     use_nesterov_momentum: bool = False
@@ -238,6 +242,8 @@ class RMRv3Config:
             self.region_sizes_px = _deep_tuple(self.region_sizes_px)
         if self.aspp_dilations is not None:
             self.aspp_dilations = _deep_tuple(self.aspp_dilations)
+        if self.hdc_dilations is not None:
+            self.hdc_dilations = _deep_tuple(self.hdc_dilations)
         if self.context_dilations is not None:
             self.context_dilations = _deep_tuple(self.context_dilations)
         if self.morozov_gamma_scales is not None:

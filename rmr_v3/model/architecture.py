@@ -8,7 +8,13 @@ import torch.nn.functional as F
 
 from rmr_core.backbones import TimmPyramidBackbone
 from rmr_core.heads import build_fine_head
-from rmr_core.necks import AdditiveFPNNeck, ASPPLiteFPNNeck, CoordinateAttention, RepWeightedFPNNeck
+from rmr_core.necks import (
+    AdditiveFPNNeck,
+    ASPPLiteFPNNeck,
+    CoordinateAttention,
+    HDCLiteFPNNeck,
+    RepWeightedFPNNeck,
+)
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.types import RMRModelOutput
 from rmr_core.operators import RegionSet, build_multiscale_regions
@@ -79,6 +85,12 @@ class RMRv3(nn.Module):
                 aspp_dilations=cfg.aspp_dilations,
                 use_aspp_gap=cfg.use_aspp_gap,
             )
+        elif cfg.neck_type == "hdc_lite":
+            self.fusion = HDCLiteFPNNeck(
+                in_channels=self.encoder.out_channels,
+                width=cfg.feature_width,
+                hdc_dilations=cfg.hdc_dilations,
+            )
         elif cfg.neck_type == "additive":
             self.fusion = AdditiveFPNNeck(
                 in_channels=self.encoder.out_channels,
@@ -86,7 +98,7 @@ class RMRv3(nn.Module):
             )
         else:
             raise ValueError(
-                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', or 'rep_weighted'."
+                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', 'hdc_lite', or 'rep_weighted'."
             )
 
         init_bias = _softplus_inverse(cfg.init_m0)
@@ -106,6 +118,9 @@ class RMRv3(nn.Module):
             subpixel_stride2=cfg.subpixel_stride2,
             floor_tau=cfg.floor_tau,
             curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
+            density_adaptive_scale=getattr(cfg, "density_adaptive_scale", False),
+            density_scale_gamma=getattr(cfg, "density_scale_gamma", 0.0),
+            density_scale_learnable=getattr(cfg, "density_scale_learnable", False),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(

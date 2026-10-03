@@ -12,6 +12,7 @@ from .fpn import (
     AdditiveFPNNeck,
     AdditiveFusion,
     ASPPLiteFPNNeck,
+    HDCLiteFPNNeck,
 )
 from .rep_fpn import (
     RepDWBlock7x7,
@@ -26,6 +27,7 @@ __all__ = [
     "CoordinateAttention",
     "DSResidual",
     "DepthwiseDilated",
+    "HDCLiteFPNNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
     "TinyIR",

@@ -16,37 +16,15 @@ _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.1422
 
 
 def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
-    """Compute local average density with dimension-safe pooling.
-
-    Handles 0-D (scalar), 1-D, 2-D [H, W], 3-D [C, H, W], and 4-D [B, C, H, W] tensors
-    without dimension mismatch or edge slicing truncation.
-    """
+    """Compute local average density with dimension-safe pooling."""
     if y.ndim < 2:
         return y
     orig_ndim = y.ndim
-    if orig_ndim == 2:
-        y_in = y.unsqueeze(0).unsqueeze(0)
-    elif orig_ndim == 3:
-        y_in = y.unsqueeze(0)
-    else:
-        y_in = y
-
-    pad = k_pool // 2
-    y_local = F.avg_pool2d(
-        y_in,
-        kernel_size=k_pool,
-        stride=1,
-        padding=pad,
-        count_include_pad=False,
-    )
+    y_in = y.unsqueeze(0).unsqueeze(0) if orig_ndim == 2 else (y.unsqueeze(0) if orig_ndim == 3 else y)
+    y_local = F.avg_pool2d(y_in, kernel_size=k_pool, stride=1, padding=k_pool // 2, count_include_pad=False)
     if y_local.shape[-2:] != y_in.shape[-2:]:
         y_local = y_local[..., : y_in.shape[-2], : y_in.shape[-1]]
-
-    if orig_ndim == 2:
-        return y_local.squeeze(0).squeeze(0)
-    elif orig_ndim == 3:
-        return y_local.squeeze(0)
-    return y_local
+    return y_local.squeeze(0).squeeze(0) if orig_ndim == 2 else (y_local.squeeze(0) if orig_ndim == 3 else y_local)
 
 
 def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
@@ -70,12 +48,10 @@ def _density_activate(
     curvature_pool_kernel: int,
     curv_scale: float = 1.0,
     floor_tau: float = 0.0,
+    density_adaptive_scale: bool = False,
+    density_scale_gamma: "torch.Tensor | float" = 0.0,
 ) -> torch.Tensor:
-    """Shared density activation: temperature-scaled softplus + optional gated quadratic curvature.
-
-    Eliminates copy-paste between FineMeasureHead and ScaleConditionedFineHead.
-    All curvature computation is done in float32 and cast back to z.dtype.
-    """
+    """Shared density activation: temperature softplus + density adaptive scale + curvature."""
     if temp_softplus and tau is not None:
         tau_clamped = tau.clamp_min(0.1)
         y_base = tau_clamped * F.softplus(z / tau_clamped)
@@ -85,6 +61,9 @@ def _density_activate(
     if floor_tau > 0.0:
         y_base = _smooth_floor(y_base, floor_tau)
 
+    if density_adaptive_scale:
+        gamma_val = density_scale_gamma.clamp_min(0.0) if isinstance(density_scale_gamma, torch.Tensor) else max(float(density_scale_gamma), 0.0)
+        y_base = y_base * (1.0 + gamma_val * F.relu(z))
 
     if density_curvature and curvature_alpha is not None:
         alpha_eff = F.softplus(curvature_alpha)
@@ -103,9 +82,6 @@ def _density_activate(
     return y_base
 
 
-# Learnable density curvature parameter α initialized to -8.0: softplus(-8.0) ≈ 0.000335.
-# Preserves seamless Step 0 identity with vanilla softplus, maintains the calibrated m0=0.015763 rate,
-# and prevents artificial quadratic overcounting in dense regions (which caused +5.91 MAE regression at -4.0).
 _CURVATURE_ALPHA_INIT: float = -8.0
 
 
@@ -144,10 +120,12 @@ class FineMeasureHead(nn.Module):
         subpixel_stride2: bool = False,
         floor_tau: float = 0.0,
         curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
+        density_adaptive_scale: bool = False,
+        density_scale_gamma: float = 0.0,
+        density_scale_learnable: bool = False,
     ):
         super().__init__()
         self.subpixel_stride2 = bool(subpixel_stride2)
-        # Scaled floor suppression: at stride 2, cell area is 1/4 of stride 4 cell area
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
         self.body = nn.Sequential(
@@ -170,14 +148,12 @@ class FineMeasureHead(nn.Module):
 
         self.temp_softplus = bool(temp_softplus)
         if self.temp_softplus:
-            # Learnable temperature τ; initialized to 1.0 (identical to vanilla softplus)
             self.tau = nn.Parameter(torch.ones(1))
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
         self.curv_scale = 4.0 if self.subpixel_stride2 else 1.0
         if self.subpixel_stride2:
-            # Calibrate curvature thresholds for Stride 2 cell area (1/4 of Stride 4 cell area)
             self.curvature_dense_threshold = float(curvature_dense_threshold) / 4.0
             self.curvature_gate_beta = float(curvature_gate_beta) / 4.0
             self.curvature_pool_kernel = int(curvature_pool_kernel) * 2
@@ -186,15 +162,16 @@ class FineMeasureHead(nn.Module):
             self.curvature_gate_beta = float(curvature_gate_beta)
             self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
-            # providing seamless Step 0 identity with vanilla softplus.
             self.curvature_alpha = nn.Parameter(torch.tensor(float(curvature_alpha_init)))
+
+        self.density_adaptive_scale = bool(density_adaptive_scale)
+        if self.density_adaptive_scale and bool(density_scale_learnable):
+            self.density_scale_gamma = nn.Parameter(torch.tensor([float(density_scale_gamma)]))
+        else:
+            self.density_scale_gamma = float(density_scale_gamma)
 
         self.scale_conditioned = bool(scale_conditioned)
         if self.scale_conditioned:
-            # Learnable scale coupling vectors β and γ for RMR-v15
-            # β modulates effective prior bias b_eff(u) = b0 + β^T π(u)
-            # γ modulates effective temperature τ_eff(u) = τ0 * exp(γ^T π(u))
             self.scale_beta = nn.Parameter(torch.zeros(int(num_scales)))
             self.scale_gamma = nn.Parameter(torch.zeros(int(num_scales)))
 
@@ -218,7 +195,9 @@ class FineMeasureHead(nn.Module):
             y_base = tau_eff * F.softplus((z + b_eff) / tau_eff)
             if self.floor_tau > 0.0:
                 y_base = _smooth_floor(y_base, self.floor_tau)
-            # Apply curvature on top of scale-conditioned base if enabled
+            if self.density_adaptive_scale:
+                g_val = self.density_scale_gamma.clamp_min(0.0) if isinstance(self.density_scale_gamma, torch.Tensor) else max(float(self.density_scale_gamma), 0.0)
+                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
             if self.density_curvature:
                 alpha_eff = F.softplus(self.curvature_alpha)
                 orig_dtype = y_base.dtype
@@ -247,6 +226,8 @@ class FineMeasureHead(nn.Module):
             curvature_pool_kernel=self.curvature_pool_kernel,
             curv_scale=self.curv_scale,
             floor_tau=getattr(self, "floor_tau", 0.0),
+            density_adaptive_scale=self.density_adaptive_scale,
+            density_scale_gamma=self.density_scale_gamma,
         )
 
     def forward_logits(
@@ -301,6 +282,9 @@ class ScaleConditionedFineHead(nn.Module):
         curvature_pool_kernel: int = 8,
         floor_tau: float = 0.0,
         curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
+        density_adaptive_scale: bool = False,
+        density_scale_gamma: float = 0.0,
+        density_scale_learnable: bool = False,
     ):
         super().__init__()
         self.floor_tau = float(floor_tau)
@@ -328,9 +312,13 @@ class ScaleConditionedFineHead(nn.Module):
         self.curvature_gate_beta = float(curvature_gate_beta)
         self.curvature_pool_kernel = int(curvature_pool_kernel)
         if self.density_curvature:
-            # Learnable density curvature parameter α; initialized to -8.0 so softplus(-8) ≈ 0.000335,
-            # providing seamless Step 0 identity with vanilla softplus.
             self.curvature_alpha = nn.Parameter(torch.tensor(float(curvature_alpha_init)))
+
+        self.density_adaptive_scale = bool(density_adaptive_scale)
+        if self.density_adaptive_scale and bool(density_scale_learnable):
+            self.density_scale_gamma = nn.Parameter(torch.tensor([float(density_scale_gamma)]))
+        else:
+            self.density_scale_gamma = float(density_scale_gamma)
 
     def activate(
         self,
@@ -350,8 +338,9 @@ class ScaleConditionedFineHead(nn.Module):
             curvature_pool_kernel=self.curvature_pool_kernel,
             curv_scale=self.curv_scale,
             floor_tau=self.floor_tau,
+            density_adaptive_scale=self.density_adaptive_scale,
+            density_scale_gamma=self.density_scale_gamma,
         )
-
 
     def forward_logits(
         self,
@@ -409,6 +398,9 @@ def build_fine_head(
     subpixel_stride2: bool = False,
     floor_tau: float = 0.0,
     curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
+    density_adaptive_scale: bool = False,
+    density_scale_gamma: float = 0.0,
+    density_scale_learnable: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     if scale_conditioned_fine_head:
@@ -424,6 +416,9 @@ def build_fine_head(
             curvature_pool_kernel=curvature_pool_kernel,
             floor_tau=floor_tau,
             curvature_alpha_init=curvature_alpha_init,
+            density_adaptive_scale=density_adaptive_scale,
+            density_scale_gamma=density_scale_gamma,
+            density_scale_learnable=density_scale_learnable,
         )
     return FineMeasureHead(
         width=width,
@@ -439,6 +434,7 @@ def build_fine_head(
         subpixel_stride2=subpixel_stride2,
         floor_tau=floor_tau,
         curvature_alpha_init=curvature_alpha_init,
+        density_adaptive_scale=density_adaptive_scale,
+        density_scale_gamma=density_scale_gamma,
+        density_scale_learnable=density_scale_learnable,
     )
-
-

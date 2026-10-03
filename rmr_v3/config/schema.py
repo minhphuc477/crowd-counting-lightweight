@@ -158,7 +158,7 @@ ALLOWED_MODEL_KEYS = {
     # DiAG Dynamic Image-Adaptive Geometry (RMR-v34)
     "use_diag", "diag_persp_slope_init",
     "use_vertical_gradient_dcap", "use_dcap_tilt",
-    # Sub-60 & Gen 12 Mathematical Operators
+    # Sub-60 & Gen 12-15 Mathematical Operators
     "shifted_carrier", "shifted_carrier_eps",
     "density_adaptive_trust", "trust_dense_tau", "trust_dense_kappa",
     "density_scale_gating", "density_scale_tau",
@@ -166,6 +166,7 @@ ALLOWED_MODEL_KEYS = {
     "detach_y0_for_solver",
     "spatial_morozov", "morozov_gamma_scales",
     "scale_routed_trust", "scale_seeded_carrier", "scale_seed_eps",
+    "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
 }
 
 
