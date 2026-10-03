@@ -249,6 +249,7 @@ def test_rmr_v11_end_to_end_forward_backward_amp():
         cell_loss_mode="mass_weighted",
         cell_mass_weight_alpha=2.0,
         cell_mass_weight_gamma=1.15,
+        lambda_scale_align=0.05,
     )
 
     model = RMRv3(cfg)

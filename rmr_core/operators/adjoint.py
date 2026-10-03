@@ -102,6 +102,7 @@ def weighted_coverage(
     if weight.ndim == 2:
         weight = weight.unsqueeze(1)
     if scale_routing_weights is not None:
+        scale_routing_weights = scale_routing_weights.detach()
         b, k_scales = scale_routing_weights.shape[:2]
         if scale_routing_weights.shape[-2:] != (height, width):
             scale_routing_weights = F.interpolate(

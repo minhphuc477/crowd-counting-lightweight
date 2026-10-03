@@ -201,7 +201,7 @@ def flat_dm_block_loss(
         return pred_map.new_tensor(0.0)
 
     pi = probs_from_positive_mass(pred_block, tiny=eps)
-    eff_kappa = float(kappa) * ((k / 4.0) ** 2) if auto_scale_kappa else float(kappa)
+    eff_kappa = float(kappa) * ((float(block_px) / 16.0) ** 2) if auto_scale_kappa else float(kappa)
     alpha = eff_kappa * pi
 
     per_image = dm_nll_none(target_block, alpha, eps=eps)

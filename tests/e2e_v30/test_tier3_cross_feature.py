@@ -160,11 +160,17 @@ class TestTier3CrossFeatureCombinations:
         assert torch.isfinite(out.y).all()
 
         loss = mass_weighted_cell_loss(out.y, target)
+        if getattr(out, "b_region", None) is not None:
+            loss = loss + 0.01 * out.b_region.sum()
+        if getattr(out, "region_dispersion", None) is not None:
+            loss = loss + 0.01 * out.region_dispersion.sum()
+        if getattr(out, "scale_weights", None) is not None:
+            loss = loss + 0.01 * out.scale_weights.sum()
         if getattr(out, "hurdle_logit", None) is not None:
             loss = loss + 0.01 * out.hurdle_logit.sum()
         loss.backward()
 
-        # Verify gradient flow through backbone, neck, and subpixel head
+        # Verify gradient flow through all composite model parameters
         has_grad = [p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters() if p.requires_grad]
         assert all(has_grad), "Gradient did not flow through all trainable model parameters!"
 

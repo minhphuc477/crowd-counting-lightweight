@@ -186,6 +186,7 @@ def test_rmr_v12_end_to_end_loss_dual_supervision():
         lambda_hard_bg=0.10,
         hard_bg_ratio=0.05,
         lambda_fg_gate=0.05,
+        lambda_scale_align=0.05,
     )
 
     x = torch.randn(2, 3, 128, 128)

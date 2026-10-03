@@ -1,0 +1,114 @@
+{
+  "cell_collision_and_rayleigh_audit": {
+    "dataset_summary": {
+      "manifest": "data\\sha_a_test.jsonl",
+      "total_images": 182,
+      "total_heads": 78970,
+      "sparse_images (<=100)": 7,
+      "moderate_images (100-500)": 129,
+      "dense_images (>500)": 46,
+      "avg_heads_per_image": 433.9
+    },
+    "rayleigh_resolution_audit": {
+      "rayleigh_cutoff_px": 5.04,
+      "evaluated_heads": 73641,
+      "rayleigh_violating_heads": 6088,
+      "sub_rayleigh_fraction_pct": 8.27
+    },
+    "stride_collision_audit": {
+      "stride_2": {
+        "occupied_cells": 78866,
+        "single_head_cells_pct": 99.87,
+        "double_head_cells_pct": 0.12,
+        "triple_plus_cells_pct": 0.01,
+        "max_heads_in_single_cell": 3,
+        "heads_in_multi_occupancy_cells_pct": 0.26,
+        "discrete_information_loss_pct": 0.13
+      },
+      "stride_4": {
+        "occupied_cells": 78354,
+        "single_head_cells_pct": 99.25,
+        "double_head_cells_pct": 0.72,
+        "triple_plus_cells_pct": 0.03,
+        "max_heads_in_single_cell": 8,
+        "heads_in_multi_occupancy_cells_pct": 1.52,
+        "discrete_information_loss_pct": 0.78
+      },
+      "stride_8": {
+        "occupied_cells": 74060,
+        "single_head_cells_pct": 94.67,
+        "double_head_cells_pct": 4.34,
+        "triple_plus_cells_pct": 0.99,
+        "max_heads_in_single_cell": 12,
+        "heads_in_multi_occupancy_cells_pct": 11.22,
+        "discrete_information_loss_pct": 6.22
+      }
+    }
+  },
+  "aspp_sampling_geometry": {
+    "dilation_1": {
+      "kernel_size": 3,
+      "dilation": 1,
+      "rf_in_feature_grid": 3,
+      "rf_in_image_pixels": 9,
+      "sampling_step_pixels": 4,
+      "convex_hull_area_px": 81,
+      "sampled_points": 9,
+      "sampling_sparsity_pct": 88.8889,
+      "gridding_hole_risk": "LOW"
+    },
+    "dilation_3": {
+      "kernel_size": 3,
+      "dilation": 3,
+      "rf_in_feature_grid": 7,
+      "rf_in_image_pixels": 25,
+      "sampling_step_pixels": 12,
+      "convex_hull_area_px": 625,
+      "sampled_points": 9,
+      "sampling_sparsity_pct": 98.56,
+      "gridding_hole_risk": "MEDIUM"
+    },
+    "dilation_6": {
+      "kernel_size": 3,
+      "dilation": 6,
+      "rf_in_feature_grid": 13,
+      "rf_in_image_pixels": 49,
+      "sampling_step_pixels": 24,
+      "convex_hull_area_px": 2401,
+      "sampled_points": 9,
+      "sampling_sparsity_pct": 99.6252,
+      "gridding_hole_risk": "HIGH"
+    }
+  },
+  "model_svd_and_logit_diagnostics": {
+    "images_evaluated": 20,
+    "feature_dim_C": 32,
+    "effective_rank": 21.61,
+    "stable_rank": 1.74,
+    "rank_utilization_pct": 67.53,
+    "singular_values_top8": [
+      0.2033,
+      0.0848,
+      0.0614,
+      0.0596,
+      0.0462,
+      0.0445,
+      0.0397,
+      0.0353
+    ],
+    "top1_singular_variance_pct": 20.33,
+    "top2_singular_variance_pct": 28.81,
+    "top4_singular_variance_pct": 40.91,
+    "carrier_logit_z0_diagnostics": {
+      "mean": -5.9022,
+      "std": 1.7629,
+      "min": -11.375,
+      "p50": -6.2465,
+      "p95": -3.1415,
+      "p99": -2.5084,
+      "max": -1.1195,
+      "pct_cells_z0_ge_1_85 (count >= 2 barrier)": 0.0,
+      "pct_cells_z0_ge_2_95 (count >= 3 barrier)": 0.0
+    }
+  }
+}

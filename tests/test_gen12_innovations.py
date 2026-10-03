@@ -193,7 +193,7 @@ def test_spatially_routed_trust_floor_and_detached_routing():
     regions = build_multiscale_regions(h, w, 4, region_sizes_px=(32,), overlap=0.5, include_full_image=False)
     m = regions.boxes.shape[0]
 
-    y_zero = torch.zeros((b, 1, h, w), dtype=torch.float32)
+    y_zero = torch.zeros((b, 1, h, w), dtype=torch.float32, requires_grad=True)
     b_solver = torch.full((b, 1, m), 100.0, dtype=torch.float32)
     weight_solver = torch.ones((b, 1, m), dtype=torch.float32)
 
@@ -227,10 +227,37 @@ def test_spatially_routed_trust_floor_and_detached_routing():
     assert dense_half_mass > sparse_half_mass, f"Dense half ({dense_half_mass}) should exceed sparse half ({sparse_half_mass})"
 
     # Verify zero gradient backprop into scale_routing_weights from trust bounds & adjoint
+    assert y_final.requires_grad, "y_final must require grad through y0"
     loss = y_final.sum()
     loss.backward()
     assert sc_weights.grad is None or sc_weights.grad.abs().max().item() == 0.0, (
         f"Leaked gradient detected in scale_routing_weights: max abs grad = {sc_weights.grad.abs().max().item()}"
     )
+
+
+def test_rmrv3_solver_tensors_autograd_isolation():
+    """Verify that RMRv3 model output solver tensors have requires_grad=False under detach flags."""
+    from rmr_v3.model.architecture import RMRv3
+    from rmr_v3.model.config import RMRv3Config
+
+    cfg = RMRv3Config(
+        dynamic_scale_routing=True,
+        pre_solver_scale_gating=True,
+        detach_reliability_in_solver=True,
+        detach_region_mean_in_solver=True,
+        enable_solver=True,
+        iterations=2,
+    )
+    model = RMRv3(cfg)
+    x = torch.randn(1, 3, 128, 128)
+    out = model(x)
+
+    assert out.scale_weights is not None
+    assert out.scale_weights.requires_grad is True, "Scale weights should have grad from routing head"
+    assert out.solver_region_weight.requires_grad is False, "solver_region_weight must be detached"
+    assert out.solver_count_variance.requires_grad is False, "solver_count_variance must be detached"
+    assert out.b_solver.requires_grad is False, "b_solver must be detached"
+    assert out.y.requires_grad is True, "y must require grad through y0"
+
 
 

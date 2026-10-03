@@ -230,7 +230,7 @@ def test_one_batch_overfit_dsr_sparse_and_dense():
     model.train()
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    loss_cfg = RMRv3LossConfig(dm_target="dual")
+    loss_cfg = RMRv3LossConfig(dm_target="dual", lambda_scale_align=0.05)
 
     # Sparse image (5 people)
     x_sparse = torch.randn(1, 3, 128, 128)

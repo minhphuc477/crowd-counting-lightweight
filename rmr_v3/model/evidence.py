@@ -67,29 +67,36 @@ def extract_regional_evidence(
     else:
         b_solver = b_solver_raw
 
-    if cfg.detach_reliability_in_solver:
-        weight_solver = weight_solver.detach()
-
     should_gate = (
         cfg.pre_solver_scale_gating
         or getattr(cfg, "density_scale_gating", False)
     ) and scale_weights is not None
     if should_gate:
         power = float(cfg.scale_gating_power) if cfg.pre_solver_scale_gating else 0.0
+        gating_scale_weights = (
+            scale_weights.detach() if cfg.detach_reliability_in_solver else scale_weights
+        )
+        gating_regional_rate = (
+            regional["rate"].detach() if cfg.detach_reliability_in_solver else regional["rate"]
+        )
         weight_solver = apply_scale_consistency_gating(
             weight_solver,
             regions,
-            scale_weights,
+            gating_scale_weights,
             power=power,
             eps=cfg.eps,
             perspective_horizon_gate=cfg.perspective_horizon_gate,
             horizon_cutoff=float(cfg.horizon_cutoff),
             region_sizes_px=cfg.region_sizes_px,
             grid_h=grid_h,
-            regional_rate=regional["rate"],
+            regional_rate=gating_regional_rate,
             density_scale_gating=getattr(cfg, "density_scale_gating", False),
             density_scale_tau=float(getattr(cfg, "density_scale_tau", 0.15)),
         )
+
+    if cfg.detach_reliability_in_solver:
+        weight_solver = weight_solver.detach()
+        b_variance = b_variance.detach()
 
     return {
         "mu_count": mu_count,
