@@ -180,6 +180,7 @@ class RMRv3Config:
     scale_routed_trust: bool = False
     scale_seeded_carrier: bool = False
     scale_seed_eps: float = 0.02
+    trust_region_floor_dense: float = 0.025
 
     # Curvature warping & BB solver
     density_curvature: bool = False

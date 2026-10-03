@@ -186,3 +186,51 @@ def test_scale_seeded_carrier_in_unrolled_solver_breaks_choke():
     y_out = res_seeded["y"]
     assert y_out.mean().item() > 0.01, f"Expected escape from zero choke (>0.01), got {y_out.mean().item()}"
 
+
+def test_spatially_routed_trust_floor_and_detached_routing():
+    """Verify spatially-routed trust floor: dense regions get floor_dense (0.025) while sparse get floor_sparse (0.005), with zero autograd leak."""
+    b, h, w = 1, 32, 32
+    regions = build_multiscale_regions(h, w, 4, region_sizes_px=(32,), overlap=0.5, include_full_image=False)
+    m = regions.boxes.shape[0]
+
+    y_zero = torch.zeros((b, 1, h, w), dtype=torch.float32)
+    b_solver = torch.full((b, 1, m), 100.0, dtype=torch.float32)
+    weight_solver = torch.ones((b, 1, m), dtype=torch.float32)
+
+    # Half image dense (pi_32=1), half image sparse (pi_32=0)
+    sc_weights = torch.zeros((b, 3, h, w), dtype=torch.float32, requires_grad=True)
+    with torch.no_grad():
+        sc_weights[:, 0, :, :w // 2] = 1.0  # Dense left half
+        sc_weights[:, 2, :, w // 2:] = 1.0  # Sparse right half
+
+    res = unrolled_sirt_solver(
+        y0=y_zero,
+        b_solver=b_solver,
+        weight_solver=weight_solver,
+        regions=regions,
+        iterations=6,
+        omega=1.0,
+        scale_routing_weights=sc_weights,
+        adjoint_mode="radon_nikodym",
+        trust_region_kappa=0.35,
+        trust_region_floor=0.005,
+        trust_region_floor_dense=0.025,
+        scale_routed_trust=True,
+        scale_seeded_carrier=True,
+        scale_seed_eps=0.02,
+    )
+    y_final = res["y"]
+
+    # Dense half must have significantly larger recovered density than sparse half
+    dense_half_mass = y_final[:, :, :, :w // 2].mean().item()
+    sparse_half_mass = y_final[:, :, :, w // 2:].mean().item()
+    assert dense_half_mass > sparse_half_mass, f"Dense half ({dense_half_mass}) should exceed sparse half ({sparse_half_mass})"
+
+    # Verify zero gradient backprop into scale_routing_weights from trust bounds & adjoint
+    loss = y_final.sum()
+    loss.backward()
+    assert sc_weights.grad is None or sc_weights.grad.abs().max().item() == 0.0, (
+        f"Leaked gradient detected in scale_routing_weights: max abs grad = {sc_weights.grad.abs().max().item()}"
+    )
+
+

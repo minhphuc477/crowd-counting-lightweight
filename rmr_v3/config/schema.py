@@ -76,6 +76,7 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v11 additions
     "trust_region_kappa",
     "trust_region_floor",
+    "trust_region_floor_dense",
     "foreground_gate",
     # RMR-v13 additions
     "adjoint_mode",
@@ -379,6 +380,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "subpixel_stride2", "subpixel_dm", "curvature_alpha_init",
         "spatial_morozov", "morozov_gamma_scales", "scale_routed_trust",
         "scale_seeded_carrier", "scale_seed_eps", "detach_y0_for_solver",
+        "trust_region_floor_dense",
         # PARK Perspective-Adaptive Regional Kernels
         "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",

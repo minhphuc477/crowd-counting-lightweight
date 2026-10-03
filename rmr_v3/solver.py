@@ -99,6 +99,7 @@ def unrolled_sirt_solver(
     scale_routed_trust: bool = False,
     scale_seeded_carrier: bool = False,
     scale_seed_eps: float = 0.02,
+    trust_region_floor_dense: float = 0.025,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
@@ -228,76 +229,31 @@ def unrolled_sirt_solver(
                     morozov_rho=float(morozov_rho),
                 )
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
-            b_effective = q - rate_res * eff_q.clamp_min(float(eps))
-            field = weighted_normalized_adjoint_field(
-                z_state,
-                b_effective,
-                weight_solver,
-                regions,
-                weighted_cov=cov_w,
-                residual_clip=residual_clip,
-                eps=eps,
-                solver_mode=solver_mode,
-                density_gate_rho=float(effective_rho),
-                density_gate_floor=float(density_gate_floor),
-                scale_routing_weights=scale_routing_weights,
-                scale_partitions=scale_partitions,
-                adjoint_mode="radon_nikodym",
-                b_variance=None,
-                morozov_gamma=0.0,
-                hybrid_recovery_alpha=float(hybrid_recovery_alpha),
-                output_stride=output_stride,
-                area_normalized=area_normalized_adjoint,
-                carrier_energy=carrier_energy,
-                resonant_lambda=float(resonant_lambda),
-                anscombe_morozov=False,
-                crest_discovery_flux=crest_discovery_flux,
-                crest_kappa_0=float(crest_kappa_0),
-                crest_eps_seed=float(crest_eps_seed),
-                asymmetric_morozov=False,
-                shifted_carrier=shifted_carrier,
-                shifted_carrier_eps=float(shifted_carrier_eps),
-                y_initial=y0,
-                scale_seeded_carrier=scale_seeded_carrier,
-                scale_seed_eps=float(scale_seed_eps),
-            )
+            b_target = q - rate_res * eff_q.clamp_min(float(eps))
+            adj_mode, b_var, m_gamma = "radon_nikodym", None, 0.0
+            ansc_morozov, asym_morozov, spat_morozov = False, False, False
         else:
-            field = weighted_normalized_adjoint_field(
-                z_state,
-                b_solver,
-                weight_solver,
-                regions,
-                weighted_cov=cov_w,
-                residual_clip=residual_clip,
-                eps=eps,
-                solver_mode=solver_mode,
-                density_gate_rho=float(effective_rho),
-                density_gate_floor=float(density_gate_floor),
-                scale_routing_weights=scale_routing_weights,
-                scale_partitions=scale_partitions,
-                adjoint_mode=adjoint_mode,
-                b_variance=b_variance,
-                morozov_gamma=float(morozov_gamma),
-                hybrid_recovery_alpha=float(hybrid_recovery_alpha),
-                output_stride=output_stride,
-                area_normalized=area_normalized_adjoint,
-                carrier_energy=carrier_energy,
-                resonant_lambda=float(resonant_lambda),
-                anscombe_morozov=anscombe_morozov,
-                crest_discovery_flux=crest_discovery_flux,
-                crest_kappa_0=float(crest_kappa_0),
-                crest_eps_seed=float(crest_eps_seed),
-                asymmetric_morozov=asymmetric_morozov,
-                morozov_gamma_under=float(morozov_gamma_under),
-                morozov_rho=float(morozov_rho),
-                shifted_carrier=shifted_carrier,
-                shifted_carrier_eps=float(shifted_carrier_eps),
-                y_initial=y0,
-                spatial_morozov=spatial_morozov,
-                morozov_gamma_scales=morozov_gamma_scales,
-                scale_seeded_carrier=scale_seeded_carrier,
-                scale_seed_eps=float(scale_seed_eps),
-            )
+            b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
+            m_gamma = float(morozov_gamma)
+            ansc_morozov, asym_morozov, spat_morozov = anscombe_morozov, asymmetric_morozov, spatial_morozov
+
+        field = weighted_normalized_adjoint_field(
+            z_state, b_target, weight_solver, regions,
+            weighted_cov=cov_w, residual_clip=residual_clip, eps=eps,
+            solver_mode=solver_mode, density_gate_rho=float(effective_rho),
+            density_gate_floor=float(density_gate_floor),
+            scale_routing_weights=scale_routing_weights, scale_partitions=scale_partitions,
+            adjoint_mode=adj_mode, b_variance=b_var, morozov_gamma=m_gamma,
+            hybrid_recovery_alpha=float(hybrid_recovery_alpha), output_stride=output_stride,
+            area_normalized=area_normalized_adjoint, carrier_energy=carrier_energy,
+            resonant_lambda=float(resonant_lambda), anscombe_morozov=ansc_morozov,
+            crest_discovery_flux=crest_discovery_flux, crest_kappa_0=float(crest_kappa_0),
+            crest_eps_seed=float(crest_eps_seed), asymmetric_morozov=asym_morozov,
+            morozov_gamma_under=float(morozov_gamma_under), morozov_rho=float(morozov_rho),
+            shifted_carrier=shifted_carrier, shifted_carrier_eps=float(shifted_carrier_eps),
+            y_initial=y0, spatial_morozov=spat_morozov, morozov_gamma_scales=morozov_gamma_scales,
+            scale_seeded_carrier=scale_seeded_carrier, scale_seed_eps=float(scale_seed_eps),
+        )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
         current_omega: float | torch.Tensor = effective_omega
@@ -347,15 +303,21 @@ def unrolled_sirt_solver(
             if scale_routed_trust and scale_routing_weights is not None:
                 pi_fine = scale_routing_weights[:, 0:1, :, :].float().detach()
                 eff_pos_kappa = eff_kappa + (float(trust_pos_kappa) - eff_kappa) * pi_fine
+                fl_sparse = float(effective_trust_floor)
+                fl_dense = float(trust_region_floor_dense) * area_scale
+                eff_floor = fl_sparse + (fl_dense - fl_sparse) * pi_fine
             elif density_adaptive_trust:
                 z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
                 dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
                 eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
-            base_bound = torch.clamp_min(z_state.float(), float(effective_trust_floor))
+                eff_floor = float(effective_trust_floor)
+            else:
+                eff_floor = float(effective_trust_floor)
+            base_bound = torch.clamp_min(z_state.float(), eff_floor)
             bound = eff_kappa * base_bound
             if scale_seeded_carrier and scale_routing_weights is not None:
                 seed_supp = float(scale_seed_eps) * scale_routing_weights[:, 0:1, :, :].float().detach()
-                base_bound_pos = torch.clamp_min(torch.maximum(z_state.float(), seed_supp), float(effective_trust_floor))
+                base_bound_pos = torch.clamp_min(torch.maximum(z_state.float(), seed_supp), eff_floor)
             else:
                 base_bound_pos = base_bound
             if scale_routed_trust and scale_routing_weights is not None:

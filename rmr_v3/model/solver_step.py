@@ -154,6 +154,7 @@ def solve_inverse_measure(
         scale_routed_trust=getattr(cfg, "scale_routed_trust", False),
         scale_seeded_carrier=getattr(cfg, "scale_seeded_carrier", False),
         scale_seed_eps=getattr(cfg, "scale_seed_eps", 0.02),
+        trust_region_floor_dense=getattr(cfg, "trust_region_floor_dense", 0.025),
     )
 
     y = solver_res["y"]
