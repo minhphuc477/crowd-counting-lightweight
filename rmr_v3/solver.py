@@ -182,6 +182,8 @@ def unrolled_sirt_solver(
         r_rate = regional_rate.unsqueeze(1) if regional_rate.ndim == 2 else regional_rate
         rho_back = regional_adjoint(r_rate.float().detach(), regions.boxes, h, w, out_dtype=torch.float32)
         rho_spatial = rho_back / cov_1.clamp_min(eps)
+        if scale_routing_weights is not None:
+            rho_spatial = rho_spatial * scale_routing_weights[:, 0:1, :, :].float()
         eatr_floor = float(eatr_alpha) * rho_spatial
 
     y_curr = y0
