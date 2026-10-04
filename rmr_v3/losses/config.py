@@ -35,6 +35,8 @@ class RMRv3LossConfig:
     auto_scale_kappa: bool = True
     kappa_flat16: float = 20.0
     normalize_flat_dm16: bool = True
+    dm_norm_mode: str = "count"  # "count" (legacy O(1/N^2)) | "head_balanced" (scale-invariant O(1)) | "none" (O(1/N))
+    dm_ref_count: float = 100.0
     dm_strict: bool = False
     dm_target: str = "y"  # "y" | "y0" | "dual"
 

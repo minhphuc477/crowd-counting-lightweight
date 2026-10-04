@@ -239,8 +239,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"dm_strict must be a boolean, got {type(l_cfg_pre['dm_strict']).__name__}")
         if "count_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["count_loss_mode"])
-            if clm not in ("nb", "log1p", "l1", "anscombe"):
-                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', or 'anscombe', got '{clm}'")
+            if clm not in ("nb", "log1p", "l1", "smooth_l1", "huber", "anscombe"):
+                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', got '{clm}'")
         if "allocation_loss_type" in l_cfg_pre:
             alt = str(l_cfg_pre["allocation_loss_type"])
             if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt"):

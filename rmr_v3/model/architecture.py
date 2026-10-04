@@ -90,6 +90,7 @@ class RMRv3(nn.Module):
                 in_channels=self.encoder.out_channels,
                 width=cfg.feature_width,
                 hdc_dilations=cfg.hdc_dilations,
+                use_gap=cfg.use_aspp_gap,
             )
         elif cfg.neck_type == "additive":
             self.fusion = AdditiveFPNNeck(

@@ -197,3 +197,41 @@ def test_gen15_full_model_forward_and_routing_isolation():
         has_grad = any(p.grad is not None and torch.any(p.grad != 0.0) for p in model.scale_router.parameters())
         assert has_grad, "Scale router received no gradient from physical_scale_alignment_loss!"
 
+
+def test_hdc_lite_neck_with_gap_parity():
+    """Verify HDC-Lite with GAP matches ASPP-Lite with GAP parameter count exactly."""
+    aspp_neck = ASPPLiteFPNNeck(in_channels=(16, 32, 48), width=32, aspp_dilations=(1, 3, 6), use_aspp_gap=True)
+    hdc_neck_gap = HDCLiteFPNNeck(in_channels=(16, 32, 48), width=32, hdc_dilations=(1, 2, 3), use_gap=True)
+
+    params_aspp = sum(p.numel() for p in aspp_neck.parameters() if p.requires_grad)
+    params_hdc_gap = sum(p.numel() for p in hdc_neck_gap.parameters() if p.requires_grad)
+
+    assert params_aspp == params_hdc_gap, f"Expected exact param parity, got {params_aspp} vs {params_hdc_gap}"
+
+
+def test_head_balanced_flat_dm_scale_invariance():
+    """Verify Head-Balanced Flat DM loss maintains O(1) gradient norm across densities."""
+    from rmr_core.losses import count_magnitude_loss, flat_dm_block_loss
+
+    grad_norms = []
+    for n in (20, 100, 500, 2000):
+        pred = (torch.ones(1, 1, 64, 64) * (n / (64 * 64))).requires_grad_(True)
+        target = torch.zeros(1, 1, 64, 64)
+        target[0, 0, :8, :8] = n / 64.0
+        loss = flat_dm_block_loss(pred, target, block_px=16, norm_mode="head_balanced", ref_count=100.0)
+        loss.backward()
+        assert pred.grad is not None
+        grad_norms.append(pred.grad.norm().item())
+
+    # Ratio between dense (2000) and sparse (20) gradient norm should be O(1), within factor of 2
+    ratio = grad_norms[-1] / grad_norms[0]
+    assert 0.5 < ratio < 2.0, f"Expected O(1) gradient scaling, got ratio {ratio:.2f}"
+
+    # Smooth L1 count loss gradient test
+    pred_c = torch.tensor([1950.0], requires_grad=True)
+    tgt_c = torch.tensor([2000.0])
+    loss_c = count_magnitude_loss(pred_c, tgt_c, mode="smooth_l1")
+    loss_c.backward()
+    assert pred_c.grad is not None and abs(pred_c.grad.item() - (-1.0)) < 1e-4
+
+

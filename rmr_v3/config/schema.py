@@ -239,6 +239,7 @@ ALLOWED_LOSS_KEYS = {
     "use_chfl_loss", "lambda_chfl", "chfl_num_frequencies", "chfl_omega_max",
     # DM block resolution and concentration scaling
     "dm_block_px", "auto_scale_kappa",
+    "dm_norm_mode", "dm_ref_count",
 }
 
 ALLOWED_TRAIN_KEYS = {

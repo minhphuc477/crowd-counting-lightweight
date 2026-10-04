@@ -93,6 +93,8 @@ def count_magnitude_loss(
         return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
     elif mode == "l1":
         return F.l1_loss(pn, tn, reduction="mean")
+    elif mode in ("smooth_l1", "huber"):
+        return F.smooth_l1_loss(pn, tn, reduction="mean", beta=1.0)
     elif mode == "anscombe":
         g_pn = 2.0 * torch.sqrt(torch.clamp_min(pn, 0.0) + 0.375)
         g_tn = 2.0 * torch.sqrt(torch.clamp_min(tn, 0.0) + 0.375)
@@ -168,6 +170,8 @@ def flat_dm_block_loss(
     normalize_by_count: bool = True,
     strict: bool = True,
     auto_scale_kappa: bool = True,
+    norm_mode: str = "count",
+    ref_count: float = 100.0,
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial allocation loss on arbitrary block_px sizes."""
     if block_px % stride != 0:
@@ -205,7 +209,12 @@ def flat_dm_block_loss(
     alpha = eff_kappa * pi
 
     per_image = dm_nll_none(target_block, alpha, eps=eps)
-    if normalize_by_count:
+    if norm_mode == "head_balanced":
+        count = target_block.sum(-1).clamp_min(1.0)
+        per_image = per_image * (count / float(max(ref_count, 1.0)))
+    elif norm_mode == "none" or not normalize_by_count:
+        pass
+    else:
         count = target_block.sum(-1).clamp_min(1.0)
         per_image = per_image / count
 
@@ -223,6 +232,8 @@ def multiscale_dm_loss(
     normalize_by_count: bool = True,
     strict: bool = True,
     return_components: bool = False,
+    norm_mode: str = "count",
+    ref_count: float = 100.0,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """Multi-Scale Dirichlet-Multinomial allocation loss across independent block granularities.
 
@@ -267,6 +278,8 @@ def multiscale_dm_loss(
             eps=eps,
             normalize_by_count=normalize_by_count,
             strict=strict,
+            norm_mode=norm_mode,
+            ref_count=ref_count,
         )
         components[int(block_px)] = li
         terms.append((float(w) / wsum) * li)

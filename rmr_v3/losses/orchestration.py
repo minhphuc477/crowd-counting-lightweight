@@ -176,20 +176,20 @@ def _compute_core_losses(
             loss_val = sinkhorn_ot_loss(inp, points, reg=cfg.ot_reg, num_iters=cfg.ot_num_iters, stride=stride)
         elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
             loss_val, comps = multiscale_dm_loss(
-                inp, target_float,
-                block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
-                weights=tuple(float(x) for x in cfg.dm_weights),
-                kappas=tuple(float(x) for x in cfg.dm_kappas),
-                stride=stride, normalize_by_count=cfg.normalize_flat_dm16,
-                strict=cfg.dm_strict, return_components=True,
+                inp, target_float, block_sizes_px=tuple(int(x) for x in cfg.dm_block_sizes_px),
+                weights=tuple(float(x) for x in cfg.dm_weights), kappas=tuple(float(x) for x in cfg.dm_kappas),
+                stride=stride, normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
+                return_components=True, norm_mode=getattr(cfg, "dm_norm_mode", "count"),
+                ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
             )
         else:
             b_px = int(getattr(cfg, "dm_block_px", 16))
             auto_k = bool(getattr(cfg, "auto_scale_kappa", True))
             loss_val = flat_dm_block_loss(
                 inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
-                normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
-                auto_scale_kappa=auto_k,
+                normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict, auto_scale_kappa=auto_k,
+                norm_mode=getattr(cfg, "dm_norm_mode", "count"),
+                ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
             )
             comps[b_px] = loss_val
         return loss_val, comps

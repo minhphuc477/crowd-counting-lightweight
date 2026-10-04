@@ -175,7 +175,8 @@ class HDCLiteFPNNeck(nn.Module):
         h2 = DW_{d=2}(h1)
         h3 = DW_{d=3}(h2)
     Satisfies HDC gridding-free condition (M_2 = 2 <= K=3), eliminating the 24px gridding holes
-    of ASPP dilation 6, while omitting the GAP Linear layer to save 1,056 parameters.
+    of ASPP dilation 6. When use_gap=True, retains the GAP Linear projection branch (1,056 params)
+    to provide the essential 512px global scene context prior.
     """
 
     def __init__(
@@ -183,10 +184,12 @@ class HDCLiteFPNNeck(nn.Module):
         in_channels: tuple[int, int, int] = (16, 32, 48),
         width: int = 32,
         hdc_dilations: tuple[int, ...] = (1, 2, 3),
+        use_gap: bool = False,
     ):
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = width
+        self.use_gap = bool(use_gap)
 
         self.lat4 = ConvGNAct(c4, width, 1)
         self.lat8 = ConvGNAct(c8, width, 1)
@@ -195,6 +198,15 @@ class HDCLiteFPNNeck(nn.Module):
         self.hdc_blocks = nn.ModuleList([
             DepthwiseDilated(width, dilation=d) for d in hdc_dilations
         ])
+        if self.use_gap:
+            self.aspp_gap: nn.Sequential | None = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Flatten(1),
+                nn.Linear(width, width, bias=True),
+                nn.SiLU(inplace=False),
+            )
+        else:
+            self.aspp_gap = None
         self.hdc_proj = ConvGNAct(width, width, k=1)
 
         self.ref16 = DSResidual(width)
@@ -213,6 +225,11 @@ class HDCLiteFPNNeck(nn.Module):
         for block in self.hdc_blocks:
             h = block(h)
             hdc_accum = hdc_accum + h
+
+        if self.aspp_gap is not None:
+            gap_vec = self.aspp_gap(l16)
+            gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)
+            hdc_accum = hdc_accum + gap_broadcast
 
         p16 = self.ref16(self.hdc_proj(l16 + hdc_accum))
 
