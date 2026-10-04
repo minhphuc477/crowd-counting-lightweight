@@ -244,29 +244,16 @@ ALLOWED_LOSS_KEYS = {
 }
 
 ALLOWED_TRAIN_KEYS = {
-    "batch_size",
-    "workers",
-    "pin_memory",
-    "lr",
-    "backbone_lr_scale",
-    "weight_decay",
-    "epochs",
-    "warmup_epochs",
-    "eval_every",
-    "grad_clip",
-    "amp",
-    "early_stopping",
-    "patience",
-    "solver_warmup_epochs",
-    "solver_ramp_epochs",
-    "deterministic",
-    "ema_decay",
-    "teacher_ckpt",
-    "min_lr_ratio",
-    "grad_scaler_init_scale",
-    "device",
-    "num_threads",
-    "cudnn_benchmark",
+    "batch_size", "workers", "pin_memory", "lr", "backbone_lr_scale", "weight_decay",
+    "epochs", "warmup_epochs", "eval_every", "grad_clip", "amp", "early_stopping",
+    "patience", "solver_warmup_epochs", "solver_ramp_epochs", "deterministic",
+    "ema_decay", "teacher_ckpt", "min_lr_ratio", "grad_scaler_init_scale",
+    "device", "num_threads", "cudnn_benchmark",
+    # Optimizer & Scheduler additions (Gen 18)
+    "optimizer", "scheduler_type", "wsd_stable_ratio",
+    "auto_lr_finder", "lr_finder_min_lr", "lr_finder_max_lr", "lr_finder_num_iter", "lr_finder_max_safe_lr",
+    "prodigy_d_coef", "prodigy_growth_rate", "prodigy_d_max_cap", "prodigy_d_warmup_steps",
+    "prodigy_grad_spike_thresh", "prodigy_use_rms_clipping", "prodigy_d0",
 }
 
 ALLOWED_EVAL_KEYS = {

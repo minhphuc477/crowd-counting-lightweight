@@ -11,19 +11,19 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.training import (
-    get_git_info, load_rng_state, make_generator, make_scheduler,
+    get_git_info, load_rng_state, make_generator,
     safe_torch_load, seed_everything, seed_worker,
 )
 
 from rmr_v3.checkpoint import CheckpointManager, EMAManager
 from rmr_v3.config import compute_config_hash, validate_resume_compatibility, validate_v3_config
 from rmr_v3.engine import (
-    build_optimizer,
     evaluate_v3,
     make_loss_cfg,
     make_model,
     train_one_epoch,
 )
+from rmr_v3.optim import build_v3_optimizer, build_v3_scheduler, maybe_run_safe_lr_finder
 from rmr_v3.kd import DensityMapKDLoss
 from rmr_v3.reporting import TRAIN_LOG_FIELDNAMES, format_epoch_row, format_eval_block
 from rmr_v3.tracking import format_dynamic_training_banner
@@ -220,10 +220,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         flush=True,
     )
 
-    optimizer = build_optimizer(model, cfg, lr_init)
-    warmup_epochs = int(cfg.get("train", {}).get("warmup_epochs", 5))
-    min_lr_ratio = float(cfg.get("train", {}).get("min_lr_ratio", 0.05))
-    scheduler = make_scheduler(optimizer, epochs, warmup_epochs, min_lr_ratio=min_lr_ratio)
+    optimizer = build_v3_optimizer(model, cfg, lr_init)
+    scheduler = build_v3_scheduler(optimizer, cfg, epochs)
     amp = bool(cfg.get("train", {}).get("amp", True) and device.type == "cuda")
     scaler_init_scale = float(cfg.get("train", {}).get("grad_scaler_init_scale", 1024.0))
     scaler = torch.amp.GradScaler("cuda" if device.type == "cuda" else "cpu", enabled=amp, init_scale=scaler_init_scale)
@@ -258,6 +256,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         best_mae = float(ckpt.get("best_mae", float("inf")))
         epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0)) if patience > 0 else 0
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
+    else:
+        maybe_run_safe_lr_finder(model, optimizer, train_loader, loss_cfg, cfg, device)
 
     ckpt_manager = CheckpointManager(
         out_dir=out_dir,
