@@ -1,14 +1,17 @@
-# SUB60-E63: Single-Variable Control - Gradient Conflict Cure (Zero Curvature & Scale Alignment Sabotage)
+# SUB60-E63: Single-Variable Control - Evidence-Anchored Trust Region (EATR) Solver
 # Scientific Purpose:
-# Directly addresses the severe gradient conflict identified in multi-loss diagnostics:
-# 1. cos(theta) between curvature loss and count_nb loss is -0.956 to -0.328 (destructive counter-force).
-#    Curvature loss penalizes local spatial derivative variance, actively suppressing high-frequency Dirac peaks
-#    in dense crowd clusters.
-# 2. cos(theta) between curvature and physical scale alignment is -0.606.
-# e63 eliminates both conflicting auxiliary terms: lambda_curvature: 0.0 and lambda_scale_align: 0.0,
-# ensuring the backbone optimization landscape is strictly aligned with the forward observation operator.
+# Directly addresses the SIRT Solver Density Ceiling identified in code diagnostics.
+# In canonical e34, the trust region step kappa = 0.35 with constant floor tau = 0.025 restricts
+# positive growth from a near-zero carrier state to (1 + 0.35)^6 * 0.025 = 0.151 heads/cell.
+# It is mathematically impossible for the solver to reach dense crowd levels (1.0 - 4.0 heads/cell),
+# capping Dense MAE at ~125-135.
+# EATR projects the predicted regional rate rho_R back onto the spatial grid (rho_spatial = A* rho_R / cov_1)
+# and anchors the positive trust floor to max(tau, alpha_eatr * rho_spatial).
+# In dense crowd clusters where regional evidence predicts rho_spatial ~ 0.5 - 2.0 heads/cell,
+# allowable step sizes increase from 0.00875 to 0.175 - 0.26 per iteration, eliminating the 0.151 ceiling.
+# In empty background, rho_spatial ~ 0.0, preserving the standard 0.025 floor and preventing false alarms.
 # Base: Exactly sub60_e34 anchor (73.04 MAE, RMSE 110.79, Bias -3.85, Dense 123.73).
-# Single Change vs e34: lambda_curvature: 0.0, lambda_scale_align: 0.0.
+# Single Change vs e34: evidence_anchored_trust: true, eatr_alpha: 0.5.
 # Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -55,6 +58,8 @@ model:
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
+  evidence_anchored_trust: true
+  eatr_alpha: 0.5
   enable_solver: true
   solver_mode: additive
   iterations: 6
@@ -110,12 +115,12 @@ loss:
   lambda_trunc_nb: 0.2
   count_loss_mode: nb
   count_nb_dispersion: 50.0
-  lambda_scale_align: 0.0
+  lambda_scale_align: 0.05
   scale_align_tau_dense: 0.12
   scale_align_tau_sparse: 0.03
   scale_align_kernel: 5
   scale_align_mask_bg: true
-  lambda_curvature: 0.0
+  lambda_curvature: 0.5
   curvature_gate_threshold: 0.08
   curvature_gate_kernel: 5
   curvature_gate_mode: hard
@@ -145,4 +150,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e63_gradient_conflict_cure
+output_dir: runs/sha_a/sub60_e63_eatr_solver

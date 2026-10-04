@@ -155,6 +155,9 @@ def solve_inverse_measure(
         scale_seeded_carrier=getattr(cfg, "scale_seeded_carrier", False),
         scale_seed_eps=getattr(cfg, "scale_seed_eps", 0.02),
         trust_region_floor_dense=getattr(cfg, "trust_region_floor_dense", 0.025),
+        evidence_anchored_trust=getattr(cfg, "evidence_anchored_trust", False),
+        eatr_alpha=getattr(cfg, "eatr_alpha", 0.5),
+        regional_rate=regional_evidence.get("rate"),
     )
 
     y = solver_res["y"]

@@ -10,6 +10,7 @@ from rmr_core.operators import (
     RegionSet,
     charbonnier_tv_step,
     partition_regions_by_scale,
+    regional_adjoint,
     regional_sum,
     weighted_coverage,
     weighted_normalized_adjoint_field,
@@ -100,6 +101,9 @@ def unrolled_sirt_solver(
     scale_seeded_carrier: bool = False,
     scale_seed_eps: float = 0.02,
     trust_region_floor_dense: float = 0.025,
+    evidence_anchored_trust: bool = False,
+    eatr_alpha: float = 0.5,
+    regional_rate: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
@@ -171,6 +175,14 @@ def unrolled_sirt_solver(
                 scale_confidence = F.interpolate(
                     scale_confidence, size=(h, w), mode="bilinear", align_corners=False
                 )
+
+    eatr_floor = None
+    if evidence_anchored_trust and regional_rate is not None:
+        cov_1 = weighted_coverage(torch.ones_like(weight_solver), regions, h, w, eps=eps)
+        r_rate = regional_rate.unsqueeze(1) if regional_rate.ndim == 2 else regional_rate
+        rho_back = regional_adjoint(r_rate.float().detach(), regions.boxes, h, w, out_dtype=torch.float32)
+        rho_spatial = rho_back / cov_1.clamp_min(eps)
+        eatr_floor = float(eatr_alpha) * rho_spatial
 
     y_curr = y0
     y_prev = y0
@@ -322,6 +334,8 @@ def unrolled_sirt_solver(
                 base_bound_pos = torch.clamp_min(torch.maximum(z_state.float(), seed_supp), eff_floor)
             else:
                 base_bound_pos = base_bound
+            if eatr_floor is not None:
+                base_bound_pos = torch.maximum(base_bound_pos, eatr_floor)
             if scale_routed_trust and scale_routing_weights is not None:
                 bound_pos = eff_pos_kappa * base_bound_pos
             elif asymmetric_trust:

@@ -63,7 +63,8 @@ def _density_activate(
 
     if density_adaptive_scale:
         gamma_val = density_scale_gamma.clamp_min(0.0) if isinstance(density_scale_gamma, torch.Tensor) else max(float(density_scale_gamma), 0.0)
-        y_base = y_base * (1.0 + gamma_val * F.relu(z))
+        y_loc = _pool_local_density(y_base.float(), 5)
+        y_base = y_base * (1.0 + gamma_val * torch.sigmoid((y_loc - 0.08) / 0.03))
 
     if density_curvature and curvature_alpha is not None:
         alpha_eff = F.softplus(curvature_alpha)
@@ -123,8 +124,10 @@ class FineMeasureHead(nn.Module):
         density_adaptive_scale: bool = False,
         density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False,
+        scale_prior_boost: float = 0.0,
     ):
         super().__init__()
+        self.scale_prior_boost = float(scale_prior_boost)
         self.subpixel_stride2 = bool(subpixel_stride2)
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
@@ -180,7 +183,12 @@ class FineMeasureHead(nn.Module):
         z: torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute calibrated non-negative measure Y0 from latent logit field z0."""
+        if scale_weights is not None and getattr(self, "scale_prior_boost", 0.0) > 0.0:
+            sw_b = scale_weights if scale_weights.shape[-2:] == z.shape[-2:] else F.interpolate(
+                scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
+            )
+            z = z + float(self.scale_prior_boost) * sw_b[:, 0:1, :, :].float()
+
         if self.scale_conditioned and scale_weights is not None:
             if scale_weights.shape[-2:] != z.shape[-2:]:
                 scale_weights = F.interpolate(
@@ -197,7 +205,8 @@ class FineMeasureHead(nn.Module):
                 y_base = _smooth_floor(y_base, self.floor_tau)
             if self.density_adaptive_scale:
                 g_val = self.density_scale_gamma.clamp_min(0.0) if isinstance(self.density_scale_gamma, torch.Tensor) else max(float(self.density_scale_gamma), 0.0)
-                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
+                y_loc = _pool_local_density(y_base.float(), 5)
+                y_base = y_base * (1.0 + g_val * torch.sigmoid((y_loc - 0.08) / 0.03))
             if self.density_curvature:
                 alpha_eff = F.softplus(self.curvature_alpha)
                 orig_dtype = y_base.dtype
@@ -261,7 +270,6 @@ class FineMeasureHead(nn.Module):
         if self.temp_softplus or self.scale_conditioned or self.density_curvature:
             return self.activate(z, scale_weights=scale_weights)
         return z
-
 
 
 class ScaleConditionedFineHead(nn.Module):
@@ -401,6 +409,7 @@ def build_fine_head(
     density_adaptive_scale: bool = False,
     density_scale_gamma: float = 0.0,
     density_scale_learnable: bool = False,
+    scale_prior_boost: float = 0.0,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     if scale_conditioned_fine_head:
@@ -437,4 +446,5 @@ def build_fine_head(
         density_adaptive_scale=density_adaptive_scale,
         density_scale_gamma=density_scale_gamma,
         density_scale_learnable=density_scale_learnable,
+        scale_prior_boost=scale_prior_boost,
     )

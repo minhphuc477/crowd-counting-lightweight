@@ -167,6 +167,7 @@ ALLOWED_MODEL_KEYS = {
     "spatial_morozov", "morozov_gamma_scales",
     "scale_routed_trust", "scale_seeded_carrier", "scale_seed_eps",
     "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
+    "evidence_anchored_trust", "eatr_alpha", "scale_prior_boost",
 }
 
 

@@ -1,12 +1,17 @@
-# SUB60-E65: Single-Variable Control - Dual Count Rebalancing & Curvature Removal
+# SUB60-E64: Single-Variable Control - Fixed Density-Adaptive FineMeasureHead
 # Scientific Purpose:
-# Directly addresses the count loss gradient explosion (norm = 417.72 in e34) and curvature interference:
-# In e59, pure linear count loss (lambda_count_l1: 1.0) caused uniform DC noise across all 16,384 pixels.
-# e65 pairs primary Negative-Binomial count loss (rebalanced to lambda_count: 0.80) with a gentle auxiliary
-# L1 count penalty (lambda_count_l1: 0.01) to provide global scale anchoring without DC background corruption,
-# combined with removing curvature sabotage (lambda_curvature: 0.0).
-# Base: Sub60_e34 anchor (73.04 MAE, RMSE 110.79, Bias -3.85, Dense 123.73).
-# Single Change vs e34: lambda_count: 0.80, lambda_count_l1: 0.01, lambda_curvature: 0.0.
+# Directly addresses the FineMeasureHead dead code flaw uncovered during empirical code forensics.
+# In earlier implementations, density_adaptive_scale relied on F.relu(z), which was mathematically
+# dead because carrier logit z <= -0.66 everywhere on ShanghaiTech Part A images (F.relu(z) == 0.0 on 100% of dense pixels).
+# The corrected FineMeasureHead in rmr_core/heads.py computes local pooled carrier density
+# y_loc = _pool_local_density(y_base.float(), 5) and applies a smooth sigmoid transition:
+# gate = torch.sigmoid((y_loc - 0.08) / 0.03), scaling carrier density by:
+# y_out = y_base * (1.0 + gamma * gate)
+# In dense clusters (y_loc >= 0.15), gate -> 1.0, cleanly boosting carrier density by up to (1 + gamma)x = 2.0x,
+# allowing the carrier to initiate solver iterations at peak levels >= 1.5 - 2.5 heads/cell.
+# In sparse/background regions (y_loc <= 0.02), gate -> 0.0, strictly preserving background zero-suppression.
+# Base: Exactly sub60_e34 anchor (73.04 MAE, RMSE 110.79, Bias -3.85, Dense 123.73).
+# Single Change vs e34: density_adaptive_scale: true, density_scale_gamma: 1.0.
 # Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -53,6 +58,8 @@ model:
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
+  density_adaptive_scale: true
+  density_scale_gamma: 1.0
   enable_solver: true
   solver_mode: additive
   iterations: 6
@@ -100,8 +107,7 @@ loss:
   kappa_flat16: 20.0
   normalize_flat_dm16: true
   dm_target: dual
-  lambda_count: 0.8
-  lambda_count_l1: 0.01
+  lambda_count: 1.0
   lambda_flat_dm16: 1.0
   lambda_cell: 0.0
   lambda_region_nb: 0.2
@@ -114,7 +120,7 @@ loss:
   scale_align_tau_sparse: 0.03
   scale_align_kernel: 5
   scale_align_mask_bg: true
-  lambda_curvature: 0.0
+  lambda_curvature: 0.5
   curvature_gate_threshold: 0.08
   curvature_gate_kernel: 5
   curvature_gate_mode: hard
@@ -144,4 +150,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e65_dual_count_rebalance
+output_dir: runs/sha_a/sub60_e64_density_adaptive_head

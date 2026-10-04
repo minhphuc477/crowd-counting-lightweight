@@ -203,6 +203,9 @@ class RMRv3Config:
     density_adaptive_scale: bool = False
     density_scale_gamma: float = 0.0
     density_scale_learnable: bool = False
+    scale_prior_boost: float = 0.0
+    evidence_anchored_trust: bool = False
+    eatr_alpha: float = 0.5
 
     # Banned solver anti-patterns (retained for validator rejection)
     use_nesterov_momentum: bool = False
