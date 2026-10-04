@@ -412,25 +412,14 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 flush=True,
             )
         else:
-            print(
-                format_epoch_row(
-                    epoch=epoch,
-                    epochs=epochs,
-                    row_log=row_log,
-                    loss_avgs=loss_avgs,
-                    loss_cfg=loss_cfg,
-                    solver_strength=solver_strength,
-                ),
-                flush=True,
-            )
+            print(format_epoch_row(
+                epoch=epoch, epochs=epochs, row_log=row_log,
+                loss_avgs=loss_avgs, loss_cfg=loss_cfg, solver_strength=solver_strength,
+            ), flush=True)
 
         ckpt_manager.save_last(
-            epoch=epoch + 1,
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            solver_strength=solver_strength,
+            epoch=epoch + 1, model=model, optimizer=optimizer,
+            scheduler=scheduler, scaler=scaler, solver_strength=solver_strength,
             ema_manager=ema_manager,
         )
 

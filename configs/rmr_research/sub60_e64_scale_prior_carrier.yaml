@@ -1,15 +1,14 @@
-# SUB60-E62: Single-Variable Architectural Control - Scale-Prior Carrier Calibration (Code in rmr_core/heads.py)
+# SUB60-E64: Single-Variable Control - Scale-Prior Logit Conditioning (SPLC) Carrier Head
 # Scientific Purpose:
-# Directly addresses the negative logit ceiling identified in empirical diagnostics:
-# In sub60_e34, empirical test on 182 test images revealed carrier logit z0 <= -0.66 (0.0% positive logits)
-# on dense crowd images, artificially capping softplus carrier density at y0 <= 0.32 heads/cell.
-# e62 activates the newly implemented Scale-Prior Logit Calibration in FineMeasureHead (scale_prior_boost: 2.0):
-# z_eff(x) = z0(x) + delta * pi_fine(x).
-# In dense clusters (pi_fine ~ 1.0), this shifts z out of the negative trench (z_eff ~ +1.84, y0 ~ 2.0 heads/cell),
-# restoring active O(1) gradients (sigma(z) > 0.85), while in empty background (pi_fine = 0.0), z remains at -4.1422
-# preserving perfect zero-suppression.
+# Directly addresses the negative carrier logit ceiling z0 <= -0.66 identified in code forensics.
+# In canonical e34, carrier logits z0 <= -0.66 across all dense crowd images, mathematically
+# capping initial carrier density y0 = softplus(z0) at <= 0.32 heads/cell.
+# SPLC modulates carrier logits spatially using the fine scale prior pi_fine from ScaleRoutingHead:
+# z_eff(x) = z0(x) + Delta * pi_fine(x), with Delta = 2.0.
+# In dense crowd clusters where pi_fine -> 1.0, z_eff rises from -0.66 to +1.84, allowing
+# carrier density y0 to initialize at ~1.99 heads/cell without inflating empty background.
 # Base: Exactly sub60_e34 anchor (73.04 MAE, RMSE 110.79, Bias -3.85, Dense 123.73).
-# Single Change vs e34: scale_prior_boost: 2.0 (0 extra parameters).
+# Single Change vs e34: scale_prior_boost: 2.0.
 # Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -147,4 +146,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e62_scale_prior_carrier
+output_dir: runs/sha_a/sub60_e64_scale_prior_carrier

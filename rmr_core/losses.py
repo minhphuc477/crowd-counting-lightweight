@@ -305,18 +305,14 @@ def flat_dm16_loss(
     normalize_by_count: bool = True,
     strict: bool = True,
     auto_scale_kappa: bool = True,
+    norm_mode: str = "count",
+    ref_count: float = 100.0,
 ) -> torch.Tensor:
     """Flat Dirichlet-Multinomial-16 allocation loss on 16px blocks (backward compatible)."""
     return flat_dm_block_loss(
-        pred_map,
-        target_map,
-        block_px=16,
-        kappa=kappa,
-        stride=stride,
-        eps=eps,
-        normalize_by_count=normalize_by_count,
-        strict=strict,
-        auto_scale_kappa=auto_scale_kappa,
+        pred_map, target_map, block_px=16, kappa=kappa, stride=stride, eps=eps,
+        normalize_by_count=normalize_by_count, strict=strict, auto_scale_kappa=auto_scale_kappa,
+        norm_mode=norm_mode, ref_count=ref_count,
     )
 
 

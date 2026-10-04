@@ -435,14 +435,11 @@ def compute_rmr_v3_losses(
 
     router = TargetSupervisionRouter(cfg.dm_target)
     losses = _compute_core_losses(
-        target_float=target_float, target_region=target_region,
-        y=y, y0=y0, regions=regions, mean_region=mean_region,
-        dispersion_region=dispersion_region, cfg=cfg, points=points, router=router,
+        target_float=target_float, target_region=target_region, y=y, y0=y0, regions=regions,
+        mean_region=mean_region, dispersion_region=dispersion_region, cfg=cfg, points=points, router=router,
     )
-
     return _compute_auxiliary_losses(
-        losses=losses, outputs=outputs, target_float=target_float,
-        target_region=target_region, mean_region=mean_region,
-        dispersion_region=dispersion_region, y=y, y0=y0,
-        cfg=cfg, zero_val=zero_val, router=router, points=points,
+        losses=losses, outputs=outputs, target_float=target_float, target_region=target_region,
+        mean_region=mean_region, dispersion_region=dispersion_region, y=y, y0=y0, cfg=cfg,
+        zero_val=zero_val, router=router, points=points,
     )

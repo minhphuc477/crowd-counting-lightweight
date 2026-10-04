@@ -412,39 +412,17 @@ def build_fine_head(
     scale_prior_boost: float = 0.0,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
+    kw = dict(
+        width=width, init_bias=init_bias, temp_softplus=temp_softplus,
+        density_curvature=density_curvature, gated_density_curvature=gated_density_curvature,
+        curvature_dense_threshold=curvature_dense_threshold, curvature_gate_beta=curvature_gate_beta,
+        curvature_pool_kernel=curvature_pool_kernel, floor_tau=floor_tau,
+        curvature_alpha_init=curvature_alpha_init, density_adaptive_scale=density_adaptive_scale,
+        density_scale_gamma=density_scale_gamma, density_scale_learnable=density_scale_learnable,
+    )
     if scale_conditioned_fine_head:
-        return ScaleConditionedFineHead(
-            width=width,
-            num_scales=num_scales,
-            init_bias=init_bias,
-            temp_softplus=temp_softplus,
-            density_curvature=density_curvature,
-            gated_density_curvature=gated_density_curvature,
-            curvature_dense_threshold=curvature_dense_threshold,
-            curvature_gate_beta=curvature_gate_beta,
-            curvature_pool_kernel=curvature_pool_kernel,
-            floor_tau=floor_tau,
-            curvature_alpha_init=curvature_alpha_init,
-            density_adaptive_scale=density_adaptive_scale,
-            density_scale_gamma=density_scale_gamma,
-            density_scale_learnable=density_scale_learnable,
-        )
+        return ScaleConditionedFineHead(num_scales=num_scales, **kw)
     return FineMeasureHead(
-        width=width,
-        init_bias=init_bias,
-        temp_softplus=temp_softplus,
-        scale_conditioned=scale_conditioned_prior,
-        num_scales=num_scales,
-        density_curvature=density_curvature,
-        gated_density_curvature=gated_density_curvature,
-        curvature_dense_threshold=curvature_dense_threshold,
-        curvature_gate_beta=curvature_gate_beta,
-        curvature_pool_kernel=curvature_pool_kernel,
-        subpixel_stride2=subpixel_stride2,
-        floor_tau=floor_tau,
-        curvature_alpha_init=curvature_alpha_init,
-        density_adaptive_scale=density_adaptive_scale,
-        density_scale_gamma=density_scale_gamma,
-        density_scale_learnable=density_scale_learnable,
-        scale_prior_boost=scale_prior_boost,
+        scale_conditioned=scale_conditioned_prior, num_scales=num_scales,
+        subpixel_stride2=subpixel_stride2, scale_prior_boost=scale_prior_boost, **kw
     )

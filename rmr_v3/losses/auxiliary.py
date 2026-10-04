@@ -427,16 +427,8 @@ def physical_scale_alignment_loss(
     target_pi = torch.cat(target_pi_list, dim=1).to(dtype=work_dtype)
 
     pred_pi = scale_weights.to(dtype=work_dtype).clamp(min=float(eps), max=1.0)
-    target_log_target = torch.where(
-        target_pi > 1e-6,
-        target_pi * torch.log(target_pi.clamp_min(1e-6)),
-        torch.zeros_like(target_pi),
-    )
-    target_log_pred = torch.where(
-        target_pi > 1e-6,
-        target_pi * torch.log(pred_pi.clamp_min(max(float(eps), 1e-7))),
-        torch.zeros_like(target_pi),
-    )
+    target_log_target = torch.where(target_pi > 1e-6, target_pi * torch.log(target_pi.clamp_min(1e-6)), torch.zeros_like(target_pi))
+    target_log_pred = torch.where(target_pi > 1e-6, target_pi * torch.log(pred_pi.clamp_min(max(float(eps), 1e-7))), torch.zeros_like(target_pi))
     kl_per_pixel = (target_log_target - target_log_pred).sum(dim=1)
 
     if mask_background:
@@ -444,7 +436,6 @@ def physical_scale_alignment_loss(
         fg_sum_sample = fg_mask.sum(dim=(-2, -1), keepdim=True)
         has_fg = (fg_sum_sample > 0).float()
         sample_loss = (kl_per_pixel * fg_mask).sum(dim=(-2, -1), keepdim=True) / fg_sum_sample.clamp_min(1.0)
-        total_valid = has_fg.sum().clamp_min(1.0)
-        return (sample_loss * has_fg).sum() / total_valid
+        return (sample_loss * has_fg).sum() / has_fg.sum().clamp_min(1.0)
 
     return kl_per_pixel.mean()

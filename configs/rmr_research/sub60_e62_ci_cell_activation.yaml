@@ -1,20 +1,12 @@
-# SUB60-E65: Grand Architectural Synthesis (SPLC + EATR + Adaptive Head + Calibrated O(1) Loss)
+# SUB60-E62: Single-Variable Control - Count-Invariant Cell Loss (CI-Cell v2) Activation
 # Scientific Purpose:
-# Unifies all mathematically diagnosed and code-verified architectural breakthroughs into a single model:
-# 1. Scale-Prior Logit Conditioning (SPLC, scale_prior_boost: 2.0):
-#    Lifts carrier logit z0 from -0.66 to +1.84 in dense clusters based on ScaleRoutingHead pi_fine,
-#    enabling carrier density to initialize at ~2.0 heads/cell without inflating background.
-# 2. Corrected Density-Adaptive Expansion (density_adaptive_scale: true, gamma: 1.0):
-#    Applies local pooled density sigmoid gating to smoothly expand peak crowd densities.
-# 3. Evidence-Anchored Trust Region (EATR, evidence_anchored_trust: true, eatr_alpha: 0.5):
-#    Projects regional predicted rate rho_R to the spatial grid, raising the solver positive step floor
-#    from 0.025 to 0.175 - 0.26 per iteration in dense crowds, completely eliminating the 0.151 ceiling.
-# 4. Calibrated Unnormalized Flat DM16 (dm_norm_mode: unnorm_ref, dm_ref_count: 100.0):
-#    Eliminates O(1/N^2) gradient starvation, delivering equal O(1) gradient signals to sparse and dense heads.
-# 5. Multi-Loss Orthogonalization:
-#    Eliminates conflicting regularizers (lambda_curvature: 0.0, lambda_scale_align: 0.0) and balances
-#    global and regional count supervision (lambda_count: 0.50, lambda_region_nb: 0.40).
-# Base: Substantive architectural synthesis on e34 anchor.
+# Directly addresses the negative logit ceiling identified in empirical diagnosis.
+# In baseline e34, lambda_cell: 0.0 leaves the fine measure head unconstrained at pixel level,
+# allowing z0 <= -0.66 everywhere on dense images.
+# e62 activates count_invariant cell loss with lambda_cell: 0.10, providing an O(1) gradient
+# push directly on carrier logits at high-density points without background penalty.
+# Base: Exactly sub60_e34 anchor (73.04 MAE, RMSE 110.79, Bias -3.85, Dense 123.73).
+# Single Change vs e34: lambda_cell: 0.10, cell_loss_mode: count_invariant, cell_alpha: 2.0, cell_beta: 1.0.
 # Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
 seed: 42
 data:
@@ -61,11 +53,6 @@ model:
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
-  scale_prior_boost: 2.0
-  density_adaptive_scale: true
-  density_scale_gamma: 1.0
-  evidence_anchored_trust: true
-  eatr_alpha: 0.5
   enable_solver: true
   solver_mode: additive
   iterations: 6
@@ -112,23 +99,24 @@ loss:
   allocation_loss_type: flat_dm16
   kappa_flat16: 20.0
   normalize_flat_dm16: true
-  dm_norm_mode: unnorm_ref
-  dm_ref_count: 100.0
   dm_target: dual
-  lambda_count: 0.50
+  lambda_count: 1.0
   lambda_flat_dm16: 1.0
-  lambda_cell: 0.0
-  lambda_region_nb: 0.40
+  lambda_cell: 0.10
+  cell_loss_mode: count_invariant
+  cell_alpha: 2.0
+  cell_beta: 1.0
+  lambda_region_nb: 0.2
   lambda_hurdle: 0.1
   lambda_trunc_nb: 0.2
   count_loss_mode: nb
   count_nb_dispersion: 50.0
-  lambda_scale_align: 0.0
+  lambda_scale_align: 0.05
   scale_align_tau_dense: 0.12
   scale_align_tau_sparse: 0.03
   scale_align_kernel: 5
   scale_align_mask_bg: true
-  lambda_curvature: 0.0
+  lambda_curvature: 0.5
   curvature_gate_threshold: 0.08
   curvature_gate_kernel: 5
   curvature_gate_mode: hard
@@ -158,4 +146,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e65_grand_architectural_synthesis
+output_dir: runs/sha_a/sub60_e62_ci_cell_activation
