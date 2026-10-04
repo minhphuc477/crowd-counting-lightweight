@@ -63,8 +63,7 @@ def _density_activate(
 
     if density_adaptive_scale:
         gamma_val = density_scale_gamma.clamp_min(0.0) if isinstance(density_scale_gamma, torch.Tensor) else max(float(density_scale_gamma), 0.0)
-        y_loc = _pool_local_density(y_base.float(), 5)
-        y_base = y_base * (1.0 + gamma_val * torch.sigmoid((y_loc - 0.08) / 0.03))
+        y_base = y_base * (1.0 + gamma_val * F.relu(z))
 
     if density_curvature and curvature_alpha is not None:
         alpha_eff = F.softplus(curvature_alpha)
