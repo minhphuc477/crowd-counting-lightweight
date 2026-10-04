@@ -103,7 +103,7 @@ loss:
   dm_ref_count: 100.0
   dm_target: dual
   lambda_count: 1.0
-  lambda_flat_dm16: 1.0
+  lambda_flat_dm16: 0.01
   lambda_cell: 0.0
   lambda_region_nb: 0.2
   lambda_hurdle: 0.1
