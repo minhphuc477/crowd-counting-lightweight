@@ -88,28 +88,21 @@ class SafeProdigy(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        # Step 1: Detect non-finite values and check global gradient norm
-        total_grad_norm_sq = 0.0
-        has_invalid_grad = False
-
+        # Step 1: Detect non-finite values and compute global gradient norm with zero intermediate syncs
+        grad_norms_sq = []
         for group in self.param_groups:
             for p in group["params"]:
-                if p.grad is None:
-                    continue
-                g = p.grad.data
-                if not torch.isfinite(g).all():
-                    has_invalid_grad = True
-                    break
-                total_grad_norm_sq += float(g.norm(2).item() ** 2)
-            if has_invalid_grad:
-                break
+                if p.grad is not None:
+                    grad_norms_sq.append(p.grad.data.norm(2).square())
 
-        if has_invalid_grad:
+        if not grad_norms_sq:
+            return loss
+
+        global_grad_norm = float(torch.stack(grad_norms_sq).sum().sqrt().item())
+        if not math.isfinite(global_grad_norm):
             logger.warning("[SafeProdigy] Non-finite gradient detected. Zeroing grads and skipping step.")
             self.zero_grad(set_to_none=True)
             return loss
-
-        global_grad_norm = math.sqrt(total_grad_norm_sq)
 
         group0 = self.param_groups[0]
         k = group0["k"]
@@ -132,14 +125,15 @@ class SafeProdigy(Optimizer):
         # Safety gating: only learn distance D past warmup and below gradient spike threshold
         is_safe_for_d = (k >= d_warmup_steps) and (global_grad_norm <= grad_spike_thresh)
 
-        delta_numerator = 0.0
-        delta_denom = 0.0
+        num_terms = []
+        denom_terms = []
 
         # Step 2: Accumulate Adam moments and D adaptation statistics
         for group in self.param_groups:
             d0 = group["d0"]
             group_lr = group["lr"]
             dlr = d * group_lr * bias_correction
+            group_num_scale = (d / d0) * dlr
 
             for p in group["params"]:
                 if p.grad is None:
@@ -167,12 +161,15 @@ class SafeProdigy(Optimizer):
                     sliced_grad = grad.flatten()[::slice_p]
                     sliced_p = p.data.flatten()[::slice_p]
                     x0_diff = p0 - sliced_p
-                    dot_prod = float(torch.dot(sliced_grad, x0_diff).item())
-                    delta_numerator += (d / d0) * dlr * dot_prod
+                    dot_prod = torch.dot(sliced_grad, x0_diff)
+                    num_terms.append(dot_prod * group_num_scale)
 
                     alpha_denom = ((d / d0) * d) if safeguard_warmup else ((d / d0) * dlr)
                     s.mul_(beta3).add_(sliced_grad, alpha=alpha_denom)
-                    delta_denom += float(s.abs().sum().item())
+                    denom_terms.append(s.abs().sum())
+
+        delta_numerator = float(torch.stack(num_terms).sum().item()) if num_terms else 0.0
+        delta_denom = float(torch.stack(denom_terms).sum().item()) if denom_terms else 0.0
 
         # Step 3: Compute updated D with rate-limited growth and hard ceiling
         if is_safe_for_d and delta_denom > 0.0:
