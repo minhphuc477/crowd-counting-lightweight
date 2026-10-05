@@ -307,8 +307,9 @@ def test_rmr_v19_full_pipeline_forward_and_backward():
     assert any(p.grad is not None and torch.isfinite(p.grad).all() for p in model.encoder.parameters()), "Encoder received no gradients"
     assert model.fine_head.curvature_alpha.grad is not None
     assert model.scale_router.pw_scale.weight.grad is not None
-    # pw_aspect is detached from SIRT solver backprop to prevent autograd leak
-    assert model.scale_router.pw_aspect.weight.grad is None
+    # pw_aspect receives active finite gradient with autograd restored
+    assert model.scale_router.pw_aspect.weight.grad is not None
+    assert torch.isfinite(model.scale_router.pw_aspect.weight.grad).all()
 
 
 def test_rmr_v19_numerical_stability_edge_cases():

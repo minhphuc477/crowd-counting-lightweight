@@ -44,20 +44,26 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
     ]
 
     if opt_type in ("prodigy", "safeprodigy", "safe_prodigy"):
+        prodigy_groups = [
+            {"name": "backbone_decay", "params": bb_decay, "lr": backbone_scale, "weight_decay": wd},
+            {"name": "backbone_no_decay", "params": bb_no_decay, "lr": backbone_scale, "weight_decay": 0.0},
+            {"name": "main_decay", "params": other_decay, "lr": 1.0, "weight_decay": wd},
+            {"name": "main_no_decay", "params": other_no_decay, "lr": 1.0, "weight_decay": 0.0},
+        ]
         d_coef = float(train_cfg.get("prodigy_d_coef", 0.5))
         growth_rate = float(train_cfg.get("prodigy_growth_rate", 1.015))
         d_max_cap = float(train_cfg.get("prodigy_d_max_cap", 0.08))
         d_warmup = int(train_cfg.get("prodigy_d_warmup_steps", 400))
         grad_thresh = float(train_cfg.get("prodigy_grad_spike_thresh", 5.0))
-        use_rms = bool(train_cfg.get("prodigy_use_rms_clipping", True))
+        use_rms = bool(train_cfg.get("prodigy_use_rms_clipping", False))
         d0 = float(train_cfg.get("prodigy_d0", 1e-5))
 
         logger.info(
-            "[Optimizer] Initializing SafeProdigy: d_coef=%.2f, growth_rate=%.4f, d_max_cap=%.4f, warmup_steps=%d",
-            d_coef, growth_rate, d_max_cap, d_warmup,
+            "[Optimizer] Initializing SafeProdigy: d0=%.2e, d_coef=%.2f, growth_rate=%.4f, d_max_cap=%.4f, warmup_steps=%d",
+            d0, d_coef, growth_rate, d_max_cap, d_warmup,
         )
         return SafeProdigy(
-            param_groups,
+            prodigy_groups,
             lr=1.0,
             weight_decay=wd,
             d0=d0,

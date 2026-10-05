@@ -34,7 +34,7 @@ def make_wsd_scheduler(
     floor_ratio = float(min_lr_ratio)
 
     def wsd_lambda(epoch: int) -> float:
-        # Phase 1: Linear Warmup
+        # Phase 1: Linear Warmup ((epoch + 1) / w_epochs)
         if epoch < w_epochs:
             return max(1e-3, float(epoch + 1) / float(w_epochs))
 
@@ -42,8 +42,8 @@ def make_wsd_scheduler(
         if epoch < s_epochs:
             return 1.0
 
-        # Phase 3: Decisive Cosine Annealing to Floor
-        decay_steps = max(1, total_epochs - s_epochs)
+        # Phase 3: Decisive Cosine Annealing to Floor (reaches floor_ratio at total_epochs - 1)
+        decay_steps = max(1, total_epochs - 1 - s_epochs)
         progress = min(1.0, float(epoch - s_epochs) / float(decay_steps))
         cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
         return floor_ratio + (1.0 - floor_ratio) * cosine

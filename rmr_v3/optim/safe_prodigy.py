@@ -157,34 +157,39 @@ class SafeProdigy(Optimizer):
                 exp_avg.mul_(beta1).add_(grad, alpha=d * (1.0 - beta1))
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=d * d * (1.0 - beta2))
 
-                if is_safe_for_d:
-                    sliced_grad = grad.flatten()[::slice_p]
-                    sliced_p = p.data.flatten()[::slice_p]
-                    x0_diff = p0 - sliced_p
-                    dot_prod = torch.dot(sliced_grad, x0_diff)
-                    num_terms.append(dot_prod * group_num_scale)
+                # Prodigy distance tracking statistics accumulate continuously from step 0
+                sliced_grad = grad.flatten()[::slice_p]
+                sliced_p = p.data.flatten()[::slice_p]
+                x0_diff = p0 - sliced_p
+                dot_prod = torch.dot(sliced_grad, x0_diff)
+                num_terms.append(dot_prod * group_num_scale)
 
-                    alpha_denom = ((d / d0) * d) if safeguard_warmup else ((d / d0) * dlr)
-                    s.mul_(beta3).add_(sliced_grad, alpha=alpha_denom)
-                    denom_terms.append(s.abs().sum())
+                alpha_denom = ((d / d0) * d) if safeguard_warmup else ((d / d0) * dlr)
+                s.mul_(beta3).add_(sliced_grad, alpha=alpha_denom)
+                denom_terms.append(s.abs().sum())
 
         delta_numerator = float(torch.stack(num_terms).sum().item()) if num_terms else 0.0
         delta_denom = float(torch.stack(denom_terms).sum().item()) if denom_terms else 0.0
 
         # Step 3: Compute updated D with rate-limited growth and hard ceiling
-        if is_safe_for_d and delta_denom > 0.0:
+        if delta_denom > 0.0:
             d_numerator = group0["d_numerator"] * beta3 + delta_numerator
             d_denom = delta_denom
             d_hat = d_coef * (d_numerator / d_denom)
-
-            # Strict rate-limited growth (fixes step-0 bypass bug)
-            allowed_max_d = min(d * growth_rate, d_max_cap)
-            if d_hat > d:
-                d = max(d, min(d_hat, allowed_max_d))
-
-            d = min(d, d_max_cap)
             group0["d_numerator"] = d_numerator
             group0["d_denom"] = d_denom
+
+            # Only allow d to adapt when past warmup and grad norm is healthy
+            if is_safe_for_d:
+                d0_val = group0["d0"]
+                if d == d0_val:
+                    # Allow escape from d0 without 1.015x rate limit lock
+                    d = max(d, min(d_hat, d_max_cap))
+                else:
+                    allowed_max_d = min(d * growth_rate, d_max_cap)
+                    if d_hat > d:
+                        d = max(d, min(d_hat, allowed_max_d))
+                d = min(d, d_max_cap)
         else:
             d = group0["d"]
 
