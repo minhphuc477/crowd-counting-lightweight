@@ -55,18 +55,21 @@ def test_wsd_scheduler_phases() -> None:
 
     # Epoch 10 (Warmup end / Start of flat plateau)
     for _ in range(10):
+        opt.step()
         sched.step()
     lr10 = opt.param_groups[0]["lr"]
     assert lr10 == pytest.approx(1e-3, rel=1e-3)
 
     # Epoch 50 (In the middle of flat stable plateau)
     for _ in range(40):
+        opt.step()
         sched.step()
     lr50 = opt.param_groups[0]["lr"]
     assert lr50 == pytest.approx(1e-3, rel=1e-3)
 
     # Epoch 99 (Decay end)
     for _ in range(49):
+        opt.step()
         sched.step()
     lr_end = opt.param_groups[0]["lr"]
     assert lr_end <= 1e-3 * 0.15
