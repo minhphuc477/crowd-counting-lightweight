@@ -91,6 +91,25 @@ def test_no_synthetic_padding_small_image():
         assert (cropped_pts[:, 1] >= 0).all() and (cropped_pts[:, 1] < crop_size).all()
 
 
+def test_pad_small_images_preserves_scale():
+    """When pad_small_images=True, small image is kept at drawn scale and padded with gray (128)."""
+    crop_size = 512
+    arr = np.full((300, 200, 3), 200, dtype=np.uint8)
+    img = Image.fromarray(arr)
+    pts = torch.tensor([[100.0, 150.0]])
+
+    cropped_t, cropped_pts = train_transform(
+        img, pts, crop_size=crop_size, scale_range=(1.0, 1.0), hflip_prob=0.0,
+        pad_small_images=True,
+    )
+    assert cropped_t.shape == (3, crop_size, crop_size)
+    assert cropped_pts.numel() == 2
+    # The gray border should exist and have values 128 / 255 = ~0.502
+    assert (cropped_t < 0.6).any()
+    # And the inner image area should have values 200 / 255 = ~0.784
+    assert (cropped_t > 0.7).any()
+
+
 def test_count_conservation_in_rasterization():
     """Rasterization must conserve the exact count of all valid points."""
     pts = torch.tensor([

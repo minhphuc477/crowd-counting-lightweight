@@ -113,6 +113,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
         preload=bool(cfg.get("data", {}).get("preload", False)),
+        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", False)),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -221,11 +222,13 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     )
 
     optimizer = build_v3_optimizer(model, cfg, lr_init)
+    loss_cfg = make_loss_cfg(cfg)
+    if resume_ckpt is None:
+        maybe_run_safe_lr_finder(model, optimizer, train_loader, loss_cfg, cfg, device)
     scheduler = build_v3_scheduler(optimizer, cfg, epochs)
     amp = bool(cfg.get("train", {}).get("amp", True) and device.type == "cuda")
     scaler_init_scale = float(cfg.get("train", {}).get("grad_scaler_init_scale", 1024.0))
     scaler = torch.amp.GradScaler("cuda" if device.type == "cuda" else "cpu", enabled=amp, init_scale=scaler_init_scale)
-    loss_cfg = make_loss_cfg(cfg)
     grad_clip = float(cfg.get("train", {}).get("grad_clip", 500.0))
     eval_every = int(cfg.get("train", {}).get("eval_every", 10))
     density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
@@ -256,8 +259,6 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         best_mae = float(ckpt.get("best_mae", float("inf")))
         epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0)) if patience > 0 else 0
         print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
-    else:
-        maybe_run_safe_lr_finder(model, optimizer, train_loader, loss_cfg, cfg, device)
 
     ckpt_manager = CheckpointManager(
         out_dir=out_dir,
@@ -313,6 +314,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             teacher_model=teacher_model,
             kd_loss_fn=kd_loss_fn,
         )
+        if hasattr(optimizer, "eval"):
+            optimizer.eval()
 
         row_log: dict[str, Any] = {
             "epoch": epoch + 1,

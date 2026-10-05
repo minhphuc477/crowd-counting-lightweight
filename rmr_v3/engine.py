@@ -147,6 +147,8 @@ def train_one_epoch(
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
     model.train()
+    if hasattr(optimizer, "train"):
+        optimizer.train()
     loss_tracker = LossTracker()
     diag_tracker = DiagnosticTracker(model)
 
@@ -202,5 +204,6 @@ def train_one_epoch(
         if n_batches <= 0 or batch_idx == n_batches - 1:
             diag_tracker.update(outputs)
 
-    scheduler.step()
+    if scheduler is not None:
+        scheduler.step()
     return loss_tracker.averages(), diag_tracker.summarize()

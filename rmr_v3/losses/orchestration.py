@@ -16,6 +16,8 @@ from rmr_core.losses import (
 from rmr_core.spectral import characteristic_function_loss, count_preserving_spectral_loss
 from .config import RMRv3LossConfig
 from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
+from .chfl import canonical_chfl_loss
+from .fidt import canonical_fidt_loss
 from .auxiliary import (
     count_harmonized_cell_loss,
     count_invariant_cell_loss,
@@ -167,11 +169,10 @@ def _compute_core_losses(
                 background_ratio=cfg.bayesian_background_ratio, stride=stride,
             )
         elif cfg.allocation_loss_type == "fidt":
-            loss_val = fidt_loss(
-                inp, points, k=getattr(cfg, "fidt_k", 6.0), stride=stride,
-                loss_type=getattr(cfg, "fidt_loss_type", "smooth_l1"),
-                normalize_by_count=getattr(cfg, "fidt_normalize_by_count", True),
-            )
+            if not getattr(cfg, "fidt_normalize_by_count", True):
+                loss_val = canonical_fidt_loss(inp, points, stride=stride, loss_mode=getattr(cfg, "fidt_loss_type", "smooth_l1"))
+            else:
+                loss_val = fidt_loss(inp, points, k=getattr(cfg, "fidt_k", 6.0), stride=stride, loss_type=getattr(cfg, "fidt_loss_type", "smooth_l1"), normalize_by_count=True)
         elif cfg.allocation_loss_type == "ot_sinkhorn":
             loss_val = sinkhorn_ot_loss(inp, points, reg=cfg.ot_reg, num_iters=cfg.ot_num_iters, stride=stride)
         elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
@@ -372,12 +373,9 @@ def _compute_auxiliary_losses(
     if getattr(cfg, "use_chfl_loss", False) and getattr(cfg, "lambda_chfl", 0.0) > 0.0:
         stride = int(getattr(cfg, "output_stride", 4))
         def _compute_chfl(dmap: torch.Tensor) -> torch.Tensor:
-            return characteristic_function_loss(
-                dmap, points,
-                omega_max=getattr(cfg, "chfl_omega_max", 0.5),
-                num_frequencies=getattr(cfg, "chfl_num_frequencies", 64),
-                stride=stride,
-            )
+            if getattr(cfg, "chfl_canonical", True):
+                return canonical_chfl_loss(dmap, points, chf_tik=getattr(cfg, "chfl_tik", 0.01), chf_step=getattr(cfg, "chfl_step", 16), bandwidth=getattr(cfg, "chfl_bandwidth", 8.0), stride=stride)
+            return characteristic_function_loss(dmap, points, omega_max=getattr(cfg, "chfl_omega_max", 0.5), num_frequencies=getattr(cfg, "chfl_num_frequencies", 64), stride=stride)
         loss_chfl, _ = router.dispatch(_compute_chfl, y, y0)
         losses["chfl"] = loss_chfl
         losses["total"] = losses["total"] + cfg.lambda_chfl * loss_chfl

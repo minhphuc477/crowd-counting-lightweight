@@ -76,7 +76,45 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
             decouple=True,
         )
 
+    if opt_type in ("schedule_free", "schedulefree", "adamw_schedulefree"):
+        from .schedule_free import AdamWScheduleFree
+        warmup_steps = int(train_cfg.get("schedule_free_warmup_steps", train_cfg.get("warmup_steps", 0)))
+        r = float(train_cfg.get("schedule_free_r", 0.0))
+        weight_lr_power = float(train_cfg.get("schedule_free_weight_lr_power", 2.0))
+        logger.info(
+            "[Optimizer] Initializing Meta FAIR Schedule-Free AdamW: lr=%.2e, wd=%.2e, warmup_steps=%d",
+            lr_init, wd, warmup_steps,
+        )
+        return AdamWScheduleFree(
+            param_groups,
+            lr=lr_init,
+            weight_decay=wd,
+            warmup_steps=warmup_steps,
+            r=r,
+            weight_lr_power=weight_lr_power,
+        )
+
     return torch.optim.AdamW(param_groups)
+
+
+class IdentityScheduler:
+    """No-op scheduler for schedule-free and parameter-free optimizers."""
+
+    def __init__(self, optimizer: torch.optim.Optimizer) -> None:
+        self.optimizer = optimizer
+        self.base_lrs = [g["lr"] for g in optimizer.param_groups]
+
+    def step(self, epoch: int | None = None) -> None:
+        pass
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"type": "identity"}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        pass
+
+    def get_last_lr(self) -> list[float]:
+        return [g["lr"] for g in self.optimizer.param_groups]
 
 
 def build_v3_scheduler(
@@ -84,8 +122,12 @@ def build_v3_scheduler(
     cfg: dict[str, Any],
     epochs: int,
 ) -> Any:
-    """Build LR scheduler supporting Cosine Annealing and Warmup-Stable-Decay (WSD)."""
+    """Build LR scheduler supporting Cosine Annealing, WSD, and Schedule-Free."""
     train_cfg = cfg.get("train", {})
+    opt_type = str(train_cfg.get("optimizer", "adamw")).lower().strip()
+    if opt_type in ("schedule_free", "schedulefree", "adamw_schedulefree"):
+        return IdentityScheduler(optimizer)
+
     sched_type = str(train_cfg.get("scheduler_type", "cosine")).lower().strip()
     warmup_epochs = int(train_cfg.get("warmup_epochs", 5))
     min_lr_ratio = float(train_cfg.get("min_lr_ratio", 0.05))
@@ -119,6 +161,7 @@ def maybe_run_safe_lr_finder(
     loss_fn: Any,
     cfg: dict[str, Any],
     device: torch.device,
+    scheduler: Any | None = None,
 ) -> float | None:
     """Optionally probe optimal learning rate before epoch 1 if auto_lr_finder is configured."""
     train_cfg = cfg.get("train", {})
@@ -153,6 +196,9 @@ def maybe_run_safe_lr_finder(
         group["lr"] = suggested_lr * scale
         if "initial_lr" in group:
             group["initial_lr"] = suggested_lr * scale
+
+    if scheduler is not None and hasattr(scheduler, "base_lrs"):
+        scheduler.base_lrs = [group["lr"] for group in optimizer.param_groups]
 
     logger.info("[LR Finder] Set discovered optimal LR: %.2e (backbone: %.2e)", suggested_lr, suggested_lr * backbone_scale)
     return suggested_lr

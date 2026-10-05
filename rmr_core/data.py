@@ -58,6 +58,7 @@ def train_transform(
     contrast_jitter: float = 0.0,
     gamma_jitter: tuple[float, float] = (1.0, 1.0),
     random_invert_prob: float = 0.0,
+    pad_small_images: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Geometric + photometric augmentation that keeps point coordinates exact.
 
@@ -97,18 +98,36 @@ def train_transform(
                 pts[:, 1] += pad_top
             w0, h0 = image.size
 
-    min_dim = min(w0, h0)
-    min_scale = max(float(scale_range[0]), float(crop_size) / float(min_dim))
-    max_scale = max(float(scale_range[1]), min_scale)
-    scale = random.uniform(min_scale, max_scale)
-    w1 = max(crop_size, int(round(w0 * scale)))
-    h1 = max(crop_size, int(round(h0 * scale)))
+    if pad_small_images:
+        scale = random.uniform(float(scale_range[0]), float(scale_range[1]))
+        w1 = int(round(w0 * scale))
+        h1 = int(round(h0 * scale))
+    else:
+        min_dim = min(w0, h0)
+        min_scale = max(float(scale_range[0]), float(crop_size) / float(min_dim))
+        max_scale = max(float(scale_range[1]), min_scale)
+        scale = random.uniform(min_scale, max_scale)
+        w1 = max(crop_size, int(round(w0 * scale)))
+        h1 = max(crop_size, int(round(h0 * scale)))
 
     if (w1, h1) != (w0, h0):
         image = image.resize((w1, h1), Image.Resampling.BILINEAR)
         if pts.numel():
             pts[:, 0] = (pts[:, 0] + 0.5) * (w1 / w0) - 0.5
             pts[:, 1] = (pts[:, 1] + 0.5) * (h1 / h0) - 0.5
+
+    if pad_small_images and (w1 < crop_size or h1 < crop_size):
+        pad_w = max(0, crop_size - w1)
+        pad_h = max(0, crop_size - h1)
+        padded = Image.new("RGB", (w1 + pad_w, h1 + pad_h), color=(128, 128, 128))
+        pad_l, pad_t = pad_w // 2, pad_h // 2
+        padded.paste(image, (pad_l, pad_t))
+        image.close()
+        image = padded
+        if pts.numel():
+            pts[:, 0] += pad_l
+            pts[:, 1] += pad_t
+        w1, h1 = image.size
 
     top = random.randint(0, h1 - crop_size)
     left = random.randint(0, w1 - crop_size)
@@ -196,18 +215,7 @@ def resolve_manifest_path(manifest_val: str | Path, data_root: str | Path | None
 
 
 class CrowdManifestDataset(Dataset):
-    """Standardized Crowd Counting Dataset with Zero-Stall In-Memory RAM Caching.
-
-    Key Architectural Invariants:
-    - Zero Ad-hoc Split Policy: Strictly rejects ad-hoc internal splits (e.g. 270/30).
-      Enforces canonical 300 Train / 182 Test partitions for ShanghaiTech Part A.
-    - In-Memory RAM Caching (Train): Caches decoded PIL RGB images in self._image_cache,
-      completely eliminating redundant disk I/O and JPEG decoding across 1,000 epochs.
-    - Static Evaluation Caching (Eval): In test/val mode (train=False), caches normalized
-      image tensors and rasterized target counts in self._eval_cache, making 200 evaluation
-      cycles instant memory queries with zero redundant CPU preprocessing.
-    - Copy-on-Write Optimization: Coordinates pre-converted to float32 tensors on init.
-    """
+    """Standardized Crowd Counting Dataset with Zero-Stall In-Memory RAM Caching."""
 
     def __init__(
         self,
@@ -221,6 +229,7 @@ class CrowdManifestDataset(Dataset):
         contrast_jitter: float = 0.0,
         gamma_jitter: tuple[float, float] = (1.0, 1.0),
         random_invert_prob: float = 0.0,
+        pad_small_images: bool = False,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
@@ -247,6 +256,7 @@ class CrowdManifestDataset(Dataset):
         self.contrast_jitter = float(contrast_jitter)
         self.gamma_jitter = (float(gamma_jitter[0]), float(gamma_jitter[1]))
         self.random_invert_prob = float(random_invert_prob)
+        self.pad_small_images = bool(pad_small_images)
         self.cache_images = bool(cache_images)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
@@ -324,6 +334,7 @@ class CrowdManifestDataset(Dataset):
                 contrast_jitter=self.contrast_jitter,
                 gamma_jitter=self.gamma_jitter,
                 random_invert_prob=self.random_invert_prob,
+                pad_small_images=self.pad_small_images,
             )
         else:
             image_t = TF.to_tensor(image)

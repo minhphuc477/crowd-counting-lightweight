@@ -107,6 +107,10 @@ class RMRv3LossConfig:
     lambda_chfl: float = 0.0
     chfl_num_frequencies: int = 64
     chfl_omega_max: float = 0.5
+    chfl_canonical: bool = True
+    chfl_step: int = 16
+    chfl_tik: float = 0.01
+    chfl_bandwidth: float = 8.0
 
     # Mass-Weighted Regional Loss (Hypothesis H8)
     regional_mass_weight_alpha: float = 0.0

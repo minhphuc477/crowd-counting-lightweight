@@ -16,6 +16,7 @@ ALLOWED_DATA_KEYS = {
     "train_manifest", "val_manifest", "crop_size", "scale_range",
     "hflip_prob", "brightness_jitter", "contrast_jitter", "gamma_jitter",
     "random_invert_prob", "data_root", "cache_images", "preload",
+    "pad_small_images",
 }
 
 ALLOWED_MODEL_KEYS = {
@@ -236,8 +237,9 @@ ALLOWED_LOSS_KEYS = {
     # CI-Cell Loss & Count-Harmonized Cell Loss additions
     "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref",
     # FIDT (H1) & ChfL (H2) additions
-    "fidt_k", "fidt_loss_type", "fidt_normalize_by_count",
-    "use_chfl_loss", "lambda_chfl", "chfl_num_frequencies", "chfl_omega_max",
+    "fidt_k", "fidt_loss_type", "fidt_loss_mode", "fidt_normalize_by_count",
+    "use_chfl", "use_chfl_loss", "lambda_chfl", "chfl_canonical", "chfl_step", "chfl_tik", "chfl_bandwidth",
+    "chfl_num_frequencies", "chfl_omega_max",
     # DM block resolution and concentration scaling
     "dm_block_px", "auto_scale_kappa",
     "dm_norm_mode", "dm_ref_count",
@@ -245,12 +247,13 @@ ALLOWED_LOSS_KEYS = {
 
 ALLOWED_TRAIN_KEYS = {
     "batch_size", "workers", "pin_memory", "lr", "backbone_lr_scale", "weight_decay",
-    "epochs", "warmup_epochs", "eval_every", "grad_clip", "amp", "early_stopping",
+    "epochs", "warmup_epochs", "warmup_steps", "eval_every", "grad_clip", "amp", "early_stopping",
     "patience", "solver_warmup_epochs", "solver_ramp_epochs", "deterministic",
     "ema_decay", "teacher_ckpt", "min_lr_ratio", "grad_scaler_init_scale",
     "device", "num_threads", "cudnn_benchmark",
-    # Optimizer & Scheduler additions (Gen 18)
+    # Optimizer & Scheduler additions (Gen 18 / Gen 22)
     "optimizer", "scheduler_type", "wsd_stable_ratio",
+    "schedule_free_warmup_steps", "schedule_free_r", "schedule_free_weight_lr_power",
     "auto_lr_finder", "lr_finder_min_lr", "lr_finder_max_lr", "lr_finder_num_iter", "lr_finder_max_safe_lr",
     "prodigy_d_coef", "prodigy_growth_rate", "prodigy_d_max_cap", "prodigy_d_warmup_steps",
     "prodigy_grad_spike_thresh", "prodigy_use_rms_clipping", "prodigy_d0",

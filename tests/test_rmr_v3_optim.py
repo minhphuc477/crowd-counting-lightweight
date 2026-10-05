@@ -210,3 +210,46 @@ def test_builder_factories() -> None:
         model, opt1, None, None, {"train": {"auto_lr_finder": False}}, torch.device("cpu")
     )
     assert res is None
+
+
+def test_auto_lr_finder_scheduler_sync() -> None:
+    """Verify that auto_lr_finder properly sets base_lrs and is not overwritten by scheduler.step()."""
+    model = nn.Sequential(nn.Linear(10, 5), nn.Linear(5, 1))
+    cfg = {
+        "train": {
+            "optimizer": "adamw",
+            "scheduler_type": "wsd",
+            "lr": 1e-4,
+            "auto_lr_finder": True,
+            "lr_finder_num_iter": 15,
+            "backbone_lr_scale": 0.1,
+            "warmup_epochs": 5,
+        }
+    }
+    opt = build_v3_optimizer(model, cfg, lr_init=1e-4)
+    x = torch.randn(32, 10)
+    y = torch.randn(32, 1)
+    ds = TensorDataset(x, y)
+    loader = DataLoader(ds, batch_size=4)
+
+    def dummy_loss(out, tgt):
+        return {"total": ((out["total"] if isinstance(out, dict) else out) - tgt.sum()).square().mean()}
+
+    # Run lr finder before scheduler creation
+    suggested_lr = maybe_run_safe_lr_finder(
+        model, opt, loader, dummy_loss, cfg, torch.device("cpu")
+    )
+    assert suggested_lr is not None
+    assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-5)
+
+    # Now build scheduler — it must capture suggested_lr in its base_lrs
+    sched = build_v3_scheduler(opt, cfg, epochs=50)
+    assert sched.base_lrs[2] == pytest.approx(suggested_lr, rel=1e-5)
+
+    # Step scheduler into plateau (epoch > 5)
+    for _ in range(6):
+        opt.step()
+        sched.step()
+
+    # The LR in plateau must equal 100% of suggested_lr, NOT the old 1e-4!
+    assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-5)
