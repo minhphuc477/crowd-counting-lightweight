@@ -191,7 +191,8 @@ class TestBitwiseBaselineParity:
     """Verify exact bitwise parity (diff == 0.000000) between v19 canonical and v30 step0."""
 
     @pytest.fixture(scope="class")
-    def paired_models(self):
+    @classmethod
+    def paired_models(cls):
         c19 = yaml.safe_load(open(REPO_ROOT / "configs" / "rmr_v19" / "rmr_v19_canonical_isotropic.yaml"))
         c30 = yaml.safe_load(open(CONFIG_DIR / "rmr_v30_step0_v19_anchor.yaml"))
         torch.manual_seed(42)
