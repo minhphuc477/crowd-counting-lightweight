@@ -28,6 +28,8 @@ GEN19_CONFIGS = [
     "configs/rmr_research/sub60_e82_canonical_m04.yaml",
     "configs/rmr_research/sub60_e83_m04_wsd_plateau50.yaml",
     "configs/rmr_research/sub60_e84_e5_safeprodigy_calibrated.yaml",
+    "configs/rmr_research/sub60_e85_e5_wsd_plateau50.yaml",
+    "configs/rmr_research/sub60_e86_m04_safeprodigy_calibrated.yaml",
 ]
 
 
