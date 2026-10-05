@@ -102,7 +102,6 @@ def weighted_coverage(
     if weight.ndim == 2:
         weight = weight.unsqueeze(1)
     if scale_routing_weights is not None:
-        scale_routing_weights = scale_routing_weights.detach()
         b, k_scales = scale_routing_weights.shape[:2]
         if scale_routing_weights.shape[-2:] != (height, width):
             scale_routing_weights = F.interpolate(
@@ -174,7 +173,6 @@ def weighted_normalized_adjoint_field(
             scale_routing_weights = F.interpolate(
                 scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
             )
-        scale_routing_weights = scale_routing_weights.detach()
 
     if b_region.ndim == 2:
         b_region = b_region.unsqueeze(1)
@@ -193,7 +191,7 @@ def weighted_normalized_adjoint_field(
     # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, or Scale-Routed Spatial)
     if (morozov_gamma > 0.0 or spatial_morozov) and b_variance is not None:
         if spatial_morozov and scale_routing_weights is not None:
-            pi_sum = regional_sum(scale_routing_weights.float(), regions.boxes, out_dtype=torch.float32)
+            pi_sum = regional_sum(scale_routing_weights.detach().float(), regions.boxes, out_dtype=torch.float32)
             reg_area = regions.area.float().view(1, 1, -1).clamp_min(1.0)
             pi_box = pi_sum / reg_area
             if len(morozov_gamma_scales) == pi_box.shape[1]:
