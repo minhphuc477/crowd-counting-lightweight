@@ -226,7 +226,7 @@ def _compute_core_losses(
         + cfg.lambda_region_nb * losses["region_nb"]
     )
     if getattr(cfg, "lambda_count_l1", 0.0) > 0.0:
-        loss_l1, _ = router.dispatch(
+        loss_l1, _ = cnt_router.dispatch(
             lambda dm: count_magnitude_loss(dm, target_float, mode="l1"), y, y0
         )
         losses["count_l1"] = loss_l1

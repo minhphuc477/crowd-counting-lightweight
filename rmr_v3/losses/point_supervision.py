@@ -80,7 +80,7 @@ def bayesian_loss(
 
         target_person = (
             targets_list[i].to(device=device, dtype=torch.float32)
-            if targets_list is not None and i < len(targets_list) and targets_list[i] is not None
+            if targets_list is not None and i < len(targets_list) and targets_list[i] is not None and targets_list[i].shape[0] == n
             else torch.ones(n, device=device, dtype=torch.float32)
         )
         person_err = 0.0
