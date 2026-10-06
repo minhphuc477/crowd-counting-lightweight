@@ -150,7 +150,9 @@ def train_transform(
         pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
 
     if hflip_prob > 0.0 and random.random() < hflip_prob:
-        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        flipped = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        image.close()
+        image = flipped
         if pts.numel():
             pts[:, 0] = (float(crop_size) - 1.0) - pts[:, 0]
             pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
@@ -314,7 +316,8 @@ class CrowdManifestDataset(Dataset):
         if self.cache_images:
             if idx not in self._raw_bytes_cache:
                 self._raw_bytes_cache[idx] = path.read_bytes()
-            image = Image.open(io.BytesIO(self._raw_bytes_cache[idx])).convert("RGB")
+            with io.BytesIO(self._raw_bytes_cache[idx]) as buf, Image.open(buf) as raw_img:
+                image = raw_img.convert("RGB")
         else:
             with Image.open(path) as img:
                 image = img.convert("RGB")

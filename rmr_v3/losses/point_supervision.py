@@ -29,8 +29,9 @@ def bayesian_loss(
     y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
     x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
     grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
-    grid_xy = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)  # [M, 2]
-    m_total = grid_xy.shape[0]
+    gx = grid_x.flatten().unsqueeze(0)  # [1, M]
+    gy = grid_y.flatten().unsqueeze(0)  # [1, M]
+    m_total = gx.shape[1]
 
     losses: list[torch.Tensor] = []
     inv_two_sigma_sq = 1.0 / (2.0 * sigma * sigma)
@@ -49,35 +50,36 @@ def bayesian_loss(
 
         # Compute posterior probabilities under torch.no_grad()
         with torch.no_grad():
+            points_sum = torch.zeros((m_total,), device=device, dtype=torch.float32)
             if canonical_background:
                 st_size = float(min(h, w) * stride)
                 min_dist_sq = torch.full((m_total,), float("inf"), device=device, dtype=torch.float32)
                 for c_idx in range(0, n, 512):
                     p_chunk = pts[c_idx : c_idx + 512]
-                    dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
-                    dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                    dx = p_chunk[:, 0:1] - gx
+                    dy = p_chunk[:, 1:2] - gy
                     d2 = dx.square().add_(dy.square())
                     min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
+                    points_sum.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
                 bg_dis_sq = ((st_size * float(background_ratio)) ** 2) / (min_dist_sq + 1e-5)
                 s_bg = -bg_dis_sq * inv_two_sigma_sq
                 exp_bg = torch.exp(s_bg)
-                denom = exp_bg.clone()
             else:
                 tau = float(background_ratio)
-                denom = torch.full((m_total,), tau, device=device, dtype=torch.float32)
                 exp_bg = torch.full((m_total,), tau, device=device, dtype=torch.float32)
+                for c_idx in range(0, n, 512):
+                    p_chunk = pts[c_idx : c_idx + 512]
+                    dx = p_chunk[:, 0:1] - gx
+                    dy = p_chunk[:, 1:2] - gy
+                    d2 = dx.square().add_(dy.square())
+                    points_sum.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
 
-            for c_idx in range(0, n, 512):
-                p_chunk = pts[c_idx : c_idx + 512]
-                dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
-                dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
-                d2 = dx.square().add_(dy.square())
-                denom.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
-            denom.clamp_min_(1e-8)
+            denom = (exp_bg + points_sum).clamp_min_(1e-8)
             post_bg = exp_bg / denom
 
         c_hat_bg = torch.dot(post_bg, y_flat)
 
+        u = y_flat / denom
         target_person = (
             targets_list[i].to(device=device, dtype=torch.float32)
             if targets_list is not None and i < len(targets_list) and targets_list[i] is not None and targets_list[i].shape[0] == n
@@ -87,11 +89,11 @@ def bayesian_loss(
         for c_idx in range(0, n, 512):
             p_chunk = pts[c_idx : c_idx + 512]
             with torch.no_grad():
-                dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
-                dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                dx = p_chunk[:, 0:1] - gx
+                dy = p_chunk[:, 1:2] - gy
                 d2 = dx.square().add_(dy.square())
-                p_chunk_prob = torch.exp(-d2 * inv_two_sigma_sq) / denom.unsqueeze(0)
-            c_hat_chunk = torch.matmul(p_chunk_prob, y_flat)
+                k_chunk = torch.exp(-d2 * inv_two_sigma_sq)
+            c_hat_chunk = torch.matmul(k_chunk, u)
             tgt_chunk = target_person[c_idx : c_idx + 512]
             person_err = person_err + torch.abs(c_hat_chunk - tgt_chunk).sum()
 

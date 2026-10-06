@@ -137,8 +137,10 @@ loss:
 train:
   epochs: 1000
   batch_size: 8
-  workers: 4
+  workers: 0
   pin_memory: true
+  num_threads: 2
+  cudnn_benchmark: false
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
