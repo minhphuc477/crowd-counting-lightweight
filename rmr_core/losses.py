@@ -209,10 +209,7 @@ def flat_dm_block_loss(
     alpha = eff_kappa * pi
 
     per_image = dm_nll_none(target_block, alpha, eps=eps)
-    if norm_mode == "head_balanced":
-        count = target_block.sum(-1).clamp_min(1.0)
-        per_image = per_image * (count / float(max(ref_count, 1.0)))
-    elif norm_mode == "unnorm_ref":
+    if norm_mode in ("head_balanced", "unnorm_ref"):
         per_image = per_image / float(max(ref_count, 1.0))
     elif norm_mode == "none" or not normalize_by_count:
         pass

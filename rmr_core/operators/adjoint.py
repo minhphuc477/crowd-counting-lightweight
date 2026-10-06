@@ -346,9 +346,9 @@ def weighted_normalized_adjoint_field(
         if shifted_carrier and y_initial is not None:
             m_eff = m_eff + float(shifted_carrier_eps) * y_initial.float()
         if scale_seeded_carrier and scale_routing_weights is not None:
-            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach() * (back < 0.0).float()
+            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach()
         if crest_discovery_flux and psi_crest is not None:
-            m_eff = m_eff + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
+            m_eff = m_eff + float(crest_eps_seed) * psi_crest
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)
             back = (1.0 - alpha_recov) * (m_eff * back) + alpha_recov * back_leb

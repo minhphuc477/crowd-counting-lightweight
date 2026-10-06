@@ -22,8 +22,8 @@ def rasterize_points(
     """Exact stride-cell counts from point annotations.
 
     Canonical assignment:
-        i = floor((y + 0.5) / stride)
-        j = floor((x + 0.5) / stride)
+        i = floor(y / stride)
+        j = floor(x / stride)
     Points outside the actual image support are ignored, never clipped into a border cell.
     """
     gh = math.ceil(image_h / stride)
@@ -40,8 +40,8 @@ def rasterize_points(
         return out
     x, y = x[valid], y[valid]
 
-    j = torch.floor((x + 0.5) / stride).long().clamp(0, gw - 1)
-    i = torch.floor((y + 0.5) / stride).long().clamp(0, gh - 1)
+    j = torch.floor(x / float(stride)).long().clamp(0, gw - 1)
+    i = torch.floor(y / float(stride)).long().clamp(0, gh - 1)
 
     flat = i * gw + j
     out.view(-1).scatter_add_(0, flat, torch.ones_like(flat, dtype=dtype))

@@ -172,7 +172,7 @@ class RMRv3Config:
     trust_dense_kappa: float = 0.80
     density_scale_gating: bool = False
     density_scale_tau: float = 0.15
-    asymmetric_trust: bool = True
+    asymmetric_trust: bool = False
     trust_pos_kappa: float = 1.0
 
     # Scale-Routed Spatial Operators (Gen 12)
