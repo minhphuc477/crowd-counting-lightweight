@@ -89,6 +89,12 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(
                     f"solver_mode must be 'additive' or 'multiplicative', got '{solver_mode}'"
                 )
+        if "hurdle_gating_mode" in m_cfg:
+            hgm = str(m_cfg["hurdle_gating_mode"])
+            if hgm not in ("occupancy", "product", "disabled", "unbiased"):
+                raise ValueError(
+                    f"hurdle_gating_mode must be 'occupancy', 'product', 'disabled', or 'unbiased', got '{hgm}'"
+                )
         if "tv_type" in m_cfg:
             tv_type = str(m_cfg["tv_type"])
             if tv_type not in ("laplacian", "charbonnier", "perona_malik"):

@@ -300,6 +300,7 @@ class ScaleConditionedFineHead(nn.Module):
         density_adaptive_scale: bool = False,
         density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False,
+        curvature_pade: bool = False,
     ):
         super().__init__()
         self.floor_tau = float(floor_tau)
@@ -322,6 +323,7 @@ class ScaleConditionedFineHead(nn.Module):
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
+        self.curvature_pade = bool(curvature_pade)
         self.curv_scale = 1.0
         self.curvature_dense_threshold = float(curvature_dense_threshold)
         self.curvature_gate_beta = float(curvature_gate_beta)
@@ -355,6 +357,7 @@ class ScaleConditionedFineHead(nn.Module):
             floor_tau=self.floor_tau,
             density_adaptive_scale=self.density_adaptive_scale,
             density_scale_gamma=self.density_scale_gamma,
+            curvature_pade=getattr(self, "curvature_pade", False),
         )
 
     def forward_logits(

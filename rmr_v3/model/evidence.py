@@ -58,7 +58,7 @@ def extract_regional_evidence(
             # Legacy multiplicative hurdle (eroded dense crowd mass by 15-25%)
             b_solver = pi_r * b_solver_raw
             b_variance = pi_r.square() * b_variance
-        elif mode == "disabled":
+        elif mode in ("disabled", "unbiased"):
             b_solver = b_solver_raw
         else:  # "occupancy" (default principled gate)
             occ_gate = 1.0 - (1.0 - pi_r) * torch.clamp(1.0 - b_solver_raw, min=0.0, max=1.0)
