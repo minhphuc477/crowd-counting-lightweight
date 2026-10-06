@@ -169,6 +169,7 @@ ALLOWED_MODEL_KEYS = {
     "scale_routed_trust", "scale_seeded_carrier", "scale_seed_eps",
     "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
     "evidence_anchored_trust", "eatr_alpha", "scale_prior_boost",
+    "morozov_rho_cap",
 }
 
 
@@ -243,6 +244,8 @@ ALLOWED_LOSS_KEYS = {
     # DM block resolution and concentration scaling
     "dm_block_px", "auto_scale_kappa",
     "dm_norm_mode", "dm_ref_count",
+    # Orthogonal carrier-solver routing & Bayesian loss configuration
+    "count_target", "cell_target", "bayesian_norm_mode", "bayesian_canonical_bg",
 }
 
 ALLOWED_TRAIN_KEYS = {

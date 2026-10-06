@@ -104,6 +104,7 @@ def unrolled_sirt_solver(
     evidence_anchored_trust: bool = False,
     eatr_alpha: float = 0.5,
     regional_rate: torch.Tensor | None = None,
+    morozov_rho_cap: float = 0.0,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
@@ -268,6 +269,7 @@ def unrolled_sirt_solver(
             shifted_carrier=shifted_carrier, shifted_carrier_eps=float(shifted_carrier_eps),
             y_initial=y0, spatial_morozov=spat_morozov, morozov_gamma_scales=morozov_gamma_scales,
             scale_seeded_carrier=scale_seeded_carrier, scale_seed_eps=float(scale_seed_eps),
+            morozov_rho_cap=float(morozov_rho_cap),
         )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)

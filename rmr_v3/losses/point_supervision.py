@@ -11,12 +11,16 @@ def bayesian_loss(
     sigma: float = 8.0,
     background_ratio: float = 0.1,
     stride: int = 4,
+    norm_mode: str = "canonical",
+    norm_ref: float = 100.0,
+    canonical_background: bool = True,
+    targets_list: list[torch.Tensor] | None = None,
 ) -> torch.Tensor:
-    """Bayesian Loss for point supervision (Ma et al. ICCV 2019).
+    """Canonical Bayesian Loss for point supervision (Ma et al. ICCV 2019).
     
-    Computes continuous spatial allocation loss without artificial block boundaries.
-    Memory-optimized: evaluates coordinate likelihoods under torch.no_grad() and
-    avoids [N, M, 2] intermediate tensor duplication. Always returns float32.
+    Computes continuous spatial allocation loss with Gaussian coordinate posteriors.
+    Supports official dynamic virtual background distance and flexible normalization modes.
+    Always returns float32.
     """
     b, _, h, w = prob_y0.shape
     device = prob_y0.device
@@ -26,9 +30,9 @@ def bayesian_loss(
     x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
     grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
     grid_xy = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)  # [M, 2]
+    m_total = grid_xy.shape[0]
 
     losses: list[torch.Tensor] = []
-    tau = float(background_ratio)
     inv_two_sigma_sq = 1.0 / (2.0 * sigma * sigma)
 
     for i in range(b):
@@ -43,35 +47,65 @@ def bayesian_loss(
         pts = pts.to(device=device, dtype=torch.float32)
         n = pts.shape[0]
 
-        # Compute posterior probabilities under torch.no_grad() without autograd overhead
+        # Compute posterior probabilities under torch.no_grad()
         with torch.no_grad():
-            denom = torch.full((grid_xy.shape[0],), tau, device=device, dtype=torch.float32)
-            for chunk_idx in range(0, n, 500):
-                pts_chunk = pts[chunk_idx:chunk_idx+500]
-                dx = pts_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
-                dy = pts_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
-                dist_sq = dx.square().add_(dy.square())
-                p_y_given_x = torch.exp(-dist_sq * inv_two_sigma_sq)
-                denom.add_(p_y_given_x.sum(dim=0))
-            denom.clamp_min_(1e-8)
-            post_bg = tau / denom
-            c_hat_bg = torch.dot(post_bg, y_flat)
+            if canonical_background:
+                st_size = float(min(h, w) * stride)
+                min_dist_sq = torch.full((m_total,), float("inf"), device=device, dtype=torch.float32)
+                for c_idx in range(0, n, 512):
+                    p_chunk = pts[c_idx : c_idx + 512]
+                    dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
+                    dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                    d2 = dx.square().add_(dy.square())
+                    min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
+                bg_dis_sq = ((st_size * float(background_ratio)) ** 2) / (min_dist_sq + 1e-5)
+                s_bg = -bg_dis_sq * inv_two_sigma_sq
+                exp_bg = torch.exp(s_bg)
+                denom = exp_bg.clone()
+            else:
+                tau = float(background_ratio)
+                denom = torch.full((m_total,), tau, device=device, dtype=torch.float32)
+                exp_bg = torch.full((m_total,), tau, device=device, dtype=torch.float32)
 
+            for c_idx in range(0, n, 512):
+                p_chunk = pts[c_idx : c_idx + 512]
+                dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
+                dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                d2 = dx.square().add_(dy.square())
+                denom.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
+            denom.clamp_min_(1e-8)
+            post_bg = exp_bg / denom
+
+        c_hat_bg = torch.dot(post_bg, y_flat)
+
+        target_person = (
+            targets_list[i].to(device=device, dtype=torch.float32)
+            if targets_list is not None and i < len(targets_list) and targets_list[i] is not None
+            else torch.ones(n, device=device, dtype=torch.float32)
+        )
         person_err = 0.0
-        for chunk_idx in range(0, n, 500):
-            pts_chunk = pts[chunk_idx:chunk_idx+500]
+        for c_idx in range(0, n, 512):
+            p_chunk = pts[c_idx : c_idx + 512]
             with torch.no_grad():
-                dx = pts_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
-                dy = pts_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
-                dist_sq = dx.square().add_(dy.square())
-                p_y_given_x = torch.exp(-dist_sq * inv_two_sigma_sq)
-                post_person_chunk = p_y_given_x / denom.unsqueeze(0)
-            c_hat_person_chunk = torch.matmul(post_person_chunk, y_flat)
-            person_err = person_err + torch.abs(c_hat_person_chunk - 1.0).sum()
+                dx = p_chunk[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
+                dy = p_chunk[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
+                d2 = dx.square().add_(dy.square())
+                p_chunk_prob = torch.exp(-d2 * inv_two_sigma_sq) / denom.unsqueeze(0)
+            c_hat_chunk = torch.matmul(p_chunk_prob, y_flat)
+            tgt_chunk = target_person[c_idx : c_idx + 512]
+            person_err = person_err + torch.abs(c_hat_chunk - tgt_chunk).sum()
 
         bg_err = c_hat_bg
+        raw_sample_loss = person_err + bg_err
 
-        sample_loss = (person_err + bg_err) / float(max(n, 1))
+        if norm_mode == "canonical":
+            sample_loss = raw_sample_loss
+        elif norm_mode == "square_root":
+            scale_denom = math.sqrt(float(max(n, 1)) / max(float(norm_ref), 1.0))
+            sample_loss = raw_sample_loss / max(scale_denom, 1e-4)
+        else:
+            sample_loss = raw_sample_loss / float(max(n, 1))
+
         losses.append(sample_loss)
 
     # Always return float32 for AMP gradient scaler stability

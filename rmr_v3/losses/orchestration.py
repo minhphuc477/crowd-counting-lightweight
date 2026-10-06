@@ -148,25 +148,29 @@ def _compute_core_losses(
             )
         return balanced_smooth_l1(density_map, target_float, beta=cfg.cell_beta, stride=stride)
 
-    loss_count, aux_count = router.dispatch(_compute_count_loss, y, y0)
+    cnt_m = cfg.dm_target if getattr(cfg, "count_target", "default") == "default" else cfg.count_target
+    cell_m = cfg.dm_target if getattr(cfg, "cell_target", "default") == "default" else cfg.cell_target
+    cnt_router = router if cnt_m == router.mode else TargetSupervisionRouter(cnt_m)
+    cell_router = router if cell_m == router.mode else TargetSupervisionRouter(cell_m)
+
+    loss_count, aux_count = cnt_router.dispatch(_compute_count_loss, y, y0)
     losses["count"] = loss_count
     if "y" in aux_count and "y0" in aux_count:
-        losses["count_y"] = aux_count["y"]
-        losses["count_y0"] = aux_count["y0"]
+        losses["count_y"], losses["count_y0"] = aux_count["y"], aux_count["y0"]
 
-    loss_cell, aux_cell = router.dispatch(_compute_cell_loss, y, y0)
+    loss_cell, aux_cell = cell_router.dispatch(_compute_cell_loss, y, y0)
     losses["cell"] = loss_cell
     if "y" in aux_cell and "y0" in aux_cell:
-        losses["cell_y"] = aux_cell["y"]
-        losses["cell_y0"] = aux_cell["y0"]
+        losses["cell_y"], losses["cell_y0"] = aux_cell["y"], aux_cell["y0"]
 
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
         stride = int(getattr(cfg, "output_stride", 4))
         if cfg.allocation_loss_type == "bayesian":
             loss_val = bayesian_loss(
-                inp, points, sigma=cfg.bayesian_sigma,
-                background_ratio=cfg.bayesian_background_ratio, stride=stride,
+                inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
+                stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
+                canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
             )
         elif cfg.allocation_loss_type == "fidt":
             if not getattr(cfg, "fidt_normalize_by_count", True):
@@ -383,7 +387,6 @@ def _compute_auxiliary_losses(
         losses["chfl"] = zero_val
 
     return losses
-
 
 
 def compute_rmr_v3_losses(

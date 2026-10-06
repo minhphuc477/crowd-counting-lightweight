@@ -127,7 +127,7 @@ class RMRv3Config:
     asymmetric_morozov: bool = False
     morozov_gamma_under: float = 0.20
     morozov_rho: float = 0.30
-
+    morozov_rho_cap: float = 0.0
 
     # Perspective-Adaptive Regional Kernels (PARK - RMR-v33)
     use_park: bool = False
@@ -395,6 +395,8 @@ class RMRv3Config:
             raise ValueError(f"morozov_gamma_under must be non-negative, got {self.morozov_gamma_under}")
         if self.morozov_rho < 0.0:
             raise ValueError(f"morozov_rho must be non-negative, got {self.morozov_rho}")
+        if self.morozov_rho_cap < 0.0:
+            raise ValueError(f"morozov_rho_cap must be non-negative, got {self.morozov_rho_cap}")
         if self.shifted_carrier_eps <= 0.0:
             raise ValueError(f"shifted_carrier_eps must be strictly positive, got {self.shifted_carrier_eps}")
         if self.trust_dense_tau <= 0.0:

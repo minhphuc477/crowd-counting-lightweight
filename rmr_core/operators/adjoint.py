@@ -165,6 +165,7 @@ def weighted_normalized_adjoint_field(
     morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75),
     scale_seeded_carrier: bool = False,
     scale_seed_eps: float = 0.02,
+    morozov_rho_cap: float = 0.0,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
@@ -225,6 +226,8 @@ def weighted_normalized_adjoint_field(
             else:
                 gamma_eff = base_gamma
             deadband = gamma_eff * sigma_b
+            if morozov_rho_cap > 0.0:
+                deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_b)
             delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
     area = regions.area.float().view(1, 1, -1)

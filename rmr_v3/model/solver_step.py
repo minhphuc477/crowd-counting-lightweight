@@ -158,6 +158,7 @@ def solve_inverse_measure(
         evidence_anchored_trust=getattr(cfg, "evidence_anchored_trust", False),
         eatr_alpha=getattr(cfg, "eatr_alpha", 0.5),
         regional_rate=regional_evidence.get("rate"),
+        morozov_rho_cap=getattr(cfg, "morozov_rho_cap", 0.0),
     )
 
     y = solver_res["y"]

@@ -19,6 +19,8 @@ class RMRv3LossConfig:
     allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt"
     bayesian_sigma: float = 8.0
     bayesian_background_ratio: float = 0.10
+    bayesian_norm_mode: str = "canonical"  # "canonical" | "count" | "square_root"
+    bayesian_canonical_bg: bool = True
     ot_reg: float = 10.0
     ot_num_iters: int = 20
     fidt_k: float = 6.0
@@ -28,6 +30,7 @@ class RMRv3LossConfig:
     # Count loss configuration
     count_loss_mode: str = "nb"  # "nb" | "log1p" | "l1"
     count_nb_dispersion: float = 50.0
+    count_target: str = "default"  # "default" (uses dm_target) | "y" | "y0" | "dual"
 
     # Allocation loss configuration
     output_stride: int = 4
@@ -39,6 +42,7 @@ class RMRv3LossConfig:
     dm_ref_count: float = 100.0
     dm_strict: bool = False
     dm_target: str = "y"  # "y" | "y0" | "dual"
+    cell_target: str = "default"  # "default" (uses dm_target) | "y" | "y0" | "dual"
 
     # Multi-scale / Hierarchical DM loss
     use_multiscale_dm: bool = False
