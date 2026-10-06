@@ -58,7 +58,7 @@ def train_transform(
     contrast_jitter: float = 0.0,
     gamma_jitter: tuple[float, float] = (1.0, 1.0),
     random_invert_prob: float = 0.0,
-    pad_small_images: bool = False,
+    pad_small_images: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Geometric + photometric augmentation that keeps point coordinates exact.
 
@@ -231,7 +231,7 @@ class CrowdManifestDataset(Dataset):
         contrast_jitter: float = 0.0,
         gamma_jitter: tuple[float, float] = (1.0, 1.0),
         random_invert_prob: float = 0.0,
-        pad_small_images: bool = False,
+        pad_small_images: bool = True,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,

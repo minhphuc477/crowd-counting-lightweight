@@ -76,7 +76,8 @@ def test_no_synthetic_padding_small_image():
 
     pts = torch.tensor([[50.0, 50.0], [150.0, 250.0]])
     cropped_t, cropped_pts = train_transform(
-        img, pts, crop_size=crop_size, scale_range=(0.75, 1.25), hflip_prob=0.0
+        img, pts, crop_size=crop_size, scale_range=(0.75, 1.25), hflip_prob=0.0,
+        pad_small_images=False,
     )
 
     assert cropped_t.shape == (3, crop_size, crop_size)
