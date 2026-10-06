@@ -21,6 +21,9 @@ class RMRv3LossConfig:
     bayesian_background_ratio: float = 0.10
     bayesian_norm_mode: str = "canonical"  # "canonical" | "count" | "square_root"
     bayesian_canonical_bg: bool = True
+    bayesian_adaptive_sigma: bool = False
+    bayesian_sigma_min: float = 3.0
+    bayesian_sigma_max: float = 8.0
     ot_reg: float = 10.0
     ot_num_iters: int = 20
     fidt_k: float = 6.0

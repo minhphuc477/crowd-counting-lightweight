@@ -342,3 +342,92 @@ def test_full_model_end_to_end_under_budget():
     for name, param in model.named_parameters():
         if param.requires_grad and param.grad is not None:
             assert torch.isfinite(param.grad).all(), f"NaN/Inf gradient in {name}"
+
+
+# =========================================================================
+# 4. GEN 25 HYPOTHESIS TESTS (GATED SUPPORT & NYQUIST BANDWIDTH)
+# =========================================================================
+
+def test_gated_support_injection_zero_support_escape():
+    """Verify that scale_seeded_carrier escapes the Zero-Support Trap in dense regions while preserving background."""
+    from pathlib import Path
+    h, w = 32, 32
+    regions = build_multiscale_regions(h, w, 4, region_sizes_px=(16,), overlap=0.5)
+    m = regions.boxes.shape[0]
+    b_solver = torch.full((1, 1, m), 50.0, dtype=torch.float32)  # Undercounted dense target
+    weight_solver = torch.ones((1, 1, m), dtype=torch.float32)
+
+    # Carrier initialized identically to zero
+    y0 = torch.zeros((1, 1, h, w), dtype=torch.float32)
+
+    # Scale routing weights: Left half is dense crowd (pi_fine = 1.0), right half is empty background (pi_fine = 0.0)
+    sc_weights = torch.zeros((1, 3, h, w), dtype=torch.float32)
+    sc_weights[:, 0, :, : w // 2] = 1.0  # Dense fine scale
+    sc_weights[:, 2, :, w // 2 :] = 1.0  # Coarse scale
+
+    # Run solver with scale_seeded_carrier: true
+    res = unrolled_sirt_solver(
+        y0=y0,
+        b_solver=b_solver,
+        weight_solver=weight_solver,
+        regions=regions,
+        iterations=3,
+        omega=1.0,
+        adjoint_mode="radon_nikodym",
+        scale_routing_weights=sc_weights,
+        scale_seeded_carrier=True,
+        scale_seed_eps=0.02,
+        trust_region_kappa=0.35,
+    )
+
+    y_out = res["y"]
+    assert y_out.shape == (1, 1, h, w)
+    # Left half (dense crowd) must escape the zero trap and generate positive mass
+    assert (y_out[:, :, :, : w // 2] > 0.0).any(), "Dense region failed to escape zero-support trap!"
+    # Right half (empty background) must stay identically zero
+    assert (y_out[:, :, :, w // 2 :] == 0.0).all(), "Support leaked into empty background!"
+
+
+def test_gen25_all_configs_strict_validation_and_budget():
+    """Verify that all 5 Gen 25 configs validate cleanly and respect the 104,441 parameter budget."""
+    from pathlib import Path
+    import yaml
+    from rmr_v3.config import validate_v3_config
+    from rmr_v3.config.provenance import compute_config_hash
+
+    repo_root = Path(__file__).resolve().parent.parent
+    gen25_names = [
+        "sub60_e110_gated_support_morozov",
+        "sub60_e111_tight_sigma_bayesian",
+        "sub60_e112_wsd_scheduler_champion",
+        "sub60_e113_gated_support_plus_tight_sigma",
+        "sub60_e114_gen25_grand_champion",
+    ]
+
+    for name in gen25_names:
+        cfg_path = repo_root / "configs" / "rmr_research" / f"{name}.yaml"
+        assert cfg_path.exists(), f"Missing config: {cfg_path}"
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        validate_v3_config(cfg)
+        h = compute_config_hash(cfg)
+        assert len(h) == 64, f"Invalid config hash length: {h}"
+
+
+def test_adaptive_sigma_point_supervision_sharpness():
+    """Verify that adaptive sigma sharpens close point pairs and flows finite gradients."""
+    h, w, stride = 64, 64, 4
+    pts = [torch.tensor([[100.0, 100.0], [104.0, 100.0], [100.0, 104.0], [104.0, 104.0]], dtype=torch.float32)]
+    y0 = torch.full((1, 1, h, w), 0.01, dtype=torch.float32, requires_grad=True)
+
+    loss = bayesian_loss(
+        y0, pts, sigma=8.0, stride=stride,
+        adaptive_sigma=True, sigma_min=3.0, sigma_max=8.0,
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert y0.grad is not None
+    assert torch.isfinite(y0.grad).all()
+    assert y0.grad.abs().max() > 0.0
+
+

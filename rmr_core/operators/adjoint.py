@@ -190,7 +190,7 @@ def weighted_normalized_adjoint_field(
     delta = q - b32
 
     # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, or Scale-Routed Spatial)
-    if (morozov_gamma > 0.0 or spatial_morozov) and b_variance is not None:
+    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov) and b_variance is not None:
         if spatial_morozov and scale_routing_weights is not None:
             pi_sum = regional_sum(scale_routing_weights.detach().float(), regions.boxes, out_dtype=torch.float32)
             reg_area = regions.area.float().view(1, 1, -1).clamp_min(1.0)
@@ -255,12 +255,20 @@ def weighted_normalized_adjoint_field(
 
     # Radon-Nikodym Measure-Modulated Adjoint vs Flat Lebesgue Adjoint
     if adjoint_mode == "radon_nikodym":
+        m_base = m_carrier
+        has_base_mod = False
         if shifted_carrier and y_initial is not None:
-            m_base = m_carrier + float(shifted_carrier_eps) * y_initial.float()
-            q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
-            eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
-        elif carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
-            m_base = m_carrier + (float(crest_eps_seed) * psi_crest if (crest_discovery_flux and psi_crest is not None) else 0.0)
+            m_base = m_base + float(shifted_carrier_eps) * y_initial.float()
+            has_base_mod = True
+        if scale_seeded_carrier and scale_routing_weights is not None:
+            m_base = m_base + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach()
+            has_base_mod = True
+        if carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
+            if crest_discovery_flux and psi_crest is not None:
+                m_base = m_base + float(crest_eps_seed) * psi_crest
+                has_base_mod = True
+
+        if has_base_mod:
             q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
             eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
         else:
@@ -338,8 +346,8 @@ def weighted_normalized_adjoint_field(
         if shifted_carrier and y_initial is not None:
             m_eff = m_eff + float(shifted_carrier_eps) * y_initial.float()
         if scale_seeded_carrier and scale_routing_weights is not None:
-            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float() * (back < 0.0).float()
-        elif crest_discovery_flux and psi_crest is not None:
+            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach() * (back < 0.0).float()
+        if crest_discovery_flux and psi_crest is not None:
             m_eff = m_eff + float(crest_eps_seed) * psi_crest * (back < 0.0).float()
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)

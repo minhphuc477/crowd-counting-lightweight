@@ -15,6 +15,9 @@ def bayesian_loss(
     norm_ref: float = 100.0,
     canonical_background: bool = True,
     targets_list: list[torch.Tensor] | None = None,
+    adaptive_sigma: bool = False,
+    sigma_min: float = 3.0,
+    sigma_max: float = 8.0,
 ) -> torch.Tensor:
     """Canonical Bayesian Loss for point supervision (Ma et al. ICCV 2019).
     
@@ -48,6 +51,15 @@ def bayesian_loss(
         pts = pts.to(device=device, dtype=torch.float32)
         n = pts.shape[0]
 
+        # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters)
+        inv_sq_pts = None
+        if adaptive_sigma and n >= 4:
+            with torch.no_grad():
+                dist_mat = torch.cdist(pts, pts)
+                knn_d = torch.topk(dist_mat, k=4, largest=False).values[:, -1]
+                sig_pts = (knn_d * 0.5).clamp(float(sigma_min), float(sigma_max))
+                inv_sq_pts = (1.0 / (2.0 * sig_pts.square())).unsqueeze(1)
+
         # Compute posterior probabilities under torch.no_grad()
         with torch.no_grad():
             points_sum = torch.zeros((m_total,), device=device, dtype=torch.float32)
@@ -60,7 +72,8 @@ def bayesian_loss(
                     dy = p_chunk[:, 1:2] - gy
                     d2 = dx.square().add_(dy.square())
                     min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
-                    points_sum.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
+                    inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
+                    points_sum.add_(torch.exp(-d2 * inv_k).sum(dim=0))
                 bg_dis_sq = ((st_size * float(background_ratio)) ** 2) / (min_dist_sq + 1e-5)
                 s_bg = -bg_dis_sq * inv_two_sigma_sq
                 exp_bg = torch.exp(s_bg)
@@ -72,7 +85,8 @@ def bayesian_loss(
                     dx = p_chunk[:, 0:1] - gx
                     dy = p_chunk[:, 1:2] - gy
                     d2 = dx.square().add_(dy.square())
-                    points_sum.add_(torch.exp(-d2 * inv_two_sigma_sq).sum(dim=0))
+                    inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
+                    points_sum.add_(torch.exp(-d2 * inv_k).sum(dim=0))
 
             denom = (exp_bg + points_sum).clamp_min_(1e-8)
             post_bg = exp_bg / denom
@@ -88,11 +102,12 @@ def bayesian_loss(
         person_err = 0.0
         for c_idx in range(0, n, 512):
             p_chunk = pts[c_idx : c_idx + 512]
+            inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
             with torch.no_grad():
                 dx = p_chunk[:, 0:1] - gx
                 dy = p_chunk[:, 1:2] - gy
                 d2 = dx.square().add_(dy.square())
-                k_chunk = torch.exp(-d2 * inv_two_sigma_sq)
+                k_chunk = torch.exp(-d2 * inv_k)
             c_hat_chunk = torch.matmul(k_chunk, u)
             tgt_chunk = target_person[c_idx : c_idx + 512]
             person_err = person_err + torch.abs(c_hat_chunk - tgt_chunk).sum()

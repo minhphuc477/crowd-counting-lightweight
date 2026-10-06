@@ -50,6 +50,7 @@ def _density_activate(
     floor_tau: float = 0.0,
     density_adaptive_scale: bool = False,
     density_scale_gamma: "torch.Tensor | float" = 0.0,
+    curvature_pade: bool = False,
 ) -> torch.Tensor:
     """Shared density activation: temperature softplus + density adaptive scale + curvature."""
     if temp_softplus and tau is not None:
@@ -75,9 +76,11 @@ def _density_activate(
             tau_dense = float(curvature_dense_threshold)
             beta = float(max(curvature_gate_beta, 1e-4))
             gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-            curv_term = float(curv_scale) * alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+            curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if curvature_pade else y_base_f32.square()
+            curv_term = float(curv_scale) * alpha_eff.float() * gate_dense * curv_poly
         else:
-            curv_term = float(curv_scale) * alpha_eff.float() * (y_base_f32 ** 2)
+            curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if curvature_pade else y_base_f32.square()
+            curv_term = float(curv_scale) * alpha_eff.float() * curv_poly
         return (y_base_f32 + curv_term).to(orig_dtype)
     return y_base
 
@@ -124,6 +127,7 @@ class FineMeasureHead(nn.Module):
         density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False,
         scale_prior_boost: float = 0.0,
+        curvature_pade: bool = False,
     ):
         super().__init__()
         self.scale_prior_boost = float(scale_prior_boost)
@@ -154,6 +158,7 @@ class FineMeasureHead(nn.Module):
 
         self.density_curvature = bool(density_curvature)
         self.gated_density_curvature = bool(gated_density_curvature)
+        self.curvature_pade = bool(curvature_pade)
         self.curv_scale = 4.0 if self.subpixel_stride2 else 1.0
         if self.subpixel_stride2:
             self.curvature_dense_threshold = float(curvature_dense_threshold) / 4.0
@@ -216,9 +221,11 @@ class FineMeasureHead(nn.Module):
                     tau_dense = float(self.curvature_dense_threshold)
                     beta = float(max(self.curvature_gate_beta, 1e-4))
                     gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-                    curv_term = float(self.curv_scale) * alpha_eff.float() * gate_dense * (y_base_f32 ** 2)
+                    curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if getattr(self, "curvature_pade", False) else y_base_f32.square()
+                    curv_term = float(self.curv_scale) * alpha_eff.float() * gate_dense * curv_poly
                 else:
-                    curv_term = float(self.curv_scale) * alpha_eff.float() * (y_base_f32 ** 2)
+                    curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if getattr(self, "curvature_pade", False) else y_base_f32.square()
+                    curv_term = float(self.curv_scale) * alpha_eff.float() * curv_poly
                 return (y_base_f32 + curv_term).to(orig_dtype)
             return y_base
 
@@ -236,6 +243,7 @@ class FineMeasureHead(nn.Module):
             floor_tau=getattr(self, "floor_tau", 0.0),
             density_adaptive_scale=self.density_adaptive_scale,
             density_scale_gamma=self.density_scale_gamma,
+            curvature_pade=getattr(self, "curvature_pade", False),
         )
 
     def forward_logits(
@@ -409,6 +417,7 @@ def build_fine_head(
     density_scale_gamma: float = 0.0,
     density_scale_learnable: bool = False,
     scale_prior_boost: float = 0.0,
+    curvature_pade: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     kw = dict(
@@ -418,6 +427,7 @@ def build_fine_head(
         curvature_pool_kernel=curvature_pool_kernel, floor_tau=floor_tau,
         curvature_alpha_init=curvature_alpha_init, density_adaptive_scale=density_adaptive_scale,
         density_scale_gamma=density_scale_gamma, density_scale_learnable=density_scale_learnable,
+        curvature_pade=curvature_pade,
     )
     if scale_conditioned_fine_head:
         return ScaleConditionedFineHead(num_scales=num_scales, **kw)

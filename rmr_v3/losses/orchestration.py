@@ -138,12 +138,9 @@ def _compute_core_losses(
             )
         if cfg.cell_loss_mode == "count_harmonized":
             return count_harmonized_cell_loss(
-                density_map, target_float,
-                beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
-                gamma=float(cfg.cell_mass_weight_gamma),
-                fg_ratio=float(getattr(cfg, "cell_fg_ratio", 0.67)),
-                stride=stride,
-                norm_power=float(getattr(cfg, "cell_norm_power", 1.0)),
+                density_map, target_float, beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+                gamma=float(cfg.cell_mass_weight_gamma), fg_ratio=float(getattr(cfg, "cell_fg_ratio", 0.67)),
+                stride=stride, norm_power=float(getattr(cfg, "cell_norm_power", 1.0)),
                 norm_ref=float(getattr(cfg, "cell_norm_ref", 100.0)),
             )
         return balanced_smooth_l1(density_map, target_float, beta=cfg.cell_beta, stride=stride)
@@ -171,6 +168,9 @@ def _compute_core_losses(
                 inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
                 stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
                 canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
+                adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
+                sigma_min=getattr(cfg, "bayesian_sigma_min", 3.0),
+                sigma_max=getattr(cfg, "bayesian_sigma_max", 8.0),
             )
         elif cfg.allocation_loss_type == "fidt":
             if not getattr(cfg, "fidt_normalize_by_count", True):
