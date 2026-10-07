@@ -133,6 +133,7 @@ def anscombe_discrepancy(
     asymmetric_morozov: bool = False,
     morozov_gamma_under: float = 0.20,
     morozov_rho: float = 0.30,
+    morozov_rho_cap: float = 0.0,
 ) -> torch.Tensor:
     """Compute Anscombe-stabilized rate discrepancy in float32 with optional A-SAM."""
     if b.ndim == 2:
@@ -162,6 +163,8 @@ def anscombe_discrepancy(
         else:
             gamma_eff = float(morozov_gamma)
         deadband = gamma_eff * sigma_tilde
+        if morozov_rho_cap > 0.0:
+            deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_tilde)
         delta_tilde = torch.sign(delta_tilde) * torch.clamp_min(delta_tilde.abs() - deadband, 0.0)
 
     # Chain rule adjoint projection factor: 1 / sqrt(q_stab)
@@ -243,6 +246,7 @@ def density_gated_anscombe_discrepancy(
     asymmetric_morozov: bool = False,
     morozov_gamma_under: float = 0.20,
     morozov_rho: float = 0.30,
+    morozov_rho_cap: float = 0.0,
 ) -> torch.Tensor:
     """Density-gated Anscombe variance-stabilized rate discrepancy with A-SAM."""
     if b.ndim == 2:
@@ -259,6 +263,7 @@ def density_gated_anscombe_discrepancy(
         asymmetric_morozov=asymmetric_morozov,
         morozov_gamma_under=morozov_gamma_under,
         morozov_rho=morozov_rho,
+        morozov_rho_cap=morozov_rho_cap,
     )
 
     delta = q.float() - b.float()
@@ -270,6 +275,8 @@ def density_gated_anscombe_discrepancy(
         else:
             gamma_eff = float(morozov_gamma)
         deadband = gamma_eff * sigma_b
+        if morozov_rho_cap > 0.0:
+            deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_b)
         delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
     eff_q = q.float() + float(eps) * area_clamped
     rate_res_linear = delta / eff_q.clamp_min(float(eps))

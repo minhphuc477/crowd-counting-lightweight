@@ -433,6 +433,7 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "amp": True,
     "grad_clip": 1.0,
     "solver_warmup_epochs": 5,
-    "solver_ramp_epochs": 20,
+    "solver_ramp_epochs": 5,
     "warmup_epochs": 5,
+    "freeze_bn_after_epoch": -1,
 }

@@ -75,6 +75,7 @@ def evaluate_v3(
     device: torch.device,
     uniform_reliability: bool = False,
     density_bins: tuple[float, float] = (100.0, 500.0),
+    run_tiling: bool = False,
 ) -> dict:
     all_diag_rows = []
     traj_rows = []
@@ -97,7 +98,7 @@ def evaluate_v3(
         loader=loader,
         device=device,
         output_stride=int(model.cfg.output_stride),
-        run_tiling=False,
+        run_tiling=run_tiling,
         forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,
@@ -144,9 +145,14 @@ def train_one_epoch(
     ema_manager: EMAManager,
     teacher_model: Any = None,
     kd_loss_fn: Any = None,
+    freeze_bn: bool = False,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
     model.train()
+    if freeze_bn:
+        for m in model.modules():
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                m.eval()
     if hasattr(optimizer, "train"):
         optimizer.train()
     loss_tracker = LossTracker()

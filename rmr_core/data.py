@@ -59,6 +59,7 @@ def train_transform(
     gamma_jitter: tuple[float, float] = (1.0, 1.0),
     random_invert_prob: float = 0.0,
     pad_small_images: bool = True,
+    boundary_margin: float = 4.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Geometric + photometric augmentation that keeps point coordinates exact.
 
@@ -138,14 +139,14 @@ def train_transform(
     if pts.numel():
         pts[:, 0] -= left
         pts[:, 1] -= top
+        bm = float(boundary_margin)
         keep = (
-            (pts[:, 0] >= 0) & (pts[:, 0] < crop_size) &
-            (pts[:, 1] >= 0) & (pts[:, 1] < crop_size)
+            (pts[:, 0] >= -bm) & (pts[:, 0] < float(crop_size) + bm) &
+            (pts[:, 1] >= -bm) & (pts[:, 1] < float(crop_size) + bm)
         )
         pts = pts[keep]
-        # Invariant: coordinates within the crop are clamped to the closed support
-        # [0.0, crop_size - 1.0] so that pixel-center reflection (crop_size - 1) - x
-        # is an exact, closed involution without negative underflow or boundary collapse.
+        # Invariant: coordinates within the crop (including boundary heads) are clamped
+        # to the closed support [0.0, crop_size - 1.0].
         pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
         pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
 
@@ -232,6 +233,7 @@ class CrowdManifestDataset(Dataset):
         gamma_jitter: tuple[float, float] = (1.0, 1.0),
         random_invert_prob: float = 0.0,
         pad_small_images: bool = True,
+        boundary_margin: float = 4.0,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
@@ -259,6 +261,7 @@ class CrowdManifestDataset(Dataset):
         self.gamma_jitter = (float(gamma_jitter[0]), float(gamma_jitter[1]))
         self.random_invert_prob = float(random_invert_prob)
         self.pad_small_images = bool(pad_small_images)
+        self.boundary_margin = float(boundary_margin)
         self.cache_images = bool(cache_images)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
@@ -338,6 +341,7 @@ class CrowdManifestDataset(Dataset):
                 gamma_jitter=self.gamma_jitter,
                 random_invert_prob=self.random_invert_prob,
                 pad_small_images=self.pad_small_images,
+                boundary_margin=self.boundary_margin,
             )
         else:
             image_t = TF.to_tensor(image)

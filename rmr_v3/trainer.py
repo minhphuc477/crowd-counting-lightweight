@@ -235,7 +235,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
 
     solver_warmup_epochs = int(cfg.get("train", {}).get("solver_warmup_epochs", 5))
-    solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 20))
+    solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 5))
+    freeze_bn_epoch = int(cfg.get("train", {}).get("freeze_bn_after_epoch", -1))
+    eval_run_tiling = bool(cfg.get("eval", {}).get("run_tiling", False))
 
     start_epoch = 0
     best_mae = float("inf")
@@ -313,6 +315,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             ema_manager=ema_manager,
             teacher_model=teacher_model,
             kd_loss_fn=kd_loss_fn,
+            freeze_bn=(freeze_bn_epoch >= 0 and epoch >= freeze_bn_epoch),
         )
         if hasattr(optimizer, "eval"):
             optimizer.eval()
@@ -356,6 +359,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 val_metrics = evaluate_v3(
                     model, val_loader, device,
                     uniform_reliability=uniform_reliability, density_bins=density_bins,
+                    run_tiling=eval_run_tiling,
                 )
             if device.type == "cuda":
                 torch.cuda.empty_cache()
