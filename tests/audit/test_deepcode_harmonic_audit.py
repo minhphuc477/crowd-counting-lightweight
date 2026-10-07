@@ -10,6 +10,8 @@ from rmr_core.losses import balanced_smooth_l1
 from rmr_core.operators import build_multiscale_regions, regional_sum
 from rmr_v3.eval import load_model_from_ckpt
 from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
+from rmr_v3.losses.chfl import canonical_chfl_loss
+from rmr_v3.losses.fidt import canonical_fidt_loss, generate_canonical_fidt_target
 from rmr_v3.model import RMRv3, RMRv3Config
 
 
@@ -122,3 +124,45 @@ def test_odd_prime_resolution_gradient_backprop():
     loss.backward()
     assert x.grad is not None
     assert torch.isfinite(x.grad).all()
+
+
+def test_canonical_fidt_loss_properties():
+    """Verify canonical FIDT loss produces exact peaks, handles empty scenes, and flows valid gradients."""
+    h, w, stride = 32, 32, 4
+    pts = [torch.tensor([[10.0, 10.0], [20.0, 20.0]])]
+    target = generate_canonical_fidt_target(h, w, pts[0], stride=stride)
+    assert target.shape == (h, w)
+    assert abs(target.max().item() - 1.0) < 1e-4
+
+    target_empty = generate_canonical_fidt_target(h, w, torch.empty((0, 2)), stride=stride)
+    assert torch.equal(target_empty, torch.zeros_like(target_empty))
+
+    pred = torch.full((1, 1, h, w), 0.1, requires_grad=True)
+    for mode in ["mse", "smooth_l1"]:
+        l = canonical_fidt_loss(pred, pts, stride=stride, loss_mode=mode)
+        assert torch.isfinite(l)
+        l.backward(retain_graph=True)
+        assert pred.grad is not None
+        assert torch.isfinite(pred.grad).all()
+        pred.grad.zero_()
+
+
+def test_canonical_chfl_loss_properties():
+    """Verify canonical ChfL loss computes exact Fourier distances and flows valid gradients."""
+    h, w, stride = 16, 16, 4
+    pts = [torch.tensor([[8.0, 8.0], [24.0, 24.0]])]
+    pred = torch.full((1, 1, h, w), 0.05, requires_grad=True)
+
+    loss = canonical_chfl_loss(pred, pts, stride=stride, chf_tik=0.01, chf_step=8, bandwidth=8.0)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+    pred_empty = torch.full((1, 1, h, w), 0.05, requires_grad=True)
+    loss_empty = canonical_chfl_loss(pred_empty, [torch.empty((0, 2))], stride=stride, chf_step=8)
+    assert loss_empty.item() > 0.0
+    loss_empty.backward()
+    assert pred_empty.grad is not None
+    assert torch.isfinite(pred_empty.grad).all()
+

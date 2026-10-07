@@ -6,7 +6,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from rmr_core.evaluation import evaluate_dataset, predict_tiled, save_evaluation_artifacts
+from rmr_core.evaluation import (
+    evaluate_dataset,
+    predict_multiscale_tta,
+    predict_tiled,
+    save_evaluation_artifacts,
+)
 
 
 class DummyModel(nn.Module):
@@ -162,4 +167,50 @@ def test_gt_consistency_invariant():
             device=device,
             enforce_gt_consistency=True,
         )
+
+
+class ZeroModel(nn.Module):
+    def forward(self, x, **kwargs):
+        b, _, h, w = x.shape
+        return {"y": torch.zeros((b, 1, h // 4, w // 4), device=x.device)}
+
+
+def test_multiscale_tta_single_scale_parity():
+    """When scales=(1.0,) and use_hflip=False, predict_multiscale_tta matches predict_tiled."""
+    model = LocalConvModel().eval()
+    image = torch.rand(3, 128, 128)
+    with torch.no_grad():
+        tiled = predict_tiled(model, image, output_stride=4, tile_size=64, halo=16)
+        tta = predict_multiscale_tta(
+            model, image, output_stride=4, tile_size=64, halo=16, scales=(1.0,), use_hflip=False
+        )
+    assert torch.allclose(tiled, tta, atol=1e-6)
+
+
+def test_multiscale_tta_zero_mass_stability():
+    """Predicting on zero-mass images must remain exactly 0.0 with zero NaNs or Infs."""
+    model = ZeroModel().eval()
+    image = torch.rand(3, 128, 128)
+    with torch.no_grad():
+        tta = predict_multiscale_tta(
+            model, image, output_stride=4, tile_size=64, halo=16, scales=(0.8, 1.0, 1.2), use_hflip=True
+        )
+    assert not torch.isnan(tta).any()
+    assert not torch.isinf(tta).any()
+    assert torch.equal(tta, torch.zeros_like(tta))
+
+
+def test_multiscale_tta_mass_conservation():
+    """Verify multiscale TTA produces finite, strictly positive conserved predictions."""
+    model = LocalConvModel().eval()
+    image = torch.rand(3, 128, 128)
+    with torch.no_grad():
+        tta = predict_multiscale_tta(
+            model, image, output_stride=4, tile_size=64, halo=16, scales=(0.8, 1.0, 1.2), use_hflip=True
+        )
+    assert tta.shape == (1, 32, 32)
+    assert not torch.isnan(tta).any()
+    assert not torch.isinf(tta).any()
+    assert tta.sum().item() > 0.0
+
 
