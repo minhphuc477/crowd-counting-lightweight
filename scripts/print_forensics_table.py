@@ -20,9 +20,11 @@ for it in items:
     tot_h = it["total_heads"]
     mean_c = it["head_count"]["mean"]
     med_c = it["head_count"]["median"]
-    res = f"{int(it['resolution']['w_median'])}x{int(it['resolution']['h_median'])}"
-    lt_512 = f"{it['resolution']['pct_short_side_lt_512']:.1f}%"
-    gt_2048 = f"{it['resolution']['pct_long_side_gt_2048']:.1f}%"
-    sub4 = f"{it['spatial_1nn']['sub_4px_fraction_pct']:.1f}%"
-    nn_med = f"{it['spatial_1nn']['median_px']:.1f}p"
+    res_d = it.get("resolution", {})
+    res = f"{int(res_d['w_median'])}x{int(res_d['h_median'])}" if "w_median" in res_d else "varied"
+    lt_512 = f"{res_d['pct_short_side_lt_512']:.1f}%" if "pct_short_side_lt_512" in res_d else "N/A"
+    gt_2048 = f"{res_d['pct_long_side_gt_2048']:.1f}%" if "pct_long_side_gt_2048" in res_d else "N/A"
+    s1nn = it.get("spatial_1nn", {})
+    sub4 = f"{s1nn['sub_4px_fraction_pct']:.1f}%" if "sub_4px_fraction_pct" in s1nn else "N/A"
+    nn_med = f"{s1nn['median_px']:.1f}p" if "median_px" in s1nn else "N/A"
     print(f"| {name:<22} | {n_img:>6} | {tot_h:>8} | {mean_c:>7.1f} | {med_c:>6.0f} | {res:>10} | {lt_512:>7} | {gt_2048:>7} | {sub4:>7} | {nn_med:>7} |")
