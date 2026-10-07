@@ -85,7 +85,7 @@ def _density_activate(
     return y_base
 
 
-_CURVATURE_ALPHA_INIT: float = -8.0
+_CURVATURE_ALPHA_INIT: float = -2.0
 
 
 def _softplus_inverse(y: float) -> float:
@@ -126,7 +126,7 @@ class FineMeasureHead(nn.Module):
         density_adaptive_scale: bool = False,
         density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False,
-        scale_prior_boost: float = 0.0,
+        scale_prior_boost: float = 0.05,
         curvature_pade: bool = False,
     ):
         super().__init__()
@@ -419,7 +419,7 @@ def build_fine_head(
     density_adaptive_scale: bool = False,
     density_scale_gamma: float = 0.0,
     density_scale_learnable: bool = False,
-    scale_prior_boost: float = 0.0,
+    scale_prior_boost: float = 0.05,
     curvature_pade: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""

@@ -54,13 +54,9 @@ def extract_regional_evidence(
     if cfg.hurdle_head and "hurdle_logit" in regional:
         pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
         mode = getattr(cfg, "hurdle_gating_mode", "occupancy")
-        if mode == "product":
-            # Legacy multiplicative hurdle (eroded dense crowd mass by 15-25%)
-            b_solver = pi_r * b_solver_raw
-            b_variance = pi_r.square() * b_variance
-        elif mode in ("disabled", "unbiased"):
+        if mode in ("disabled", "unbiased"):
             b_solver = b_solver_raw
-        else:  # "occupancy" (default principled gate)
+        else:  # "occupancy" (principled gate: 100% mass preservation on b >= 1.0, background suppression on b < 1.0)
             occ_gate = 1.0 - (1.0 - pi_r) * torch.clamp(1.0 - b_solver_raw, min=0.0, max=1.0)
             b_solver = occ_gate * b_solver_raw
             b_variance = occ_gate.square() * b_variance
