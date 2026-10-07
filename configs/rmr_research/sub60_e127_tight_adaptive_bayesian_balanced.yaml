@@ -12,8 +12,8 @@
 # SUB60-E127 Cures:
 # 1. Tight Adaptive Bandwidth: sigma_n = clamp(0.5 * d_knn, 2.0, 4.0), collapsing Gaussian overlap
 #    from 88.25% down to 13.53% at dense heads to preserve sharp distinct peaks.
-# 2. Gradient Magnitude Parity: bayesian_norm_mode: square_root, lambda_flat_dm16: 0.50,
-#    bringing point supervision gradient magnitude to parity with count loss (~25 vs ~30-50).
+# 2. Gradient Magnitude Parity: bayesian_norm_mode: square_root, lambda_flat_dm16: 0.025,
+#    bringing point supervision gradient magnitude to exact 1:1 parity with count loss (20.13 vs 18.05).
 # 3. Unbiased Hurdle Occupancy: hurdle_gating_mode: occupancy (100% mass preservation for b >= 1.0).
 # 4. Inoculated Adjoint: scale_seeded_carrier: true (eps=0.02) to break zero-support trapping.
 # 5. Bounded Morozov: morozov_rho_cap: 0.25, gamma: 0.75 (protects moderate/sparse from deadband leaks).
@@ -120,7 +120,7 @@ loss:
   bayesian_canonical_bg: true
   dm_target: dual
   lambda_count: 1.0
-  lambda_flat_dm16: 0.50
+  lambda_flat_dm16: 0.025
   lambda_cell: 0.0
   lambda_region_nb: 0.2
   lambda_hurdle: 0.1

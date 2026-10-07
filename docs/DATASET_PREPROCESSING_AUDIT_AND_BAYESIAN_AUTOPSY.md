@@ -149,7 +149,7 @@ To successfully deploy Bayesian supervision within the 104k parameter budget:
 * **Config File**: [`configs/rmr_research/sub60_e127_tight_adaptive_bayesian_balanced.yaml`](file:///f:/lightweightcrcn/configs/rmr_research/sub60_e127_tight_adaptive_bayesian_balanced.yaml)
 * **Mathematical Synthesis**:
   - Bandwidth: $\sigma_n = \operatorname{clamp}(0.5 \cdot d_{\text{knn}}, 2.0, 4.0)$ via `bayesian_adaptive_sigma: true`, `bayesian_sigma_min: 2.0`, `bayesian_sigma_max: 4.0`.
-  - Normalization: `bayesian_norm_mode: square_root` with $\lambda_{\text{Bayes}} = 0.50$ (re-establishing gradient magnitude parity with count loss).
+  - Normalization: `bayesian_norm_mode: square_root` with $\lambda_{\text{Bayes}} = 0.025$ (establishing exact 1:1 gradient magnitude parity with count loss: $\|\nabla \mathcal{L}_{\text{Bayes}}\| = 20.13$ vs $\|\nabla \mathcal{L}_{\text{Count}}\| = 18.05$).
   - Adjoint Protection: `scale_seeded_carrier: true` ($\varepsilon = 0.02$) prevents the $0 \cdot \delta = 0$ zero-support trap.
   - Mass Preservation: `hurdle_gating_mode: occupancy` ensures $b_{\text{solver}} = b_{\text{raw}}$ for crowd regions ($b \ge 1.0$), eliminating the 20-25% mass erosion of legacy `product` gating.
   - Variance Anchor: Bounded Morozov with $\rho_{\text{cap}} = 0.25$ and $\gamma = 0.75$ preserves the low-variance advantage of `sub60_e108a` (RMSE = 123.48).
