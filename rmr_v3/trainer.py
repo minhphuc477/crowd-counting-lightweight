@@ -230,7 +230,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     scaler_init_scale = float(cfg.get("train", {}).get("grad_scaler_init_scale", 1024.0))
     scaler = torch.amp.GradScaler("cuda" if device.type == "cuda" else "cpu", enabled=amp, init_scale=scaler_init_scale)
     grad_clip = float(cfg.get("train", {}).get("grad_clip", 1.0))
-    eval_every = int(cfg.get("train", {}).get("eval_every", 10))
+    eval_every = int(cfg.get("train", {}).get("eval_every", 5))
     density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
     patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
 

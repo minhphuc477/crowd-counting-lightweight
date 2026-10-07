@@ -426,12 +426,12 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
 
 CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "workers": 0,
-    "eval_every": 10,
+    "eval_every": 5,
     "early_stopping": False,
     "patience": 0,
     "deterministic": True,
     "amp": True,
-    "grad_clip": 500.0,
+    "grad_clip": 1.0,
     "solver_warmup_epochs": 5,
     "solver_ramp_epochs": 20,
     "warmup_epochs": 5,
