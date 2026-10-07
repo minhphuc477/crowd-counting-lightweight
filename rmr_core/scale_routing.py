@@ -50,9 +50,7 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        # Small normal initialization: keeps uniform prior Softmax(logits) ≈ (1/K, 1/K, ...)
-        # at step 0 while immediately unmasking active gradient flow to depthwise conv and GroupNorm.
-        nn.init.normal_(self.pw.weight, std=0.01)
+        nn.init.zeros_(self.pw.weight)
         nn.init.zeros_(self.pw.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -145,8 +143,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        # Small normal initialization: unmasks active gradient flow from step 0
-        nn.init.normal_(self.pw_scale.weight, std=0.01)
+        nn.init.zeros_(self.pw_scale.weight)
         nn.init.zeros_(self.pw_scale.bias)
 
         # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
@@ -156,7 +153,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        nn.init.normal_(self.pw_aspect.weight, std=0.01)
+        nn.init.zeros_(self.pw_aspect.weight)
         nn.init.zeros_(self.pw_aspect.bias)
 
     def forward(

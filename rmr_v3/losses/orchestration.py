@@ -169,7 +169,7 @@ def _compute_core_losses(
                 stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
                 canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
                 adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
-                sigma_min=getattr(cfg, "bayesian_sigma_min", 3.0),
+                sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0),
                 sigma_max=getattr(cfg, "bayesian_sigma_max", 8.0),
             )
         elif cfg.allocation_loss_type == "fidt":
@@ -354,15 +354,11 @@ def _compute_auxiliary_losses(
         if router.mode == "dual":
             l_y, c_y = count_preserving_spectral_loss(y, target_float, **sp_kw)
             l_y0, c_y0 = count_preserving_spectral_loss(y0, target_float, **sp_kw)
-            loss_spec = 0.5 * l_y + 0.5 * l_y0
-            loss_spec_dc = 0.5 * c_y["spectral_dc"] + 0.5 * c_y0["spectral_dc"]
-            loss_spec_ac = 0.5 * c_y["spectral_ac"] + 0.5 * c_y0["spectral_ac"]
-        elif router.mode == "y0":
-            loss_spec, comps = count_preserving_spectral_loss(y0, target_float, **sp_kw)
-            loss_spec_dc = comps["spectral_dc"]
-            loss_spec_ac = comps["spectral_ac"]
+            loss_spec = 0.5 * (l_y + l_y0)
+            loss_spec_dc = 0.5 * (c_y["spectral_dc"] + c_y0["spectral_dc"])
+            loss_spec_ac = 0.5 * (c_y["spectral_ac"] + c_y0["spectral_ac"])
         else:
-            loss_spec, comps = count_preserving_spectral_loss(y, target_float, **sp_kw)
+            loss_spec, comps = count_preserving_spectral_loss(y0 if router.mode == "y0" else y, target_float, **sp_kw)
             loss_spec_dc = comps["spectral_dc"]
             loss_spec_ac = comps["spectral_ac"]
 

@@ -16,7 +16,7 @@ def bayesian_loss(
     canonical_background: bool = True,
     targets_list: list[torch.Tensor] | None = None,
     adaptive_sigma: bool = False,
-    sigma_min: float = 3.0,
+    sigma_min: float = 2.0,
     sigma_max: float = 8.0,
 ) -> torch.Tensor:
     """Canonical Bayesian Loss for point supervision (Ma et al. ICCV 2019).

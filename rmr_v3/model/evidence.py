@@ -56,6 +56,9 @@ def extract_regional_evidence(
         mode = getattr(cfg, "hurdle_gating_mode", "occupancy")
         if mode in ("disabled", "unbiased"):
             b_solver = b_solver_raw
+        elif mode == "product":
+            b_solver = pi_r * b_solver_raw
+            b_variance = pi_r.square() * b_variance
         else:  # "occupancy" (principled gate: 100% mass preservation on b >= 1.0, background suppression on b < 1.0)
             occ_gate = 1.0 - (1.0 - pi_r) * torch.clamp(1.0 - b_solver_raw, min=0.0, max=1.0)
             b_solver = occ_gate * b_solver_raw

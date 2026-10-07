@@ -48,6 +48,27 @@ def rasterize_points(
     return out
 
 
+def cap_image_resolution(
+    image: Image.Image,
+    pts: torch.Tensor,
+    max_size: int = 2048,
+) -> tuple[Image.Image, torch.Tensor]:
+    """Downscale image and points if maximum dimension exceeds max_size."""
+    w0, h0 = image.size
+    max_dim = max(w0, h0)
+    if max_dim <= max_size:
+        return image, pts
+    cap_scale = float(max_size) / float(max_dim)
+    w_cap, h_cap = int(round(w0 * cap_scale)), int(round(h0 * cap_scale))
+    image_capped = image.resize((w_cap, h_cap), Image.Resampling.BILINEAR)
+    image.close()
+    if pts.numel():
+        pts = pts.clone()
+        pts[:, 0] = (pts[:, 0] + 0.5) * (w_cap / w0) - 0.5
+        pts[:, 1] = (pts[:, 1] + 0.5) * (h_cap / h0) - 0.5
+    return image_capped, pts
+
+
 def train_transform(
     image: Image.Image,
     points_xy: torch.Tensor,
@@ -58,56 +79,39 @@ def train_transform(
     contrast_jitter: float = 0.0,
     gamma_jitter: tuple[float, float] = (1.0, 1.0),
     random_invert_prob: float = 0.0,
-    pad_small_images: bool = True,
-    boundary_margin: float = 4.0,
+    pad_small_images: bool = False,
+    boundary_margin: float = 0.0,
+    max_size: int = 2048,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Geometric + photometric augmentation that keeps point coordinates exact.
+    """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
-    Memory-efficient: resize and crop performed directly in uint8 PIL space.
-    Scale protocol: random scale drawn from [scale_range[0], scale_range[1]], with the
-    lower bound increased when necessary to permit a real crop_size x crop_size crop
-    without synthetic padding:
-        scale_lo = max(scale_range[0], crop_size / min(w0, h0))
-        scale = uniform(scale_lo, max(scale_range[1], scale_lo))
-    Points are transformed via continuous pixel-center scaling:
-        x' = (x + 0.5) * (w1 / w0) - 0.5
-        y' = (y + 0.5) * (h1 / h0) - 0.5
-
-    Photometric augmentation (all opt-in, inactive by default):
-        brightness_jitter: ±factor uniform, applied with prob 0.5
-        contrast_jitter:   ±factor uniform, applied with prob 0.5
-        gamma_jitter:      (lo, hi) log-uniform gamma exponent, applied with prob 0.5
-        random_invert_prob: probability of pixel-inversion (1.0 - x), models dark/negative images
+    Universal 0.0% padding invariant (pad_small_images=False, default):
+        Scale shorter side so min(w1, h1) >= crop_size, guaranteeing that every single pixel
+        in the crop is a real photo pixel (0.0% synthetic gray padding).
+    Multi-dataset scale cap (max_size=2048):
+        Downscales ultra-large images (e.g. 6000x4000 in QNRF/NWPU) to max_size before cropping
+        to eliminate RAM explosion and PIL resize latency.
+    Continuous pixel-center scaling:
+        x' = (x + 0.5) * (w1 / w0) - 0.5, y' = (y + 0.5) * (h1 / h0) - 0.5.
     """
     pts = points_xy.clone().float().reshape(-1, 2)
+    image, pts = cap_image_resolution(image, pts, max_size=max_size)
     w0, h0 = image.size
-
-    # Guard against extreme aspect ratio image scaling explosion (e.g. 100x2400 panoramas)
-    aspect_ratio = max(w0, h0) / max(min(w0, h0), 1)
-    if aspect_ratio > 3.0 and min(w0, h0) < crop_size:
-        pad_w = max(0, crop_size - w0)
-        pad_h = max(0, crop_size - h0)
-        if pad_w > 0 or pad_h > 0:
-            new_img = Image.new("RGB", (w0 + pad_w, h0 + pad_h), color=(128, 128, 128))
-            pad_left = pad_w // 2
-            pad_top = pad_h // 2
-            new_img.paste(image, (pad_left, pad_top))
-            image.close()
-            image = new_img
-            if pts.numel():
-                pts[:, 0] += pad_left
-                pts[:, 1] += pad_top
-            w0, h0 = image.size
-
+    max_dim, min_dim = max(w0, h0), min(w0, h0)
     if pad_small_images:
-        scale = random.uniform(float(scale_range[0]), float(scale_range[1]))
+        scale_lo = max(1.0, float(scale_range[0])) if min_dim < crop_size else float(scale_range[0])
+        scale_hi = max(scale_lo, float(scale_range[1]))
+        scale = random.uniform(scale_lo, scale_hi)
         w1 = int(round(w0 * scale))
         h1 = int(round(h0 * scale))
     else:
-        min_dim = min(w0, h0)
-        min_scale = max(float(scale_range[0]), float(crop_size) / float(min_dim))
-        max_scale = max(float(scale_range[1]), min_scale)
-        scale = random.uniform(min_scale, max_scale)
+        # 0.0% synthetic padding: scale shorter side so min(w1, h1) >= crop_size, preserving scale variance
+        min_scale = max(float(scale_range[0]), float(crop_size) / float(max(min_dim, 1)))
+        max_allowed = max(min_scale * 1.25, float(max_size) / float(max(max_dim, 1)))
+        bandwidth_ratio = float(scale_range[1]) / max(float(scale_range[0]), 1e-4)
+        target_hi = max(float(scale_range[1]), min_scale * min(bandwidth_ratio, 1.35))
+        scale_hi = max(min_scale, min(target_hi, max_allowed))
+        scale = random.uniform(min_scale, scale_hi)
         w1 = max(crop_size, int(round(w0 * scale)))
         h1 = max(crop_size, int(round(h0 * scale)))
 
@@ -185,7 +189,6 @@ def train_transform(
     return image_t.clamp(0, 1), pts
 
 
-
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
     mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
     std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
@@ -222,29 +225,17 @@ class CrowdManifestDataset(Dataset):
 
     def __init__(
         self,
-        manifest: str | Path,
-        train: bool,
-        output_stride: int = 4,
-        crop_size: int = 512,
-        scale_range: tuple[float, float] = (0.75, 1.25),
-        hflip_prob: float = 0.5,
-        brightness_jitter: float = 0.0,
-        contrast_jitter: float = 0.0,
-        gamma_jitter: tuple[float, float] = (1.0, 1.0),
-        random_invert_prob: float = 0.0,
-        pad_small_images: bool = True,
-        boundary_margin: float = 4.0,
-        data_root: str | Path | None = None,
-        cache_images: bool = True,
-        preload: bool = False,
+        manifest: str | Path, train: bool,
+        output_stride: int = 4, crop_size: int = 512,
+        scale_range: tuple[float, float] = (0.75, 1.25), hflip_prob: float = 0.5,
+        brightness_jitter: float = 0.0, contrast_jitter: float = 0.0,
+        gamma_jitter: tuple[float, float] = (1.0, 1.0), random_invert_prob: float = 0.0,
+        pad_small_images: bool = False, boundary_margin: float = 0.0, max_size: int = 2048,
+        data_root: str | Path | None = None, cache_images: bool = True, preload: bool = False,
     ):
         manifest_path = Path(manifest)
         if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
-            raise ValueError(
-                f"Ad-hoc split manifest '{manifest}' has been deleted and is strictly forbidden "
-                f"under the Zero Ad-hoc Split Policy! Use 'data/sha_a_train_all.jsonl' (300 samples) "
-                f"and 'data/sha_a_test.jsonl' (182 samples)."
-            )
+            raise ValueError(f"Forbidden legacy split '{manifest}' under Zero Ad-hoc Split Policy. Use canonical benchmarks.")
 
         resolved_manifest = resolve_manifest_path(manifest, data_root=data_root)
         self.manifest = resolved_manifest if resolved_manifest is not None else Path(manifest)
@@ -262,37 +253,35 @@ class CrowdManifestDataset(Dataset):
         self.random_invert_prob = float(random_invert_prob)
         self.pad_small_images = bool(pad_small_images)
         self.boundary_margin = float(boundary_margin)
+        self.max_size = int(max_size)
         self.cache_images = bool(cache_images)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
-        seen_ids = set()
-        seen_images = set()
+        seen_ids, seen_images = set(), set()
         for idx, it in enumerate(self.items):
             sid = str(it.get("id", idx))
             if sid in seen_ids:
-                raise ValueError(
-                    f"Duplicate sample ID '{sid}' in manifest '{self.manifest}' at index {idx}."
-                )
+                raise ValueError(f"Duplicate sample ID '{sid}' in manifest '{self.manifest}' at index {idx}.")
             seen_ids.add(sid)
             img_raw = it.get("image", "")
             if img_raw:
                 img_p = Path(img_raw).as_posix()
                 if img_p in seen_images:
-                    raise ValueError(
-                        f"Duplicate image path '{img_p}' in manifest '{self.manifest}' at index {idx}."
-                    )
+                    raise ValueError(f"Duplicate image path '{img_p}' in manifest '{self.manifest}' at index {idx}.")
                 seen_images.add(img_p)
 
-        # Enforce canonical benchmark partitions for ShanghaiTech Part A
-        if self.manifest.name == "sha_a_train_all.jsonl" and len(self.items) != 300:
+        # Enforce canonical benchmark partitions
+        canonical_counts = {
+            "sha_a_train_all.jsonl": 300, "sha_a_test.jsonl": 182,
+            "shb_train_all.jsonl": 400, "shb_test.jsonl": 316,
+            "ucf_cc_50_all.jsonl": 50, "qnrf_train.jsonl": 1201, "qnrf_test.jsonl": 334,
+            "nwpu_train.jsonl": 3109, "nwpu_val.jsonl": 500, "nwpu_test.jsonl": 1500,
+        }
+        if self.manifest.name in canonical_counts and len(self.items) != canonical_counts[self.manifest.name]:
             raise ValueError(
-                f"ShanghaiTech Part A train partition must contain exactly 300 images, got {len(self.items)}."
-            )
-        if self.manifest.name == "sha_a_test.jsonl" and len(self.items) != 182:
-            raise ValueError(
-                f"ShanghaiTech Part A test partition must contain exactly 182 images, got {len(self.items)}."
+                f"Partition '{self.manifest.name}' must contain exactly {canonical_counts[self.manifest.name]} images, got {len(self.items)}."
             )
 
         # Pre-convert coordinate points to contiguous float32 tensors once to avoid
@@ -342,8 +331,10 @@ class CrowdManifestDataset(Dataset):
                 random_invert_prob=self.random_invert_prob,
                 pad_small_images=self.pad_small_images,
                 boundary_margin=self.boundary_margin,
+                max_size=self.max_size,
             )
         else:
+            image, pts = cap_image_resolution(image, pts, max_size=self.max_size)
             image_t = TF.to_tensor(image)
             image.close()
 

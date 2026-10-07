@@ -118,11 +118,11 @@ class RMRv3(nn.Module):
             curvature_pool_kernel=cfg.curvature_pool_kernel,
             subpixel_stride2=cfg.subpixel_stride2,
             floor_tau=cfg.floor_tau,
-            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -2.0),
+            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
             density_adaptive_scale=getattr(cfg, "density_adaptive_scale", False),
             density_scale_gamma=getattr(cfg, "density_scale_gamma", 0.0),
             density_scale_learnable=getattr(cfg, "density_scale_learnable", False),
-            scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.05),
+            scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.0),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
@@ -370,19 +370,16 @@ class RMRv3(nn.Module):
             if fg_logit is not None:
                 fg_logit = fg_logit[..., :target_h4, :target_w4]
 
+        regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
         if self.cfg.subpixel_stride2:
             target_h, target_w = (h_in + 1) // 2, (w_in + 1) // 2
             if y0.shape[-2] != target_h or y0.shape[-1] != target_w:
-                y0 = y0[..., :target_h, :target_w]
-                z0 = z0[..., :target_h, :target_w]
-            regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
+                y0, z0 = y0[..., :target_h, :target_w], z0[..., :target_h, :target_w]
             regions_solver = scale_regions_to_stride2(regions_feat, target_h, target_w)
         else:
             if y0.shape[-2] != target_h4 or y0.shape[-1] != target_w4:
-                y0 = y0[..., :target_h4, :target_w4]
-                z0 = z0[..., :target_h4, :target_w4]
-            regions_solver = self._regions(target_h4, target_w4, x.device, stride=4)
-            regions_feat = regions_solver
+                y0, z0 = y0[..., :target_h4, :target_w4], z0[..., :target_h4, :target_w4]
+            regions_solver = regions_feat
 
         regional_evidence = self._extract_regional_evidence(
             p4=p4,

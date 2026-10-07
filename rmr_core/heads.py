@@ -35,6 +35,31 @@ def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
     return torch.where(y_base > tau, y_base - 0.5 * tau, y_base.square() / (2.0 * max(tau, 1e-8)))
 
 
+def _apply_curvature(
+    y_base: torch.Tensor,
+    curvature_alpha: torch.nn.Parameter | None,
+    curv_scale: float = 1.0,
+    gated: bool = False,
+    pool_kernel: int = 8,
+    dense_threshold: float = 0.15,
+    gate_beta: float = 0.03,
+    curvature_pade: bool = False,
+) -> torch.Tensor:
+    if curvature_alpha is None:
+        return y_base
+    alpha_eff = F.softplus(curvature_alpha)
+    orig_dtype = y_base.dtype
+    y_base_f32 = y_base.float()
+    curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if curvature_pade else y_base_f32.square()
+    if gated:
+        y_local = _pool_local_density(y_base_f32, int(pool_kernel))
+        gate_dense = torch.sigmoid((y_local - float(dense_threshold)) / float(max(gate_beta, 1e-4)))
+        curv_term = float(curv_scale) * alpha_eff.float() * gate_dense * curv_poly
+    else:
+        curv_term = float(curv_scale) * alpha_eff.float() * curv_poly
+    return (y_base_f32 + curv_term).to(orig_dtype)
+
+
 def _density_activate(
     z: torch.Tensor,
     *,
@@ -67,25 +92,20 @@ def _density_activate(
         y_base = y_base * (1.0 + gamma_val * F.relu(z))
 
     if density_curvature and curvature_alpha is not None:
-        alpha_eff = F.softplus(curvature_alpha)
-        orig_dtype = y_base.dtype
-        y_base_f32 = y_base.float()
-        if gated_density_curvature:
-            k_pool = int(curvature_pool_kernel)
-            y_local = _pool_local_density(y_base_f32, k_pool)
-            tau_dense = float(curvature_dense_threshold)
-            beta = float(max(curvature_gate_beta, 1e-4))
-            gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-            curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if curvature_pade else y_base_f32.square()
-            curv_term = float(curv_scale) * alpha_eff.float() * gate_dense * curv_poly
-        else:
-            curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if curvature_pade else y_base_f32.square()
-            curv_term = float(curv_scale) * alpha_eff.float() * curv_poly
-        return (y_base_f32 + curv_term).to(orig_dtype)
+        return _apply_curvature(
+            y_base,
+            curvature_alpha,
+            curv_scale=curv_scale,
+            gated=gated_density_curvature,
+            pool_kernel=curvature_pool_kernel,
+            dense_threshold=curvature_dense_threshold,
+            gate_beta=curvature_gate_beta,
+            curvature_pade=curvature_pade,
+        )
     return y_base
 
 
-_CURVATURE_ALPHA_INIT: float = -2.0
+_CURVATURE_ALPHA_INIT: float = -8.0
 
 
 def _softplus_inverse(y: float) -> float:
@@ -110,23 +130,14 @@ class FineMeasureHead(nn.Module):
 
     def __init__(
         self,
-        width: int = 32,
-        init_bias: float = _FINE_HEAD_BIAS_INIT,
-        temp_softplus: bool = False,
-        scale_conditioned: bool = False,
-        num_scales: int = 4,
-        density_curvature: bool = False,
-        gated_density_curvature: bool = False,
-        curvature_dense_threshold: float = 0.15,
-        curvature_gate_beta: float = 0.03,
-        curvature_pool_kernel: int = 8,
-        subpixel_stride2: bool = False,
-        floor_tau: float = 0.0,
-        curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
-        density_adaptive_scale: bool = False,
-        density_scale_gamma: float = 0.0,
-        density_scale_learnable: bool = False,
-        scale_prior_boost: float = 0.05,
+        width: int = 32, init_bias: float = _FINE_HEAD_BIAS_INIT,
+        temp_softplus: bool = False, scale_conditioned: bool = False, num_scales: int = 4,
+        density_curvature: bool = False, gated_density_curvature: bool = False,
+        curvature_dense_threshold: float = 0.15, curvature_gate_beta: float = 0.03,
+        curvature_pool_kernel: int = 8, subpixel_stride2: bool = False,
+        floor_tau: float = 0.0, curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
+        density_adaptive_scale: bool = False, density_scale_gamma: float = 0.0,
+        density_scale_learnable: bool = False, scale_prior_boost: float = 0.0,
         curvature_pade: bool = False,
     ):
         super().__init__()
@@ -187,12 +198,6 @@ class FineMeasureHead(nn.Module):
         z: torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if scale_weights is not None and getattr(self, "scale_prior_boost", 0.0) > 0.0:
-            sw_b = scale_weights if scale_weights.shape[-2:] == z.shape[-2:] else F.interpolate(
-                scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
-            )
-            z = z + float(self.scale_prior_boost) * sw_b[:, 0:1, :, :].float()
-
         if self.scale_conditioned and scale_weights is not None:
             if scale_weights.shape[-2:] != z.shape[-2:]:
                 scale_weights = F.interpolate(
@@ -209,24 +214,18 @@ class FineMeasureHead(nn.Module):
                 y_base = _smooth_floor(y_base, self.floor_tau)
             if self.density_adaptive_scale:
                 g_val = self.density_scale_gamma.clamp_min(0.0) if isinstance(self.density_scale_gamma, torch.Tensor) else max(float(self.density_scale_gamma), 0.0)
-                y_loc = _pool_local_density(y_base.float(), 5)
-                y_base = y_base * (1.0 + g_val * torch.sigmoid((y_loc - 0.08) / 0.03))
+                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
             if self.density_curvature:
-                alpha_eff = F.softplus(self.curvature_alpha)
-                orig_dtype = y_base.dtype
-                y_base_f32 = y_base.float()
-                if self.gated_density_curvature:
-                    k_pool = int(self.curvature_pool_kernel)
-                    y_local = _pool_local_density(y_base_f32, k_pool)
-                    tau_dense = float(self.curvature_dense_threshold)
-                    beta = float(max(self.curvature_gate_beta, 1e-4))
-                    gate_dense = torch.sigmoid((y_local - tau_dense) / beta)
-                    curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if getattr(self, "curvature_pade", False) else y_base_f32.square()
-                    curv_term = float(self.curv_scale) * alpha_eff.float() * gate_dense * curv_poly
-                else:
-                    curv_poly = (y_base_f32.square() / (1.0 + y_base_f32)) if getattr(self, "curvature_pade", False) else y_base_f32.square()
-                    curv_term = float(self.curv_scale) * alpha_eff.float() * curv_poly
-                return (y_base_f32 + curv_term).to(orig_dtype)
+                return _apply_curvature(
+                    y_base,
+                    self.curvature_alpha,
+                    curv_scale=self.curv_scale,
+                    gated=self.gated_density_curvature,
+                    pool_kernel=self.curvature_pool_kernel,
+                    dense_threshold=self.curvature_dense_threshold,
+                    gate_beta=self.curvature_gate_beta,
+                    curvature_pade=getattr(self, "curvature_pade", False),
+                )
             return y_base
 
         return _density_activate(
@@ -251,12 +250,17 @@ class FineMeasureHead(nn.Module):
         f: tuple[torch.Tensor, ...] | torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute raw pre-activation logit field z0."""
+        """Compute raw pre-activation logit field z0 with scale prior boost."""
         if isinstance(f, tuple):
             f = f[0]
         z = self.body(f)
         if self.subpixel_stride2 and self.pixel_shuffle is not None:
             z = self.pixel_shuffle(z)
+        if scale_weights is not None and getattr(self, "scale_prior_boost", 0.0) > 0.0:
+            sw_b = scale_weights if scale_weights.shape[-2:] == z.shape[-2:] else F.interpolate(
+                scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
+            )
+            z = z + float(self.scale_prior_boost) * sw_b[:, 0:1, :, :].float()
         return z
 
     def forward(
@@ -273,7 +277,7 @@ class FineMeasureHead(nn.Module):
             y0 = F.softplus(z0)
         New code (rmr_v3+) must call forward_logits() + activate() separately.
         """
-        z = self.forward_logits(f)
+        z = self.forward_logits(f, scale_weights=scale_weights)
         if self.temp_softplus or self.scale_conditioned or self.density_curvature:
             return self.activate(z, scale_weights=scale_weights)
         return z
@@ -402,25 +406,15 @@ class ScaleConditionedFineHead(nn.Module):
 
 
 def build_fine_head(
-    width: int = 32,
-    scale_conditioned_fine_head: bool = False,
-    num_scales: int = 3,
-    init_bias: float = _FINE_HEAD_BIAS_INIT,
-    temp_softplus: bool = True,
-    scale_conditioned_prior: bool = False,
-    density_curvature: bool = False,
-    gated_density_curvature: bool = False,
-    curvature_dense_threshold: float = 0.15,
-    curvature_gate_beta: float = 0.03,
-    curvature_pool_kernel: int = 8,
-    subpixel_stride2: bool = False,
-    floor_tau: float = 0.0,
-    curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
-    density_adaptive_scale: bool = False,
-    density_scale_gamma: float = 0.0,
-    density_scale_learnable: bool = False,
-    scale_prior_boost: float = 0.05,
-    curvature_pade: bool = False,
+    width: int = 32, scale_conditioned_fine_head: bool = False, num_scales: int = 3,
+    init_bias: float = _FINE_HEAD_BIAS_INIT, temp_softplus: bool = True,
+    scale_conditioned_prior: bool = False, density_curvature: bool = False,
+    gated_density_curvature: bool = False, curvature_dense_threshold: float = 0.15,
+    curvature_gate_beta: float = 0.03, curvature_pool_kernel: int = 8,
+    subpixel_stride2: bool = False, floor_tau: float = 0.0,
+    curvature_alpha_init: float = _CURVATURE_ALPHA_INIT, density_adaptive_scale: bool = False,
+    density_scale_gamma: float = 0.0, density_scale_learnable: bool = False,
+    scale_prior_boost: float = 0.0, curvature_pade: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     kw = dict(

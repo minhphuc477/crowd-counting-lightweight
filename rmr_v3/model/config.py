@@ -199,11 +199,11 @@ class RMRv3Config:
     curvature_dense_threshold: float = 0.15
     curvature_gate_beta: float = 0.03
     curvature_pool_kernel: int = 8
-    curvature_alpha_init: float = -2.0
+    curvature_alpha_init: float = -8.0
     density_adaptive_scale: bool = False
     density_scale_gamma: float = 0.0
     density_scale_learnable: bool = False
-    scale_prior_boost: float = 0.05
+    scale_prior_boost: float = 0.0
     evidence_anchored_trust: bool = False
     eatr_alpha: float = 0.5
 

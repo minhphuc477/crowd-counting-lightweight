@@ -1,6 +1,6 @@
 import torch
 
-from rmr_count.data import rasterize_points
+from rmr_core.data import rasterize_points
 
 
 def test_rasterize_points_conserves_count():

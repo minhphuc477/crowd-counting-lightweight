@@ -113,7 +113,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
         preload=bool(cfg.get("data", {}).get("preload", False)),
-        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", True)),
+        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", False)),
+        boundary_margin=float(cfg.get("data", {}).get("boundary_margin", 0.0)),
+        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -123,6 +125,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
         preload=bool(cfg.get("data", {}).get("preload", False)),
+        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
     )
 
     dev_req = cfg.get("train", {}).get("device")

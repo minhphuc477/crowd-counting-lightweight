@@ -226,7 +226,7 @@ def weighted_normalized_adjoint_field(
             else:
                 gamma_eff = base_gamma
             deadband = gamma_eff * sigma_b
-            if morozov_rho_cap > 0.0:
+            if morozov_rho_cap > 0.0 and not asymmetric_morozov:
                 deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_b)
             delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
@@ -349,7 +349,6 @@ def weighted_normalized_adjoint_field(
             m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach()
         if crest_discovery_flux and psi_crest is not None:
             m_eff = m_eff + float(crest_eps_seed) * psi_crest
-        m_eff = m_eff.clamp_min(1e-4)
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)
             back = (1.0 - alpha_recov) * (m_eff * back) + alpha_recov * back_leb

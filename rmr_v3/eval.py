@@ -168,6 +168,7 @@ def main() -> None:
         train=False,
         output_stride=stride,
         data_root=cfg.get("data", {}).get("data_root"),
+        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
