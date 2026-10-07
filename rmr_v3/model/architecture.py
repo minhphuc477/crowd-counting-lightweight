@@ -118,11 +118,11 @@ class RMRv3(nn.Module):
             curvature_pool_kernel=cfg.curvature_pool_kernel,
             subpixel_stride2=cfg.subpixel_stride2,
             floor_tau=cfg.floor_tau,
-            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
+            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -2.0),
             density_adaptive_scale=getattr(cfg, "density_adaptive_scale", False),
             density_scale_gamma=getattr(cfg, "density_scale_gamma", 0.0),
             density_scale_learnable=getattr(cfg, "density_scale_learnable", False),
-            scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.0),
+            scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.05),
         )
 
         self.region_head = ProbabilisticRegionalEvidenceHead(
