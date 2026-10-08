@@ -1,12 +1,10 @@
-# SUB60-E139: Purified Dual-Loss Baseline (Phase 1 Loss Purification)
+# SUB60-E141: RMR-v35 Scaled Architecture with Balanced DM Loss (lambda_dm=8.0)
 # Scientific Purpose:
-# Eliminate multi-task loss conflict and AdamW gradient variance explosion:
-# 1. In e138 (champion MAE 75.80), 9 simultaneous loss objectives competed, causing 28 conflicting gradient pairs.
-# 2. In e139, all 7 auxiliary losses (cell, region_nb, hurdle, trunc_nb, scale_align, curvature, hard_bg) are pruned to 0.0.
-# 3. Only two strictly orthogonal objectives are retained:
-#    - Macro Mass: Smooth Count Loss (Negative Binomial / Smooth-L1)
-#    - Micro Spatial: Balanced Dirichlet-Multinomial Loss at Stride 2 (lambda_flat_dm16 = 15.0, kappa = 10.0)
-# 4. Total Trainable Parameters: Exactly 104,373 (strictly <= 104,441 budget, 100% Standalone, 0.0% KD).
+# Loss Scale & Gradient Balancing Ablation:
+# 1. In e140 (lambda_flat_dm16 = 15.0), DM loss term contributes ~61.5 / 82.8 (74% of total loss).
+# 2. In e141, lambda_flat_dm16 is recalibrated to 8.0 (matching champion e138), bringing total initial loss to ~50.
+# 3. Trains with identical 175,221 parameter budget (feature_width=80, region_head_hidden=140).
+# 4. Total Trainable Parameters: Exactly 175,221 (strictly <= 200,000 budget, 100% Standalone, 0.0% KD).
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -26,11 +24,12 @@ data:
 model:
   output_stride: 2
   subpixel_dm: true
-  feature_width: 32
+  feature_width: 80
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: 0.015763
+  max_trainable_params: 200000
   neck_type: hdc_lite
   use_aspp_gap: true
   hdc_dilations:
@@ -44,7 +43,7 @@ model:
   region_overlap: 0.5
   include_full_image: false
   regional_feature_stats: mean
-  region_head_hidden: 44
+  region_head_hidden: 140
   dynamic_scale_routing: true
   factorized_scale_routing: false
   scale_router_temperature: 1.0
@@ -111,7 +110,7 @@ loss:
   dm_target: dual
   lambda_count: 1.0
   lambda_bayesian: 0.0
-  lambda_flat_dm16: 15.0
+  lambda_flat_dm16: 8.0
   lambda_cell: 0.0
   lambda_region_nb: 0.2
   lambda_hurdle: 0.1
@@ -147,4 +146,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e139_purified_dual_loss_104k
+output_dir: runs/sha_a/sub60_e141_rmr_v35_balanced_dm_lambda8

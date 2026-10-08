@@ -236,3 +236,24 @@ def test_empty_target_batch_robustness():
 
     assert "total" in losses
     assert losses["total"].item() == 0.0
+
+
+def test_comprehensive_ablation_configs_e141_to_e143():
+    """Verify e141, e142, and e143 configurations load, validate, and execute forward pass."""
+    for cfg_file in [
+        "configs/rmr_research/sub60_e141_rmr_v35_balanced_dm_lambda8.yaml",
+        "configs/rmr_research/sub60_e142_rmr_v35_coupled_solver.yaml",
+        "configs/rmr_research/sub60_e143_rmr_v35_factorized_routing.yaml",
+    ]:
+        m_cfg, l_cfg = _load_cfg(cfg_file)
+        model = RMRv3(m_cfg)
+        params = count_params(model)
+        assert 150000 <= params <= 200000, f"Params {params} out of bounds for {cfg_file}"
+
+        x = torch.randn(1, 3, 256, 256)
+        out = model(x)
+        assert out["y"].shape[-2:] == (128, 128)
+        tgt = torch.zeros(1, 1, 128, 128)
+        tgt[:, :, 10, 10] = 1.0
+        loss = compute_rmr_v3_losses(out, tgt, cfg=l_cfg)
+        assert torch.isfinite(loss["total"])

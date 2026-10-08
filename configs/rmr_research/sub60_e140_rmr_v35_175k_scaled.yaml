@@ -128,7 +128,7 @@ loss:
 train:
   epochs: 1000
   batch_size: 8
-  workers: 0
+  workers: 4
   pin_memory: true
   lr: 0.0001
   backbone_lr_scale: 0.1
@@ -144,7 +144,7 @@ train:
   eval_every: 5
   deterministic: false
   num_threads: 2
-  cudnn_benchmark: false
+  cudnn_benchmark: true
 eval:
   density_bins:
   - 100.0

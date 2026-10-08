@@ -1,12 +1,10 @@
-# SUB60-E139: Purified Dual-Loss Baseline (Phase 1 Loss Purification)
+# SUB60-E143: RMR-v35 Scaled Architecture with DiAG Factorized Scale Routing
 # Scientific Purpose:
-# Eliminate multi-task loss conflict and AdamW gradient variance explosion:
-# 1. In e138 (champion MAE 75.80), 9 simultaneous loss objectives competed, causing 28 conflicting gradient pairs.
-# 2. In e139, all 7 auxiliary losses (cell, region_nb, hurdle, trunc_nb, scale_align, curvature, hard_bg) are pruned to 0.0.
-# 3. Only two strictly orthogonal objectives are retained:
-#    - Macro Mass: Smooth Count Loss (Negative Binomial / Smooth-L1)
-#    - Micro Spatial: Balanced Dirichlet-Multinomial Loss at Stride 2 (lambda_flat_dm16 = 15.0, kappa = 10.0)
-# 4. Total Trainable Parameters: Exactly 104,373 (strictly <= 104,441 budget, 100% Standalone, 0.0% KD).
+# Perspective Geometry & Aspect Ratio Decomposition Ablation:
+# 1. In e140, dynamic_scale_routing uses 1D routing across 3 scale boxes [32, 64, 128].
+# 2. In e143, factorized_scale_routing=true decomposes routing into Scale x Aspect Ratio (3 x 2 = 6 anchor subspaces).
+# 3. Leverages the expanded 80-channel feature width to resolve perspective distortion at high pitch angles.
+# 4. Total Trainable Parameters: Exactly 175,240 (strictly <= 200,000 budget, 100% Standalone, 0.0% KD).
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -26,11 +24,12 @@ data:
 model:
   output_stride: 2
   subpixel_dm: true
-  feature_width: 32
+  feature_width: 80
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: 0.015763
+  max_trainable_params: 200000
   neck_type: hdc_lite
   use_aspp_gap: true
   hdc_dilations:
@@ -44,9 +43,11 @@ model:
   region_overlap: 0.5
   include_full_image: false
   regional_feature_stats: mean
-  region_head_hidden: 44
+  region_head_hidden: 140
   dynamic_scale_routing: true
-  factorized_scale_routing: false
+  factorized_scale_routing: true
+  num_marginal_scales: 3
+  num_aspect_ratios: 2
   scale_router_temperature: 1.0
   pre_solver_scale_gating: true
   scale_gating_power: 1.0
@@ -147,4 +148,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e139_purified_dual_loss_104k
+output_dir: runs/sha_a/sub60_e143_rmr_v35_factorized_routing
