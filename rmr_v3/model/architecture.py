@@ -412,8 +412,9 @@ class RMRv3(nn.Module):
             out["y_carrier"] = out.y
             out["y0_carrier"] = out.y0
             out["regions_carrier"] = regions_solver
-            y2_alloc = self.subpixel_allocator(p4, out.y)[..., :target_h2, :target_w2]
-            y02_alloc = self.subpixel_allocator(p4, out.y0)[..., :target_h2, :target_w2]
+            y2_raw, y02_raw = self.subpixel_allocator.forward_pair(p4, out.y, out.y0)
+            y2_alloc = y2_raw[..., :target_h2, :target_w2]
+            y02_alloc = y02_raw[..., :target_h2, :target_w2]
             # Exact boundary mass reconciliation for odd spatial dimensions
             m4_y = out.y.sum(dim=(-2, -1), keepdim=True)
             m2_y = y2_alloc.sum(dim=(-2, -1), keepdim=True).clamp_min(1e-8)

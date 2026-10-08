@@ -36,6 +36,10 @@ def bayesian_loss(
     gy = grid_y.flatten().unsqueeze(0)  # [1, M]
     m_total = gx.shape[1]
 
+    # Bounded adaptive chunk size: limits peak chunk tensor to <= 16MB (4,194,304 float32 elements)
+    # Stride 4 (M=16,384) -> chunk_size = 256; Stride 2 (M=65,536) -> chunk_size = 64
+    chunk_size = max(32, min(256, int(4194304 // max(m_total, 1))))
+
     losses: list[torch.Tensor] = []
     inv_two_sigma_sq = 1.0 / (2.0 * sigma * sigma)
 
@@ -66,27 +70,29 @@ def bayesian_loss(
             if canonical_background:
                 st_size = float(min(h, w) * stride)
                 min_dist_sq = torch.full((m_total,), float("inf"), device=device, dtype=torch.float32)
-                for c_idx in range(0, n, 512):
-                    p_chunk = pts[c_idx : c_idx + 512]
+                for c_idx in range(0, n, chunk_size):
+                    p_chunk = pts[c_idx : c_idx + chunk_size]
                     dx = p_chunk[:, 0:1] - gx
                     dy = p_chunk[:, 1:2] - gy
-                    d2 = dx.square().add_(dy.square())
+                    d2 = dx.square_().add_(dy.square_())
                     min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
-                    inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
-                    points_sum.add_(torch.exp(-d2 * inv_k).sum(dim=0))
+                    inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
+                    d2.mul_(-inv_k)
+                    points_sum.add_(torch.exp(d2).sum(dim=0))
                 bg_dis_sq = ((st_size * float(background_ratio)) ** 2) / (min_dist_sq + 1e-5)
                 s_bg = -bg_dis_sq * inv_two_sigma_sq
                 exp_bg = torch.exp(s_bg)
             else:
                 tau = float(background_ratio)
                 exp_bg = torch.full((m_total,), tau, device=device, dtype=torch.float32)
-                for c_idx in range(0, n, 512):
-                    p_chunk = pts[c_idx : c_idx + 512]
+                for c_idx in range(0, n, chunk_size):
+                    p_chunk = pts[c_idx : c_idx + chunk_size]
                     dx = p_chunk[:, 0:1] - gx
                     dy = p_chunk[:, 1:2] - gy
-                    d2 = dx.square().add_(dy.square())
-                    inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
-                    points_sum.add_(torch.exp(-d2 * inv_k).sum(dim=0))
+                    d2 = dx.square_().add_(dy.square_())
+                    inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
+                    d2.mul_(-inv_k)
+                    points_sum.add_(torch.exp(d2).sum(dim=0))
 
             denom = (exp_bg + points_sum).clamp_min_(1e-8)
             post_bg = exp_bg / denom
@@ -100,16 +106,17 @@ def bayesian_loss(
             else torch.ones(n, device=device, dtype=torch.float32)
         )
         person_err = 0.0
-        for c_idx in range(0, n, 512):
-            p_chunk = pts[c_idx : c_idx + 512]
-            inv_k = inv_sq_pts[c_idx : c_idx + 512] if inv_sq_pts is not None else inv_two_sigma_sq
+        for c_idx in range(0, n, chunk_size):
+            p_chunk = pts[c_idx : c_idx + chunk_size]
+            inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
             with torch.no_grad():
                 dx = p_chunk[:, 0:1] - gx
                 dy = p_chunk[:, 1:2] - gy
-                d2 = dx.square().add_(dy.square())
-                k_chunk = torch.exp(-d2 * inv_k)
+                d2 = dx.square_().add_(dy.square_())
+                d2.mul_(-inv_k)
+                k_chunk = torch.exp(d2)
             c_hat_chunk = torch.matmul(k_chunk, u)
-            tgt_chunk = target_person[c_idx : c_idx + 512]
+            tgt_chunk = target_person[c_idx : c_idx + chunk_size]
             person_err = person_err + torch.abs(c_hat_chunk - tgt_chunk).sum()
 
         bg_err = c_hat_bg

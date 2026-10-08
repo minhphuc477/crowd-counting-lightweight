@@ -169,4 +169,17 @@ class SubpixelAllocationHead(torch.nn.Module):
             return y2.squeeze(1)
         return y2
 
+    def forward_pair(
+        self, p4: torch.Tensor, y4: torch.Tensor, y04: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Project both coarse measures (y, y0) simultaneously using a shared allocation partition."""
+        logits = self.conv(p4)
+        if logits.shape[-2:] != y4.shape[-2:]:
+            logits = F.interpolate(logits, size=y4.shape[-2:], mode="bilinear", align_corners=False)
+        pi = F.softmax(logits, dim=1)
+        y2 = self.pixel_shuffle(y4 * pi)
+        y02 = self.pixel_shuffle(y04 * pi)
+        return y2, y02
+
+
 
