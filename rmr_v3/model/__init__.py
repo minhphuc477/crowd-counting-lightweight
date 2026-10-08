@@ -39,8 +39,21 @@ from .dual_lattice import (
     check_mass_conservation,
     SubpixelAllocationHead,
 )
+from .canonical import (
+    CANONICAL_PARAM_BUDGET,
+    CANONICAL_EXPECTED_PARAMS,
+    build_canonical_rmr_model,
+    get_canonical_model_config,
+    get_canonical_loss_config,
+)
 
 __all__ = [
+    "CANONICAL_PARAM_BUDGET",
+    "CANONICAL_EXPECTED_PARAMS",
+    "build_canonical_rmr_model",
+    "get_canonical_model_config",
+    "get_canonical_loss_config",
+
     "AdditiveFPNNeck",
     "ASPPLiteFPNNeck",
     "CoordinateAttention",
