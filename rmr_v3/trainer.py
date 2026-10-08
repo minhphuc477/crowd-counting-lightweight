@@ -324,36 +324,20 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             optimizer.eval()
 
         row_log: dict[str, Any] = {
-            "epoch": epoch + 1,
-            "lr_backbone": cur_lr_bb,
-            "lr_main": cur_lr_main,
-            "solver_strength": solver_strength,
-            "train_total": loss_avgs.get("total", 0.0),
-            "train_count": loss_avgs.get("count", 0.0),
-            "train_count_l1": loss_avgs.get("count_l1", 0.0),
-            "train_flat_dm16": loss_avgs.get("allocation", 0.0),
-            "train_allocation": loss_avgs.get("allocation", 0.0),
-            "train_dm16": loss_avgs.get("dm_16", loss_avgs.get("allocation", 0.0) if "dm_32" not in loss_avgs else 0.0),
-            "train_dm32": loss_avgs.get("dm_32", 0.0),
-            "train_dm64": loss_avgs.get("dm_64", 0.0),
-            "train_cell": loss_avgs.get("cell", 0.0),
-            "train_region_nb": loss_avgs.get("region_nb", 0.0),
-            "train_hurdle_bce": loss_avgs.get("hurdle_bce", 0.0),
-            "train_trunc_nb": loss_avgs.get("trunc_nb", 0.0),
-            "train_curvature": loss_avgs.get("curvature", 0.0),
-            "train_hard_bg": loss_avgs.get("hard_bg", 0.0),
-            "train_fg_bce": loss_avgs.get("fg_bce", 0.0),
-            "train_scale_align": loss_avgs.get("scale_align", 0.0),
-            "train_spectral": loss_avgs.get("spectral", 0.0),
-            "train_spectral_dc": loss_avgs.get("spectral_dc", 0.0),
-            "train_spectral_ac": loss_avgs.get("spectral_ac", 0.0),
-            "train_cell_carrier": loss_avgs.get("cell_carrier", 0.0),
-            "train_cell_fine": loss_avgs.get("cell_fine", 0.0),
-            "train_kd_total": loss_avgs.get("kd_total", 0.0),
-            "train_kd_spatial": loss_avgs.get("kd_spatial", 0.0),
-            "train_kd_count": loss_avgs.get("kd_count", 0.0),
-            **diag_summary,
+            "epoch": epoch + 1, "lr_backbone": cur_lr_bb, "lr_main": cur_lr_main,
+            "solver_strength": solver_strength, **diag_summary,
         }
+        train_loss_keys = (
+            "total", "count", "count_l1", "allocation", "cell", "region_nb", "hurdle_bce",
+            "trunc_nb", "curvature", "hard_bg", "fg_bce", "scale_align", "spectral",
+            "spectral_dc", "spectral_ac", "cell_carrier", "cell_fine", "kd_total", "kd_spatial", "kd_count",
+        )
+        for k in train_loss_keys:
+            row_log[f"train_{k}"] = loss_avgs.get(k, 0.0)
+        row_log["train_flat_dm16"] = loss_avgs.get("allocation", 0.0)
+        row_log["train_dm16"] = loss_avgs.get("dm_16", loss_avgs.get("allocation", 0.0) if "dm_32" not in loss_avgs else 0.0)
+        row_log["train_dm32"] = loss_avgs.get("dm_32", 0.0)
+        row_log["train_dm64"] = loss_avgs.get("dm_64", 0.0)
 
         # Periodic evaluation
         is_eval_epoch = (epoch + 1) % eval_every == 0 or (epoch + 1) == epochs
@@ -444,3 +428,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 flush=True,
             )
             break
+
+
+if __name__ == "__main__":
+    from rmr_v3.train import main
+    main()

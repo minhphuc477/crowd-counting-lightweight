@@ -81,7 +81,7 @@ def main() -> None:
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
     ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism (default: enabled)")
-    ap.add_argument("--non-deterministic", action="store_true", default=False, help="Disable strict determinism")
+    ap.add_argument("--non-deterministic", "--no-deterministic", dest="non_deterministic", action="store_true", default=False, help="Disable strict determinism")
     ap.add_argument("-o", "--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--teacher-ckpt", default=None, help="Path to teacher checkpoint for Stage 3 Knowledge Distillation")
