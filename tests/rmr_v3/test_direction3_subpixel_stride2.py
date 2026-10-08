@@ -362,3 +362,42 @@ def test_tiled_prediction_and_game_physical_parity_at_stride2():
     total_gt = float(valid_mask.sum().item())
     abs_err = abs(total_pred - total_gt)
     assert abs(game_dict[0] - abs_err) < 1e-4, f"GAME(0) {game_dict[0]} != |pred - gt| {abs_err}"
+
+
+def test_sub60_e135_to_e138_new_experiment_suite():
+    """Verify all newly designed experiment configurations (e135, e136, e137, e138).
+
+    Guarantees:
+      1. All 4 configs load and validate cleanly with validate_v3_config.
+      2. All 4 models strictly satisfy trainable parameters <= 104,441.
+      3. All 4 models execute a full forward pass and loss computation without NaN/Inf.
+    """
+    from rmr_v3.config import load_config
+
+    configs = [
+        "configs/rmr_research/sub60_e135_subpixel_stride2_adaptive_sigma.yaml",
+        "configs/rmr_research/sub60_e136_subpixel_stride2_pure_bayesian.yaml",
+        "configs/rmr_research/sub60_e137_subpixel_stride2_aspp_control.yaml",
+        "configs/rmr_research/sub60_e138_subpixel_stride2_balanced_dm.yaml",
+    ]
+
+    for cfg_path in configs:
+        cfg = load_config(cfg_path)
+        validate_v3_config(cfg)
+        model_cfg = RMRv3Config.from_dict(cfg["model"], pretrained=False)
+        model = RMRv3(model_cfg)
+        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        assert n_params <= 104441, f"Param limit exceeded: {n_params} > 104441 in {cfg_path}"
+
+        # Lightweight forward and loss check on 256x256 test crop
+        x = torch.randn(1, 3, 256, 256)
+        out = model(x)
+        assert "y" in out and out.y.shape[-2:] == (128, 128)
+        assert "y_carrier" in out and out["y_carrier"].shape[-2:] == (64, 64)
+
+        pts = [torch.tensor([[50.0, 60.0], [120.0, 140.0]])]
+        tgt = rasterize_points(pts[0], 256, 256, stride=2).unsqueeze(0)
+        loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
+        loss_dict = compute_rmr_v3_losses(dict(out), tgt, cfg=loss_cfg, points=pts)
+        assert torch.isfinite(loss_dict["total"]), f"Non-finite total loss in {cfg_path}"
+
