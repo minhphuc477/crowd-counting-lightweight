@@ -401,3 +401,26 @@ def test_sub60_e135_to_e138_new_experiment_suite():
         loss_dict = compute_rmr_v3_losses(dict(out), tgt, cfg=loss_cfg, points=pts)
         assert torch.isfinite(loss_dict["total"]), f"Non-finite total loss in {cfg_path}"
 
+
+def test_python39_typing_and_bayesian_function_parity():
+    """Verify _BayesianPersonErrorFunction works seamlessly across Python versions."""
+    from rmr_v3.losses.point_supervision import _BayesianPersonErrorFunction
+
+    u = torch.randn(2, requires_grad=True)
+    pts = torch.tensor([[10.0, 10.0], [20.0, 20.0]])
+    gx = torch.tensor([[10.0, 20.0]])
+    gy = torch.tensor([[10.0, 20.0]])
+    target = torch.tensor([1.0, 1.0])
+
+    # Float inv_k
+    loss_float = _BayesianPersonErrorFunction.apply(u, pts, gx, gy, 0.125, target, 64)
+    loss_float.backward()
+    assert u.grad is not None and torch.isfinite(u.grad).all()
+
+    # Tensor inv_k
+    u.grad.zero_()
+    inv_k_tensor = torch.tensor([0.125, 0.25])
+    loss_tensor = _BayesianPersonErrorFunction.apply(u, pts, gx, gy, inv_k_tensor, target, 64)
+    loss_tensor.backward()
+    assert u.grad is not None and torch.isfinite(u.grad).all()
+

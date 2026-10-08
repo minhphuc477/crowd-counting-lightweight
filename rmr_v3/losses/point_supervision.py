@@ -1,5 +1,8 @@
-from typing import Any
+from __future__ import annotations
+
 import math
+from typing import Any, Optional, Union
+
 import torch
 import torch.nn.functional as F
 
@@ -19,7 +22,7 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
         pts: torch.Tensor,
         gx: torch.Tensor,
         gy: torch.Tensor,
-        inv_k: torch.Tensor | float,
+        inv_k: Union[torch.Tensor, float],
         target_person: torch.Tensor,
         chunk_size: int,
     ) -> torch.Tensor:
@@ -44,7 +47,7 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
         return err
 
     @staticmethod
-    def backward(ctx: Any, grad_err: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
+    def backward(ctx: Any, grad_err: torch.Tensor) -> tuple[Optional[torch.Tensor], ...]:
         pts, gx, gy, inv_k_saved, sign = ctx.saved_tensors
         chunk_size = ctx.chunk_size
         n = pts.shape[0]

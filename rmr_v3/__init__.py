@@ -2,6 +2,8 @@
 
 Isolated module -- does NOT overwrite rmr_count (RMR-v2).
 """
+from __future__ import annotations
+
 from .config import (
     compute_config_hash,
     compute_file_sha256,
