@@ -36,12 +36,12 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: 0.015763
-  neck_type: aspp_lite
+  neck_type: hdc_lite
   use_aspp_gap: true
-  aspp_dilations:
+  hdc_dilations:
   - 1
+  - 2
   - 3
-  - 6
   region_sizes_px:
   - 32
   - 64
@@ -99,10 +99,10 @@ model:
   curvature_dense_threshold: 0.15
   curvature_gate_beta: 0.03
   curvature_pool_kernel: 8
-  curvature_alpha_init: -8.0
+  curvature_alpha_init: -4.0
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
-  hurdle_gating_mode: product
+  hurdle_gating_mode: occupancy
 loss:
   allocation_loss_type: bayesian
   bayesian_sigma: 4.0

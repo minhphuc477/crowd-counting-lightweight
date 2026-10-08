@@ -120,7 +120,7 @@ class TestCanonicalArchitecture(unittest.TestCase):
 
         # Confirm exact parameter count matching canonical
         m_cfg = cfg_dict["model"]
-        self.assertEqual(m_cfg["neck_type"], "aspp_lite")
+        self.assertEqual(m_cfg["neck_type"], "hdc_lite")
         self.assertEqual(m_cfg["iterations"], 6)
         self.assertEqual(m_cfg["morozov_gamma"], 0.75)
         self.assertEqual(m_cfg["morozov_rho_cap"], 0.25)

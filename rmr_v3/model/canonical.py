@@ -37,10 +37,10 @@ def get_canonical_model_config(**overrides: Any) -> RMRv3Config:
         "backbone_lr_scale": 0.1,
         "init_m0": 0.015763,
         "max_trainable_params": CANONICAL_PARAM_BUDGET,
-        # Multi-scale neck
-        "neck_type": "aspp_lite",
+        # Multi-scale neck: HDC-Lite (Zero Gridding Holes)
+        "neck_type": "hdc_lite",
         "use_aspp_gap": True,
-        "aspp_dilations": (1, 3, 6),
+        "hdc_dilations": (1, 2, 3),
         # Regional evidence dictionary
         "region_sizes_px": (32, 64, 128),
         "region_overlap": 0.5,
@@ -53,17 +53,17 @@ def get_canonical_model_config(**overrides: Any) -> RMRv3Config:
         "scale_router_temperature": 1.0,
         "pre_solver_scale_gating": True,
         "scale_gating_power": 1.0,
-        # Carrier density head & curvature
+        # Carrier density head & curvature (Sub-Rayleigh collision support)
         "temp_softplus": True,
         "density_curvature": True,
         "gated_density_curvature": True,
         "curvature_dense_threshold": 0.15,
         "curvature_gate_beta": 0.03,
         "curvature_pool_kernel": 8,
-        "curvature_alpha_init": -8.0,
-        # Negative-Binomial & hurdle gating
+        "curvature_alpha_init": -4.0,
+        # Negative-Binomial & hurdle gating (100% mass preservation in dense clusters)
         "hurdle_head": True,
-        "hurdle_gating_mode": "product",
+        "hurdle_gating_mode": "occupancy",
         "dispersion_init": 50.0,
         "dispersion_min": 0.5,
         "dispersion_max": 500.0,
