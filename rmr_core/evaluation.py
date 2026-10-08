@@ -207,6 +207,8 @@ def evaluate_dataset(
         summary: Dictionary of aggregated dataset metrics.
     """
     forward_kwargs = forward_kwargs or {}
+    model_stride = int(getattr(getattr(model, "cfg", None), "output_stride", output_stride))
+    eff_output_stride = model_stride if model_stride in (1, 2, 4, 8) else output_stride
     model.eval()
 
     rows: list[dict] = []
@@ -266,25 +268,25 @@ def evaluate_dataset(
                 if use_tta:
                     y_t0 = predict_multiscale_tta(
                         model, sample["image"].to(device),
-                        output_stride=output_stride, tile_size=tile_size, halo=0,
+                        output_stride=eff_output_stride, tile_size=tile_size, halo=0,
                         use_hflip=True,
                         forward_kwargs=forward_kwargs,
                     )
                     y_th = predict_multiscale_tta(
                         model, sample["image"].to(device),
-                        output_stride=output_stride, tile_size=tile_size, halo=practical_halo,
+                        output_stride=eff_output_stride, tile_size=tile_size, halo=practical_halo,
                         use_hflip=True,
                         forward_kwargs=forward_kwargs,
                     )
                 else:
                     y_t0 = predict_tiled(
                         model, sample["image"].to(device),
-                        output_stride=output_stride, tile_size=tile_size, halo=0,
+                        output_stride=eff_output_stride, tile_size=tile_size, halo=0,
                         forward_kwargs=forward_kwargs,
                     )
                     y_th = predict_tiled(
                         model, sample["image"].to(device),
-                        output_stride=output_stride, tile_size=tile_size, halo=practical_halo,
+                        output_stride=eff_output_stride, tile_size=tile_size, halo=practical_halo,
                         forward_kwargs=forward_kwargs,
                     )
                 pred_t0 = float(y_t0.sum().item())
@@ -298,12 +300,13 @@ def evaluate_dataset(
 
             # Physical-support GAME when raw points and original dimensions are available
             if "points" in sample and "height" in sample and "width" in sample:
+                game_stride = round(float(sample["height"]) / float(y.shape[-2])) if (y.ndim >= 2 and y.shape[-2] > 0) else eff_output_stride
                 game_dict = game_physical_image(
                     y,
                     sample["points"],
                     image_h=sample["height"],
                     image_w=sample["width"],
-                    stride=output_stride,
+                    stride=game_stride if game_stride in (1, 2, 4, 8) else eff_output_stride,
                     levels=(0, 1, 2, 3),
                 )
                 for level in range(4):

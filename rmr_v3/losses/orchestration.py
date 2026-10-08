@@ -29,7 +29,7 @@ from .auxiliary import (
     topk_hard_background_loss,
     truncated_nb_nll_loss,
 )
-from .dual_supervision import compute_dual_lattice_losses
+from .dual_supervision import align_target_to_prediction, compute_dual_lattice_losses
 from rmr_v3.model.dual_lattice import push_forward_stride2_to_stride4
 
 
@@ -423,12 +423,9 @@ def compute_rmr_v3_losses(
     if cfg.elementwise_dense_scaling or cfg.density_loss_scaling:
         return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)
 
-    target_float = target_y.float()
-    if target_float.shape[-2:] != y.shape[-2:]:
-        dh, dw = y.shape[-2] - target_float.shape[-2], y.shape[-1] - target_float.shape[-1]
-        if dh > 0 or dw > 0:
-            target_float = F.pad(target_float, (0, max(0, dw), 0, max(0, dh)))
-        target_float = target_float[..., :y.shape[-2], :y.shape[-1]]
+    target_float = align_target_to_prediction(
+        target_y.float(), y, points=points, stride=int(getattr(cfg, "output_stride", 2 if y.shape[-2] > 150 else 4))
+    )
     regions: RegionSet = outputs["regions"]
     mean_region = outputs["b_region"].float()
     dispersion_region = outputs["region_dispersion"].float()
