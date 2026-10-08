@@ -247,6 +247,7 @@ ALLOWED_LOSS_KEYS = {
     # Orthogonal carrier-solver routing & Bayesian loss configuration
     "count_target", "cell_target", "bayesian_norm_mode", "bayesian_canonical_bg",
     "bayesian_adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
+    "lambda_bayesian",
 }
 
 ALLOWED_TRAIN_KEYS = {

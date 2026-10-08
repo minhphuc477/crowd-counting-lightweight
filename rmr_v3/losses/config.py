@@ -10,13 +10,14 @@ class RMRv3LossConfig:
     lambda_count: float = 1.0
     lambda_count_l1: float = 0.0
     lambda_flat_dm16: float = 1.0
+    lambda_bayesian: float = 0.025
     lambda_cell: float = 0.50
     lambda_region_nb: float = 0.20
     lambda_hurdle: float = 0.10
     lambda_trunc_nb: float = 0.20
 
     # Loss mode selection
-    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt"
+    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt" | "dual_bayesian_dm16"
     bayesian_sigma: float = 8.0
     bayesian_background_ratio: float = 0.10
     bayesian_norm_mode: str = "canonical"  # "canonical" | "count" | "square_root"
@@ -145,8 +146,8 @@ class RMRv3LossConfig:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
         if self.cell_alpha < 0.0:
             raise ValueError(f"cell_alpha must be non-negative, got {self.cell_alpha}")
-        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt"):
-            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', or 'fidt', got '{self.allocation_loss_type}'")
+        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt", "dual_bayesian_dm16"):
+            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', or 'dual_bayesian_dm16', got '{self.allocation_loss_type}'")
         if self.fidt_k <= 0.0:
             raise ValueError(f"fidt_k must be strictly positive, got {self.fidt_k}")
         if self.lambda_chfl < 0.0:

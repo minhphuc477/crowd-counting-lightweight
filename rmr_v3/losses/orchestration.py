@@ -163,15 +163,27 @@ def _compute_core_losses(
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
         stride = int(getattr(cfg, "output_stride", 4))
-        if cfg.allocation_loss_type == "bayesian":
-            loss_val = bayesian_loss(
+        if cfg.allocation_loss_type in ("dual_bayesian_dm16", "bayesian"):
+            s_max = float(getattr(cfg, "bayesian_sigma_max", 4.0 if cfg.allocation_loss_type == "dual_bayesian_dm16" else 8.0))
+            l_bay = bayesian_loss(
                 inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
                 stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
                 canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
                 adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
-                sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0),
-                sigma_max=getattr(cfg, "bayesian_sigma_max", 8.0),
+                sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0), sigma_max=s_max,
             )
+            if cfg.allocation_loss_type == "dual_bayesian_dm16":
+                b_px = int(getattr(cfg, "dm_block_px", 16))
+                l_dm = flat_dm_block_loss(
+                    inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
+                    normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
+                    auto_scale_kappa=bool(getattr(cfg, "auto_scale_kappa", True)),
+                    norm_mode=getattr(cfg, "dm_norm_mode", "count"), ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
+                )
+                comps[b_px], comps[-999] = l_dm, l_bay
+                loss_val = float(cfg.lambda_bayesian) * l_bay + float(cfg.lambda_flat_dm16) * l_dm
+            else:
+                loss_val = l_bay
         elif cfg.allocation_loss_type == "fidt":
             if not getattr(cfg, "fidt_normalize_by_count", True):
                 loss_val = canonical_fidt_loss(inp, points, stride=stride, loss_mode=getattr(cfg, "fidt_loss_type", "smooth_l1"))
@@ -204,26 +216,27 @@ def _compute_core_losses(
         loss_alloc_y, dm_comps_y = _compute_single_allocation(y)
         loss_alloc_y0, dm_comps_y0 = _compute_single_allocation(y0)
         loss_allocation = 0.5 * loss_alloc_y + 0.5 * loss_alloc_y0
-        losses["allocation_y"] = loss_alloc_y
-        losses["allocation_y0"] = loss_alloc_y0
+        losses["allocation_y"], losses["allocation_y0"] = loss_alloc_y, loss_alloc_y0
         dm_components = {k: 0.5 * (dm_comps_y[k] + dm_comps_y0[k]) for k in dm_comps_y if k in dm_comps_y0}
     else:
         loss_allocation, dm_components = _compute_single_allocation(y if cfg.dm_target == "y" else y0)
 
     losses["allocation"] = loss_allocation
-    losses["flat_dm16"] = loss_allocation
+    losses["flat_dm16"] = dm_components.get(16, loss_allocation)
+    if -999 in dm_components:
+        losses["bayesian"] = dm_components[-999]
     for bs, val in dm_components.items():
-        losses[f"dm_{bs}"] = val
+        if bs != -999:
+            losses[f"dm_{bs}"] = val
 
     losses["region_nb"] = scale_balanced_regional_nb_nll(
         target_region, mean_region, dispersion_region, regions,
         mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
     )
+    alloc_term = loss_allocation if cfg.allocation_loss_type == "dual_bayesian_dm16" else cfg.lambda_flat_dm16 * loss_allocation
     losses["total"] = (
-        cfg.lambda_count * losses["count"]
-        + cfg.lambda_flat_dm16 * loss_allocation
-        + cfg.lambda_cell * losses["cell"]
-        + cfg.lambda_region_nb * losses["region_nb"]
+        cfg.lambda_count * losses["count"] + alloc_term
+        + cfg.lambda_cell * losses["cell"] + cfg.lambda_region_nb * losses["region_nb"]
     )
     if getattr(cfg, "lambda_count_l1", 0.0) > 0.0:
         loss_l1, _ = cnt_router.dispatch(
@@ -329,26 +342,18 @@ def _compute_auxiliary_losses(
             beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
             alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma),
         )
-        losses["cell_carrier"] = dual["cell_carrier"]
-        losses["cell_fine"] = losses["cell"]
-        # losses["total"] in core losses already includes cfg.lambda_cell * losses["cell"].
-        # Add carrier cell loss, and adjust fine cell loss if lambda_fine_cell is explicitly specified:
+        losses["cell_carrier"], losses["cell_fine"] = dual["cell_carrier"], losses["cell"]
         eff_fine_delta = (cfg.lambda_fine_cell - cfg.lambda_cell) if cfg.lambda_fine_cell > 0.0 else 0.0
         losses["total"] = losses["total"] + cfg.lambda_carrier_cell * dual["cell_carrier"] + eff_fine_delta * losses["cell"]
     else:
-        losses["cell_carrier"] = zero_val
-        losses["cell_fine"] = zero_val
+        losses["cell_carrier"] = losses["cell_fine"] = zero_val
 
     # Count-Preserving Heavy-Tailed Spectral Loss (Hypothesis H2/H8)
     if cfg.use_spectral_loss and cfg.lambda_spectral > 0.0:
         sp_kw = {
-            "beta": cfg.spectral_beta,
-            "lambda_count": cfg.lambda_spectral_dc,
-            "lambda_spectral": 1.0,
-            "omega_0": getattr(cfg, "spectral_omega_0", 0.05),
-            "bandpass": getattr(cfg, "spectral_bandpass", False),
-            "omega_low": getattr(cfg, "spectral_omega_low", 0.02),
-            "omega_high": getattr(cfg, "spectral_omega_high", 0.35),
+            "beta": cfg.spectral_beta, "lambda_count": cfg.lambda_spectral_dc, "lambda_spectral": 1.0,
+            "omega_0": getattr(cfg, "spectral_omega_0", 0.05), "bandpass": getattr(cfg, "spectral_bandpass", False),
+            "omega_low": getattr(cfg, "spectral_omega_low", 0.02), "omega_high": getattr(cfg, "spectral_omega_high", 0.35),
             "transform": getattr(cfg, "spectral_transform", "fft"),
         }
         if router.mode == "dual":
