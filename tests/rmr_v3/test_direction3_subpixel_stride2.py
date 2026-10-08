@@ -231,3 +231,134 @@ def test_sub60_e134_full_pipeline_finite_gradients():
         assert torch.all(torch.isfinite(g)), "All gradients must be finite"
     total_grad_norm = sum(g.norm().item() for g in grads)
     assert total_grad_norm > 0.0, f"Total gradient norm must be positive, got {total_grad_norm}"
+
+
+def test_subpixel_local_per_cell_discrete_mass_conservation():
+    """Verify that every single coarse cell (i, j) conserves mass locally in its 2x2 fine block."""
+    head = SubpixelAllocationHead(in_channels=32)
+    with torch.no_grad():
+        for p in head.parameters():
+            p.normal_(0, 2.0)
+
+    b, c, h, w = 2, 32, 16, 24
+    p4 = torch.randn(b, c, h, w) * 10.0
+    y4 = torch.rand(b, 1, h, w) * 100.0 + 0.1
+
+    y2 = head(p4, y4)
+    assert y2.shape == (b, 1, 2 * h, 2 * w)
+
+    # 2x2 box summation must equal y4 for EVERY cell
+    y2_blocks = y2.view(b, 1, h, 2, w, 2).sum(dim=(3, 5))
+    diff = (y2_blocks - y4).abs()
+    max_err = diff.max().item()
+    assert max_err < 1e-4, f"Per-cell local mass conservation violated! Max error: {max_err}"
+
+
+def test_adversarial_zero_and_corner_points_loss_stability():
+    """Adversarial stress test: empty images, corner coordinates, and extreme head collisions."""
+    loss_cfg = RMRv3LossConfig(
+        output_stride=2,
+        allocation_loss_type="dual_bayesian_dm16",
+        dm_target="dual",
+        lambda_count=1.0,
+        lambda_bayesian=0.025,
+        lambda_flat_dm16=15.0,
+        lambda_cell=0.0,
+        lambda_region_nb=0.2,
+    )
+
+    pts_empty = torch.empty((0, 2), dtype=torch.float32)
+    pts_corners = torch.tensor([[0.0, 0.0], [255.99, 255.99], [0.0, 255.99], [255.99, 0.0]], dtype=torch.float32)
+    pts_collision = torch.rand(500, 2) * 2.0 + 100.0
+    points = [pts_empty, pts_corners, pts_collision]
+
+    targets = torch.stack([
+        rasterize_points(pts_empty, 256, 256, stride=2),
+        rasterize_points(pts_corners, 256, 256, stride=2),
+        rasterize_points(pts_collision, 256, 256, stride=2),
+    ], dim=0)
+
+    cfg = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        pretrained=False,
+        output_stride=2,
+        subpixel_dm=True,
+        iterations=2,
+        max_trainable_params=105000,
+    )
+    model = RMRv3(cfg)
+    x = torch.randn(3, 3, 256, 256)
+
+    out = model(x)
+    losses = compute_rmr_v3_losses(dict(out), targets, loss_cfg, points=points)
+
+    assert torch.isfinite(losses["total"]), f"Loss is not finite: {losses['total']}"
+    assert torch.isfinite(losses["allocation"]), f"Allocation loss is not finite: {losses['allocation']}"
+    assert torch.isfinite(losses["region_nb"]), f"Regional NB loss is not finite: {losses['region_nb']}"
+
+    losses["total"].backward()
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            assert torch.all(torch.isfinite(p.grad)), f"NaN/Inf gradient in {name}"
+
+
+def test_diagnostics_robustness_with_stride_mismatched_target():
+    """Verify diagnostics work properly even if target_y is provided at Stride 4 for Stride 2 model."""
+    from rmr_v3.diagnostics.rows import regional_reliability_rows
+    from rmr_v3.diagnostics.trajectory import compute_solver_trajectory_diagnostics
+
+    cfg = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        pretrained=False,
+        output_stride=2,
+        subpixel_dm=True,
+        iterations=2,
+        max_trainable_params=105000,
+    )
+    model = RMRv3(cfg)
+    x = torch.randn(1, 3, 256, 256)
+    out = model(x)
+
+    pts = torch.tensor([[50.0, 60.0], [200.0, 220.0]])
+    target_stride4 = rasterize_points(pts, 256, 256, stride=4).unsqueeze(0)
+
+    d_rows = regional_reliability_rows(dict(out), target_stride4, max_regions=100)
+    assert len(d_rows) > 0, "Diagnostic rows must not be empty"
+
+    t_diag = compute_solver_trajectory_diagnostics(dict(out), target_stride4)
+    assert "mae_reg_y0" in t_diag, "Trajectory diagnostics must compute iterate MAE"
+
+
+def test_tiled_prediction_and_game_physical_parity_at_stride2():
+    """Verify tiled prediction and GAME metrics on odd dimensions (383x491) at Stride 2."""
+    from rmr_core.evaluation import predict_tiled
+    from rmr_core.metrics import game_physical_image
+
+    cfg = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        pretrained=False,
+        output_stride=2,
+        subpixel_dm=True,
+        iterations=2,
+        max_trainable_params=105000,
+    )
+    model = RMRv3(cfg).eval()
+
+    h_odd, w_odd = 383, 491
+    img = torch.randn(3, h_odd, w_odd)
+    # Coordinates in (x, y) where x < w_odd (491) and y < h_odd (383)
+    pts = torch.tensor([[150.0, 100.0], [400.0, 300.0], [450.0, 350.0]])
+
+    pred_tiled = predict_tiled(model, img, output_stride=2, tile_size=256, halo=32)
+    expected_gh = math.ceil(h_odd / 2)
+    expected_gw = math.ceil(w_odd / 2)
+    assert pred_tiled.shape == (1, expected_gh, expected_gw), f"Shape mismatch: {pred_tiled.shape}"
+
+    game_dict = game_physical_image(
+        pred_tiled, pts, image_h=h_odd, image_w=w_odd, stride=2, levels=(0, 1, 2)
+    )
+    total_pred = pred_tiled.sum().item()
+    valid_mask = (pts[:, 0] >= 0) & (pts[:, 0] < w_odd) & (pts[:, 1] >= 0) & (pts[:, 1] < h_odd)
+    total_gt = float(valid_mask.sum().item())
+    abs_err = abs(total_pred - total_gt)
+    assert abs(game_dict[0] - abs_err) < 1e-4, f"GAME(0) {game_dict[0]} != |pred - gt| {abs_err}"

@@ -41,7 +41,8 @@ def regional_reliability_rows(
     pred_field = outputs.get("y", outputs.get("y0"))
     target_float = target_y.float()
     if pred_field is not None and target_float.shape[-2:] != pred_field.shape[-2:]:
-        target_float = target_float[..., :pred_field.shape[-2], :pred_field.shape[-1]]
+        from rmr_v3.losses.dual_supervision import align_target_to_prediction
+        target_float = align_target_to_prediction(target_float, pred_field)
 
     gt = regional_sum(
         target_float,
