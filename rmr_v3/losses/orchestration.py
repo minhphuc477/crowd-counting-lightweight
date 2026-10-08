@@ -7,11 +7,7 @@ import torch.nn.functional as F
 
 from rmr_core.operators import RegionSet, regional_sum
 from rmr_core.losses import (
-    balanced_smooth_l1,
-    count_magnitude_loss,
-    flat_dm_block_loss,
-    flat_dm16_loss,
-    multiscale_dm_loss,
+    balanced_smooth_l1, count_magnitude_loss, flat_dm_block_loss, flat_dm16_loss, multiscale_dm_loss,
 )
 from rmr_core.spectral import characteristic_function_loss, count_preserving_spectral_loss
 from .config import RMRv3LossConfig
@@ -19,15 +15,9 @@ from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
 from .chfl import canonical_chfl_loss
 from .fidt import canonical_fidt_loss
 from .auxiliary import (
-    count_harmonized_cell_loss,
-    count_invariant_cell_loss,
-    curvature_power_loss,
-    hurdle_focal_bce_loss,
-    mass_weighted_cell_loss,
-    physical_scale_alignment_loss,
-    scale_balanced_regional_nb_nll,
-    topk_hard_background_loss,
-    truncated_nb_nll_loss,
+    count_harmonized_cell_loss, count_invariant_cell_loss, curvature_power_loss,
+    hurdle_focal_bce_loss, mass_weighted_cell_loss, physical_scale_alignment_loss,
+    scale_balanced_regional_nb_nll, topk_hard_background_loss, truncated_nb_nll_loss,
 )
 from .dual_supervision import align_target_to_prediction, compute_dual_lattice_losses
 from rmr_v3.model.dual_lattice import push_forward_stride2_to_stride4
@@ -116,25 +106,18 @@ def _compute_core_losses(
     losses: dict[str, torch.Tensor] = {}
 
     def _compute_count_loss(density_map: torch.Tensor) -> torch.Tensor:
-        return count_magnitude_loss(
-            density_map, target_float, mode=cfg.count_loss_mode, dispersion=cfg.count_nb_dispersion,
-        )
+        return count_magnitude_loss(density_map, target_float, mode=cfg.count_loss_mode, dispersion=cfg.count_nb_dispersion)
 
     def _compute_cell_loss(density_map: torch.Tensor) -> torch.Tensor:
         stride = int(getattr(cfg, "output_stride", 4))
         if cfg.cell_loss_mode in ("count_invariant", "ci_cell"):
             return count_invariant_cell_loss(
-                density_map, target_float,
-                beta=cfg.cell_beta, alpha=float(getattr(cfg, "cell_alpha", 2.0)),
-                # tau_head deliberately omitted: deprecated in CI-Cell v2 (ignored)
-                stride=stride,
+                density_map, target_float, beta=cfg.cell_beta, alpha=float(getattr(cfg, "cell_alpha", 2.0)), stride=stride,
             )
         if cfg.cell_loss_mode == "mass_weighted":
             return mass_weighted_cell_loss(
-                density_map, target_float,
-                beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
-                alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma),
-                stride=stride,
+                density_map, target_float, beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+                alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma), stride=stride,
             )
         if cfg.cell_loss_mode == "count_harmonized":
             return count_harmonized_cell_loss(
@@ -150,40 +133,60 @@ def _compute_core_losses(
     cnt_router = router if cnt_m == router.mode else TargetSupervisionRouter(cnt_m)
     cell_router = router if cell_m == router.mode else TargetSupervisionRouter(cell_m)
 
-    loss_count, aux_count = cnt_router.dispatch(_compute_count_loss, y, y0)
-    losses["count"] = loss_count
-    if "y" in aux_count and "y0" in aux_count:
-        losses["count_y"], losses["count_y0"] = aux_count["y"], aux_count["y0"]
+    if cfg.lambda_count > 0.0:
+        loss_count, aux_count = cnt_router.dispatch(_compute_count_loss, y, y0)
+        losses["count"] = loss_count
+        if "y" in aux_count and "y0" in aux_count:
+            losses["count_y"], losses["count_y0"] = aux_count["y"], aux_count["y0"]
+    else:
+        losses["count"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
-    loss_cell, aux_cell = cell_router.dispatch(_compute_cell_loss, y, y0)
-    losses["cell"] = loss_cell
-    if "y" in aux_cell and "y0" in aux_cell:
-        losses["cell_y"], losses["cell_y0"] = aux_cell["y"], aux_cell["y0"]
+    if cfg.lambda_cell > 0.0 or getattr(cfg, "lambda_fine_cell", 0.0) > 0.0:
+        loss_cell, aux_cell = cell_router.dispatch(_compute_cell_loss, y, y0)
+        losses["cell"] = loss_cell
+        if "y" in aux_cell and "y0" in aux_cell:
+            losses["cell_y"], losses["cell_y0"] = aux_cell["y"], aux_cell["y0"]
+    else:
+        losses["cell"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
     def _compute_single_allocation(inp: torch.Tensor) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
         comps: dict[int, torch.Tensor] = {}
         stride = int(getattr(cfg, "output_stride", 4))
         if cfg.allocation_loss_type in ("dual_bayesian_dm16", "bayesian"):
-            s_max = float(getattr(cfg, "bayesian_sigma_max", 4.0 if cfg.allocation_loss_type == "dual_bayesian_dm16" else 8.0))
-            l_bay = bayesian_loss(
-                inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
-                stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
-                canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
-                adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
-                sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0), sigma_max=s_max,
-            )
             if cfg.allocation_loss_type == "dual_bayesian_dm16":
                 b_px = int(getattr(cfg, "dm_block_px", 16))
-                l_dm = flat_dm_block_loss(
-                    inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
-                    normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
-                    auto_scale_kappa=bool(getattr(cfg, "auto_scale_kappa", True)),
-                    norm_mode=getattr(cfg, "dm_norm_mode", "count"), ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
-                )
+                if float(cfg.lambda_bayesian) > 0.0:
+                    s_max = float(getattr(cfg, "bayesian_sigma_max", 4.0))
+                    l_bay = bayesian_loss(
+                        inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
+                        stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
+                        canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
+                        adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
+                        sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0), sigma_max=s_max,
+                    )
+                else:
+                    l_bay = torch.zeros((), device=inp.device, dtype=inp.dtype)
+                if float(cfg.lambda_flat_dm16) > 0.0:
+                    l_dm = flat_dm_block_loss(
+                        inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
+                        normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict,
+                        auto_scale_kappa=bool(getattr(cfg, "auto_scale_kappa", True)),
+                        norm_mode=getattr(cfg, "dm_norm_mode", "count"),
+                        ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
+                    )
+                else:
+                    l_dm = torch.zeros((), device=inp.device, dtype=inp.dtype)
                 comps[b_px], comps[-999] = l_dm, l_bay
                 loss_val = float(cfg.lambda_bayesian) * l_bay + float(cfg.lambda_flat_dm16) * l_dm
             else:
-                loss_val = l_bay
+                s_max = float(getattr(cfg, "bayesian_sigma_max", 8.0))
+                loss_val = bayesian_loss(
+                    inp, points, sigma=cfg.bayesian_sigma, background_ratio=cfg.bayesian_background_ratio,
+                    stride=stride, norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
+                    canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
+                    adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
+                    sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0), sigma_max=s_max,
+                )
         elif cfg.allocation_loss_type == "fidt":
             if not getattr(cfg, "fidt_normalize_by_count", True):
                 loss_val = canonical_fidt_loss(inp, points, stride=stride, loss_mode=getattr(cfg, "fidt_loss_type", "smooth_l1"))
@@ -201,13 +204,16 @@ def _compute_core_losses(
             )
         else:
             b_px = int(getattr(cfg, "dm_block_px", 16))
-            auto_k = bool(getattr(cfg, "auto_scale_kappa", True))
-            loss_val = flat_dm_block_loss(
-                inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
-                normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict, auto_scale_kappa=auto_k,
-                norm_mode=getattr(cfg, "dm_norm_mode", "count"),
-                ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
-            )
+            if float(cfg.lambda_flat_dm16) > 0.0:
+                auto_k = bool(getattr(cfg, "auto_scale_kappa", True))
+                loss_val = flat_dm_block_loss(
+                    inp, target_float, block_px=b_px, kappa=cfg.kappa_flat16, stride=stride,
+                    normalize_by_count=cfg.normalize_flat_dm16, strict=cfg.dm_strict, auto_scale_kappa=auto_k,
+                    norm_mode=getattr(cfg, "dm_norm_mode", "count"),
+                    ref_count=float(getattr(cfg, "dm_ref_count", 100.0)),
+                )
+            else:
+                loss_val = torch.zeros((), device=inp.device, dtype=inp.dtype)
             comps[b_px] = loss_val
         return loss_val, comps
 
@@ -229,10 +235,14 @@ def _compute_core_losses(
         if bs != -999:
             losses[f"dm_{bs}"] = val
 
-    losses["region_nb"] = scale_balanced_regional_nb_nll(
-        target_region, mean_region, dispersion_region, regions,
-        mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
-    )
+    if cfg.lambda_region_nb > 0.0:
+        losses["region_nb"] = scale_balanced_regional_nb_nll(
+            target_region, mean_region, dispersion_region, regions,
+            mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
+        )
+    else:
+        losses["region_nb"] = torch.zeros((), device=y.device, dtype=y.dtype)
+
     alloc_term = loss_allocation if cfg.allocation_loss_type == "dual_bayesian_dm16" else cfg.lambda_flat_dm16 * loss_allocation
     losses["total"] = (
         cfg.lambda_count * losses["count"] + alloc_term
@@ -332,14 +342,11 @@ def _compute_auxiliary_losses(
         and (cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0)
     )
     if is_dual_lattice:
-        # Mass-preserving push: 2x2 box sum → stride-4 carrier target
         target_stride4 = push_forward_stride2_to_stride4(target_float)
         dual = compute_dual_lattice_losses(
-            y_fine=y, y_carrier=y_carrier.float(),
-            target_stride2=target_float, target_stride4=target_stride4,
+            y_fine=y, y_carrier=y_carrier.float(), target_stride2=target_float, target_stride4=target_stride4,
             lambda_carrier_cell=cfg.lambda_carrier_cell, lambda_fine_cell=cfg.lambda_fine_cell,
-            cell_loss_mode=cfg.cell_loss_mode,
-            beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+            cell_loss_mode=cfg.cell_loss_mode, beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
             alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma),
         )
         losses["cell_carrier"], losses["cell_fine"] = dual["cell_carrier"], losses["cell"]
@@ -364,12 +371,9 @@ def _compute_auxiliary_losses(
             loss_spec_ac = 0.5 * (c_y["spectral_ac"] + c_y0["spectral_ac"])
         else:
             loss_spec, comps = count_preserving_spectral_loss(y0 if router.mode == "y0" else y, target_float, **sp_kw)
-            loss_spec_dc = comps["spectral_dc"]
-            loss_spec_ac = comps["spectral_ac"]
+            loss_spec_dc, loss_spec_ac = comps["spectral_dc"], comps["spectral_ac"]
 
-        losses["spectral"] = loss_spec
-        losses["spectral_dc"] = loss_spec_dc
-        losses["spectral_ac"] = loss_spec_ac
+        losses["spectral"], losses["spectral_dc"], losses["spectral_ac"] = loss_spec, loss_spec_dc, loss_spec_ac
         losses["total"] = losses["total"] + cfg.lambda_spectral * loss_spec
     else:
         losses["spectral"] = losses["spectral_dc"] = losses["spectral_ac"] = zero_val
@@ -407,18 +411,16 @@ def compute_rmr_v3_losses(
 
     y = outputs["y"].float()
     y0 = outputs["y0"].float()
-    zero_val = (y.sum() + y0.sum()) * 0.0
+    zero_val = torch.zeros((), device=y.device, dtype=y.dtype)
 
     if target_y.shape[0] == 0 or target_y.numel() == 0:
-        return {
-            "total": zero_val, "count": zero_val, "count_l1": zero_val, "cell": zero_val,
-            "allocation": zero_val, "flat_dm16": zero_val, "region_nb": zero_val,
-            "curvature": zero_val, "hard_bg": zero_val, "fg_bce": zero_val,
-            "hurdle_bce": zero_val, "trunc_nb": zero_val, "scale_align": zero_val,
-            "cell_carrier": zero_val, "cell_fine": zero_val,
-            "spectral": zero_val, "spectral_dc": zero_val, "spectral_ac": zero_val,
-            "chfl": zero_val,
-        }
+        empty_val = (y.sum() + y0.sum()) * 0.0
+        keys = [
+            "total", "count", "count_l1", "cell", "allocation", "flat_dm16", "region_nb", "curvature",
+            "hard_bg", "fg_bce", "hurdle_bce", "trunc_nb", "scale_align", "cell_carrier", "cell_fine",
+            "spectral", "spectral_dc", "spectral_ac", "chfl",
+        ]
+        return {k: empty_val for k in keys}
 
     if cfg.elementwise_dense_scaling or cfg.density_loss_scaling:
         return _compute_elementwise_dense_scaling(outputs, target_y, cfg, points=points)

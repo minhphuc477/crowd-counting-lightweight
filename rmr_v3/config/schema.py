@@ -22,6 +22,7 @@ ALLOWED_DATA_KEYS = {
 ALLOWED_MODEL_KEYS = {
     "output_stride",
     "feature_width",
+    "max_trainable_params",
     "backbone",
     "backbone_name",
     "pretrained",

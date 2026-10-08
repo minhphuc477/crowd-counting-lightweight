@@ -180,3 +180,128 @@ def build_canonical_rmr_model(
         model = model.to(device=device)
 
     return model
+
+
+CANONICAL_V35_PARAM_BUDGET: int = 200000
+CANONICAL_V35_EXPECTED_PARAMS: int = 175221
+
+
+def get_v35_model_config(**overrides: Any) -> RMRv3Config:
+    """Return RMR-v35 scaled architecture configuration (~175,221 params <= 200k)."""
+    base_kwargs: dict[str, Any] = {
+        "output_stride": 2,
+        "subpixel_dm": True,
+        "feature_width": 80,
+        "backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k",
+        "pretrained": True,
+        "backbone_lr_scale": 0.1,
+        "init_m0": 0.015763,
+        "max_trainable_params": CANONICAL_V35_PARAM_BUDGET,
+        "neck_type": "hdc_lite",
+        "use_aspp_gap": True,
+        "hdc_dilations": (1, 2, 3),
+        "region_sizes_px": (32, 64, 128),
+        "region_overlap": 0.5,
+        "include_full_image": False,
+        "regional_feature_stats": "mean",
+        "region_head_hidden": 140,
+        "dynamic_scale_routing": True,
+        "factorized_scale_routing": False,
+        "scale_router_temperature": 1.0,
+        "pre_solver_scale_gating": True,
+        "scale_gating_power": 1.0,
+        "temp_softplus": True,
+        "density_curvature": True,
+        "gated_density_curvature": True,
+        "curvature_dense_threshold": 0.15,
+        "curvature_gate_beta": 0.03,
+        "curvature_pool_kernel": 9,
+        "curvature_alpha_init": -4.0,
+        "hurdle_head": True,
+        "hurdle_gating_mode": "occupancy",
+        "dispersion_init": 50.0,
+        "dispersion_min": 0.5,
+        "dispersion_max": 500.0,
+        "reliability_mode": "snr",
+        "reliability_rate_std_floor": 0.01,
+        "reliability_weight_min": 0.25,
+        "reliability_weight_max": 4.0,
+        "normalize_reliability_within_scale": True,
+        "detach_region_mean_in_solver": True,
+        "detach_reliability_in_solver": True,
+        "detach_y0_for_solver": False,
+        "enable_solver": True,
+        "solver_mode": "additive",
+        "iterations": 6,
+        "omega": 1.0,
+        "residual_clip": 0.0,
+        "eps": 1e-6,
+        "adjoint_mode": "radon_nikodym",
+        "morozov_gamma": 0.75,
+        "morozov_rho_cap": 0.25,
+        "trust_region_kappa": 0.35,
+        "trust_region_floor": 0.005,
+        "use_barzilai_borwein": True,
+        "use_scale_entropy_trust": True,
+        "tv_lambda": 0.02,
+        "tv_type": "laplacian",
+        "proximal_tau": 0.015,
+        "proximal_mode": "firm",
+        "proximal_mu": 3.0,
+        "ema_decay": 0.999,
+    }
+    base_kwargs.update(overrides)
+    return RMRv3Config.from_dict(base_kwargs)
+
+
+def get_v35_loss_config(**overrides: Any) -> RMRv3LossConfig:
+    """Return purified dual-loss configuration for RMR-v35 (Count + Simplex Balanced DM)."""
+    base_kwargs: dict[str, Any] = {
+        "output_stride": 2,
+        "allocation_loss_type": "flat_dm16",
+        "kappa_flat16": 10.0,
+        "dm_block_px": 16,
+        "normalize_flat_dm16": True,
+        "dm_norm_mode": "count",
+        "dm_ref_count": 100.0,
+        "dm_strict": True,
+        "auto_scale_kappa": True,
+        "dm_target": "dual",
+        "lambda_count": 1.0,
+        "lambda_bayesian": 0.0,
+        "lambda_flat_dm16": 15.0,
+        "lambda_cell": 0.0,
+        "lambda_region_nb": 0.2,
+        "lambda_hurdle": 0.1,
+        "lambda_trunc_nb": 0.0,
+        "count_loss_mode": "nb",
+        "count_nb_dispersion": 50.0,
+        "lambda_scale_align": 0.0,
+        "lambda_curvature": 0.0,
+        "lambda_hard_bg": 0.0,
+        "lambda_fg_gate": 0.0,
+        "lambda_carrier_cell": 0.0,
+    }
+    base_kwargs.update(overrides)
+    return RMRv3LossConfig.from_dict(base_kwargs)
+
+
+def build_v35_rmr_model(
+    pretrained: bool = True,
+    device: str | torch.device | None = None,
+    **overrides: Any,
+) -> RMRv3:
+    """Instantiate and verify the RMR-v35 Scaled Architecture (<= 200,000 params)."""
+    cfg = get_v35_model_config(pretrained=pretrained, **overrides)
+    model = RMRv3(cfg)
+
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if total_params > CANONICAL_V35_PARAM_BUDGET:
+        raise ValueError(
+            f"RMR-v35 model violated parameter ceiling: {total_params} > {CANONICAL_V35_PARAM_BUDGET}"
+        )
+
+    if device is not None:
+        model = model.to(device=device)
+
+    return model
