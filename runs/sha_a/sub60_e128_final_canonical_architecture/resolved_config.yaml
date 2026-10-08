@@ -21,12 +21,12 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: 0.015763
-  neck_type: aspp_lite
+  neck_type: hdc_lite
   use_aspp_gap: true
-  aspp_dilations:
+  hdc_dilations:
   - 1
+  - 2
   - 3
-  - 6
   region_sizes_px:
   - 32
   - 64
@@ -65,8 +65,8 @@ model:
   trust_region_floor: 0.005
   density_adaptive_trust: false
   asymmetric_trust: false
-  scale_seeded_carrier: true
-  scale_seed_eps: 0.02
+  scale_seeded_carrier: false
+  scale_seed_eps: 0.0
   tv_lambda: 0.02
   tv_type: laplacian
   proximal_tau: 0.015
@@ -84,7 +84,7 @@ model:
   curvature_dense_threshold: 0.15
   curvature_gate_beta: 0.03
   curvature_pool_kernel: 8
-  curvature_alpha_init: -8.0
+  curvature_alpha_init: -4.0
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
   hurdle_gating_mode: occupancy
@@ -95,17 +95,24 @@ loss:
   bayesian_sigma_min: 2.0
   bayesian_sigma_max: 4.0
   bayesian_background_ratio: 0.1
-  bayesian_norm_mode: square_root
+  bayesian_norm_mode: canonical
   bayesian_canonical_bg: true
   dm_target: dual
   lambda_count: 1.0
   lambda_flat_dm16: 0.025
-  lambda_cell: 0.0
+  lambda_cell: 0.5
   lambda_region_nb: 0.2
   lambda_hurdle: 0.1
   lambda_trunc_nb: 0.2
   count_loss_mode: nb
   count_nb_dispersion: 50.0
+  cell_loss_mode: count_harmonized
+  cell_beta: 1.0
+  cell_mass_weight_eps: 0.001
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.25
+  cell_norm_power: 0.5
+  cell_norm_ref: 100.0
   lambda_scale_align: 0.05
   scale_align_tau_dense: 0.12
   scale_align_tau_sparse: 0.03
@@ -122,10 +129,8 @@ loss:
 train:
   epochs: 1000
   batch_size: 8
-  workers: 0
+  workers: 4
   pin_memory: true
-  num_threads: 2
-  cudnn_benchmark: false
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
@@ -139,8 +144,9 @@ train:
   patience: 0
   eval_every: 5
   deterministic: false
+  device: cuda:0
 eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/sub60_e127_tight_adaptive_bayesian_balanced
+output_dir: runs/sha_a/sub60_e128_final_canonical_architecture
