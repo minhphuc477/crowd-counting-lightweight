@@ -96,30 +96,25 @@ def scale_balanced_regional_nb_nll(
         mean_region,
         dispersion=dispersion_region,
         reduction="none",
+        check_bounds=False,
     )
 
     scale_losses = []
-    scale_weights = []
     num_scales = int(getattr(regions, "num_scales", 3))
-    # Support full-image scale -1 if present, and standard scales [0, num_scales-1]
-    for sid in range(-1, num_scales):
+    for sid in range(num_scales):
         mask = (regions.scale_id == sid)
-        count = mask.float().sum()
-        has_scale = (count > 0).float()
-        if mass_weight_alpha > 0.0 and count > 0:
+        t_count = mask.float().sum()
+        if mass_weight_alpha > 0.0:
             t_s = target_region[..., mask].float()
             t_mean = t_s.mean(dim=-1, keepdim=True).clamp_min(1e-4)
             w_raw = 1.0 + float(mass_weight_alpha) * (t_s / t_mean)
             w_norm = w_raw / w_raw.mean(dim=-1, keepdim=True).clamp_min(1e-4)
             loss_s = (w_norm * per_region[..., mask]).mean()
         else:
-            loss_s = (per_region[..., mask].sum(dim=-1) / count.clamp_min(1.0)).mean()
-        scale_losses.append(loss_s * has_scale)
-        scale_weights.append(has_scale)
+            loss_s = (per_region[..., mask].sum(dim=-1) / t_count.clamp_min(1.0)).mean()
+        scale_losses.append(loss_s)
 
-    total_weight = torch.stack(scale_weights).sum()
-    total_loss = torch.stack(scale_losses).sum()
-    return torch.where(total_weight > 0, total_loss / total_weight.clamp_min(1.0), (per_region.sum()) * 0.0)
+    return torch.stack(scale_losses).mean() if scale_losses else (per_region.sum()) * 0.0
 
 
 def curvature_power_loss(

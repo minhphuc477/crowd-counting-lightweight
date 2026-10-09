@@ -35,6 +35,9 @@ def _gather_prefix(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> to
     return torch.gather(prefix.flatten(-2), dim=-1, index=idx)
 
 
+_RECT_INDEX_CACHE: dict[tuple, torch.Tensor] = {}
+
+
 def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     """Rectangle sums using a padded prefix table.
 
@@ -44,18 +47,23 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     """
     if boxes.ndim != 2 or boxes.shape[-1] != 4:
         raise ValueError("boxes must have shape [M,4]")
-    boxes = boxes.to(device=prefix.device, dtype=torch.long)
-    y1, x1, y2, x2 = boxes.unbind(dim=-1)
-    _, _, hp, wp = prefix.shape
-    y1 = y1.clamp(0, hp - 1)
-    x1 = x1.clamp(0, wp - 1)
-    y2 = y2.clamp(0, hp - 1)
-    x2 = x2.clamp(0, wp - 1)
-    br = _gather_prefix(prefix, y2, x2)
-    tr = _gather_prefix(prefix, y1, x2)
-    bl = _gather_prefix(prefix, y2, x1)
-    tl = _gather_prefix(prefix, y1, x1)
-    return br - tr - bl + tl
+    b, c, hp, wp = prefix.shape
+    cache_key = (boxes.data_ptr(), hp, wp, str(prefix.device))
+    if cache_key in _RECT_INDEX_CACHE:
+        idx_flat = _RECT_INDEX_CACHE[cache_key]
+    else:
+        boxes_l = boxes.to(device=prefix.device, dtype=torch.long)
+        y1, x1, y2, x2 = boxes_l.unbind(dim=-1)
+        y1, x1 = y1.clamp(0, hp - 1), x1.clamp(0, wp - 1)
+        y2, x2 = y2.clamp(0, hp - 1), x2.clamp(0, wp - 1)
+        idx = torch.stack([y2 * wp + x2, y1 * wp + x2, y2 * wp + x1, y1 * wp + x1], dim=0)
+        idx_flat = idx.view(1, 1, -1)
+        if len(_RECT_INDEX_CACHE) >= 32:
+            _RECT_INDEX_CACHE.clear()
+        _RECT_INDEX_CACHE[cache_key] = idx_flat
+
+    gathered = torch.gather(prefix.flatten(-2), dim=-1, index=idx_flat.expand(b, c, -1)).view(b, c, 4, -1)
+    return gathered[:, :, 0] - gathered[:, :, 1] - gathered[:, :, 2] + gathered[:, :, 3]
 
 
 def continuous_prefix_eval(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:

@@ -28,6 +28,7 @@ def solve_inverse_measure(
     trust_gate: nn.Linear | None,
     laplace_kernel: torch.Tensor,
     carrier_energy: torch.Tensor | None = None,
+    compute_energy: bool = True,
 ) -> RMRModelOutput:
     """Solve the unrolled inverse problem on Radon measures using SIRT and return RMRModelOutput."""
     mu_count = regional_evidence["mu_count"]
@@ -159,6 +160,7 @@ def solve_inverse_measure(
         eatr_alpha=getattr(cfg, "eatr_alpha", 0.5),
         regional_rate=regional_evidence.get("rate"),
         morozov_rho_cap=getattr(cfg, "morozov_rho_cap", 0.0),
+        compute_energy=compute_energy,
     )
 
     y = solver_res["y"]

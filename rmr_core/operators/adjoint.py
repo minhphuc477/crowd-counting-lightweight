@@ -7,6 +7,9 @@ from .prefix_sums import regional_sum
 from .regions import RegionSet, partition_regions_by_scale
 
 
+_ADJOINT_INDEX_CACHE: dict[tuple, torch.Tensor] = {}
+
+
 def regional_adjoint(
     values: torch.Tensor,
     boxes: torch.Tensor,
@@ -31,29 +34,27 @@ def regional_adjoint(
     if boxes.shape != (m, 4):
         raise ValueError(f"boxes must be [{m},4], got {tuple(boxes.shape)}")
 
-    boxes = boxes.to(device=values.device, dtype=torch.long)
-    y1, x1, y2, x2 = boxes.unbind(dim=-1)
     hp, wp = height + 1, width + 1
-
-    y1 = y1.clamp(0, height)
-    x1 = x1.clamp(0, width)
-    y2 = y2.clamp(0, height)
-    x2 = x2.clamp(0, width)
+    cache_key = (boxes.data_ptr(), height, width, str(values.device))
+    if cache_key in _ADJOINT_INDEX_CACHE:
+        idx_all = _ADJOINT_INDEX_CACHE[cache_key]
+    else:
+        boxes_l = boxes.to(device=values.device, dtype=torch.long)
+        y1, x1, y2, x2 = boxes_l.unbind(dim=-1)
+        y1, x1 = y1.clamp(0, height), x1.clamp(0, width)
+        y2, x2 = y2.clamp(0, height), x2.clamp(0, width)
+        idx1, idx2 = y1 * wp + x1, y1 * wp + x2
+        idx3, idx4 = y2 * wp + x1, y2 * wp + x2
+        idx_all = torch.cat([idx1, idx2, idx3, idx4], dim=-1).view(1, 1, -1)
+        if len(_ADJOINT_INDEX_CACHE) >= 32:
+            _ADJOINT_INDEX_CACHE.clear()
+        _ADJOINT_INDEX_CACHE[cache_key] = idx_all
 
     orig_dtype = values.dtype if out_dtype is None else out_dtype
     work = values.float() if values.dtype in (torch.float16, torch.bfloat16) else values
+    src_all = torch.cat([work, -work, -work, work], dim=-1)
     diff = work.new_zeros((b, c, hp * wp))
-
-    def scatter(y: torch.Tensor, x: torch.Tensor, src: torch.Tensor) -> None:
-        yc = y.clamp(0, hp - 1)
-        xc = x.clamp(0, wp - 1)
-        idx = (yc * wp + xc).view(1, 1, -1).expand(b, c, -1)
-        diff.scatter_add_(dim=-1, index=idx, src=src)
-
-    scatter(y1, x1, work)
-    scatter(y1, x2, -work)
-    scatter(y2, x1, -work)
-    scatter(y2, x2, work)
+    diff.scatter_add_(dim=-1, index=idx_all.expand(b, c, -1), src=src_all)
 
     diff = diff.view(b, c, hp, wp)
     field = diff.cumsum(dim=-2).cumsum(dim=-1)

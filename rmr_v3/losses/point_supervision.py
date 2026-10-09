@@ -53,14 +53,14 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
         n = pts.shape[0]
         m = gx.shape[1]
         grad_u = torch.zeros(m, device=pts.device, dtype=torch.float32)
-        inv_k = inv_k_saved if inv_k_saved.ndim > 0 else inv_k_saved.item()
+        inv_k = inv_k_saved
 
         for c in range(0, n, chunk_size):
             p = pts[c : c + chunk_size]
             dx = p[:, 0:1] - gx
             dy = p[:, 1:2] - gy
             d2 = dx.square_().add_(dy.square_())
-            ik = inv_k[c : c + chunk_size] if isinstance(inv_k, torch.Tensor) else inv_k
+            ik = inv_k[c : c + chunk_size] if inv_k.ndim > 0 else inv_k
             d2.mul_(-ik)
             k_chunk = torch.exp(d2)
             s_chunk = sign[c : c + chunk_size]
@@ -68,6 +68,9 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
 
         grad_u.mul_(grad_err)
         return grad_u, None, None, None, None, None, None
+
+
+_BAYESIAN_GRID_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 
 
 def bayesian_loss(
@@ -93,12 +96,19 @@ def bayesian_loss(
     b, _, h, w = prob_y0.shape
     device = prob_y0.device
 
-    # Create grid of center coordinates in image pixels
-    y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
-    x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
-    grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
-    gx = grid_x.flatten().unsqueeze(0)  # [1, M]
-    gy = grid_y.flatten().unsqueeze(0)  # [1, M]
+    # Create grid of center coordinates in image pixels with LRU cache
+    grid_key = (h, w, stride, str(device))
+    if grid_key in _BAYESIAN_GRID_CACHE:
+        gx, gy = _BAYESIAN_GRID_CACHE[grid_key]
+    else:
+        y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
+        x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
+        grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
+        gx = grid_x.flatten().unsqueeze(0)  # [1, M]
+        gy = grid_y.flatten().unsqueeze(0)  # [1, M]
+        if len(_BAYESIAN_GRID_CACHE) >= 16:
+            _BAYESIAN_GRID_CACHE.pop(next(iter(_BAYESIAN_GRID_CACHE)))
+        _BAYESIAN_GRID_CACHE[grid_key] = (gx, gy)
     m_total = gx.shape[1]
 
     # Bounded adaptive chunk size: limits peak chunk tensor to <= 16MB (4,194,304 float32 elements)

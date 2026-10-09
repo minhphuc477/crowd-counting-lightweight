@@ -46,18 +46,23 @@ def negative_binomial_nll_mean_dispersion(
     dispersion: float | torch.Tensor = 50.0,
     eps: float = 1e-8,
     reduction: str = "mean",
+    check_bounds: bool = True,
 ) -> torch.Tensor:
     """Negative-Binomial NLL with Var(Y) = mu + mu^2 / r evaluated in float32."""
     y = target.to(device=mean.device, dtype=torch.float32)
     mu = mean.to(dtype=torch.float32).clamp_min(eps)
     r = torch.as_tensor(dispersion, device=mean.device, dtype=torch.float32)
 
-    if torch.any(r <= 0) or torch.any(r > _MAX_DISPERSION) or not torch.isfinite(r).all():
-        raise ValueError(
-            f"Negative-Binomial dispersion parameter r must be in (0, {_MAX_DISPERSION}], got {dispersion}"
-        )
-    if not torch.isfinite(y).all() or torch.any(y < 0):
-        raise ValueError("Negative-Binomial targets must be finite non-negative numbers")
+    if check_bounds:
+        if torch.any(r <= 0) or torch.any(r > _MAX_DISPERSION) or not torch.isfinite(r).all():
+            raise ValueError(
+                f"Negative-Binomial dispersion parameter r must be in (0, {_MAX_DISPERSION}], got {dispersion}"
+            )
+        if not torch.isfinite(y).all() or torch.any(y < 0):
+            raise ValueError("Negative-Binomial targets must be finite non-negative numbers")
+    else:
+        y = y.clamp_min(0.0)
+        r = r.clamp(1e-6, _MAX_DISPERSION)
 
     log_r_plus_mu = torch.log(r + mu)
     nll = -(
@@ -88,7 +93,9 @@ def count_magnitude_loss(
     pn = pred.float().sum(dim=(-2, -1)).view(-1) if pred.ndim >= 2 else pred.float().view(-1)
     tn = target.float().sum(dim=(-2, -1)).view(-1) if target.ndim >= 2 else target.float().view(-1)
     if mode == "nb":
-        return negative_binomial_nll_mean_dispersion(tn, pn, dispersion=dispersion, reduction="mean")
+        return negative_binomial_nll_mean_dispersion(
+            tn, pn, dispersion=dispersion, reduction="mean", check_bounds=False
+        )
     elif mode == "log1p":
         return F.smooth_l1_loss(torch.log1p(pn), torch.log1p(tn), reduction="mean", beta=0.2)
     elif mode == "l1":
@@ -142,11 +149,11 @@ def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 0.05) -> torch.Te
     return (mass_f + prior) / (mass_f.sum(dim=-1, keepdim=True) + eps)
 
 
-def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def dm_nll_none(y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8, check_bounds: bool = False) -> torch.Tensor:
     """Dirichlet-Multinomial NLL; empty parents contribute exactly zero."""
     y = y.float()
     alpha = alpha.float().clamp_min(eps)
-    if torch.any(y < 0):
+    if check_bounds and torch.any(y < 0):
         raise ValueError("Dirichlet-Multinomial targets must be non-negative")
     n = y.sum(dim=-1)
     alpha0 = alpha.sum(dim=-1)

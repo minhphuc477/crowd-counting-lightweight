@@ -105,6 +105,7 @@ def unrolled_sirt_solver(
     eatr_alpha: float = 0.5,
     regional_rate: torch.Tensor | None = None,
     morozov_rho_cap: float = 0.0,
+    compute_energy: bool = True,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
@@ -210,17 +211,13 @@ def unrolled_sirt_solver(
         else:
             z_state = y_curr
 
-        # Fast Energy Trajectory: Reuse energy_after from step t-1 as energy_before for step t
-        # Eliminates 50% of redundant 2D prefix sums during unrolled SIRT optimization
-        if iter_idx == 0 or energy_after is None:
-            energy_before = weighted_regional_energy(
-                y_curr,
-                b_solver,
-                weight_solver,
-                regions,
-            ).detach()
-        else:
-            energy_before = energy_after
+        if compute_energy:
+            if iter_idx == 0 or energy_after is None:
+                energy_before = weighted_regional_energy(
+                    y_curr, b_solver, weight_solver, regions,
+                ).detach()
+            else:
+                energy_before = energy_after
 
         # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
         is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
@@ -289,14 +286,14 @@ def unrolled_sirt_solver(
                     omega_candidate = torch.where(
                         dot_sr > 1e-7,
                         norm_s_sq / dot_sr.clamp_min(1e-7),
-                        torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                        torch.full_like(dot_sr, effective_omega),
                     ).detach()
                 else:
                     # BB-1: Standard Rayleigh quotient alpha_1 = <s, r> / ||r||^2
                     omega_candidate = torch.where(
                         dot_sr > 0.0,
                         dot_sr / norm_r_sq,
-                        torch.as_tensor(effective_omega, device=dot_sr.device, dtype=dot_sr.dtype),
+                        torch.full_like(dot_sr, effective_omega),
                     ).detach()
 
                 current_omega = torch.clamp(
@@ -404,15 +401,12 @@ def unrolled_sirt_solver(
         # Zero-host-sync numerical divergence guard: restore y_curr on NaN/Inf
         y_next = torch.where(torch.isfinite(y_next), y_next, y_curr)
 
-        energy_after = weighted_regional_energy(
-            y_next,
-            b_solver,
-            weight_solver,
-            regions,
-        ).detach()
-
-        energy_trace.append({"before": energy_before, "after": energy_after})
-        residual_fields.append(field)
+        if compute_energy:
+            energy_after = weighted_regional_energy(
+                y_next, b_solver, weight_solver, regions,
+            ).detach()
+            energy_trace.append({"before": energy_before, "after": energy_after})
+        residual_fields.append(field.detach())
         iterates.append(y_next)
         y_prev = y_curr
         y_curr = y_next

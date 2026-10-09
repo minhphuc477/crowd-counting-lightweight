@@ -324,6 +324,7 @@ class RMRv3(nn.Module):
         pi_scale: torch.Tensor | None,
         pi_aspect: torch.Tensor | None,
         carrier_energy: torch.Tensor | None = None,
+        compute_energy: bool = True,
     ) -> RMRModelOutput:
         return solve_inverse_measure(
             cfg=self.cfg, y0=y0, z0=z0, regional_evidence=regional_evidence,
@@ -331,7 +332,7 @@ class RMRv3(nn.Module):
             default_solver_strength=self.solver_strength, uniform_reliability=uniform_reliability,
             p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
             trust_gate=self.trust_gate, laplace_kernel=self._laplace_kernel,
-            carrier_energy=carrier_energy,
+            carrier_energy=carrier_energy, compute_energy=compute_energy,
         )
 
     def forward(
@@ -340,6 +341,7 @@ class RMRv3(nn.Module):
         *,
         uniform_reliability: bool = False,
         solver_strength: float | None = None,
+        compute_energy: bool = True,
     ) -> RMRModelOutput:
         h_in, w_in = x.shape[-2:]
         divisor = 16  # FPN reductions (4, 8, 16) require resolution divisibility
@@ -404,7 +406,7 @@ class RMRv3(nn.Module):
             scale_weights=scale_weights, solver_strength=solver_strength,
             uniform_reliability=uniform_reliability,
             p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
-            carrier_energy=carrier_energy,
+            carrier_energy=carrier_energy, compute_energy=compute_energy,
         )
 
         if self.subpixel_allocator is not None:
