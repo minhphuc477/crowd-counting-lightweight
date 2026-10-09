@@ -115,7 +115,14 @@ loss:
   lambda_count: 1.0
   lambda_bayesian: 0.0
   lambda_flat_dm16: 1.0
-  lambda_cell: 0.0
+  lambda_cell: 0.5
+  cell_loss_mode: count_harmonized
+  cell_norm_power: 0.5
+  cell_norm_ref: 100.0
+  cell_beta: 1.0
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.25
+  cell_fg_ratio: 0.67
   lambda_region_nb: 0.05
   lambda_hurdle: 0.02
   lambda_trunc_nb: 0.0

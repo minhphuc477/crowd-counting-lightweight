@@ -115,7 +115,9 @@ def test_sub60_e139_config_and_parameters():
     assert l_cfg.lambda_region_nb == 0.05
     assert l_cfg.lambda_hurdle == 0.02
     assert l_cfg.lambda_bayesian == 0.0
-    assert l_cfg.lambda_cell == 0.0
+    assert l_cfg.lambda_cell == 0.5
+    assert l_cfg.cell_loss_mode == "count_harmonized"
+    assert l_cfg.cell_norm_power == 0.5
     assert l_cfg.lambda_trunc_nb == 0.0
     assert l_cfg.lambda_curvature == 0.0
     assert l_cfg.lambda_hard_bg == 0.0
@@ -169,6 +171,8 @@ def test_v35_scaled_architecture_budget():
     assert m_cfg.output_stride == 2
     assert m_cfg.max_trainable_params == CANONICAL_V35_PARAM_BUDGET  # 200,000
     assert l_cfg.lambda_flat_dm16 == 1.0
+    assert l_cfg.lambda_cell == 0.5
+    assert l_cfg.cell_loss_mode == "count_harmonized"
     assert l_cfg.lambda_region_nb == 0.05
     assert l_cfg.lambda_hurdle == 0.02
 
@@ -195,6 +199,8 @@ def test_sub60_e140_config_and_validation():
     assert m_cfg.output_stride == 2
     assert m_cfg.max_trainable_params == 200000
     assert l_cfg.lambda_flat_dm16 == 1.0
+    assert l_cfg.lambda_cell == 0.5
+    assert l_cfg.cell_loss_mode == "count_harmonized"
     assert l_cfg.lambda_region_nb == 0.05
     assert l_cfg.lambda_hurdle == 0.02
 
@@ -270,3 +276,28 @@ def test_comprehensive_ablation_configs_e141_to_e143():
         tgt[:, :, 10, 10] = 1.0
         loss = compute_rmr_v3_losses(out, tgt, cfg=l_cfg)
         assert torch.isfinite(loss["total"])
+
+
+def test_stride2_fractional_cell_loss_active_pinning():
+    """Verify that fractional cell loss provides sharp Dirac point gradients at Stride 2."""
+    from rmr_v3.losses.auxiliary import count_harmonized_cell_loss
+    from rmr_core.data import rasterize_points
+
+    pts = torch.tensor([[50.0, 50.0], [52.0, 50.0], [100.0, 100.0]])
+    tgt = rasterize_points(pts, 256, 256, stride=2).unsqueeze(0)
+    y = torch.full((1, 1, 128, 128), 0.015, requires_grad=True)
+
+    loss = count_harmonized_cell_loss(
+        y, tgt, beta=1.0, gamma=1.25, fg_ratio=0.67, stride=2,
+        norm_power=0.5, norm_ref=100.0
+    )
+    assert torch.isfinite(loss)
+    assert loss.item() > 0.0
+    loss.backward()
+
+    assert y.grad is not None
+    # Foreground cells where points lie must receive active gradients
+    fg_mask = (tgt[0, 0] > 0)
+    assert fg_mask.sum() == 3, "Points separated by 2px must have distinct cells at Stride 2"
+    assert (y.grad[0, 0][fg_mask].abs() > 1e-4).all(), "All Dirac head cells must receive non-zero pinning gradient"
+
