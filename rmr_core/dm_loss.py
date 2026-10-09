@@ -196,6 +196,9 @@ def multiscale_dm_loss(
         components[int(block_px)] = li
         terms.append((float(w) / wsum) * li)
 
+    if not terms:
+        zero_res = pred_map.new_tensor(0.0)
+        return (zero_res, components) if return_components else zero_res
     total = torch.stack(terms).sum()
     if return_components:
         return total, components
