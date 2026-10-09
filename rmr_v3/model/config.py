@@ -17,6 +17,21 @@ def _deep_tuple(val: Any) -> Any:
     return val
 
 
+def _require_positive(name: str, val: float) -> None:
+    if val <= 0.0:
+        raise ValueError(f"{name} must be strictly positive, got {val}")
+
+
+def _require_non_negative(name: str, val: float) -> None:
+    if val < 0.0:
+        raise ValueError(f"{name} must be non-negative, got {val}")
+
+
+def _require_unit_interval(name: str, val: float) -> None:
+    if not (0.0 <= val <= 1.0):
+        raise ValueError(f"{name} must be in [0.0, 1.0], got {val}")
+
+
 @dataclass
 class RMRv3Config:
     # Fine grid / carrier
@@ -308,103 +323,44 @@ class RMRv3Config:
             raise ValueError(
                 f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
             )
-        if self.pm_kappa <= 0.0:
-            raise ValueError(
-                f"pm_kappa must be strictly positive, got {self.pm_kappa}"
-            )
-        if self.anscombe_tau_dense <= 0.0:
-            raise ValueError(
-                f"anscombe_tau_dense must be strictly positive, got {self.anscombe_tau_dense}"
-            )
-        if self.proximal_tau < 0.0:
-            raise ValueError(
-                f"proximal_tau must be non-negative, got {self.proximal_tau}"
-            )
-        if self.floor_tau < 0.0:
-            raise ValueError(
-                f"floor_tau must be non-negative, got {self.floor_tau}"
-            )
+        _require_positive("pm_kappa", self.pm_kappa)
+        _require_positive("anscombe_tau_dense", self.anscombe_tau_dense)
+        _require_non_negative("proximal_tau", self.proximal_tau)
+        _require_non_negative("floor_tau", self.floor_tau)
         if self.use_cpcm and self.cpcm_hidden <= 0:
-            raise ValueError(
-                f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}"
-            )
+            raise ValueError(f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}")
 
         if self.proximal_mode not in ("firm", "soft", "none", "clamp"):
-            raise ValueError(
-                f"proximal_mode must be 'firm', 'soft', or 'none', got '{self.proximal_mode}'"
-            )
+            raise ValueError(f"proximal_mode must be 'firm', 'soft', or 'none', got '{self.proximal_mode}'")
         if self.proximal_mu <= 1.0:
-            raise ValueError(
-                f"proximal_mu must be > 1.0, got {self.proximal_mu}"
-            )
-        if self.tv_lambda < 0.0:
-            raise ValueError(
-                f"tv_lambda must be non-negative, got {self.tv_lambda}"
-            )
-        if self.scale_router_temperature <= 0.0:
-            raise ValueError(
-                f"scale_router_temperature must be strictly positive, got {self.scale_router_temperature}"
-            )
-        if self.trust_region_kappa < 0.0:
-            raise ValueError(
-                f"trust_region_kappa must be non-negative, got {self.trust_region_kappa}"
-            )
-        if self.trust_region_floor <= 0.0:
-            raise ValueError(
-                f"trust_region_floor must be strictly positive, got {self.trust_region_floor}"
-            )
+            raise ValueError(f"proximal_mu must be > 1.0, got {self.proximal_mu}")
+        _require_non_negative("tv_lambda", self.tv_lambda)
+        _require_positive("scale_router_temperature", self.scale_router_temperature)
+        _require_non_negative("trust_region_kappa", self.trust_region_kappa)
+        _require_positive("trust_region_floor", self.trust_region_floor)
         if self.adjoint_mode not in ("flat", "radon_nikodym", "anscombe_vst"):
-            raise ValueError(
-                f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'"
-            )
+            raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'")
         if self.adjoint_mode == "anscombe_vst":
             self.use_anscombe_sirt = True
-        if self.anscombe_c <= 0.0:
-            raise ValueError(
-                f"anscombe_c must be strictly positive, got {self.anscombe_c}"
-            )
-        if self.adaptive_tau_rho0 <= 0.0:
-            raise ValueError(
-                f"adaptive_tau_rho0 must be strictly positive, got {self.adaptive_tau_rho0}"
-            )
-        if self.morozov_gamma < 0.0:
-            raise ValueError(
-                f"morozov_gamma must be non-negative, got {self.morozov_gamma}"
-            )
+        _require_positive("anscombe_c", self.anscombe_c)
+        _require_positive("adaptive_tau_rho0", self.adaptive_tau_rho0)
+        _require_non_negative("morozov_gamma", self.morozov_gamma)
         if self.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
                 f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
             )
-        if not (0.0 <= self.tdsg_floor <= 1.0):
-            raise ValueError(
-                f"tdsg_floor must be in [0.0, 1.0], got {self.tdsg_floor}"
-            )
-        if not (0.0 <= self.fg_gate_floor <= 1.0):
-            raise ValueError(
-                f"fg_gate_floor must be in [0.0, 1.0], got {self.fg_gate_floor}"
-            )
-        if not (0.0 <= self.hybrid_recovery_alpha <= 1.0):
-            raise ValueError(
-                f"hybrid_recovery_alpha must be in [0.0, 1.0], got {self.hybrid_recovery_alpha}"
-            )
-        if self.crest_kappa_0 < 0.0:
-            raise ValueError(f"crest_kappa_0 must be non-negative, got {self.crest_kappa_0}")
-        if self.crest_eps_seed < 0.0:
-            raise ValueError(f"crest_eps_seed must be non-negative, got {self.crest_eps_seed}")
-        if self.morozov_gamma_under < 0.0:
-            raise ValueError(f"morozov_gamma_under must be non-negative, got {self.morozov_gamma_under}")
-        if self.morozov_rho < 0.0:
-            raise ValueError(f"morozov_rho must be non-negative, got {self.morozov_rho}")
-        if self.morozov_rho_cap < 0.0:
-            raise ValueError(f"morozov_rho_cap must be non-negative, got {self.morozov_rho_cap}")
-        if self.shifted_carrier_eps <= 0.0:
-            raise ValueError(f"shifted_carrier_eps must be strictly positive, got {self.shifted_carrier_eps}")
-        if self.trust_dense_tau <= 0.0:
-            raise ValueError(f"trust_dense_tau must be strictly positive, got {self.trust_dense_tau}")
-        if self.trust_dense_kappa <= 0.0:
-            raise ValueError(f"trust_dense_kappa must be strictly positive, got {self.trust_dense_kappa}")
-        if self.density_scale_tau <= 0.0:
-            raise ValueError(f"density_scale_tau must be strictly positive, got {self.density_scale_tau}")
+        _require_unit_interval("tdsg_floor", self.tdsg_floor)
+        _require_unit_interval("fg_gate_floor", self.fg_gate_floor)
+        _require_unit_interval("hybrid_recovery_alpha", self.hybrid_recovery_alpha)
+        _require_non_negative("crest_kappa_0", self.crest_kappa_0)
+        _require_non_negative("crest_eps_seed", self.crest_eps_seed)
+        _require_non_negative("morozov_gamma_under", self.morozov_gamma_under)
+        _require_non_negative("morozov_rho", self.morozov_rho)
+        _require_non_negative("morozov_rho_cap", self.morozov_rho_cap)
+        _require_positive("shifted_carrier_eps", self.shifted_carrier_eps)
+        _require_positive("trust_dense_tau", self.trust_dense_tau)
+        _require_positive("trust_dense_kappa", self.trust_dense_kappa)
+        _require_positive("density_scale_tau", self.density_scale_tau)
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -440,3 +396,33 @@ class RMRv3Config:
                 else:
                     kwargs[k] = v
         return cls(**kwargs)
+
+
+def validate_architecture_contract(cfg: RMRv3Config) -> None:
+    """Validate architectural invariants and hyperparameter bounds."""
+    has_subpixel = cfg.subpixel_stride2 or getattr(cfg, "subpixel_dm", False)
+    if cfg.output_stride != 4 and not (has_subpixel and cfg.output_stride == 2):
+        raise ValueError(
+            "RMR-v3 requires output_stride=4 (or output_stride=2 when subpixel_stride2=True or subpixel_dm=True)"
+        )
+    if cfg.include_full_image:
+        raise ValueError("RMR-v3 registered method requires include_full_image=False")
+    if cfg.enable_solver and cfg.iterations < 1:
+        raise ValueError("iterations must be >= 1 when enable_solver=True")
+    if cfg.enable_solver and cfg.omega <= 0:
+        raise ValueError("omega must be > 0 when enable_solver=True")
+    if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
+        raise ValueError(
+            f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
+        )
+    if len(cfg.region_sizes_px) == 0:
+        raise ValueError("region_sizes_px must not be empty")
+    if cfg.reliability_weight_min <= 0:
+        raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
+    if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
+        raise ValueError(
+            f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"
+        )
+    if cfg.reliability_rate_std_floor <= 0:
+        raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
+

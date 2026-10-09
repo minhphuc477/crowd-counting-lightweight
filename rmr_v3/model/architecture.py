@@ -7,19 +7,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.backbones import TimmPyramidBackbone
-from rmr_core.heads import build_fine_head
-from rmr_core.necks import (
-    AdditiveFPNNeck,
-    ASPPLiteFPNNeck,
-    CoordinateAttention,
-    HDCLiteFPNNeck,
-    RepWeightedFPNNeck,
-)
-from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
+from rmr_core.necks import CoordinateAttention
 from rmr_core.types import RMRModelOutput
 from rmr_core.operators import RegionSet, build_multiscale_regions
-from ..regional_head import ProbabilisticRegionalEvidenceHead
-from .config import RMRv3Config, _softplus_inverse, _deep_tuple
+from .config import (
+    RMRv3Config,
+    _deep_tuple,
+    validate_architecture_contract,
+)
+from .builder import (
+    build_neck_module,
+    build_scale_router,
+    build_1x1_gate,
+    build_fine_carrier_head,
+    build_regional_evidence_head,
+    package_subpixel_output,
+)
 from .evidence import extract_regional_evidence
 from .perspective_geometry import (
     DynamicCameraAnglePredictor,
@@ -27,7 +30,7 @@ from .perspective_geometry import (
     DiAGFactorizedRoutingHead,
 )
 from .solver_step import solve_inverse_measure
-from .dual_lattice import push_forward_stride2_to_stride4, scale_regions_to_stride2, SubpixelAllocationHead
+from .dual_lattice import scale_regions_to_stride2, SubpixelAllocationHead
 
 
 class RMRv3(nn.Module):
@@ -41,29 +44,7 @@ class RMRv3(nn.Module):
 
         if cfg is None:
             cfg = RMRv3Config()
-
-        has_subpixel = cfg.subpixel_stride2 or getattr(cfg, "subpixel_dm", False)
-        if cfg.output_stride != 4 and not (has_subpixel and cfg.output_stride == 2):
-            raise ValueError(
-                "RMR-v3 requires output_stride=4 (or output_stride=2 when subpixel_stride2=True or subpixel_dm=True)"
-            )
-        if cfg.include_full_image:
-            raise ValueError("RMR-v3 registered method requires include_full_image=False")
-        if cfg.enable_solver and cfg.iterations < 1:
-            raise ValueError("iterations must be >= 1 when enable_solver=True")
-        if cfg.enable_solver and cfg.omega <= 0:
-            raise ValueError("omega must be > 0 when enable_solver=True")
-        if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
-            raise ValueError(f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'.")
-        if len(cfg.region_sizes_px) == 0:
-            raise ValueError("region_sizes_px must not be empty")
-        if cfg.reliability_weight_min <= 0:
-            raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
-        if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
-            raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})")
-        if cfg.reliability_rate_std_floor <= 0:
-            raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
-
+        validate_architecture_contract(cfg)
         self.cfg = cfg
 
         self.encoder = TimmPyramidBackbone(
@@ -71,120 +52,15 @@ class RMRv3(nn.Module):
             pretrained=cfg.pretrained,
             target_reductions=(4, 8, 16),
         )
-
-        if cfg.neck_type == "rep_weighted":
-            self.fusion = RepWeightedFPNNeck(
-                in_channels=self.encoder.out_channels,
-                width=cfg.feature_width,
-                context_dilations=cfg.context_dilations,
-            )
-        elif cfg.neck_type == "aspp_lite":
-            self.fusion = ASPPLiteFPNNeck(
-                in_channels=self.encoder.out_channels,
-                width=cfg.feature_width,
-                aspp_dilations=cfg.aspp_dilations,
-                use_aspp_gap=cfg.use_aspp_gap,
-            )
-        elif cfg.neck_type == "hdc_lite":
-            self.fusion = HDCLiteFPNNeck(
-                in_channels=self.encoder.out_channels,
-                width=cfg.feature_width,
-                hdc_dilations=cfg.hdc_dilations,
-                use_gap=cfg.use_aspp_gap,
-            )
-        elif cfg.neck_type == "additive":
-            self.fusion = AdditiveFPNNeck(
-                in_channels=self.encoder.out_channels,
-                width=cfg.feature_width,
-            )
-        else:
-            raise ValueError(
-                f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', 'hdc_lite', or 'rep_weighted'."
-            )
-
-        init_bias = _softplus_inverse(cfg.init_m0)
-
-        self.fine_head = build_fine_head(
-            width=cfg.feature_width,
-            scale_conditioned_fine_head=cfg.scale_conditioned_fine_head,
-            num_scales=len(cfg.region_sizes_px),
-            init_bias=init_bias,
-            temp_softplus=cfg.temp_softplus,
-            scale_conditioned_prior=cfg.scale_conditioned_prior,
-            density_curvature=cfg.density_curvature,
-            gated_density_curvature=cfg.gated_density_curvature,
-            curvature_dense_threshold=cfg.curvature_dense_threshold,
-            curvature_gate_beta=cfg.curvature_gate_beta,
-            curvature_pool_kernel=cfg.curvature_pool_kernel,
-            subpixel_stride2=cfg.subpixel_stride2,
-            floor_tau=cfg.floor_tau,
-            curvature_alpha_init=getattr(cfg, "curvature_alpha_init", -8.0),
-            density_adaptive_scale=getattr(cfg, "density_adaptive_scale", False),
-            density_scale_gamma=getattr(cfg, "density_scale_gamma", 0.0),
-            density_scale_learnable=getattr(cfg, "density_scale_learnable", False),
-            scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.0),
-        )
-
-        self.region_head = ProbabilisticRegionalEvidenceHead(
-            feature_dim=cfg.feature_width,
-            hidden=cfg.region_head_hidden,
-            init_rate=cfg.init_m0,
-            region_sizes_px=cfg.region_sizes_px,
-            dispersion_init=cfg.dispersion_init,
-            dispersion_min=cfg.dispersion_min,
-            dispersion_max=cfg.dispersion_max,
-            native_scale_pooling=cfg.native_scale_pooling,
-            regional_feature_stats=cfg.regional_feature_stats,
-            hurdle_head=cfg.hurdle_head,
-            floor_tau=cfg.floor_tau,
-        )
-
+        self.fusion = build_neck_module(self.encoder.out_channels, cfg)
+        self.fine_head = build_fine_carrier_head(cfg)
+        self.region_head = build_regional_evidence_head(cfg)
         self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
 
         # Dynamic Scale Routing & DiAG (100% Feature-Driven, Zero Coordinate Linspace)
-        if cfg.use_diag:
-            self.dcap: DynamicCameraAnglePredictor | None = DynamicCameraAnglePredictor(
-                cfg.feature_width,
-                len(cfg.region_sizes_px),
-                use_vertical_gradient=getattr(cfg, "use_vertical_gradient_dcap", False),
-            )
-            if cfg.factorized_scale_routing:
-                self.scale_router: nn.Module | None = DiAGFactorizedRoutingHead(
-                    cfg.feature_width,
-                    cfg.num_marginal_scales,
-                    cfg.num_aspect_ratios,
-                    cfg.scale_router_temperature,
-                    use_tilt=getattr(cfg, "use_dcap_tilt", True),
-                )
-            else:
-                self.scale_router = DiAGScaleRoutingHead(
-                    cfg.feature_width,
-                    len(cfg.region_sizes_px),
-                    cfg.scale_router_temperature,
-                    use_tilt=getattr(cfg, "use_dcap_tilt", True),
-                )
-        else:
-            self.dcap = None
-            if cfg.factorized_scale_routing:
-                self.scale_router = FactorizedRoutingHead(
-                    cfg.feature_width, cfg.num_marginal_scales, cfg.num_aspect_ratios, cfg.scale_router_temperature
-                )
-            elif cfg.dynamic_scale_routing:
-                self.scale_router = ScaleRoutingHead(
-                    cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
-                )
-            else:
-                self.scale_router = None
-
-        self.fg_gate = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True) if cfg.foreground_gate else None
-        if self.fg_gate is not None:
-            nn.init.normal_(self.fg_gate.weight, std=0.01)
-            nn.init.constant_(self.fg_gate.bias, 2.0)
-
-        self.tdsg = nn.Conv2d(cfg.feature_width, 1, kernel_size=1, bias=True) if cfg.use_top_down_semantic_gate else None
-        if self.tdsg is not None:
-            nn.init.normal_(self.tdsg.weight, std=0.01)
-            nn.init.constant_(self.tdsg.bias, 2.0)
+        self.dcap, self.scale_router = build_scale_router(cfg)
+        self.fg_gate = build_1x1_gate(cfg.foreground_gate, cfg.feature_width)
+        self.tdsg = build_1x1_gate(cfg.use_top_down_semantic_gate, cfg.feature_width)
 
         self.trust_gate = nn.Linear(cfg.feature_width, 1) if cfg.dynamic_trust_gate else None
         if self.trust_gate is not None:
@@ -192,20 +68,11 @@ class RMRv3(nn.Module):
             nn.init.constant_(self.trust_gate.bias, float(cfg.trust_gate_init_bias))
 
         self.solver_strength: float = 1.0
-
         self.subpixel_allocator = (
             SubpixelAllocationHead(cfg.feature_width) if getattr(cfg, "subpixel_dm", False) else None
         )
-
-        self.register_buffer(
-            "_laplace_kernel",
-            torch.tensor(
-                [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
-                dtype=torch.float32,
-            ).view(1, 1, 3, 3),
-            persistent=False,
-        )
-
+        lap_k = torch.tensor([[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float32).view(1, 1, 3, 3)
+        self.register_buffer("_laplace_kernel", lap_k, persistent=False)
         self._region_cache: OrderedDict[tuple, RegionSet] = OrderedDict()
 
         total_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -409,28 +276,15 @@ class RMRv3(nn.Module):
             carrier_energy=carrier_energy, compute_energy=compute_energy,
         )
 
-        if self.subpixel_allocator is not None:
-            target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
-            out["y_carrier"] = out.y
-            out["y0_carrier"] = out.y0
-            out["regions_carrier"] = regions_solver
-            y2_raw, y02_raw = self.subpixel_allocator.forward_pair(p4, out.y, out.y0)
-            y2_alloc = y2_raw[..., :target_h2, :target_w2]
-            y02_alloc = y02_raw[..., :target_h2, :target_w2]
-            # Exact boundary mass reconciliation for odd spatial dimensions
-            m4_y = out.y.sum(dim=(-2, -1), keepdim=True)
-            m2_y = y2_alloc.sum(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
-            out["y"] = y2_alloc * (m4_y / m2_y)
-            m4_y0 = out.y0.sum(dim=(-2, -1), keepdim=True)
-            m2_y0 = y02_alloc.sum(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
-            out["y0"] = y02_alloc * (m4_y0 / m2_y0)
-            out["regions"] = scale_regions_to_stride2(regions_solver, target_h2, target_w2)
-        elif self.cfg.subpixel_stride2:
-            out["y_carrier"] = push_forward_stride2_to_stride4(out.y)
-            out["y0_carrier"] = push_forward_stride2_to_stride4(out.y0)
-        else:
-            out["y_carrier"] = out.y
-            out["y0_carrier"] = out.y0
+        package_subpixel_output(
+            out=out,
+            p4=p4,
+            allocator=self.subpixel_allocator,
+            subpixel_stride2=self.cfg.subpixel_stride2,
+            h_in=h_in,
+            w_in=w_in,
+            regions_solver=regions_solver,
+        )
 
         if delta_scale is not None:
             out["delta_scale"] = delta_scale
