@@ -45,6 +45,7 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     if boxes.ndim != 2 or boxes.shape[-1] != 4:
         raise ValueError("boxes must have shape [M,4]")
     b, c, hp, wp = prefix.shape
+    m = boxes.shape[0]
     boxes_l = boxes.to(device=prefix.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes_l.unbind(dim=-1)
     y1, x1 = y1.clamp(0, hp - 1), x1.clamp(0, wp - 1)
@@ -52,8 +53,9 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     idx = torch.stack([y2 * wp + x2, y1 * wp + x2, y2 * wp + x1, y1 * wp + x1], dim=0)
     idx_flat = idx.view(1, 1, -1)
 
-    gathered = torch.gather(prefix.flatten(-2), dim=-1, index=idx_flat.expand(b, c, -1)).view(b, c, 4, -1)
+    gathered = torch.gather(prefix.flatten(-2), dim=-1, index=idx_flat.expand(b, c, -1)).view(b, c, 4, m)
     return gathered[:, :, 0] - gathered[:, :, 1] - gathered[:, :, 2] + gathered[:, :, 3]
+
 
 
 def continuous_prefix_eval(prefix: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
