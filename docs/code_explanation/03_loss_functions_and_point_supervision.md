@@ -1,14 +1,64 @@
 # Chapter 3: Loss Functions & High-Efficiency Point Supervision
 
-This document explains the mathematical loss formulations, gradient coordination dynamics, and the memory-saving custom autograd implementation in [`rmr_v3/losses/point_supervision.py`](file:///f:/lightweightcrcn/rmr_v3/losses/point_supervision.py) and [`rmr_v3/losses/orchestration.py`](file:///f:/lightweightcrcn/rmr_v3/losses/orchestration.py).
+This document explains the mathematical loss formulations, modular loss architecture across 13 specialized files, gradient coordination dynamics, and the memory-saving custom autograd implementation in [`rmr_v3/losses/`](file:///f:/lightweightcrcn/rmr_v3/losses/).
 
 ---
 
-## 1. Point Supervision Formulation
+## 1. Modular Loss Architecture Overview
+
+To eliminate monolithic files and enforce single responsibility, loss computation is decoupled into specialized modules coordinated by [`rmr_v3/losses/orchestration.py`](file:///f:/lightweightcrcn/rmr_v3/losses/orchestration.py):
+
+```mermaid
+flowchart TD
+    ORCH["compute_rmr_v3_losses (orchestration.py)"]
+
+    subgraph MacroCount ["Macro & Global Count Losses"]
+        CNT["Count Magnitude Loss (L1, NB NLL, Huber)<br/>rmr_core/losses.py"]
+        ORCH --> CNT
+    end
+
+    subgraph SpatialAlloc ["Spatial Point Allocation"]
+        ALLOC["route_allocation_loss (allocation.py)"]
+        BAYES["Memory-Efficient Bayesian Loss (point_supervision.py)"]
+        DM16["Flat-DM16 Dirichlet-Multinomial (rmr_core/losses.py)"]
+        FIDT["Canonical FIDTM Loss (fidt.py)"]
+        CHFL["Canonical ChfL Fourier Loss (chfl.py)"]
+        OT["Sinkhorn Optimal Transport (point_supervision.py)"]
+        ORCH --> ALLOC
+        ALLOC --> BAYES & DM16 & FIDT & CHFL & OT
+    end
+
+    subgraph CellStream ["Cell-Level Supervisions"]
+        CELL["compute_cell_loss (cell.py)"]
+        CI_CELL["Count-Invariant CI-Cell v2"]
+        HARM["Count-Harmonized Cell Loss"]
+        MASS["Mass-Weighted Smooth L1"]
+        ORCH --> CELL
+        CELL --> CI_CELL & HARM & MASS
+    end
+
+    subgraph RegionalEvidence ["Regional Evidence Losses"]
+        REG["scale_balanced_regional_nb_nll (regional.py)"]
+        HURD["hurdle_focal_bce_loss (regional.py)"]
+        TRUNC["truncated_nb_nll_loss (regional.py)"]
+        ORCH --> REG & HURD & TRUNC
+    end
+
+    subgraph GeometricPriors ["Geometric & Spatial Priors"]
+        CURV["curvature_power_loss (spatial_priors.py)"]
+        ALIGN["physical_scale_alignment_loss (spatial_priors.py)"]
+        TOPK["topk_hard_background_loss (spatial_priors.py)"]
+        ORCH --> CURV & ALIGN & TOPK
+    end
+```
+
+---
+
+## 2. Point Supervision Formulations
 
 Point annotations provide discrete pixel locations $\{z_n\}_{n=1}^N \subset \mathbb{R}^2$ rather than bounding boxes. Converting these into dense supervision without subjective Gaussian blurring is critical.
 
-### 1.1. Canonical Bayesian Loss (Ma et al. ICCV 2019)
+### 2.1. Canonical Bayesian Loss (Ma et al. ICCV 2019) ([`rmr_v3/losses/point_supervision.py`](file:///f:/lightweightcrcn/rmr_v3/losses/point_supervision.py))
 Bayesian Loss treats crowd counting as estimating posterior expectations over spatial allocations.
 For pixel $x_m \in \Omega$ and ground truth point $z_n$:
 $$P(z_n | x_m) = \frac{1}{\mathcal{Z}(x_m)} \exp\left(-\frac{\|x_m - z_n\|_2^2}{2\sigma_n^2}\right)$$
@@ -25,9 +75,9 @@ where $\hat{c}_0 = \sum_{m \in \Omega} P(z_0 | x_m) y(x_m)$ penalizes false posi
 
 ---
 
-## 2. Memory Bottleneck & Custom Autograd Engine
+### 2.2. Memory Bottleneck & Custom Autograd Engine
 
-### 2.1. The $\mathcal{O}(B \cdot N \cdot M)$ Autograd Memory Crisis
+#### The $\mathcal{O}(B \cdot N \cdot M)$ Autograd Memory Crisis
 At Stride 2 ($256 \times 256$), the number of spatial pixels is $M = 65,536$. In dense images with $N = 2,500$ people:
 * Distance matrix $D \in \mathbb{R}^{N \times M}$ contains $2,500 \times 65,536 = 163.84 \times 10^6$ elements ($655.4\text{ MB}$ in `float32`).
 * Standard PyTorch autograd records all intermediate tensors (`dx`, `dy`, `d2`, `k_chunk`) into the reverse computational graph.
@@ -50,79 +100,53 @@ graph TD
     end
 ```
 
----
-
-### 2.2. Mathematical Solution: Analytical Backward Recomputation
-
+#### Analytical Backward Recomputation
 The gradient of the person error $\mathcal{L}_{\text{person}} = \sum_{n=1}^N |\hat{c}_n - 1|$ with respect to normalized pixel intensity $u_m$ has the closed-form analytical expression:
 $$\frac{\partial \mathcal{L}_{\text{person}}}{\partial u_m} = \sum_{n=1}^N \text{sign}(\hat{c}_n - 1) \cdot K_{n, m}$$
 
-Because this gradient depends *only* on $K_{n, m}$ and the scalar error sign $s_n = \text{sign}(\hat{c}_n - 1)$, [`_BayesianPersonErrorFunction`](file:///f:/lightweightcrcn/rmr_v3/losses/point_supervision.py#L9) implements a custom PyTorch autograd operator:
+Because this gradient depends *only* on $K_{n, m}$ and the scalar error sign $s_n = \text{sign}(\hat{c}_n - 1)$, [`_BayesianPersonErrorFunction`](file:///f:/lightweightcrcn/rmr_v3/losses/point_supervision.py#L10) implements a custom PyTorch autograd operator:
 1. **Forward:** Computes $\hat{c}_n$ using memory-bounded chunks (`chunk_size = 64`). Discards all intermediate matrices immediately. Saves *only* point coordinates and signs $s_n \in \{-1, +1\}^N$ ($< 50\text{ KB}$).
-2. **Backward:** Recomputes $K_{n, m}$ chunk-by-chunk and accumulates $\nabla_u \mathcal{L}$ directly into GPU registers:
-   ```python
-   for c in range(0, n, chunk_size):
-       p = pts[c : c + chunk_size]
-       dx = p[:, 0:1] - gx
-       dy = p[:, 1:2] - gy
-       d2 = dx.square_().add_(dy.square_())
-       k_chunk = torch.exp(d2.mul_(-ik))
-       # Direct analytical accumulation without graph retention
-       grad_u += torch.matmul(k_chunk.t(), sign[c : c + chunk_size])
-   ```
-
-* **VRAM Impact:** Peak reserved VRAM drops from **$3,570.0\text{ MB}$ to $960.0\text{ MB}$** (**$-73.1\%$ reduction**).
-* **Parity:** Exact mathematical identity ($0.00e+00$ loss discrepancy, max grad difference $2.98 \times 10^{-7}$).
+2. **Backward:** Recomputes $K_{n, m}$ chunk-by-chunk and accumulates $\nabla_u \mathcal{L}$ directly into GPU registers using in-place matrix-vector products (`grad_u.addmv_(k_chunk.t(), s_chunk)`).
+3. **VRAM Impact:** Peak reserved VRAM drops from **$3,570.0\text{ MB}$ to $960.0\text{ MB}$** (**$-73.1\%$ reduction**).
+4. **Numerical Parity:** Exact mathematical identity ($0.00e+00$ loss discrepancy, max gradient difference $2.98 \times 10^{-7}$).
 
 ---
 
-### 2.3. Density-Adaptive $k$-NN Sharpness ($\sigma_n$)
+### 2.3. Density-Adaptive $k$-NN Gaussian Sharpness ($\sigma_n$)
 
-Fixed Gaussian radii ($\sigma = 8.0$) cause $88\%$ kernel overlap between heads closer than $4\text{ px}$, washing out high-frequency gradients.
-RMR-v3 computes adaptive sharpness based on 4-nearest-neighbor distance:
-$$\sigma_n = \text{clamp}\left(\beta \cdot \bar{d}_{4\text{-NN}}(z_n), \, \sigma_{\min}, \, \sigma_{\max}\right)$$
-* For Stride 2: $\sigma_{\min} = 1.5\text{ px}$, $\sigma_{\max} = 3.5\text{ px}$, $\beta = 0.5$.
-* In congested clusters, $\sigma_n$ contracts to $1.5\text{ px}$, cleanly separating heads separated by only $2\text{--}3\text{ px}$.
+In ultra-dense clusters ($N > 1,000$), heads are separated by $3\text{--}4\text{ px}$. A fixed Gaussian kernel $\sigma = 8.0$ creates an $88\%$ overlap between neighboring heads, washing out spatial gradients.
 
----
-
-## 3. Flat-DM16 Dirichlet-Multinomial Loss
-
-Complementing micro-scale point assignment, macro-scale spatial allocation is supervised via Dirichlet-Multinomial distribution over $16 \times 16\text{ px}$ blocks (Wang et al. NeurIPS 2020):
-$$\mathcal{L}_{\text{DM}} = \text{DM-Loss}(Y_{\text{pred}}, Y_{\text{GT}}, \kappa = 20.0)$$
-
-### Head-Balanced Normalization Mode
-Standard DM loss normalizes by sample headcount $N$, inducing $\mathcal{O}(1/N)$ gradient starvation on dense images ($N > 2,000$).
-The `head_balanced` mode scales loss proportionally to cluster counts:
-$$\mathcal{L}_{\text{DM}}^{\text{balanced}} = \frac{1}{\sqrt{N + 1}} \mathcal{L}_{\text{DM}}$$
-balancing gradient norms across both sparse ($N=30$) and ultra-dense ($N=2,500$) scenes.
+When `adaptive_sigma: true`, RMR-v3 computes per-head adaptive variance based on $k$-nearest neighbors:
+$$d_{\text{knn}}(n) = \text{dist}\left(z_n, \text{4-th NN}\right)$$
+$$\sigma_n = \text{clamp}\left(0.5 \cdot d_{\text{knn}}(n), \, \sigma_{\min}, \, \sigma_{\max}\right) \quad (\sigma_{\min}=2.0, \sigma_{\max}=8.0)$$
+In dense clusters, $\sigma_n$ automatically contracts to $2.0\text{ px}$, maintaining sharp local peaks; in sparse clusters, it expands up to $8.0\text{ px}$ to provide broad basins of attraction.
 
 ---
 
-## 4. Multi-Task Loss Orchestration & Decoupling
+## 3. Advanced Continuous Allocation Formulations
 
-The full optimization objective combines four complementary loss components:
-$$\mathcal{L}_{\text{total}} = \lambda_{\text{count}} \mathcal{L}_{\text{count}} + \lambda_{\text{Bayes}} \mathcal{L}_{\text{Bayes}} + \lambda_{\text{DM}} \mathcal{L}_{\text{DM}} + \lambda_{\text{reg}} \mathcal{L}_{\text{reg}}$$
+### 3.1. Canonical FIDT Loss (Liang et al. TPAMI 2022) ([`rmr_v3/losses/fidt.py`](file:///f:/lightweightcrcn/rmr_v3/losses/fidt.py))
+Focal Inverse Distance Transform constructs an inverse distance representation:
+$$I(p) = \frac{1}{1 + d(p)^{0.02 \cdot d(p) + 0.75}}$$
+where $d(p)$ is the Euclidean distance from pixel $p$ to the nearest head.
+* At every head location: $d(p) = 0 \implies I(p) = 1.0$ unconditionally.
+* No density saturation occurs because heads do not additively blend together.
+* Supervised via balanced Smooth L1 loss across foreground ($I > 0.05$) and background pixels.
 
-```mermaid
-flowchart LR
-    subgraph Losses ["Loss Functions"]
-        L_COUNT["Count Loss (NB / L1)<br/>lambda = 1.0"]
-        L_BAYES["Bayesian Loss<br/>lambda = 0.025 - 0.04"]
-        L_DM["Flat-DM16 Loss<br/>lambda = 0.0 - 15.0"]
-        L_REG["Regional NB Loss<br/>lambda = 0.20"]
-    end
+### 3.2. Canonical Characteristic Function Loss (Shu et al. CVPR 2022) ([`rmr_v3/losses/chfl.py`](file:///f:/lightweightcrcn/rmr_v3/losses/chfl.py))
+Measures the crowd distribution in the continuous spatial frequency domain:
+$$\Phi_{\text{gt}}(\mathbf{t}) = \sum_{j=1}^N \exp\left(i \mathbf{t}^T z_j\right) \cdot \exp\left(-\frac{1}{2} \|\mathbf{t}\|_2^2 \sigma_{\text{bw}}^2\right)$$
+$$\Phi_{\text{pred}}(\mathbf{t}) = \sum_{u \in \Omega} y_{\text{pred}}(u) \cdot \exp\left(i \mathbf{t}^T u\right)$$
+At zero frequency $\mathbf{t} = 0$: $\Phi_{\text{gt}}(0) = N$ and $\Phi_{\text{pred}}(0) = \sum y$, strictly enforcing global mass conservation across all spatial frequencies.
 
-    subgraph Targets ["Decoupled Supervision Targets"]
-        T_SOLVER["Solver State y*"]
-        T_CARRIER["Carrier State y0"]
-        T_HEAD["Evidence Head b"]
-    end
+---
 
-    L_COUNT --> T_SOLVER
-    L_BAYES --> T_SOLVER
-    L_DM --> T_CARRIER
-    L_REG --> T_HEAD
-```
+## 4. Probabilistic Regional Evidence Supervision ([`rmr_v3/losses/regional.py`](file:///f:/lightweightcrcn/rmr_v3/losses/regional.py))
 
-* **Decoupled Supervision:** Micro point supervision ($\mathcal{L}_{\text{Bayes}}$) guides the final high-resolution measure $y^*$, while macro allocation ($\mathcal{L}_{\text{DM}}$) guides the coarse carrier $y_0$. This prevents gradient cancellation between the initial carrier and the unrolled solver.
+Regional evidence head parameters $(\mu_m, \alpha_m)$ are trained using Negative-Binomial Negative Log-Likelihood:
+$$\mathcal{L}_{\text{NB}}(b_m, \mu_m, \alpha_m) = -\ln \Gamma\left(b_m + \frac{1}{\alpha_m}\right) + \ln \Gamma\left(\frac{1}{\alpha_m}\right) + \ln \Gamma(b_m + 1) - \frac{1}{\alpha_m} \ln\left(1 + \alpha_m \mu_m\right) - b_m \ln\left(\frac{\alpha_m \mu_m}{1 + \alpha_m \mu_m}\right)$$
+
+### Scale-Balanced Normalization
+Regional loss is normalized per scale:
+$$\mathcal{L}_{\text{region\_nb}} = \frac{1}{K} \sum_{k=1}^K \frac{1}{M_k} \sum_{m \in \mathcal{S}_k} \mathcal{L}_{\text{NB}}(b_m, \mu_m, \alpha_m)$$
+This prevents $32\text{ px}$ boxes ($M_{32} = 1,024$) from drowning out $128\text{ px}$ boxes ($M_{128} = 64$) by a factor of $16\times$.

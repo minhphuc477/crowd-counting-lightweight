@@ -132,4 +132,6 @@ def canonical_chfl_loss(
         diff_mag = torch.sqrt(diff_real.square() + diff_imag.square() + eps)
         losses.append(diff_mag.mean())
 
+    if not losses:
+        return torch.zeros((), device=device, dtype=torch.float32)
     return torch.stack(losses).mean().float()

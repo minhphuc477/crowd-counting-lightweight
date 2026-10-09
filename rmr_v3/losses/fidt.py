@@ -118,4 +118,6 @@ def canonical_fidt_loss(
 
         losses.append(loss_i)
 
+    if not losses:
+        return torch.zeros((), device=device, dtype=torch.float32)
     return torch.stack(losses).mean().float()

@@ -198,7 +198,8 @@ def bayesian_loss(
 
         losses.append(sample_loss)
 
-    # Always return float32 for AMP gradient scaler stability
+    if not losses:
+        return torch.zeros((), device=device, dtype=torch.float32)
     return torch.stack(losses).mean().float()
 
 
@@ -272,7 +273,8 @@ def sinkhorn_ot_loss(
         sample_loss = ot_cost + 0.1 * mass_penalty
         losses.append(sample_loss)
 
-    # Always return float32 for AMP gradient scaler stability
+    if not losses:
+        return torch.zeros((), device=device, dtype=torch.float32)
     return torch.stack(losses).mean().float()
 
 
@@ -354,4 +356,6 @@ def fidt_loss(
             l_val = 0.5 * (pos_loss + neg_loss)
         losses.append(l_val)
 
+    if not losses:
+        return torch.zeros((), device=device, dtype=torch.float32)
     return torch.stack(losses).mean().float()

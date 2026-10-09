@@ -1,46 +1,74 @@
 # Chapter 4: Data Pipeline, Training Engine & Numerical Stability
 
-This document details the dataset pre-processing, deterministic guards, optimization dynamics, and validation protocols in [`rmr_core/data.py`](file:///f:/lightweightcrcn/rmr_core/data.py), [`rmr_v3/trainer.py`](file:///f:/lightweightcrcn/rmr_v3/trainer.py), and [`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py).
+This document details the dataset pre-processing, deterministic guards, optimization dynamics, and validation protocols in [`rmr_core/data.py`](file:///f:/lightweightcrcn/rmr_core/data.py), [`rmr_v3/trainer.py`](file:///f:/lightweightcrcn/rmr_v3/trainer.py), [`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py), and [`rmr_v3/optim/`](file:///f:/lightweightcrcn/rmr_v3/optim/).
 
 ---
 
-## 1. Data Pipeline & Distortion Prevention
+## 1. Data Pipeline & Distortion Prevention ([`rmr_core/data.py`](file:///f:/lightweightcrcn/rmr_core/data.py))
 
 Crowd counting benchmarks exhibit extreme resolution and aspect-ratio diversity. Standard data loaders frequently introduce severe scale distortion by forcing arbitrary crops.
 
-### 1.1. Dynamic Padding vs. Forced Scaling ([`rmr_core/data.py`](file:///f:/lightweightcrcn/rmr_core/data.py))
+### 1.1. Dynamic Padding vs. Forced Scaling
 * **The Problem:** In ShanghaiTech Part A, $93 / 300$ training images ($31.0\%$) and $72 / 182$ test images ($39.6\%$) have $\min(H, W) < 512$ (e.g. $384 \times 512$).
-  Naively forcing random crops by scaling small images up to $512\text{ px}$ magnifies physical head areas by $1.7\times\text{--}7.8\times$, severely altering the crowd density physics.
+  Naively forcing random crops by scaling small images up to $512\text{ px}$ magnifies physical head areas by $1.7\times\text{--}7.8\times$, severely altering crowd density physics.
 * **The Solution:** RMR-v3 implements `pad_small_images: true`:
   Images smaller than `crop_size` ($512\text{ px}$) are padded symmetrically using reflection or zero padding, preserving the true physical scale of every head annotation.
 
-### 1.2. Half-Pixel Coordinate Consistency
-A frequent subtle error in crowd counting is coordinate alignment between continuous point labels and discrete downsampled grids.
-RMR-v3 computes pixel center coordinates with exact half-pixel centering:
-$$x_{\text{pixel}} = (c + 0.5) \cdot \text{stride}, \quad y_{\text{pixel}} = (r + 0.5) \cdot \text{stride}$$
-This eliminates the $23.4\%$ offset systematic bias that occurs when using unshifted integer coordinates.
+### 1.2. Exact Half-Pixel Continuous Coordinate Scaling
+A frequent subtle error in crowd counting pipelines is coordinate misalignment between continuous point labels and discrete downsampled grids.
+When resizing an image from $(W_0, H_0)$ to $(W_1, H_1)$, RMR-v3 applies continuous half-pixel centering:
+$$x' = (x + 0.5) \cdot \frac{W_1}{W_0} - 0.5, \quad y' = (y + 0.5) \cdot \frac{H_1}{H_0} - 0.5$$
+Similarly, rasterizing points to stride cells ([`rasterize_points`](file:///f:/lightweightcrcn/rmr_core/data.py#L15)) maps:
+$$i = \left\lfloor \frac{y}{\text{stride}} \right\rfloor, \quad j = \left\lfloor \frac{x}{\text{stride}} \right\rfloor$$
+Points outside image support are ignored rather than clipped into boundary cells, preventing false border accumulation.
 
 ---
 
-## 2. Training Engine Architecture
+## 2. Advanced Optimization Infrastructure ([`rmr_v3/optim/`](file:///f:/lightweightcrcn/rmr_v3/optim/))
 
-The training lifecycle orchestrates multi-task optimization with numerical safeguards for the unrolled solver:
+### 2.1. SafeProdigy: Rate-Limited Distance Adaptation ([`rmr_v3/optim/safe_prodigy.py`](file:///f:/lightweightcrcn/rmr_v3/optim/safe_prodigy.py))
+Standard Prodigy (Defazio & Mishchenko, NeurIPS 2023) automatically estimates distance to optimum $D = \|x_0 - x^*\|_2$.
+However, in unrolled inverse architectures with iterative solvers, early exponential growth of $D_k$ can cause step spikes, triggering numeric divergence.
+
+`SafeProdigy` introduces 4 stability guarantees:
+1. **Linear D-Warmup:** Freezes distance adaptation during the first $N_{\text{warmup}}$ steps.
+2. **Growth Rate Limiter:** Bounds the per-step expansion factor:
+   $$\ln\left(\frac{D_{k+1}}{D_k}\right) \le \delta_{\max} \quad (\text{growth\_rate} \le 0.10)$$
+3. **Ceiling Bound:** $D_k \le D_{\text{cap}}$ prevents unbounded learning rate inflation.
+4. **Gradient Norm Gate:** Freezes $D$ if gradient norm $\|\mathbf{g}\|_2 > G_{\text{thresh}}$.
+
+### 2.2. Schedule-Free AdamW ([`rmr_v3/optim/schedule_free.py`](file:///f:/lightweightcrcn/rmr_v3/optim/schedule_free.py))
+Implements Meta FAIR's Schedule-Free optimization (Defazio et al. 2024):
+* Replaces manual cosine schedules with iterate averaging:
+  $$x_{k+1} = y_k - \gamma \nabla f(y_k)$$
+  $$z_{k+1} = (1 - c_k) z_k + c_k x_{k+1}, \quad c_k = \frac{k+1}{2}$$
+* Training evaluates gradients at exploration points $y_k$, while inference evaluates the smoothed iterate $z_k$.
+* Requires no preset epoch budget, maintaining convergence whether training for 300 or 1,000 epochs.
+
+### 2.3. Warmup-Stable-Decay (WSD) Scheduler ([`rmr_v3/optim/wsd_scheduler.py`](file:///f:/lightweightcrcn/rmr_v3/optim/wsd_scheduler.py))
+* **Phase 1 (Warmup):** Linear warm-up across $5\text{--}10\%$ of steps.
+* **Phase 2 (Stable):** Flat learning rate across $70\text{--}80\%$ of training for broad parameter exploration.
+* **Phase 3 (Decay):** Rapid cosine annealing to zero across final $15\text{--}20\%$ of training for sharp basin convergence.
+
+---
+
+## 3. Training Engine Architecture ([`rmr_v3/trainer.py`](file:///f:/lightweightcrcn/rmr_v3/trainer.py))
 
 ```mermaid
 flowchart TD
     subgraph DataBatch ["1. Batch Generation"]
-        RAW["Dataset (train_manifest.jsonl)"] --> AUG["Augmentation (Flip, Scale, Jitter)"]
+        RAW["Dataset (train_manifest.jsonl)"] --> AUG["train_transform (Flip, Scale, Jitter)"]
         AUG --> BATCH["Mini-Batch (B=4..8, 3, 512, 512)"]
     end
 
     subgraph Step ["2. Forward & Loss Computation"]
         BATCH --> MODEL["RMR-v3 Forward (Backbone -> Neck -> Solver -> Subpixel)"]
-        MODEL --> LOSS["compute_rmr_v3_losses (Bayes, DM16, Count, Reg)"]
+        MODEL --> LOSS["compute_rmr_v3_losses (Bayesian, DM16, Count, Regional)"]
     end
 
     subgraph Backward ["3. Numerical Safeguards & Optimization"]
         LOSS --> CLIP["Gradient Clipping (clip_norm = 1.0)"]
-        CLIP --> OPT["Optimizer Step (AdamW / SafeProdigy)"]
+        CLIP --> OPT["Optimizer Step (AdamW / SafeProdigy / Schedule-Free)"]
         OPT --> EMA["EMA Update (decay = 0.999)"]
         OPT --> SCHED["LR Scheduler Step (Cosine / WSD)"]
     end
@@ -54,43 +82,19 @@ flowchart TD
 
 ---
 
-## 3. Optimization & Numerical Stability Safeguards
+## 4. Evaluation Engine & Slicing Protocols ([`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py))
 
-### 3.1. Exponential Moving Average (EMA)
-In deep unfolding architectures, per-iteration parameter updates can introduce step-to-step variance in the solver's fixed-point trajectory.
-RMR-v3 maintains a shadow model with EMA decay:
-$$\theta_{\text{EMA}}^{(t+1)} = \beta_{\text{EMA}} \cdot \theta_{\text{EMA}}^{(t)} + (1 - \beta_{\text{EMA}}) \cdot \theta_{\text{model}}^{(t+1)}$$
-with $\beta_{\text{EMA}} = 0.999$. Evaluation and checkpointing operate on the smoothed $\theta_{\text{EMA}}$ weights, which lowers validation MAE variance by $1.5\text{--}2.5\text{ MAE}$.
+Validation processes test images at their original resolution without lossy downsampling.
 
-### 3.2. Learning Rate Scheduling
-* **Cosine Annealing with Warmup:**
-  * Warmup: 10 epochs linear increase from $1 \times 10^{-6}$ to peak base learning rate ($1 \times 10^{-4}$).
-  * Annealing: Smooth cosine decay down to $\eta_{\min} = 1 \times 10^{-7}$ at epoch 1000.
-* **Warmup-Stable-Decay (WSD):**
-  * Maintains stable peak learning rate during $75\%$ of training for maximal exploration, then performs rapid cosine decay in final $25\%$ of epochs.
+### 4.1. Sliding-Window Tiled Evaluation ([`rmr_core/tiling.py`](file:///f:/lightweightcrcn/rmr_core/tiling.py))
+For ultra-high-resolution images (e.g. $2048 \times 3072$ in UCF-QNRF / NWPU-Crowd):
+* Divides image into overlapping $512 \times 512$ tiles with $50\%$ overlap.
+* Applies a 2D Hann window weighting matrix to suppress tile-edge boundary artifacts:
+  $$W_{\text{Hann}}(u, v) = \sin^2\left(\frac{\pi u}{H_{\text{tile}}}\right) \cdot \sin^2\left(\frac{\pi v}{W_{\text{tile}}}\right)$$
+* Accumulates stitched predictions into an image-wide density canvas and normalizes by total tile weight.
 
-### 3.3. Gradient Clipping
-Unrolled iterations backpropagate through $T=6$ steps of matrix-vector updates. To prevent gradient explosion in adversarial edge cases (e.g. ultra-congested images with $N > 3,000$ points), gradients are clipped:
-$$\|\mathbf{g}\|_2 = \min\left(\|\mathbf{g}\|_2, \, \text{clip\_norm}\right) \quad (\text{clip\_norm} = 1.0)$$
-
----
-
-## 4. Evaluation Metrics & Slicing Protocol
-
-Validation ([`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py)) evaluates test images at their original resolution without lossy downsampling.
-
-### 4.1. Core Evaluation Metrics
-1. **Mean Absolute Error (MAE):**
-   $$\text{MAE} = \frac{1}{|\mathcal{D}_{\text{test}}|} \sum_{i=1}^{|\mathcal{D}_{\text{test}}|} |\hat{N}_i - N_i|$$
-2. **Root Mean Squared Error (RMSE):**
-   $$\text{RMSE} = \sqrt{\frac{1}{|\mathcal{D}_{\text{test}}|} \sum_{i=1}^{|\mathcal{D}_{\text{test}}|} (\hat{N}_i - N_i)^2}$$
-3. **Grid Average Mean Absolute Error (GAME):**
-   Subdivides each image into $4^L$ non-overlapping grid cells ($L \in \{0, 1, 2, 3\}$):
-   $$\text{GAME}(L) = \frac{1}{|\mathcal{D}_{\text{test}}|} \sum_{i=1}^{|\mathcal{D}_{\text{test}}|} \sum_{l=1}^{4^L} |\hat{N}_{i, l} - N_{i, l}|$$
-   Measures spatial localization fidelity independently of global count compensation.
-
-### 4.2. Forensic Density Slicing
-To diagnose model behavior across diverse crowd densities, evaluation slices the test dataset into three distinct regimes:
-* **Sparse Regime ($N \le 100$):** Tests background false positive suppression.
-* **Moderate Regime ($100 < N \le 500$):** Tests standard perspective scaling.
-* **Dense Regime ($N > 500$):** Tests high-density collision recovery and Rayleigh cutoff handling.
+### 4.2. Density-Sliced Evaluation Protocol
+To isolate failure modes across crowd density regimes, validation partitions the test set into 3 slices:
+1. **Sparse Slice ($N \le 100$):** Measures false positive suppression on background.
+2. **Moderate Slice ($100 < N \le 500$):** Standard evaluation regime.
+3. **Dense Slice ($N > 500$):** Measures density saturation resilience in extreme clusters.

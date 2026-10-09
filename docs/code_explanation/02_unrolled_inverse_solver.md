@@ -1,6 +1,6 @@
 # Chapter 2: Unrolled Inverse Solver & Mathematical Foundations
 
-This document details the mathematical formulation, algorithmic structure, and physical justification of the **Unrolled SIRT Inverse Solver** in RMR-v3 ([`rmr_v3/solver.py`](file:///f:/lightweightcrcn/rmr_v3/solver.py) and [`rmr_v3/model/solver_step.py`](file:///f:/lightweightcrcn/rmr_v3/model/solver_step.py)).
+This document details the mathematical formulation, algorithmic structure, and physical justification of the **Unrolled SIRT Inverse Solver** in RMR-v3 ([`rmr_v3/solver.py`](file:///f:/lightweightcrcn/rmr_v3/solver.py), [`rmr_v3/model/solver_step.py`](file:///f:/lightweightcrcn/rmr_v3/model/solver_step.py), and [`rmr_core/operators/`](file:///f:/lightweightcrcn/rmr_core/operators/)).
 
 ---
 
@@ -55,13 +55,14 @@ sequenceDiagram
 
 ## 3. Mathematical Foundations of Solver Operators
 
-### 3.1. Forward Operator $\mathcal{A}$ ([`rmr_core/operators.py`](file:///f:/lightweightcrcn/rmr_core/operators.py))
+### 3.1. Forward Operator $\mathcal{A}$ ([`rmr_core/operators/regions.py`](file:///f:/lightweightcrcn/rmr_core/operators/regions.py))
 For each region $\mathcal{B}_m$, the integral is computed via 2D prefix sums (integral images) or vectorized regional gathering:
 $$(\mathcal{A} y)_m = \sum_{r = y_m}^{y_m + h_m - 1} \sum_{c = x_m}^{x_m + w_m - 1} y_{r, c}$$
 
-### 3.2. Radon-Nikodym Adjoint Operator $\mathcal{A}^*$
+### 3.2. Radon-Nikodym Adjoint Operator $\mathcal{A}^*$ ([`rmr_core/operators/adjoint.py`](file:///f:/lightweightcrcn/rmr_core/operators/adjoint.py))
 Standard Landweber backprojection uses the flat adjoint:
 $$\Delta y_{\text{flat}} = \mathcal{A}^* (b - \mathcal{A} y)$$
+
 **Critical Pitfall of Flat Adjoint:**
 $\mathcal{A}^*$ broadcasts regional residuals uniformly across the entire box $\mathcal{B}_m$. In an image with $10$ heads standing in the top-left corner of a $128\text{ px}$ box and empty background in the remaining $90\%$ of the box, flat backprojection dumps mass into empty background pixels, creating massive false-positive noise.
 
@@ -77,48 +78,39 @@ where $\mathcal{C}_w = \mathcal{A}^*(W \odot \mathbf{1})$ is the spatially weigh
 ### 3.3. Zero-Support Trap & Mathematical Remedy
 
 #### The Failure Mechanism
-If carrier $y_0(u, v) \to 0$ in an extremely dense, dark cluster due to softplus logit ceiling ($z_0 \le -6.0$), the multiplicative update locks up:
-$$\Delta y(u, v) = 0 \cdot \delta = 0$$
-The solver becomes permanently blind to that cluster, regardless of how strong the regional evidence $b$ is.
+If carrier $y_0(u, v) \to 0$ in an extremely dense cluster due to softplus saturation ($z_0 \le -6.0$), the multiplicative update locks up:
+$$\Delta y = y_0 \cdot \mathcal{A}^*(\delta) = 0 \cdot \mathcal{A}^*(\delta) = 0$$
+Even if regional evidence $b$ indicates a massive deficit ($\delta = +500$), the solver cannot add mass to zero-support cells.
 
-#### The Remedy in RMR-v3
-1. **Calibrated Baseline Floor:** Carrier Softplus incorporates a non-negative floor parameter $\tau_{\text{floor}}$:
-   $$y_{\text{eff}} = \max\left(y_0, \tau_{\text{floor}} \cdot \mathbf{1}_{\Omega}\right)$$
-2. **Symmetric Carrier Alignment:** When evaluating both forward projection and backward adjoint, the effective measure is preserved uniformly across computation steps.
-
----
-
-### 3.4. Spatial Morozov Discrepancy Principle
-
-In classical inverse problems, continuing iterations until residual $\|b - \mathcal{A} y\| \to 0$ overfits observational noise $\eta$.
-The **Morozov Discrepancy Principle** asserts that the residual should not be forced below the noise level of the data:
-$$\|\delta_m\| \le \gamma \cdot \sigma_m$$
-
-In RMR-v3, the residual is passed through a **noise-aware deadband filter**:
-$$\delta_{\text{morozov}, m} = \begin{cases}
-0, & \text{if } |\delta_m| \le \gamma \sqrt{\text{Var}(b_m)} \\
-\delta_m - \gamma \sqrt{\text{Var}(b_m)}, & \text{if } \delta_m > \gamma \sqrt{\text{Var}(b_m)} \\
-\delta_m + \gamma \sqrt{\text{Var}(b_m)}, & \text{if } \delta_m < -\gamma \sqrt{\text{Var}(b_m)}
-\end{cases}$$
-
-* In regions where headcount estimation uncertainty is high (large $\alpha_m$), the solver acts conservatively.
-* In clean, high-confidence regions ($\text{Var}(b_m) \to 0$), the solver applies full corrective force.
+#### Shifted Carrier & Scale-Seeded Recovery
+RMR-v3 breaks the zero-support trap by introducing an additive perturbation $\epsilon_{\text{seed}}$ modulated by scale router probabilities $\pi_{\text{fine}}$:
+$$\tilde{y}(u, v) = y(u, v) + \epsilon_{\text{seed}} \cdot \pi_{\text{fine}}(u, v)$$
+$$\Delta y = \frac{\tilde{y}}{\mathcal{C}_w + \epsilon} \odot \mathcal{A}^*\left(W \odot \delta\right)$$
+Because $\pi_{\text{fine}}(u, v) \approx 0$ in empty background, mass injection is strictly restricted to foreground head regions.
 
 ---
 
-### 3.5. Contraction Mapping & Energy Dissipation
+### 3.4. Spatial Morozov Discrepancy Principle ([`rmr_core/operators/morozov.py`](file:///f:/lightweightcrcn/rmr_core/operators/morozov.py))
 
-The regional objective function minimized by SIRT is the weighted discrepancy:
-$$\mathcal{E}(y) = \frac{1}{2} \sum_{m=1}^M W_m \left((\mathcal{A} y)_m - b_m\right)^2$$
-To guarantee that $y^{(t+1)}$ does not oscillate or diverge, the step size $\omega$ is bounded by the operator norm:
-$$\omega < \frac{2}{\|\mathcal{A}^* \mathcal{A}\|_2}$$
-Furthermore, a **Trust-Region Multiplicative Bound** $\kappa = 0.35$ limits the maximum per-step relative change:
-$$\frac{y^{(t)}}{1 + \kappa} \le y^{(t+1)} \le y^{(t)} \cdot (1 + \kappa)$$
-This prevents extreme step-to-step spikes and guarantees monotonic energy dissipation $\mathcal{E}(y^{(t+1)}) \le \mathcal{E}(y^{(t)})$.
+#### Theoretical Basis
+In inverse problems with noisy observations $b = \mathcal{A} y + \eta$, fitting residuals below the noise level $\|\mathcal{A} y - b\| < \|\eta\|$ leads to noise overfitting and high-frequency ringing artifacts.
+
+#### Morozov Deadband Function
+The solver suppresses residual updates when the residual is smaller than the predicted observation uncertainty:
+$$\delta_{\text{morozov}} = \text{sign}(\delta) \cdot \max\left(0, |\delta| - \gamma \sqrt{\text{Var}(b)}\right)$$
+where $\text{Var}(b_m) = \mu_m + \alpha_m \mu_m^2$ is predicted per-region by the Negative-Binomial head, and $\gamma \in [0.25, 0.75]$ is the Morozov confidence factor.
 
 ---
 
-## 4. Parameter & Computational Efficiency
+### 3.5. Trust-Region Clamping & Contraction Guarantees
 
-* **Trainable Parameters:** Exactly **0 parameters** ($0.0\%$). The entire solver is governed by deterministic physical and mathematical operators ($\mathcal{A}$, $\mathcal{A}^*$, soft thresholding).
-* **Autograd Graph:** Gradients backpropagate directly through the unrolled loop into the backbone and regional heads via standard PyTorch reverse-mode AD.
+To ensure that unrolled solver steps do not diverge or oscillate, each iteration applies bounded multiplicative trust clamping:
+$$y^{(t+1)} \in \left[\frac{y^{(t)}}{1 + \kappa}, \, y^{(t)} \cdot (1 + \kappa)\right]$$
+where $\kappa = 0.35$ (or asymmetric $\kappa_+ = 0.50, \kappa_- = 0.35$).
+
+#### Monotonic Lipschitz Energy Dissipation
+Under the forward-backward splitting theorem, the unrolled mapping $\mathcal{T}(y) = y + \omega \Delta y$ satisfies:
+$$\| \mathcal{T}(y_1) - \mathcal{T}(y_2) \|_2 \le L \| y_1 - y_2 \|_2, \quad L < 1$$
+This guarantees that the residual energy sequence $E(y^{(t)}) = \| \mathcal{A} y^{(t)} - b \|_W^2$ is monotonically non-increasing:
+$$E(y^{(t+1)}) \le E(y^{(t)}), \quad \forall t \in \{1, \dots, T-1\}$$
+This invariant is formally verified by [`tests/core/test_systematic_deep_audit.py`](file:///f:/lightweightcrcn/tests/core/test_systematic_deep_audit.py).
