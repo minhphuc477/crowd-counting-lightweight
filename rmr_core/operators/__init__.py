@@ -9,6 +9,7 @@ from .adjoint import (
     weighted_regional_energy,
 )
 from .diffusion import charbonnier_tv_step
+from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
     fractional_region_mean_std_features,
@@ -42,6 +43,7 @@ __all__ = [
     "build_multiscale_regions",
     "center_scatter",
     "charbonnier_tv_step",
+    "compute_morozov_discrepancy",
     "continuous_prefix_eval",
     "fractional_box_sum",
     "fractional_region_average_features",
@@ -59,3 +61,4 @@ __all__ = [
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
 ]
+

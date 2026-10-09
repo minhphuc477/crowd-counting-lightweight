@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from .prefix_sums import regional_sum
 from .regions import RegionSet, partition_regions_by_scale
+from .morozov import compute_morozov_discrepancy
 
 
 def regional_adjoint(
@@ -182,44 +183,23 @@ def weighted_normalized_adjoint_field(
 
     # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, or Scale-Routed Spatial)
     if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov) and b_variance is not None:
-        if spatial_morozov and scale_routing_weights is not None:
-            pi_sum = regional_sum(scale_routing_weights.detach().float(), regions.boxes, out_dtype=torch.float32)
-            reg_area = regions.area.float().view(1, 1, -1).clamp_min(1.0)
-            pi_box = pi_sum / reg_area
-            if len(morozov_gamma_scales) == pi_box.shape[1]:
-                gamma_s = torch.as_tensor(morozov_gamma_scales, dtype=torch.float32, device=q.device).view(1, -1, 1)
-                base_gamma = (pi_box * gamma_s).sum(dim=1, keepdim=True)
-            else:
-                base_gamma = float(morozov_gamma)
-        else:
-            base_gamma = float(morozov_gamma)
+        delta = compute_morozov_discrepancy(
+            delta=delta,
+            q=q,
+            b32=b32,
+            b_variance=b_variance,
+            regions=regions,
+            scale_routing_weights=scale_routing_weights,
+            morozov_gamma=morozov_gamma,
+            spatial_morozov=spatial_morozov,
+            morozov_gamma_scales=morozov_gamma_scales,
+            anscombe_morozov=anscombe_morozov,
+            asymmetric_morozov=asymmetric_morozov,
+            morozov_gamma_under=morozov_gamma_under,
+            morozov_rho=morozov_rho,
+            morozov_rho_cap=morozov_rho_cap,
+        )
 
-        if anscombe_morozov:
-            c = 0.375
-            g_q = 2.0 * torch.sqrt(q.clamp_min(0.0) + c)
-            g_b = 2.0 * torch.sqrt(b32.clamp_min(0.0) + c)
-            g_delta = g_q - g_b
-            if asymmetric_morozov:
-                gamma_u_base = base_gamma if spatial_morozov else float(morozov_gamma_under)
-                gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-                gamma_eff = torch.where(g_delta > 0.0, base_gamma, gamma_under)
-            else:
-                gamma_eff = base_gamma
-            g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - gamma_eff, 0.0)
-            scale_symm = 0.5 * (torch.sqrt(q.clamp_min(0.0) + c) + torch.sqrt(b32.clamp_min(0.0) + c))
-            delta = g_shrunk * scale_symm
-        else:
-            sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
-            if asymmetric_morozov:
-                gamma_u_base = base_gamma if spatial_morozov else float(morozov_gamma_under)
-                gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-                gamma_eff = torch.where(delta > 0.0, base_gamma, gamma_under)
-            else:
-                gamma_eff = base_gamma
-            deadband = gamma_eff * sigma_b
-            if morozov_rho_cap > 0.0 and not asymmetric_morozov:
-                deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_b)
-            delta = torch.sign(delta) * torch.clamp_min(delta.abs() - deadband, 0.0)
 
     area = regions.area.float().view(1, 1, -1)
     eff_area = area * ((float(output_stride) / 4.0) ** 2) if area_normalized else area
@@ -271,64 +251,41 @@ def weighted_normalized_adjoint_field(
     weighted_residual = weight32 * rate_residual
     weighted_residual_leb = (weight32 * (delta / eff_area.clamp_min(1.0))) if use_hybrid else None
 
+    def _backproject(res: torch.Tensor, bx: torch.Tensor) -> torch.Tensor:
+        if solver_mode == "multiplicative":
+            return multiplicative_gated_adjoint(
+                res,
+                bx,
+                y32,
+                h,
+                w,
+                rho0=density_gate_rho,
+                gate_floor=density_gate_floor,
+                out_dtype=torch.float32,
+            )
+        return regional_adjoint(res, bx, h, w, out_dtype=torch.float32)
+
     def _scatter_residual(w_res: torch.Tensor) -> torch.Tensor:
-        if scale_routing_weights is not None:
-            b_sz, k_scales = scale_routing_weights.shape[:2]
-            sc_weights = scale_routing_weights
-            if sc_weights.shape[-2:] != (h, w):
-                sc_weights = F.interpolate(
-                    sc_weights, size=(h, w), mode="bilinear", align_corners=False
-                )
-            back_tot = torch.zeros((b_sz, 1, h, w), device=y.device, dtype=torch.float32)
-            partitions = scale_partitions
-            if partitions is None:
-                partitions = partition_regions_by_scale(regions, k_scales, device=y.device)
-            for k, mask_k, boxes_k in partitions:
-                if mask_k is None or boxes_k is None:
-                    continue
-                res_k = w_res[:, :, mask_k]
-                if solver_mode == "multiplicative":
-                    bk_k = multiplicative_gated_adjoint(
-                        res_k,
-                        boxes_k,
-                        y32,
-                        h,
-                        w,
-                        rho0=density_gate_rho,
-                        gate_floor=density_gate_floor,
-                        out_dtype=torch.float32,
-                    )
-                else:
-                    bk_k = regional_adjoint(
-                        res_k,
-                        boxes_k,
-                        h,
-                        w,
-                        out_dtype=torch.float32,
-                    )
-                pi_k = sc_weights[:, k:k+1, :, :].float()
-                back_tot = back_tot + pi_k * bk_k
-            return back_tot
-        else:
-            if solver_mode == "multiplicative":
-                return multiplicative_gated_adjoint(
-                    w_res,
-                    regions.boxes,
-                    y32,
-                    h,
-                    w,
-                    rho0=density_gate_rho,
-                    gate_floor=density_gate_floor,
-                    out_dtype=torch.float32,
-                )
-            else:
-                return regional_adjoint(
-                    w_res,
-                    regions.boxes,
-                    h,
-                    w,
-                    out_dtype=torch.float32,
-                )
+        if scale_routing_weights is None:
+            return _backproject(w_res, regions.boxes)
+
+        b_sz, k_scales = scale_routing_weights.shape[:2]
+        sc_weights = scale_routing_weights
+        if sc_weights.shape[-2:] != (h, w):
+            sc_weights = F.interpolate(
+                sc_weights, size=(h, w), mode="bilinear", align_corners=False
+            )
+        back_tot = torch.zeros((b_sz, 1, h, w), device=y.device, dtype=torch.float32)
+        partitions = scale_partitions
+        if partitions is None:
+            partitions = partition_regions_by_scale(regions, k_scales, device=y.device)
+        for k, mask_k, boxes_k in partitions:
+            if mask_k is None or boxes_k is None:
+                continue
+            bk_k = _backproject(w_res[:, :, mask_k], boxes_k)
+            pi_k = sc_weights[:, k:k+1, :, :].float()
+            back_tot = back_tot + pi_k * bk_k
+        return back_tot
 
     back = _scatter_residual(weighted_residual)
 
