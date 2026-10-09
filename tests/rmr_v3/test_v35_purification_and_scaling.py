@@ -53,7 +53,7 @@ def test_auxiliary_loss_detached_when_disabled():
 
     loss_cfg = RMRv3LossConfig(
         lambda_count=1.0,
-        lambda_flat_dm16=15.0,
+        lambda_flat_dm16=1.0,
         lambda_cell=0.0,
         lambda_region_nb=0.0,
         lambda_bayesian=0.0,
@@ -111,21 +111,24 @@ def test_sub60_e139_config_and_parameters():
 
     # Check loss purification settings
     assert l_cfg.lambda_count == 1.0
-    assert l_cfg.lambda_flat_dm16 == 15.0
-    assert l_cfg.lambda_region_nb == 0.2
-    assert l_cfg.lambda_hurdle == 0.1
+    assert l_cfg.lambda_flat_dm16 == 1.0
+    assert l_cfg.lambda_region_nb == 0.05
+    assert l_cfg.lambda_hurdle == 0.02
     assert l_cfg.lambda_bayesian == 0.0
     assert l_cfg.lambda_cell == 0.0
     assert l_cfg.lambda_trunc_nb == 0.0
     assert l_cfg.lambda_curvature == 0.0
     assert l_cfg.lambda_hard_bg == 0.0
     assert l_cfg.lambda_scale_align == 0.0
+    assert m_cfg.subpixel_dm is False
+    assert m_cfg.subpixel_stride2 is True
+    assert m_cfg.iterations == 2
 
     # Build model and count parameters
     model = RMRv3(m_cfg)
     total_params = count_params(model)
     assert total_params <= 104441, f"sub60_e139 parameter count {total_params} exceeds 104,441"
-    assert total_params == 104373, f"Expected 104,373 parameters, got {total_params}"
+    assert total_params == 104407, f"Expected 104,407 parameters, got {total_params}"
 
 
 def test_sub60_e139_forward_backward():
@@ -160,16 +163,21 @@ def test_v35_scaled_architecture_budget():
 
     assert m_cfg.feature_width == 80
     assert m_cfg.region_head_hidden == 140
-    assert m_cfg.subpixel_dm is True
+    assert m_cfg.subpixel_dm is False
+    assert m_cfg.subpixel_stride2 is True
+    assert m_cfg.iterations == 2
     assert m_cfg.output_stride == 2
     assert m_cfg.max_trainable_params == CANONICAL_V35_PARAM_BUDGET  # 200,000
+    assert l_cfg.lambda_flat_dm16 == 1.0
+    assert l_cfg.lambda_region_nb == 0.05
+    assert l_cfg.lambda_hurdle == 0.02
 
     model = RMRv3(m_cfg)
     total_params = count_params(model)
 
     assert 150000 <= total_params <= CANONICAL_V35_PARAM_BUDGET
-    assert total_params == CANONICAL_V35_EXPECTED_PARAMS  # 175,221
-    assert total_params == 175221
+    assert total_params == CANONICAL_V35_EXPECTED_PARAMS  # 174,340
+    assert total_params == 174340
 
 
 def test_sub60_e140_config_and_validation():
@@ -181,13 +189,18 @@ def test_sub60_e140_config_and_validation():
 
     assert m_cfg.feature_width == 80
     assert m_cfg.region_head_hidden == 140
-    assert m_cfg.subpixel_dm is True
+    assert m_cfg.subpixel_dm is False
+    assert m_cfg.subpixel_stride2 is True
+    assert m_cfg.iterations == 2
     assert m_cfg.output_stride == 2
     assert m_cfg.max_trainable_params == 200000
+    assert l_cfg.lambda_flat_dm16 == 1.0
+    assert l_cfg.lambda_region_nb == 0.05
+    assert l_cfg.lambda_hurdle == 0.02
 
     model = RMRv3(m_cfg)
     total_params = count_params(model)
-    assert total_params == 175221
+    assert total_params == 174340
 
 
 def test_v35_scaled_forward_backward_multi_res():

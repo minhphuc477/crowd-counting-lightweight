@@ -183,14 +183,15 @@ def build_canonical_rmr_model(
 
 
 CANONICAL_V35_PARAM_BUDGET: int = 200000
-CANONICAL_V35_EXPECTED_PARAMS: int = 175221
+CANONICAL_V35_EXPECTED_PARAMS: int = 174340
 
 
 def get_v35_model_config(**overrides: Any) -> RMRv3Config:
-    """Return RMR-v35 scaled architecture configuration (~175,221 params <= 200k)."""
+    """Return RMR-v35 scaled architecture configuration (~174,340 params in [150k, 200k])."""
     base_kwargs: dict[str, Any] = {
         "output_stride": 2,
-        "subpixel_dm": True,
+        "subpixel_dm": False,
+        "subpixel_stride2": True,
         "feature_width": 80,
         "backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k",
         "pretrained": True,
@@ -227,12 +228,12 @@ def get_v35_model_config(**overrides: Any) -> RMRv3Config:
         "reliability_weight_min": 0.25,
         "reliability_weight_max": 4.0,
         "normalize_reliability_within_scale": True,
-        "detach_region_mean_in_solver": True,
-        "detach_reliability_in_solver": True,
+        "detach_region_mean_in_solver": False,
+        "detach_reliability_in_solver": False,
         "detach_y0_for_solver": False,
         "enable_solver": True,
         "solver_mode": "additive",
-        "iterations": 6,
+        "iterations": 2,
         "omega": 1.0,
         "residual_clip": 0.0,
         "eps": 1e-6,
@@ -269,10 +270,10 @@ def get_v35_loss_config(**overrides: Any) -> RMRv3LossConfig:
         "dm_target": "dual",
         "lambda_count": 1.0,
         "lambda_bayesian": 0.0,
-        "lambda_flat_dm16": 15.0,
+        "lambda_flat_dm16": 1.0,
         "lambda_cell": 0.0,
-        "lambda_region_nb": 0.2,
-        "lambda_hurdle": 0.1,
+        "lambda_region_nb": 0.05,
+        "lambda_hurdle": 0.02,
         "lambda_trunc_nb": 0.0,
         "count_loss_mode": "nb",
         "count_nb_dispersion": 50.0,
