@@ -209,6 +209,42 @@ def test_sub60_e140_config_and_validation():
     assert total_params == 174340
 
 
+def test_standardized_v35_yaml_configs():
+    """Verify rmr_v35_purified_104k.yaml and rmr_v35_scaled_165k.yaml load and pass budget constraints."""
+    # 1. Purified 104k config
+    cfg_104k = Path("configs/rmr_research/rmr_v35_purified_104k.yaml")
+    assert cfg_104k.exists(), "rmr_v35_purified_104k.yaml must exist"
+    m_104, l_104 = _load_cfg(cfg_104k)
+    assert l_104.lambda_count == 1.0
+    assert l_104.lambda_flat_dm16 == 1.0
+    assert l_104.lambda_cell == 0.5
+    assert l_104.lambda_region_nb == 0.05
+    assert l_104.lambda_hurdle == 0.02
+    assert l_104.lambda_bayesian == 0.0
+    assert l_104.lambda_trunc_nb == 0.0
+    assert l_104.lambda_curvature == 0.0
+    model_104 = RMRv3(m_104)
+    params_104 = count_params(model_104)
+    assert params_104 <= 104441, f"104k config exceeded budget: {params_104} > 104,441"
+    assert params_104 == 104407
+
+    # 2. Scaled 174k config
+    cfg_scaled = Path("configs/rmr_research/rmr_v35_scaled_165k.yaml")
+    assert cfg_scaled.exists(), "rmr_v35_scaled_165k.yaml must exist"
+    m_scaled, l_scaled = _load_cfg(cfg_scaled)
+    assert m_scaled.feature_width == 80
+    assert m_scaled.region_head_hidden == 140
+    assert l_scaled.lambda_count == 1.0
+    assert l_scaled.lambda_flat_dm16 == 1.0
+    assert l_scaled.lambda_cell == 0.5
+    assert l_scaled.lambda_region_nb == 0.05
+    assert l_scaled.lambda_hurdle == 0.02
+    model_scaled = RMRv3(m_scaled)
+    params_scaled = count_params(model_scaled)
+    assert 150000 <= params_scaled <= 200000, f"Scaled config out of budget: {params_scaled}"
+    assert params_scaled == 174340
+
+
 def test_v35_scaled_forward_backward_multi_res():
     """Verify scaled v35 model handles standard and odd resolutions with finite gradients."""
     m_cfg = get_v35_model_config(pretrained=False)
