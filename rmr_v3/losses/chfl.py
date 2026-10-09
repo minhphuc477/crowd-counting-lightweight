@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-_CANONICAL_CHFL_CACHE: Dict[Tuple[int, int, int, float, int, str], Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+_CANONICAL_CHFL_CACHE: Dict[Tuple[int, int, int, float, int, float, str], Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
 
 
 def _build_canonical_chfl_templates(
@@ -32,7 +32,7 @@ def _build_canonical_chfl_templates(
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build and cache deterministic 2D spatial-frequency grid templates."""
-    key = (h, w, stride, float(chf_tik), int(chf_step), str(device))
+    key = (h, w, stride, float(chf_tik), int(chf_step), float(bandwidth), str(device))
     if key not in _CANONICAL_CHFL_CACHE:
         # Spatial grid in pixel coordinates matching image plane
         y_axis = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)

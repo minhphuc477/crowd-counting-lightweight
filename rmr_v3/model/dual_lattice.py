@@ -91,18 +91,15 @@ def check_mass_conservation(
     return (max_abs < eps) or (max_rel < eps)
 
 
-_SCALE_REGIONS_CACHE: dict[tuple, Any] = {}
-
-
 def scale_regions_to_stride2(
     regions_feat: Any,
     target_h: int,
     target_w: int,
 ) -> Any:
-    """Scale Stride 4 region boxes to Stride 2 solver grid with zero-stall caching."""
-    cache_key = (id(regions_feat), int(target_h), int(target_w))
-    if cache_key in _SCALE_REGIONS_CACHE:
-        return _SCALE_REGIONS_CACHE[cache_key]
+    """Scale Stride 4 region boxes to Stride 2 solver grid with zero-stall object-bound caching."""
+    cached = getattr(regions_feat, "_stride2_scaled", None)
+    if cached is not None and getattr(regions_feat, "_stride2_hw", None) == (int(target_h), int(target_w)):
+        return cached
 
     from rmr_core.operators import RegionSet
     b_s2 = regions_feat.boxes * 2
@@ -123,9 +120,8 @@ def scale_regions_to_stride2(
         num_scales=regions_feat.num_scales,
         scale_sizes_px=regions_feat.scale_sizes_px,
     )
-    if len(_SCALE_REGIONS_CACHE) >= 32:
-        _SCALE_REGIONS_CACHE.pop(next(iter(_SCALE_REGIONS_CACHE)))
-    _SCALE_REGIONS_CACHE[cache_key] = res
+    object.__setattr__(regions_feat, "_stride2_scaled", res)
+    object.__setattr__(regions_feat, "_stride2_hw", (int(target_h), int(target_w)))
     return res
 
 
