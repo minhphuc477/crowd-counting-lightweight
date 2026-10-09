@@ -4,7 +4,7 @@
 [![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
 [![Parameters](https://img.shields.io/badge/carrier-104.4k%20params-orange.svg)]()
 [![Knowledge Distillation](https://img.shields.io/badge/teacher%20distillation-0.0%25%20(standalone)-green.svg)]()
-[![Test Suite](https://img.shields.io/badge/tests-1031%20passed-brightgreen.svg)]()
+[![Test Suite](https://img.shields.io/badge/tests-1176%20passed-brightgreen.svg)]()
 
 > **Core Research Question:** In ultra-lightweight crowd counting ($\le 105,000$ parameters, zero knowledge distillation), how can discrete regional-count operators replace heavy learned contextual reasoning without suffering from density saturation or background false alarms?
 >
@@ -54,20 +54,47 @@ crowd-counting-lightweight/
 │   ├── solver.py           # Unrolled SIRT solver with Barzilai-Borwein step sizes
 │   ├── solver_ops.py       # Morozov discrepancy, firm thresholding, Lipschitz damping
 │   ├── losses/             # Dirichlet-Multinomial, Bayesian, and Characteristic Function losses
-│   ├── train.py            # Deterministic training loop with EMA tracking
-│   └── eval.py             # Evaluation module (with evaluate.py CLI alias)
-├── tests/                  # 1030+ automated tests (Unit, Integration, Invariants, Regression)
-├── tools/                  # 17 core analytical CLI tools (profiling, ONNX, error audits)
-│   └── archive/            # 36 archived historical one-off forensic scripts
+│   ├── trainer.py          # Core training orchestrator (python -m rmr_v3.trainer)
+│   ├── train.py            # CLI wrapper (python -m rmr_v3.train)
+│   └── eval.py             # Evaluation module (python -m rmr_v3.eval)
+├── tests/                  # 1,176 automated tests (100% passed)
+├── tools/                  # Analytical CLI tools (profiling, ONNX, error audits)
 ├── pyproject.toml          # PEP 517/518 build metadata & test configuration
 └── RULES.md                # Project rules and operational invariants
 ```
 
 ---
 
-## 3. Mathematical Foundations
+## 3. Official Execution Entrypoints
 
-### 3.1 Discrete Regional Operators & Adjoint Transfer Theorem
+Mọi tác vụ đào tạo và đánh giá đều được gọi qua module Python chuẩn:
+
+### 3.1 Training Entrypoint
+```bash
+# Huấn luyện mô hình chuẩn (khuyến nghị luôn có -o để tự động ghi đè output_dir):
+python -m rmr_v3.trainer -c configs/rmr_research/<config_name>.yaml -o
+
+# Chạy ngầm trong nền trên Ubuntu server với GPU chỉ định:
+CUDA_VISIBLE_DEVICES=0 nohup python -m rmr_v3.trainer \
+  -c configs/rmr_research/<config_name>.yaml \
+  -o \
+  > <log_name>.log 2>&1 &
+```
+
+### 3.2 Evaluation Entrypoint
+```bash
+# Đánh giá checkpoint chuẩn trên tập test:
+python -m rmr_v3.eval --checkpoint runs/sha_a/<run_name>/best_val_mae.pt
+
+# Đánh giá kèm Test-Time Augmentation (TTA bảo toàn khối lượng L1):
+python -m rmr_v3.eval --checkpoint runs/sha_a/<run_name>/best_val_mae.pt --tta
+```
+
+---
+
+## 4. Mathematical Foundations
+
+### 4.1 Discrete Regional Operators & Adjoint Transfer Theorem
 
 Let $Y \in \mathbb{R}_+^G$ be the discrete cell count measure on lattice $G$ (stride $s=4$). The regional observation operator $A \in \{0, 1\}^{M \times G}$ integrates density over multi-scale boxes $R_m \in \{32, 64, 128\}\text{ px}$:
 
@@ -77,7 +104,7 @@ With regional areas $D_a = \mathrm{diag}(A \mathbf{1}_G)$ and coverage counts $D
 
 $$ H = D_c^{-1} A^\top D_a^{-1} A \implies H \mathbf{1}_G = \mathbf{1}_G \quad (\forall \mathcal{R} \text{ covering } G). $$
 
-### 3.2 Unrolled SIRT Solver with Lipschitz Damping
+### 4.2 Unrolled SIRT Solver with Lipschitz Damping
 
 The density field is iteratively reconciled through $T=6$ unrolled iterations:
 
@@ -90,7 +117,7 @@ where:
 
 ---
 
-## 4. Benchmark Leaderboard (ShanghaiTech Part A)
+## 5. Benchmark Leaderboard (ShanghaiTech Part A)
 
 Official 300-train / 182-test partition (full-image direct inference, strictly $\le 105,000$ params, 0.0% Knowledge Distillation):
 
