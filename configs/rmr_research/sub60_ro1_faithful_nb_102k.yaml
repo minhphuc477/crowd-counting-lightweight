@@ -8,8 +8,8 @@ seed: 42
 output_dir: runs/sha_a/sub60_ro1_faithful_nb_102k
 
 data:
-  train_manifest: data/manifests/sha_a_train_full.jsonl
-  val_manifest: data/manifests/sha_a_test.jsonl
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
   crop_size: 512
   scale_range: [0.75, 1.25]
   max_size: 1024
