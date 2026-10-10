@@ -161,7 +161,8 @@ loss:
 train:
   epochs: 700
   batch_size: 8
-  workers: 4
+  workers: 2
+  num_threads: 2
   pin_memory: true
   optimizer: adamw
   lr: 0.0001

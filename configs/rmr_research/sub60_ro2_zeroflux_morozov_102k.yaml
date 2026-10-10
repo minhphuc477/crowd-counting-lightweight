@@ -145,7 +145,8 @@ train:
   device: cuda
   epochs: 1000
   batch_size: 8
-  workers: 4
+  workers: 2
+  num_threads: 2
   pin_memory: true
   lr: 1.0e-4
   backbone_lr_scale: 0.1

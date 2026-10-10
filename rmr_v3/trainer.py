@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+os.environ.setdefault("OMP_NUM_THREADS", "2")
 
 import torch
 import torch.nn.functional as F
@@ -46,6 +50,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     if num_threads is not None and int(num_threads) > 0:
         torch.set_num_threads(int(num_threads))
         torch.set_num_interop_threads(max(1, int(num_threads) // 2))
+    else:
+        # Default to 2 threads to prevent thread pool explosion and glibc arena bloat across multiple runs
+        torch.set_num_threads(2)
+        torch.set_num_interop_threads(1)
 
     m_cfg = cfg.setdefault("model", {})
     eff_stride = 2 if (m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False)) else int(m_cfg.get("output_stride", 4))
@@ -313,6 +321,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 )
             if device.type == "cuda":
                 torch.cuda.empty_cache()
+            import gc
+            gc.collect()
 
             eval_map = {
                 "val_mae": "MAE", "val_rmse": "RMSE", "val_nae": "NAE", "val_bias": "Bias",
