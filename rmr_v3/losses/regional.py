@@ -47,10 +47,50 @@ def hurdle_focal_bce_loss(
     return (focal_weight * bce).mean()
 
 
+def _decoupled_beta_nb_nll(
+    target: torch.Tensor,
+    mean: torch.Tensor,
+    dispersion: torch.Tensor,
+    beta: float,
+    faithful: bool,
+    norm_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Compute Seitzer et al. (ICLR 2022) Beta-NB NLL with Stirn et al. (AISTATS 2023) faithful decoupling."""
+    beta_val = float(max(0.0, min(1.0, beta)))
+    if not (beta_val > 0.0 or faithful):
+        return negative_binomial_nll_mean_dispersion(
+            target, mean, dispersion=dispersion, reduction="none", check_bounds=False
+        )
+
+    nll_mean = negative_binomial_nll_mean_dispersion(
+        target, mean, dispersion=dispersion.detach(), reduction="none", check_bounds=False
+    )
+    nll_disp = negative_binomial_nll_mean_dispersion(
+        target, mean.detach(), dispersion=dispersion, reduction="none", check_bounds=False
+    )
+    if beta_val > 0.0:
+        mu_d = mean.detach().float().clamp_min(1e-6)
+        r_d = dispersion.detach().float().clamp_min(1e-6)
+        var_d = mu_d + mu_d.square() / r_d
+        w_beta = var_d.pow(beta_val)
+        if norm_mask is not None:
+            m_sum = norm_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            w_mean = ((w_beta * norm_mask).sum(dim=-1, keepdim=True) / m_sum).clamp_min(1e-6)
+        else:
+            w_mean = w_beta.mean(dim=-1, keepdim=True).clamp_min(1e-6)
+        w_beta = (w_beta / w_mean).to(dtype=nll_mean.dtype)
+    else:
+        w_beta = torch.ones_like(nll_mean)
+
+    return w_beta * nll_mean + nll_disp - nll_disp.detach()
+
+
 def truncated_nb_nll_loss(
     mu_count: torch.Tensor,
     dispersion: torch.Tensor,
     target_region: torch.Tensor,
+    regional_nb_beta: float = 0.0,
+    faithful_regional_nb: bool = False,
 ) -> torch.Tensor:
     """Truncated NB NLL computed only on occupied regions (target >= 1)."""
     if target_region.ndim == 1:
@@ -69,11 +109,13 @@ def truncated_nb_nll_loss(
     occ_mask = (target_region > 0.5).float()
     occ_count = occ_mask.sum(dim=-1, keepdim=True)
 
-    per_region_nll = negative_binomial_nll_mean_dispersion(
+    per_region_nll = _decoupled_beta_nb_nll(
         target_region,
         mu_count,
         dispersion=dispersion,
-        reduction="none",
+        beta=regional_nb_beta,
+        faithful=faithful_regional_nb,
+        norm_mask=occ_mask,
     )
     sample_nll = (per_region_nll * occ_mask).sum(dim=-1, keepdim=True) / occ_count.clamp_min(1.0)
     has_occ = (occ_count > 0).float()
@@ -87,12 +129,10 @@ def scale_balanced_regional_nb_nll(
     dispersion_region: torch.Tensor,
     regions: RegionSet,
     mass_weight_alpha: float = 0.0,
+    regional_nb_beta: float = 0.0,
+    faithful_regional_nb: bool = False,
 ) -> torch.Tensor:
-    """Average proper NB NLL within scale, then average across multiscale dictionaries.
-
-    When mass_weight_alpha > 0, weights region errors by target mass to prevent
-    empty background boxes from dominating dense crowd boxes.
-    """
+    """Average proper NB NLL within scale, then average across multiscale dictionaries."""
     if target_region.shape != mean_region.shape:
         raise ValueError(
             f"target/mean mismatch: {target_region.shape} vs {mean_region.shape}"
@@ -102,27 +142,31 @@ def scale_balanced_regional_nb_nll(
             f"dispersion/mean mismatch: {dispersion_region.shape} vs {mean_region.shape}"
         )
 
-    per_region = negative_binomial_nll_mean_dispersion(
-        target_region,
-        mean_region,
-        dispersion=dispersion_region,
-        reduction="none",
-        check_bounds=False,
-    )
-
     scale_losses = []
     num_scales = int(getattr(regions, "num_scales", 3))
     for sid in range(num_scales):
         mask = (regions.scale_id == sid)
         t_count = mask.float().sum()
+        if t_count <= 0:
+            continue
+
+        nll_s = _decoupled_beta_nb_nll(
+            target_region[..., mask],
+            mean_region[..., mask],
+            dispersion=dispersion_region[..., mask],
+            beta=regional_nb_beta,
+            faithful=faithful_regional_nb,
+        )
+
         if mass_weight_alpha > 0.0:
             t_s = target_region[..., mask].float()
             t_mean = t_s.mean(dim=-1, keepdim=True).clamp_min(1e-4)
             w_raw = 1.0 + float(mass_weight_alpha) * (t_s / t_mean)
             w_norm = w_raw / w_raw.mean(dim=-1, keepdim=True).clamp_min(1e-4)
-            loss_s = (w_norm * per_region[..., mask]).mean()
+            loss_s = (w_norm * nll_s).mean()
         else:
-            loss_s = (per_region[..., mask].sum(dim=-1) / t_count.clamp_min(1.0)).mean()
+            loss_s = (nll_s.sum(dim=-1) / t_count.clamp_min(1.0)).mean()
+
         scale_losses.append(loss_s)
 
-    return torch.stack(scale_losses).mean() if scale_losses else (per_region.sum()) * 0.0
+    return torch.stack(scale_losses).mean() if scale_losses else (mean_region.sum()) * 0.0

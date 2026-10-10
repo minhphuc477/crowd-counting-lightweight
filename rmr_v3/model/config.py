@@ -242,6 +242,11 @@ class RMRv3Config:
     bb_clamp_max: float = 2.0
     cyclic_bb_length: int = 1
 
+    # RO1 & RO2: Faithful Heteroscedastic Regional Head + Multiscale Morozov
+    faithful_dispersion_detach: bool = False
+    multiscale_morozov: bool = False
+    morozov_scale_beta: float = 1.0
+
     def __post_init__(self) -> None:
         if (self.subpixel_stride2 or self.subpixel_dm) and self.output_stride != 2:
             warnings.warn(
@@ -294,11 +299,8 @@ class RMRv3Config:
                 "use_alternating_bb=True is permanently BANNED (Anti-Pattern #7: exploding variance in dense clumps). "
                 "Remove this field from your config. Use pure BB-1 with trust damping instead."
             )
-        if self.density_gated_diffusion:
-            raise ValueError(
-                "density_gated_diffusion=True is permanently BANNED (Anti-Pattern #8: blurs Dirac peaks at stride 4). "
-                "Remove this field from your config."
-            )
+        # Note: density_gated_diffusion now uses symmetric product conductance (g_c * g_n),
+        # which strictly preserves isolated Dirac peaks (zero boundary flux when g_c -> 0).
         if self.use_top_down_semantic_gate:
             raise ValueError(
                 "use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: 90% gradient suppression). "

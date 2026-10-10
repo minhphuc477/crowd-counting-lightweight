@@ -24,7 +24,6 @@ from rmr_v3.engine import (
     train_one_epoch,
 )
 from rmr_v3.optim import build_v3_optimizer, build_v3_scheduler, maybe_run_safe_lr_finder
-from rmr_v3.kd import DensityMapKDLoss
 from rmr_v3.reporting import TRAIN_LOG_FIELDNAMES, format_epoch_row, format_eval_block
 from rmr_v3.tracking import format_dynamic_training_banner
 
@@ -113,7 +112,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=cfg.get("data", {}).get("data_root"),
         cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
         preload=bool(cfg.get("data", {}).get("preload", False)),
-        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", False)),
+        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", True)),
         boundary_margin=float(cfg.get("data", {}).get("boundary_margin", 0.0)),
         max_size=int(cfg.get("data", {}).get("max_size", 2048)),
     )
@@ -168,40 +167,6 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     if ema_manager.state:
         print(f"EMA enabled: decay={ema_decay:.4f}")
 
-    # Teacher model for Stage 3 KD
-    teacher_model = None
-    kd_loss_fn = None
-    teacher_ckpt_path = args.teacher_ckpt or cfg.get("train", {}).get("teacher_ckpt")
-    if teacher_ckpt_path:
-        tp = Path(teacher_ckpt_path)
-        if tp.exists():
-            try:
-                t_ckpt = safe_torch_load(tp, map_location="cpu", weights_only=True)
-                t_cfg = t_ckpt.get("config", {})
-                teacher_model, _ = make_model(t_cfg)
-                if "ema_model" in t_ckpt:
-                    t_state = t_ckpt["ema_model"]
-                    tag = "ema_model"
-                elif "model" in t_ckpt:
-                    t_state = t_ckpt["model"]
-                    tag = "model"
-                else:
-                    t_state = t_ckpt
-                    tag = "direct_state_dict"
-                teacher_model.load_state_dict(t_state)
-                teacher_model.switch_to_deploy()
-                teacher_model.to(device).eval()
-                for p in teacher_model.parameters():
-                    p.requires_grad = False
-                kd_loss_fn = DensityMapKDLoss(
-                    lambda_spatial_kl=float(cfg.get("loss", {}).get("lambda_kd_spatial", 1.0)),
-                    lambda_count_kd=float(cfg.get("loss", {}).get("lambda_kd_count", 0.1)),
-                )
-                print(f"[Stage 3 KD] Teacher loaded and frozen successfully from '{tp}' (weights: {tag}).")
-            except Exception as e:
-                print(f"[Stage 3 KD Warning] Failed to load teacher from {tp}: {e}. Proceeding without KD.")
-        else:
-            print(f"[Stage 3 KD Warning] Teacher checkpoint not found at '{tp}'. Proceeding without KD.")
 
     epochs = int(cfg.get("train", {}).get("epochs", 1000))
     lr_init = float(cfg.get("train", {}).get("lr", 1e-4))
@@ -316,8 +281,6 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             uniform_reliability=uniform_reliability,
             solver_strength=solver_strength,
             ema_manager=ema_manager,
-            teacher_model=teacher_model,
-            kd_loss_fn=kd_loss_fn,
             freeze_bn=(freeze_bn_epoch >= 0 and epoch >= freeze_bn_epoch),
         )
         if hasattr(optimizer, "eval"):
@@ -330,7 +293,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         train_loss_keys = (
             "total", "count", "count_l1", "allocation", "cell", "region_nb", "hurdle_bce",
             "trunc_nb", "curvature", "hard_bg", "fg_bce", "scale_align", "spectral",
-            "spectral_dc", "spectral_ac", "cell_carrier", "cell_fine", "kd_total", "kd_spatial", "kd_count",
+            "spectral_dc", "spectral_ac", "cell_carrier", "cell_fine",
         )
         for k in train_loss_keys:
             row_log[f"train_{k}"] = loss_avgs.get(k, 0.0)

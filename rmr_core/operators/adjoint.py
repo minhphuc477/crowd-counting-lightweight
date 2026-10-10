@@ -158,6 +158,8 @@ def weighted_normalized_adjoint_field(
     scale_seeded_carrier: bool = False,
     scale_seed_eps: float = 0.02,
     morozov_rho_cap: float = 0.0,
+    multiscale_morozov: bool = False,
+    morozov_scale_beta: float = 1.0,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
@@ -181,8 +183,8 @@ def weighted_normalized_adjoint_field(
     q = regional_sum(y32, regions.boxes, out_dtype=torch.float32)
     delta = q - b32
 
-    # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, or Scale-Routed Spatial)
-    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov) and b_variance is not None:
+    # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, Scale-Routed, or Multiscale)
+    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov or multiscale_morozov) and b_variance is not None:
         delta = compute_morozov_discrepancy(
             delta=delta,
             q=q,
@@ -198,6 +200,8 @@ def weighted_normalized_adjoint_field(
             morozov_gamma_under=morozov_gamma_under,
             morozov_rho=morozov_rho,
             morozov_rho_cap=morozov_rho_cap,
+            multiscale_morozov=multiscale_morozov,
+            morozov_scale_beta=morozov_scale_beta,
         )
 
 

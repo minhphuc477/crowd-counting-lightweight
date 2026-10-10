@@ -1,0 +1,165 @@
+# RMR Sub-60 RO2 Ablation (Zero-Flux Conductance & Multiscale Morozov Isolated)
+# Total Trainable Parameters: 101,763 (<= 104,441 and < 300,000, Standalone 0.0% KD)
+# RO1 Inactive: faithful_dispersion_detach=False, beta=0.0
+# RO2 Active: density_gated_diffusion=True (c_ij = g_c * g_n), multiscale_morozov=True (gamma_k = gamma_0 * (s_min/s_k)^beta)
+#             (Byrne 1993/2004 SMART; Frick, Marnitz & Munk, JMIV 2012)
+
+seed: 42
+output_dir: runs/sha_a/sub60_ro2_zeroflux_morozov_102k
+
+data:
+  train_manifest: data/manifests/sha_a_train_full.jsonl
+  val_manifest: data/manifests/sha_a_test.jsonl
+  crop_size: 512
+  scale_range: [0.75, 1.25]
+  max_size: 1024
+  pad_small_images: true
+
+model:
+  output_stride: 4
+  feature_width: 32
+  backbone: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+  init_m0: 0.015763
+
+  # Neck: HDC-Lite FPN (Wang et al. WACV 2018, zero gridding holes, proven in sub60_e128)
+  neck_type: hdc_lite
+  use_aspp_gap: true
+  hdc_dilations: [1, 2, 3]
+
+  # Regional Evidence Dictionary (RO1 INACTIVE: standard trunk, beta=0.0)
+  region_sizes_px: [32, 64, 128]
+  region_overlap: 0.5
+  include_full_image: false
+  regional_feature_stats: mean
+  region_head_hidden: 48
+  faithful_dispersion_detach: false
+
+  # Pillar 1: Continuous Dynamic Scale Routing (Hilbert Adjoint Scale Duality A_pi^T)
+  dynamic_scale_routing: true
+  factorized_scale_routing: false
+  scale_router_temperature: 1.0
+  pre_solver_scale_gating: true
+  scale_gating_power: 1.0
+
+  # Carrier Density Head & Calibrated Curvature
+  temp_softplus: true
+  density_curvature: true
+  gated_density_curvature: true
+  curvature_dense_threshold: 0.15
+  curvature_gate_beta: 0.03
+  curvature_pool_kernel: 8
+  curvature_alpha_init: -4.0
+
+  # Pillar 3: Heteroscedastic Hurdle-NB & Occupancy Gating
+  hurdle_head: true
+  hurdle_gating_mode: occupancy
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+  reliability_mode: snr
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+  detach_y0_for_solver: false
+
+  # Pillar 2: Support-Absorbing Radon-Nikodym Bregman-SIRT Solver (RO2 ACTIVE: Multiscale Morozov)
+  enable_solver: true
+  solver_mode: additive
+  iterations: 6
+  sirt_omega: 1.0
+  residual_clip: 0.0
+  eps: 1.0e-6
+  adjoint_mode: radon_nikodym
+  hybrid_recovery_alpha: 0.0
+  morozov_gamma: 0.75
+  morozov_rho_cap: 0.25
+  multiscale_morozov: true
+  morozov_scale_beta: 1.0
+  trust_region_kappa: 0.35
+  trust_region_floor: 0.005
+  use_barzilai_borwein: true
+  use_scale_entropy_trust: true
+
+  # TV Diffusion (RO2 ACTIVE: Zero-Flux Symmetric Product Conductance c_ij = g_c * g_n)
+  tv_lambda: 0.02
+  tv_type: laplacian
+  density_gated_diffusion: true
+  diffusion_dense_threshold: 0.12
+  diffusion_gate_beta: 0.03
+  proximal_tau: 0.015
+  proximal_mode: firm
+  proximal_mu: 3.0
+  ema_decay: 0.999
+
+loss:
+  # Core Measure Supervision (Anchored on sub60_e128 71.33 MAE / 109.02 RMSE baseline)
+  lambda_count: 1.0
+  allocation_loss_type: bayesian
+  lambda_bayesian: 0.025
+  lambda_flat_dm16: 0.025
+  bayesian_sigma: 4.0
+  bayesian_adaptive_sigma: true
+  bayesian_sigma_min: 2.0
+  bayesian_sigma_max: 4.0
+  bayesian_background_ratio: 0.10
+  bayesian_norm_mode: canonical
+  bayesian_canonical_bg: true
+  dm_target: dual
+
+  # Regional NB Loss (RO1 INACTIVE: standard NB NLL without beta reweighting or faithful detach)
+  lambda_region_nb: 0.20
+  regional_nb_beta: 0.0
+  faithful_regional_nb: false
+  lambda_hurdle: 0.10
+  lambda_trunc_nb: 0.0
+
+  # Sparse/Moderate Cell Pinning & Scale Routing Supervision
+  lambda_cell: 0.50
+  cell_loss_mode: count_harmonized
+  cell_beta: 1.0
+  cell_mass_weight_eps: 0.001
+  cell_mass_weight_alpha: 2.0
+  cell_mass_weight_gamma: 1.25
+  cell_norm_power: 0.5
+  cell_norm_ref: 100.0
+
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+
+  lambda_scale_align: 0.05
+  scale_align_tau_dense: 0.12
+  scale_align_tau_sparse: 0.03
+  scale_align_kernel: 5
+  scale_align_mask_bg: true
+
+  lambda_curvature: 0.0
+  lambda_hard_bg: 0.0
+  lambda_fg_gate: 0.0
+
+train:
+  device: cuda
+  epochs: 1000
+  batch_size: 8
+  workers: 4
+  pin_memory: true
+  lr: 1.0e-4
+  backbone_lr_scale: 0.1
+  weight_decay: 1.0e-4
+  warmup_epochs: 10
+  eval_every: 5
+  grad_clip: 1.0
+  amp: true
+  early_stopping: false
+  patience: 200
+  solver_warmup_epochs: 5
+  solver_ramp_epochs: 10
+  deterministic: false
+  ema_decay: 0.999
+
+eval:
+  density_bins: [100, 500]

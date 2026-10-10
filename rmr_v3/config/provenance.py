@@ -89,6 +89,8 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "eval_every",
             "early_stopping",
             "patience",
+            "wsd_stable_ratio",
+            "min_lr_ratio",
         }
         t: dict[str, Any] = {}
         for k in critical_train_keys:
@@ -103,7 +105,7 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data_cfg, dict):
         d: dict[str, Any] = {}
         for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter",
-                  "gamma_jitter", "random_invert_prob"):
+                  "gamma_jitter", "random_invert_prob", "pad_small_images"):
             if k in data_cfg:
                 d[k] = _canonicalize_value(data_cfg[k])
         data_root = data_cfg.get("data_root")

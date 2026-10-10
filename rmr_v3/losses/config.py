@@ -120,14 +120,18 @@ class RMRv3LossConfig:
     chfl_tik: float = 0.01
     chfl_bandwidth: float = 8.0
 
-    # Mass-Weighted Regional Loss (Hypothesis H8)
+    # Mass-Weighted & Faithful Beta-NB Regional Loss (RO1: Seitzer et al. ICLR 2022; Stirn et al. AISTATS 2023)
     regional_mass_weight_alpha: float = 0.0
+    regional_nb_beta: float = 0.0
+    faithful_regional_nb: bool = False
 
     def __post_init__(self) -> None:
         if self.spectral_transform not in ("fft", "dct"):
             raise ValueError(f"spectral_transform must be 'fft' or 'dct', got '{self.spectral_transform}'")
         if self.regional_mass_weight_alpha < 0.0:
             raise ValueError(f"regional_mass_weight_alpha must be non-negative, got {self.regional_mass_weight_alpha}")
+        if not (0.0 <= self.regional_nb_beta <= 1.0):
+            raise ValueError(f"regional_nb_beta must be in [0.0, 1.0], got {self.regional_nb_beta}")
         if self.lambda_spectral < 0.0:
             raise ValueError(f"lambda_spectral must be non-negative, got {self.lambda_spectral}")
         if self.lambda_spectral_dc < 0.0:

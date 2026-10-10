@@ -98,16 +98,20 @@ def _compute_core_losses(
             dispersion_region,
             regions,
             mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
+            regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
+            faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
         )
     else:
         losses["region_nb"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
     # Composite Total Core Loss
-    alloc_term = (
-        loss_allocation
-        if cfg.allocation_loss_type == "dual_bayesian_dm16"
-        else cfg.lambda_flat_dm16 * loss_allocation
-    )
+    if cfg.allocation_loss_type == "dual_bayesian_dm16":
+        alloc_term = loss_allocation
+    elif cfg.allocation_loss_type == "bayesian":
+        lam_alloc = float(cfg.lambda_bayesian) if float(cfg.lambda_bayesian) > 0.0 else float(cfg.lambda_flat_dm16)
+        alloc_term = lam_alloc * loss_allocation
+    else:
+        alloc_term = cfg.lambda_flat_dm16 * loss_allocation
     losses["total"] = (
         cfg.lambda_count * losses["count"]
         + alloc_term
@@ -191,7 +195,13 @@ def _compute_auxiliary_losses(
             else zero_val
         )
         t_nb = (
-            truncated_nb_nll_loss(mean_region, dispersion_region, target_region)
+            truncated_nb_nll_loss(
+                mean_region,
+                dispersion_region,
+                target_region,
+                regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
+                faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
+            )
             if cfg.lambda_trunc_nb > 0.0
             else zero_val
         )

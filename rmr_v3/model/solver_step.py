@@ -160,6 +160,8 @@ def solve_inverse_measure(
         eatr_alpha=getattr(cfg, "eatr_alpha", 0.5),
         regional_rate=regional_evidence.get("rate"),
         morozov_rho_cap=getattr(cfg, "morozov_rho_cap", 0.0),
+        multiscale_morozov=getattr(cfg, "multiscale_morozov", False),
+        morozov_scale_beta=getattr(cfg, "morozov_scale_beta", 1.0),
         compute_energy=compute_energy,
     )
 

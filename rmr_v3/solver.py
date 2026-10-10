@@ -105,6 +105,8 @@ def unrolled_sirt_solver(
     eatr_alpha: float = 0.5,
     regional_rate: torch.Tensor | None = None,
     morozov_rho_cap: float = 0.0,
+    multiscale_morozov: bool = False,
+    morozov_scale_beta: float = 1.0,
     compute_energy: bool = True,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
@@ -244,11 +246,13 @@ def unrolled_sirt_solver(
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
             b_target = q - rate_res * eff_q.clamp_min(float(eps))
             adj_mode, b_var, m_gamma = "radon_nikodym", None, 0.0
-            ansc_morozov, asym_morozov, spat_morozov = False, False, False
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = False, False, False, False
         else:
             b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
             m_gamma = float(morozov_gamma)
-            ansc_morozov, asym_morozov, spat_morozov = anscombe_morozov, asymmetric_morozov, spatial_morozov
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = (
+                anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov
+            )
 
         field = weighted_normalized_adjoint_field(
             z_state, b_target, weight_solver, regions,
@@ -267,6 +271,7 @@ def unrolled_sirt_solver(
             y_initial=y0, spatial_morozov=spat_morozov, morozov_gamma_scales=morozov_gamma_scales,
             scale_seeded_carrier=scale_seeded_carrier, scale_seed_eps=float(scale_seed_eps),
             morozov_rho_cap=float(morozov_rho_cap),
+            multiscale_morozov=mscale_morozov, morozov_scale_beta=float(morozov_scale_beta),
         )
 
         # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)

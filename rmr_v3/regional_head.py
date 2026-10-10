@@ -13,14 +13,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.operators import (
-    RegionSet,
-    _canonicalize_region_size,
-    fractional_region_average_features,
-    fractional_region_mean_std_features,
-    partition_regions_by_scale,
-    region_average_features,
-    region_mean_std_features,
-    regional_sum,
+    RegionSet, _canonicalize_region_size, fractional_region_average_features,
+    fractional_region_mean_std_features, partition_regions_by_scale,
+    region_average_features, region_mean_std_features, regional_adjoint, regional_sum,
 )
 
 
@@ -62,9 +57,11 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         regional_feature_stats: str = "mean",
         hurdle_head: bool = False,
         floor_tau: float = 0.0,
+        faithful_dispersion_detach: bool = False,
     ) -> None:
         super().__init__()
         self.floor_tau = float(floor_tau)
+        self.faithful_dispersion_detach = bool(faithful_dispersion_detach)
 
 
         if dispersion_min <= 0:
@@ -230,11 +227,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         pyramid: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         regions: RegionSet,
     ) -> dict[str, torch.Tensor]:
-        x = self._collect_region_features(
-            pyramid,
-            regions,
-        )
-
+        x = self._collect_region_features(pyramid, regions)
         h = self.trunk(x)
 
         mean_raw = self.mean_head(h).squeeze(-1)
@@ -243,29 +236,21 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             tau = float(self.floor_tau)
             rate = torch.where(rate > tau, rate - 0.5 * tau, rate.square() / (2.0 * tau))
 
-        area = regions.area.to(
-            device=rate.device,
-            dtype=rate.dtype,
-        ).view(1, -1)
-
+        area = regions.area.to(device=rate.device, dtype=rate.dtype).view(1, -1)
         mu_count = rate * area
 
-        log_r = self.log_dispersion_head(h).squeeze(-1)
-        log_r = log_r.clamp(
-            min=math.log(self.dispersion_min),
-            max=math.log(self.dispersion_max),
-        )
-
+        h_disp = h.detach() if getattr(self, "faithful_dispersion_detach", False) else h
+        log_r = self.log_dispersion_head(h_disp).squeeze(-1)
+        log_r = log_r.clamp(min=math.log(self.dispersion_min), max=math.log(self.dispersion_max))
         dispersion = torch.exp(log_r)
 
         result: dict[str, torch.Tensor] = {
             "mu_count": mu_count.unsqueeze(1),      # [B,1,M]
             "rate": rate.unsqueeze(1),              # [B,1,M]
             "dispersion": dispersion.unsqueeze(1),  # [B,1,M]
-            "log_dispersion": log_r.unsqueeze(1),  # [B,1,M]
+            "log_dispersion": log_r.unsqueeze(1),   # [B,1,M]
         }
 
-        # Hurdle head: occupancy logit z_π_R (RMR-v7+)
         if self.has_hurdle_head:
             z_pi = self.hurdle_head_layer(h).squeeze(-1)  # [B,M]
             result["hurdle_logit"] = z_pi.unsqueeze(1)    # [B,1,M]

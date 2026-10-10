@@ -97,10 +97,10 @@ def laplacian_tv_diffusion(
         g_w = gate_pad[:, :, 1:-1, 0:-2]
         g_e = gate_pad[:, :, 1:-1, 2:]
         
-        flux_n = 0.5 * (g_c + g_n) * (y_n - y_c)
-        flux_s = 0.5 * (g_c + g_s) * (y_s - y_c)
-        flux_w = 0.5 * (g_c + g_w) * (y_w - y_c)
-        flux_e = 0.5 * (g_c + g_e) * (y_e - y_c)
+        flux_n = (g_c * g_n) * (y_n - y_c)
+        flux_s = (g_c * g_s) * (y_s - y_c)
+        flux_w = (g_c * g_w) * (y_w - y_c)
+        flux_e = (g_c * g_e) * (y_e - y_c)
         
         step_diff = lam_val * (flux_n + flux_s + flux_w + flux_e)
     else:

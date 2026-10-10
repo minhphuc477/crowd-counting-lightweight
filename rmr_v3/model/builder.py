@@ -144,6 +144,7 @@ def build_regional_evidence_head(cfg: RMRv3Config) -> nn.Module:
         regional_feature_stats=cfg.regional_feature_stats,
         hurdle_head=cfg.hurdle_head,
         floor_tau=cfg.floor_tau,
+        faithful_dispersion_detach=getattr(cfg, "faithful_dispersion_detach", False),
     )
 
 

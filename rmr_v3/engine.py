@@ -143,8 +143,6 @@ def train_one_epoch(
     uniform_reliability: bool,
     solver_strength: float,
     ema_manager: EMAManager,
-    teacher_model: Any = None,
-    kd_loss_fn: Any = None,
     freeze_bn: bool = False,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
@@ -177,29 +175,6 @@ def train_one_epoch(
             )
             losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
             loss = losses["total"]
-
-            if teacher_model is not None and kd_loss_fn is not None:
-                with torch.no_grad():
-                    t_out = teacher_model(images)
-                    t_y = t_out["y"] if isinstance(t_out, dict) else t_out
-
-                if loss_cfg.dm_target == "dual":
-                    kd_y0 = kd_loss_fn(outputs["y0"], t_y)
-                    kd_y = kd_loss_fn(outputs["y"], t_y)
-                    kd_res = {
-                        "total_kd": 0.5 * kd_y0["total_kd"] + 0.5 * kd_y["total_kd"],
-                        "spatial_kl": 0.5 * kd_y0["spatial_kl"] + 0.5 * kd_y["spatial_kl"],
-                        "count_kd": 0.5 * kd_y0["count_kd"] + 0.5 * kd_y["count_kd"],
-                    }
-                elif loss_cfg.dm_target == "y":
-                    kd_res = kd_loss_fn(outputs["y"], t_y)
-                else:
-                    kd_res = kd_loss_fn(outputs["y0"], t_y)
-
-                loss = loss + kd_res["total_kd"]
-                losses["kd_total"] = kd_res["total_kd"]
-                losses["kd_spatial"] = kd_res["spatial_kl"]
-                losses["kd_count"] = kd_res["count_kd"]
 
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)

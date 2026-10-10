@@ -171,71 +171,40 @@ ALLOWED_MODEL_KEYS = {
     "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
     "evidence_anchored_trust", "eatr_alpha", "scale_prior_boost",
     "morozov_rho_cap",
+    "pad_small_images", "wsd_stable_ratio", "min_lr_ratio", "bayesian_norm_mode",
+    "adaptive_sigma", "bayesian_adaptive_sigma", "faithful_dispersion_detach",
+    "multiscale_morozov", "morozov_scale_beta",
 }
 
-
 ALLOWED_LOSS_KEYS = {
-    "lambda_count",
-    "lambda_count_l1",
-    "lambda_flat_dm16",
-    "lambda_cell",
-    "lambda_region_nb",
-    "lambda_hurdle",
-    "lambda_trunc_nb",
-    "allocation_loss_type",
-    "bayesian_sigma",
-    "bayesian_background_ratio",
-    "ot_reg",
-    "ot_num_iters",
-    "count_loss_mode",
-    "count_nb_dispersion",
-    "kappa_flat16",
-    "normalize_flat_dm16",
-    "cell_beta",
-    "use_hierarchical_dm",
-    "use_multiscale_dm",
-    "dm_block_sizes_px",
-    "dm_weights",
-    "dm_kappas",
+    "lambda_count", "lambda_count_l1", "lambda_flat_dm16", "lambda_cell",
+    "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",
+    "allocation_loss_type", "bayesian_sigma", "bayesian_background_ratio",
+    "ot_reg", "ot_num_iters", "count_loss_mode", "count_nb_dispersion",
+    "kappa_flat16", "normalize_flat_dm16", "cell_beta",
+    "use_hierarchical_dm", "use_multiscale_dm", "dm_block_sizes_px",
+    "dm_weights", "dm_kappas",
     # RMR-v8 Stage 2 & 3
-    "cell_loss_mode",
-    "cell_mass_weight_eps",
-    "cell_mass_weight_alpha",
+    "cell_loss_mode", "cell_mass_weight_eps", "cell_mass_weight_alpha",
     # RMR-v9: allocation loss target ("y0" | "y")
-    "dm_target",
-    "dm_strict",
+    "dm_target", "dm_strict",
     # RMR-v11 additions
-    "cell_mass_weight_gamma",
-    "lambda_curvature",
-    "lambda_hard_bg",
-    "hard_bg_ratio",
-    "lambda_fg_gate",
+    "cell_mass_weight_gamma", "lambda_curvature", "lambda_hard_bg", "hard_bg_ratio", "lambda_fg_gate",
     # RMR-v12 additions
-    "curvature_gate_threshold",
-    "curvature_gate_kernel",
-    "curvature_gate_mode",
-    "curvature_gate_scale",
+    "curvature_gate_threshold", "curvature_gate_kernel", "curvature_gate_mode", "curvature_gate_scale",
     # RMR-v13 additions
-    "lambda_scale_align",
-    "scale_align_tau_dense",
-    "scale_align_tau_sparse",
-    "scale_align_kernel",
+    "lambda_scale_align", "scale_align_tau_dense", "scale_align_tau_sparse", "scale_align_kernel",
     # RMR-v14 additions
     "scale_align_mask_bg",
     # RMR-v20 additions
-    "density_loss_scaling",
-    "dense_loss_thresh",
-    "dense_loss_norm",
-    "dense_loss_alpha",
-    "dense_loss_max_boost",
-    # RMR-v21 / RMR-v30 / KD additions
+    "density_loss_scaling", "dense_loss_thresh", "dense_loss_norm", "dense_loss_alpha", "dense_loss_max_boost",
+    # RMR-v21 / RMR-v30 additions
     "elementwise_dense_scaling",
     "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
-    "lambda_kd_spatial", "lambda_kd_count",
     # Spectral Loss (H2/H8) & Regional Mass Weight (H8)
     "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
     "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
-    "spectral_transform", "regional_mass_weight_alpha",
+    "spectral_transform", "regional_mass_weight_alpha", "regional_nb_beta", "faithful_regional_nb",
     # CI-Cell Loss & Count-Harmonized Cell Loss additions
     "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref",
     # FIDT (H1) & ChfL (H2) additions
@@ -247,18 +216,18 @@ ALLOWED_LOSS_KEYS = {
     "dm_norm_mode", "dm_ref_count",
     # Orthogonal carrier-solver routing & Bayesian loss configuration
     "count_target", "cell_target", "bayesian_norm_mode", "bayesian_canonical_bg",
-    "bayesian_adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
-    "lambda_bayesian",
+    "bayesian_adaptive_sigma", "adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
+    "lambda_bayesian", "strict_loss_triad",
 }
 
 ALLOWED_TRAIN_KEYS = {
     "batch_size", "workers", "pin_memory", "lr", "backbone_lr_scale", "weight_decay",
     "epochs", "warmup_epochs", "warmup_steps", "eval_every", "grad_clip", "amp", "early_stopping",
     "patience", "solver_warmup_epochs", "solver_ramp_epochs", "deterministic",
-    "ema_decay", "teacher_ckpt", "min_lr_ratio", "grad_scaler_init_scale",
+    "ema_decay", "min_lr_ratio", "grad_scaler_init_scale",
     "device", "num_threads", "cudnn_benchmark",
     # Optimizer & Scheduler additions (Gen 18 / Gen 22)
-    "optimizer", "scheduler_type", "wsd_stable_ratio",
+    "optimizer", "scheduler_type", "wsd_stable_ratio", "betas",
     "schedule_free_warmup_steps", "schedule_free_r", "schedule_free_weight_lr_power",
     "auto_lr_finder", "lr_finder_min_lr", "lr_finder_max_lr", "lr_finder_num_iter", "lr_finder_max_safe_lr",
     "prodigy_d_coef", "prodigy_growth_rate", "prodigy_d_max_cap", "prodigy_d_warmup_steps",
@@ -393,12 +362,13 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "curvature_gate_threshold", "curvature_gate_kernel", "curvature_gate_mode", "curvature_gate_scale",
         "lambda_scale_align", "scale_align_tau_dense", "scale_align_tau_sparse", "scale_align_kernel",
         "scale_align_mask_bg", "density_loss_scaling", "elementwise_dense_scaling",
-        "output_stride", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count",
+        "output_stride", "lambda_carrier_cell", "lambda_fine_cell",
         "spectral_transform", "use_spectral_loss", "lambda_spectral", "spectral_beta", "lambda_spectral_dc",
         "spectral_omega_0", "spectral_bandpass", "spectral_omega_low", "spectral_omega_high",
         "regional_mass_weight_alpha", "cell_tau_head", "cell_alpha",
         "dense_loss_thresh", "dense_loss_norm", "dense_loss_alpha", "dense_loss_max_boost",
         "bayesian_sigma", "bayesian_background_ratio", "ot_reg", "ot_num_iters", "dm_strict",
+        "bayesian_norm_mode", "bayesian_adaptive_sigma", "adaptive_sigma",
     ],
     "train": [
         "lr",
@@ -414,6 +384,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "eval_every",
         "early_stopping",
         "patience",
+        "wsd_stable_ratio",
+        "min_lr_ratio",
     ],
     "data": [
         "crop_size",
@@ -423,6 +395,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "contrast_jitter",
         "gamma_jitter",
         "random_invert_prob",
+        "pad_small_images",
     ],
 }
 
@@ -438,4 +411,6 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "solver_ramp_epochs": 5,
     "warmup_epochs": 5,
     "freeze_bn_after_epoch": -1,
+    "wsd_stable_ratio": 0.75,
+    "min_lr_ratio": 0.01,
 }

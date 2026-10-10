@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .schema import (
-    ALLOWED_TOP_LEVEL,
-    SECTION_ALLOWED_KEYS,
-)
+from .schema import ALLOWED_TOP_LEVEL, SECTION_ALLOWED_KEYS
 
 
 def validate_v3_config(cfg: dict[str, Any]) -> None:
@@ -38,6 +35,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     # Validate data manifest invariants
     d_cfg = cfg.get("data", {})
     if isinstance(d_cfg, dict):
+        if "pad_small_images" in d_cfg and not isinstance(d_cfg["pad_small_images"], bool):
+            raise ValueError(f"data.pad_small_images must be a boolean, got {type(d_cfg['pad_small_images']).__name__}")
         for mk in ("train_manifest", "val_manifest"):
             m_val = str(d_cfg.get(mk, "")).replace("\\", "/")
             if m_val.endswith("sha_a_train.jsonl") or m_val.endswith("sha_a_val.jsonl"):
@@ -49,6 +48,15 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     # Validate logical bounds and alias collisions
     m_cfg = cfg.get("model", {})
     if isinstance(m_cfg, dict):
+        if "hybrid_recovery_alpha" in m_cfg:
+            hra = float(m_cfg["hybrid_recovery_alpha"])
+            if not (0.0 <= hra <= 1.0):
+                raise ValueError(f"hybrid_recovery_alpha must be in [0.0, 1.0], got {hra}")
+        if "curvature_alpha_init" in m_cfg:
+            try:
+                float(m_cfg["curvature_alpha_init"])
+            except (ValueError, TypeError) as err:
+                raise ValueError(f"curvature_alpha_init must be a float, got {m_cfg['curvature_alpha_init']!r}") from err
         if "backbone" in m_cfg and "backbone_name" in m_cfg:
             raise ValueError(
                 "Conflicting alias keys in model config: cannot declare both 'backbone' and 'backbone_name'."
@@ -263,21 +271,23 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {l_cfg_pre['cell_mass_weight_eps']}")
         if "cell_mass_weight_gamma" in l_cfg_pre and float(l_cfg_pre["cell_mass_weight_gamma"]) <= 0.0:
             raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {l_cfg_pre['cell_mass_weight_gamma']}")
-        if "lambda_curvature" in l_cfg_pre and float(l_cfg_pre["lambda_curvature"]) < 0.0:
-            raise ValueError(f"lambda_curvature must be non-negative, got {l_cfg_pre['lambda_curvature']}")
-        if "lambda_hard_bg" in l_cfg_pre and float(l_cfg_pre["lambda_hard_bg"]) < 0.0:
-            raise ValueError(f"lambda_hard_bg must be non-negative, got {l_cfg_pre['lambda_hard_bg']}")
         if "hard_bg_ratio" in l_cfg_pre and not (0.0 < float(l_cfg_pre["hard_bg_ratio"]) <= 1.0):
             raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {l_cfg_pre['hard_bg_ratio']}")
         if "cell_fg_ratio" in l_cfg_pre and not (0.0 <= float(l_cfg_pre["cell_fg_ratio"]) <= 1.0):
             raise ValueError(f"cell_fg_ratio must be in [0.0, 1.0], got {l_cfg_pre['cell_fg_ratio']}")
-        for key in ("lambda_fg_gate", "lambda_carrier_cell", "lambda_fine_cell", "lambda_kd_spatial", "lambda_kd_count"):
+        for key in (
+            "lambda_curvature", "lambda_hard_bg", "lambda_fg_gate", "lambda_carrier_cell",
+            "lambda_fine_cell", "lambda_spectral", "lambda_spectral_dc", "lambda_scale_align",
+        ):
             if key in l_cfg_pre and float(l_cfg_pre[key]) < 0.0:
                 raise ValueError(f"{key} must be non-negative, got {l_cfg_pre[key]}")
-        if "lambda_spectral" in l_cfg_pre and float(l_cfg_pre["lambda_spectral"]) < 0.0:
-            raise ValueError(f"lambda_spectral must be non-negative, got {l_cfg_pre['lambda_spectral']}")
-        if "lambda_spectral_dc" in l_cfg_pre and float(l_cfg_pre["lambda_spectral_dc"]) < 0.0:
-            raise ValueError(f"lambda_spectral_dc must be non-negative, got {l_cfg_pre['lambda_spectral_dc']}")
+        if "bayesian_norm_mode" in l_cfg_pre:
+            bnm = str(l_cfg_pre["bayesian_norm_mode"])
+            if bnm not in ("canonical", "count", "square_root"):
+                raise ValueError(f"bayesian_norm_mode must be 'canonical', 'count', or 'square_root', got '{bnm}'")
+        for ak in ("adaptive_sigma", "bayesian_adaptive_sigma"):
+            if ak in l_cfg_pre and not isinstance(l_cfg_pre[ak], bool):
+                raise ValueError(f"{ak} must be a boolean, got {type(l_cfg_pre[ak]).__name__}")
         if "spectral_beta" in l_cfg_pre and float(l_cfg_pre["spectral_beta"]) <= 0.0:
             raise ValueError(f"spectral_beta must be strictly positive, got {l_cfg_pre['spectral_beta']}")
         if "spectral_transform" in l_cfg_pre and str(l_cfg_pre["spectral_transform"]) not in ("fft", "dct"):
@@ -294,10 +304,6 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             cgm = str(l_cfg_pre["curvature_gate_mode"])
             if cgm not in ("none", "hard", "soft"):
                 raise ValueError(f"curvature_gate_mode must be 'none', 'hard', or 'soft', got '{cgm}'")
-        if "lambda_scale_align" in l_cfg_pre:
-            l_sa = float(l_cfg_pre["lambda_scale_align"])
-            if l_sa < 0.0:
-                raise ValueError(f"lambda_scale_align must be non-negative, got {l_sa}")
         if "scale_align_tau_dense" in l_cfg_pre or "scale_align_tau_sparse" in l_cfg_pre:
             tau_d = float(l_cfg_pre.get("scale_align_tau_dense", 0.12))
             tau_s = float(l_cfg_pre.get("scale_align_tau_sparse", 0.03))
@@ -410,26 +416,15 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             wd = float(t_cfg["weight_decay"])
             if wd < 0:
                 raise ValueError(f"train.weight_decay must be non-negative, got {wd}")
-        if "patience" in t_cfg:
-            patience = int(t_cfg["patience"])
-            if patience < 0:
-                raise ValueError(f"train.patience must be >= 0, got {patience}")
-        if "warmup_epochs" in t_cfg:
-            warmup = int(t_cfg["warmup_epochs"])
-            if warmup < 0:
-                raise ValueError(f"train.warmup_epochs must be >= 0, got {warmup}")
-        if "solver_warmup_epochs" in t_cfg:
-            sw = int(t_cfg["solver_warmup_epochs"])
-            if sw < 0:
-                raise ValueError(f"train.solver_warmup_epochs must be >= 0, got {sw}")
-        if "solver_ramp_epochs" in t_cfg:
-            sr = int(t_cfg["solver_ramp_epochs"])
-            if sr < 0:
-                raise ValueError(f"train.solver_ramp_epochs must be >= 0, got {sr}")
-        if "grad_scaler_init_scale" in t_cfg:
-            gsis = float(t_cfg["grad_scaler_init_scale"])
-            if gsis <= 0.0:
-                raise ValueError(f"train.grad_scaler_init_scale must be strictly positive, got {gsis}")
+        for k in ("patience", "warmup_epochs", "solver_warmup_epochs", "solver_ramp_epochs"):
+            if k in t_cfg and int(t_cfg[k]) < 0:
+                raise ValueError(f"train.{k} must be >= 0, got {t_cfg[k]}")
+        if "wsd_stable_ratio" in t_cfg and not (0.0 <= float(t_cfg["wsd_stable_ratio"]) <= 1.0):
+            raise ValueError(f"train.wsd_stable_ratio must be in [0.0, 1.0], got {t_cfg['wsd_stable_ratio']}")
+        if "min_lr_ratio" in t_cfg and not (0.0 < float(t_cfg["min_lr_ratio"]) < 1.0):
+            raise ValueError(f"train.min_lr_ratio must be in (0.0, 1.0), got {t_cfg['min_lr_ratio']}")
+        if "grad_scaler_init_scale" in t_cfg and float(t_cfg["grad_scaler_init_scale"]) <= 0.0:
+            raise ValueError(f"train.grad_scaler_init_scale must be strictly positive, got {t_cfg['grad_scaler_init_scale']}")
 
     # Validate eval configuration
     e_cfg = cfg.get("eval", {})
