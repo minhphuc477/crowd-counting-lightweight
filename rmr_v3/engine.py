@@ -144,6 +144,7 @@ def train_one_epoch(
     solver_strength: float,
     ema_manager: EMAManager,
     freeze_bn: bool = False,
+    grad_accum_steps: int = 1,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
     model.train()
@@ -158,12 +159,12 @@ def train_one_epoch(
 
     # Determine epoch length defensively without raising exceptions
     n_batches = len(train_loader) if hasattr(train_loader, "__len__") else -1
+    accum_steps = max(1, int(grad_accum_steps))
+    optimizer.zero_grad(set_to_none=True)
 
     for batch_idx, batch in enumerate(train_loader):
         images = batch["image"].to(device, non_blocking=True)
         targets = batch["target_y"].to(device, non_blocking=True)
-
-        optimizer.zero_grad(set_to_none=True)
 
         with torch.amp.autocast("cuda" if device.type == "cuda" else "cpu", enabled=amp):
             compute_energy = (n_batches <= 0 or batch_idx == n_batches - 1)
@@ -174,15 +175,18 @@ def train_one_epoch(
                 compute_energy=compute_energy,
             )
             losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
-            loss = losses["total"]
+            loss = losses["total"] / accum_steps
 
         scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        scaler.step(optimizer)
-        scaler.update()
 
-        ema_manager.update(model)
+        is_step = ((batch_idx + 1) % accum_steps == 0) or (batch_idx + 1 == n_batches)
+        if is_step:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+            ema_manager.update(model)
 
         loss_tracker.update(losses)
         # Zero-Sync Diagnostic Policy: Update tracker on the final batch of the epoch.

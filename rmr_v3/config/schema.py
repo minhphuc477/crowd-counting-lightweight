@@ -225,7 +225,7 @@ ALLOWED_TRAIN_KEYS = {
     "epochs", "warmup_epochs", "warmup_steps", "eval_every", "grad_clip", "amp", "early_stopping",
     "patience", "solver_warmup_epochs", "solver_ramp_epochs", "deterministic",
     "ema_decay", "min_lr_ratio", "grad_scaler_init_scale",
-    "device", "num_threads", "cudnn_benchmark",
+    "device", "num_threads", "cudnn_benchmark", "gradient_accumulation_steps",
     # Optimizer & Scheduler additions (Gen 18 / Gen 22)
     "optimizer", "scheduler_type", "wsd_stable_ratio", "betas",
     "schedule_free_warmup_steps", "schedule_free_r", "schedule_free_weight_lr_power",

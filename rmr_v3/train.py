@@ -90,6 +90,8 @@ def main() -> None:
     ap.add_argument("-o", "--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
     ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
+    ap.add_argument("--batch-size", "--batch_size", type=int, default=None, help="Training batch size per step (overrides config)")
+    ap.add_argument("--grad-accum", "--grad_accum", type=int, default=None, help="Gradient accumulation steps (overrides config)")
     ap.add_argument("--num-threads", type=int, default=None, help="PyTorch CPU intra-op thread count (recommended: 2 for parallel runs)")
     ap.add_argument("--no-cudnn-benchmark", action="store_true", default=False, help="Disable cuDNN benchmark to eliminate multi-process stalls")
     args = ap.parse_args()
@@ -107,6 +109,10 @@ def main() -> None:
         cfg.setdefault("train", {})["patience"] = args.patience
     if args.workers is not None:
         cfg.setdefault("train", {})["workers"] = args.workers
+    if args.batch_size is not None:
+        cfg.setdefault("train", {})["batch_size"] = args.batch_size
+    if args.grad_accum is not None:
+        cfg.setdefault("train", {})["gradient_accumulation_steps"] = args.grad_accum
     if args.num_threads is not None:
         cfg.setdefault("train", {})["num_threads"] = args.num_threads
     if args.no_cudnn_benchmark:
