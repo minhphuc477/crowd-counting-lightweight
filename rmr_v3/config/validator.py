@@ -278,6 +278,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         for key in (
             "lambda_curvature", "lambda_hard_bg", "lambda_fg_gate", "lambda_carrier_cell",
             "lambda_fine_cell", "lambda_spectral", "lambda_spectral_dc", "lambda_scale_align",
+            "lambda_kd_spatial", "lambda_kd_count",
         ):
             if key in l_cfg_pre and float(l_cfg_pre[key]) < 0.0:
                 raise ValueError(f"{key} must be non-negative, got {l_cfg_pre[key]}")

@@ -178,7 +178,7 @@ ALLOWED_MODEL_KEYS = {
 
 ALLOWED_LOSS_KEYS = {
     "lambda_count", "lambda_count_l1", "lambda_flat_dm16", "lambda_cell",
-    "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",
+    "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb", "lambda_kd_spatial", "lambda_kd_count",
     "allocation_loss_type", "bayesian_sigma", "bayesian_background_ratio",
     "ot_reg", "ot_num_iters", "count_loss_mode", "count_nb_dispersion",
     "kappa_flat16", "normalize_flat_dm16", "cell_beta",
