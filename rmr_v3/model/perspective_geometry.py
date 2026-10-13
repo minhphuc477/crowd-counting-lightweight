@@ -19,6 +19,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def _make_gn(channels: int) -> nn.GroupNorm:
+    for g in (8, 4, 2, 1):
+        if channels % g == 0:
+            return nn.GroupNorm(g, channels)
+    return nn.GroupNorm(1, channels)
+
+
 class DynamicCameraAnglePredictor(nn.Module):
     """Dynamic Camera Angle & Scene Scale Context Predictor (DCAP).
 
@@ -122,7 +129,7 @@ class DiAGScaleRoutingHead(nn.Module):
             groups=self.in_channels,
             bias=True,
         )
-        self.norm = nn.GroupNorm(8, self.in_channels)
+        self.norm = _make_gn(self.in_channels)
         self.act = nn.SiLU(inplace=True)
         self.pw = nn.Conv2d(self.in_channels, self.num_scales, kernel_size=1, bias=True)
 
@@ -199,7 +206,7 @@ class DiAGFactorizedRoutingHead(nn.Module):
             groups=self.in_channels,
             bias=True,
         )
-        self.norm = nn.GroupNorm(8, self.in_channels)
+        self.norm = _make_gn(self.in_channels)
         self.act = nn.SiLU(inplace=True)
 
         # Branch 1: Marginal Scale Head (S=3: 32, 64, 128)

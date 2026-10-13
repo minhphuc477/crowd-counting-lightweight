@@ -5,6 +5,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def _make_gn(channels: int) -> nn.GroupNorm:
+    for g in (8, 4, 2, 1):
+        if channels % g == 0:
+            return nn.GroupNorm(g, channels)
+    return nn.GroupNorm(1, channels)
+
+
 class ScaleRoutingHead(nn.Module):
     """Ultra-lightweight Spatial Scale Routing Head for RMR.
 
@@ -41,7 +48,7 @@ class ScaleRoutingHead(nn.Module):
             groups=in_channels,
             bias=True,
         )
-        self.norm = nn.GroupNorm(8, in_channels)
+        self.norm = _make_gn(in_channels)
         self.act = nn.ReLU(inplace=True)
         self.pw = nn.Conv2d(
             in_channels,
@@ -133,7 +140,7 @@ class FactorizedRoutingHead(nn.Module):
             groups=in_channels,
             bias=True,
         )
-        self.norm = nn.GroupNorm(8, in_channels)
+        self.norm = _make_gn(in_channels)
         self.act = nn.ReLU(inplace=True)
 
         # Branch 1: Marginal Scale Head (S=3: 32, 64, 128)
