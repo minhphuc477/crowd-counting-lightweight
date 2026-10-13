@@ -316,7 +316,10 @@ def unrolled_sirt_solver(
             current_omega = current_omega * omega_mod
 
         step_omegas.append(current_omega)
-        step_delta = current_omega * field
+        # Gradient descent on 0.5 * ||Ay - b||^2: negative gradient step direction is -field.
+        # delta_y > 0 adds mass (when under-counting: field < 0 => delta_y > 0).
+        # delta_y < 0 removes mass (when over-counting: field > 0 => delta_y < 0).
+        delta_y = -current_omega * field
         if trust_region_kappa > 0.0:
             eff_kappa = float(trust_region_kappa)
             if scale_routed_trust and scale_routing_weights is not None:
@@ -328,12 +331,15 @@ def unrolled_sirt_solver(
             elif density_adaptive_trust:
                 z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
                 dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
-                eff_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
+                eff_pos_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
                 eff_floor = float(effective_trust_floor)
             else:
+                eff_pos_kappa = eff_kappa
                 eff_floor = float(effective_trust_floor)
+
             base_bound = torch.clamp_min(z_state.float(), eff_floor)
-            bound = eff_kappa * base_bound
+            bound_removal = eff_kappa * base_bound
+
             seed_allowance: float | torch.Tensor = 0.0
             if scale_seeded_carrier and scale_routing_weights is not None:
                 seed_supp = float(scale_seed_eps) * scale_routing_weights[:, 0:1, :, :].float().detach()
@@ -343,25 +349,31 @@ def unrolled_sirt_solver(
                 base_bound_pos = base_bound
             if eatr_floor is not None:
                 base_bound_pos = torch.maximum(base_bound_pos, eatr_floor)
+
             if scale_routed_trust and scale_routing_weights is not None:
-                bound_pos = eff_pos_kappa * base_bound_pos + seed_allowance
+                bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
             elif asymmetric_trust:
                 pos_k = float(trust_pos_kappa)
                 eff_pos = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
-                bound_pos = eff_pos * base_bound_pos + seed_allowance
+                bound_addition = eff_pos * base_bound_pos + seed_allowance
+            elif density_adaptive_trust:
+                bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
             else:
-                bound_pos = eff_kappa * base_bound_pos + seed_allowance
+                bound_addition = eff_kappa * base_bound_pos + seed_allowance
+
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
                 conf_mod = 0.25 + 0.75 * scale_confidence
-                bound = bound * conf_mod
-                bound_pos = bound_pos * conf_mod
-            step_delta = torch.clamp(step_delta, min=-bound_pos, max=bound)
+                bound_removal = bound_removal * conf_mod
+                bound_addition = bound_addition * conf_mod
+
+            # Lower bound (-bound_removal) restricts removal; Upper bound (+bound_addition) allows addition/seeding
+            delta_y = torch.clamp(delta_y, min=-bound_removal, max=bound_addition)
 
         prev_y = y_curr.detach()   # Track actual iterate (not Nesterov extrapolate) for BB-1 correctness
         prev_field = field.detach()
 
-        y_step = z_state.float() - step_delta
+        y_step = z_state.float() + delta_y
 
         # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
         tau_current: float | torch.Tensor = tau_step

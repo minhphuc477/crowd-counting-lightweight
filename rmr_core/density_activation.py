@@ -15,14 +15,21 @@ import torch.nn.functional as F
 
 
 def _pool_local_density(y: torch.Tensor, k_pool: int) -> torch.Tensor:
-    """Compute local average density with dimension-safe pooling."""
+    """Compute local average density with dimension-safe, zero-shift pooling."""
     if y.ndim < 2:
         return y
     orig_ndim = y.ndim
     y_in = y.unsqueeze(0).unsqueeze(0) if orig_ndim == 2 else (y.unsqueeze(0) if orig_ndim == 3 else y)
-    y_local = F.avg_pool2d(
-        y_in, kernel_size=k_pool, stride=1, padding=k_pool // 2, count_include_pad=False
-    )
+    k = max(int(k_pool), 1)
+    if k % 2 == 1:
+        y_local = F.avg_pool2d(
+            y_in, kernel_size=k, stride=1, padding=k // 2, count_include_pad=False
+        )
+    else:
+        pad_l = k // 2 - 1
+        pad_r = k // 2
+        y_padded = F.pad(y_in, (pad_l, pad_r, pad_l, pad_r), mode="replicate")
+        y_local = F.avg_pool2d(y_padded, kernel_size=k, stride=1, count_include_pad=False)
     if y_local.shape[-2:] != y_in.shape[-2:]:
         y_local = y_local[..., : y_in.shape[-2], : y_in.shape[-1]]
     return y_local.squeeze(0).squeeze(0) if orig_ndim == 2 else (y_local.squeeze(0) if orig_ndim == 3 else y_local)
@@ -33,7 +40,8 @@ def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
     tau = float(floor_tau)
     if tau <= 0.0:
         return y_base
-    return torch.where(y_base > tau, y_base - 0.5 * tau, y_base.square() / (2.0 * max(tau, 1e-8)))
+    y_pos = y_base.clamp_min(0.0)
+    return torch.where(y_pos > tau, y_pos - 0.5 * tau, y_pos.square() / (2.0 * max(tau, 1e-8)))
 
 
 def _apply_curvature(

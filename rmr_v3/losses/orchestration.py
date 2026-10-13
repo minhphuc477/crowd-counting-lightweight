@@ -110,6 +110,12 @@ def _compute_core_losses(
     elif cfg.allocation_loss_type == "bayesian":
         lam_alloc = float(cfg.lambda_bayesian) if float(cfg.lambda_bayesian) > 0.0 else float(cfg.lambda_flat_dm16)
         alloc_term = lam_alloc * loss_allocation
+    elif cfg.allocation_loss_type == "fidt":
+        lam_fidt = float(getattr(cfg, "lambda_fidt", 1.0))
+        alloc_term = lam_fidt * loss_allocation
+    elif cfg.allocation_loss_type == "ot_sinkhorn":
+        lam_ot = float(getattr(cfg, "lambda_ot", 1.0))
+        alloc_term = lam_ot * loss_allocation
     else:
         alloc_term = cfg.lambda_flat_dm16 * loss_allocation
     losses["total"] = (
