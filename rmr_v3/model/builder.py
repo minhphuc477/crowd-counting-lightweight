@@ -127,6 +127,7 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
         density_scale_gamma=getattr(cfg, "density_scale_gamma", 0.0),
         density_scale_learnable=getattr(cfg, "density_scale_learnable", False),
         scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.0),
+        head_activation=getattr(cfg, "head_activation", "softplus"),
     )
 
 

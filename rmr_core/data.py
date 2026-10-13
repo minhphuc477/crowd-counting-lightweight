@@ -143,16 +143,14 @@ def train_transform(
     if pts.numel():
         pts[:, 0] -= left
         pts[:, 1] -= top
-        bm = float(boundary_margin)
         keep = (
-            (pts[:, 0] >= -bm) & (pts[:, 0] < float(crop_size) + bm) &
-            (pts[:, 1] >= -bm) & (pts[:, 1] < float(crop_size) + bm)
+            (pts[:, 0] >= 0.0) & (pts[:, 0] < float(crop_size)) &
+            (pts[:, 1] >= 0.0) & (pts[:, 1] < float(crop_size))
         )
         pts = pts[keep]
-        # Invariant: coordinates within the crop (including boundary heads) are clamped
-        # to the closed support [0.0, crop_size - 1.0].
-        pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
-        pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
+        if pts.numel():
+            pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
+            pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
 
     if hflip_prob > 0.0 and random.random() < hflip_prob:
         flipped = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)

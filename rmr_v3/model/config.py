@@ -96,6 +96,7 @@ class RMRv3Config:
     tv_lambda: float = 0.0
     ema_decay: float = 0.0
     temp_softplus: bool = False
+    head_activation: str = "softplus"
 
     # Solver update rule
     solver_mode: str = "additive"
@@ -427,4 +428,6 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
         )
     if cfg.reliability_rate_std_floor <= 0:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
+    if cfg.head_activation not in ("softplus", "relu"):
+        raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
 

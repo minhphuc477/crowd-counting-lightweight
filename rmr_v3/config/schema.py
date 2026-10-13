@@ -60,6 +60,7 @@ ALLOWED_MODEL_KEYS = {
     "tv_lambda",
     "ema_decay",
     "temp_softplus",
+    "head_activation",
     # RMR-v8 Stage 2
     "solver_mode",
     "density_gate_rho",

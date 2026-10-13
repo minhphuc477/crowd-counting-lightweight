@@ -52,9 +52,10 @@ class FineMeasureHead(nn.Module):
         floor_tau: float = 0.0, curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
         density_adaptive_scale: bool = False, density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False, scale_prior_boost: float = 0.0,
-        curvature_pade: bool = False,
+        curvature_pade: bool = False, head_activation: str = "softplus",
     ):
         super().__init__()
+        self.head_activation = str(head_activation).lower()
         self.scale_prior_boost = float(scale_prior_boost)
         self.subpixel_stride2 = bool(subpixel_stride2)
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
@@ -70,12 +71,18 @@ class FineMeasureHead(nn.Module):
 
         if self.subpixel_stride2:
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
-            init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
-            nn.init.constant_(final_conv.bias, init_bias_stride2)
+            if self.head_activation == "relu":
+                nn.init.constant_(final_conv.bias, m0 / 4.0)
+            else:
+                init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
+                nn.init.constant_(final_conv.bias, init_bias_stride2)
         else:
             self.pixel_shuffle = None
-            eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
-            nn.init.constant_(final_conv.bias, eff_bias)  # type: ignore[arg-type]
+            if self.head_activation == "relu":
+                nn.init.constant_(final_conv.bias, m0)
+            else:
+                eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
+                nn.init.constant_(final_conv.bias, eff_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
         if self.temp_softplus:
@@ -112,6 +119,9 @@ class FineMeasureHead(nn.Module):
         z: torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if getattr(self, "head_activation", "softplus") == "relu":
+            return F.relu(z)
+
         if self.scale_conditioned and scale_weights is not None:
             if scale_weights.shape[-2:] != z.shape[-2:]:
                 scale_weights = F.interpolate(
@@ -219,8 +229,10 @@ class ScaleConditionedFineHead(nn.Module):
         density_scale_gamma: float = 0.0,
         density_scale_learnable: bool = False,
         curvature_pade: bool = False,
+        head_activation: str = "softplus",
     ):
         super().__init__()
+        self.head_activation = str(head_activation)
         self.floor_tau = float(floor_tau)
         self.dw = ConvGNAct(width, width, 3, groups=width)
         self.pw = ConvGNAct(width, width, 1)
@@ -232,11 +244,14 @@ class ScaleConditionedFineHead(nn.Module):
         self.out_conv = nn.Conv2d(width + self.num_scales, 1, kernel_size=1)
         nn.init.normal_(self.out_conv.weight, std=0.01)
         m0 = math.log1p(math.exp(float(init_bias)))
-        eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
+        if self.head_activation == "relu":
+            eff_bias = float(m0)
+        else:
+            eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
         nn.init.constant_(self.out_conv.bias, eff_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
-        if self.temp_softplus:
+        if self.temp_softplus and self.head_activation != "relu":
             self.tau = nn.Parameter(torch.ones(1))
 
         self.density_curvature = bool(density_curvature)
@@ -261,6 +276,25 @@ class ScaleConditionedFineHead(nn.Module):
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute calibrated non-negative measure Y0 from latent logit field z0."""
+        if getattr(self, "head_activation", "softplus") == "relu":
+            y_base = F.relu(z)
+            if self.density_adaptive_scale:
+                b_eff = float(self.out_conv.bias.detach().mean().item()) if hasattr(self, "out_conv") else 0.0
+                g_val = self.density_scale_gamma.clamp_min(0.0) if isinstance(self.density_scale_gamma, torch.Tensor) else max(float(self.density_scale_gamma), 0.0)
+                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
+            if self.density_curvature:
+                return _apply_curvature(
+                    y_base,
+                    getattr(self, "curvature_alpha", None),
+                    curv_scale=self.curv_scale,
+                    gated=self.gated_density_curvature,
+                    pool_kernel=self.curvature_pool_kernel,
+                    dense_threshold=self.curvature_dense_threshold,
+                    gate_beta=self.curvature_gate_beta,
+                    curvature_pade=getattr(self, "curvature_pade", False),
+                )
+            return y_base
+
         return _density_activate(
             z,
             temp_softplus=self.temp_softplus,
@@ -276,6 +310,7 @@ class ScaleConditionedFineHead(nn.Module):
             density_adaptive_scale=self.density_adaptive_scale,
             density_scale_gamma=self.density_scale_gamma,
             curvature_pade=getattr(self, "curvature_pade", False),
+            head_activation=getattr(self, "head_activation", "softplus"),
         )
 
     def forward_logits(
@@ -329,6 +364,7 @@ def build_fine_head(
     curvature_alpha_init: float = _CURVATURE_ALPHA_INIT, density_adaptive_scale: bool = False,
     density_scale_gamma: float = 0.0, density_scale_learnable: bool = False,
     scale_prior_boost: float = 0.0, curvature_pade: bool = False,
+    head_activation: str = "softplus",
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     kw = dict(
@@ -338,7 +374,7 @@ def build_fine_head(
         curvature_pool_kernel=curvature_pool_kernel, floor_tau=floor_tau,
         curvature_alpha_init=curvature_alpha_init, density_adaptive_scale=density_adaptive_scale,
         density_scale_gamma=density_scale_gamma, density_scale_learnable=density_scale_learnable,
-        curvature_pade=curvature_pade,
+        curvature_pade=curvature_pade, head_activation=head_activation,
     )
     if scale_conditioned_fine_head:
         return ScaleConditionedFineHead(num_scales=num_scales, **kw)

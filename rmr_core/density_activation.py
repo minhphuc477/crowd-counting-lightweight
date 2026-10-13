@@ -78,8 +78,12 @@ def _density_activate(
     density_adaptive_scale: bool = False,
     density_scale_gamma: torch.Tensor | float = 0.0,
     curvature_pade: bool = False,
+    head_activation: str = "softplus",
 ) -> torch.Tensor:
-    """Shared density activation: temperature softplus + density adaptive scale + curvature."""
+    """Shared density activation: ReLU or temperature softplus + density adaptive scale + curvature."""
+    if head_activation == "relu":
+        return F.relu(z)
+
     if temp_softplus and tau is not None:
         tau_clamped = tau.clamp_min(0.1)
         y_base = tau_clamped * F.softplus(z / tau_clamped)

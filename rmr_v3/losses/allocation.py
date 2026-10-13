@@ -151,9 +151,13 @@ def route_allocation_loss(
         )
 
     losses["allocation"] = loss_allocation
-    losses["flat_dm16"] = comps.get(16, loss_allocation)
-    if -999 in comps:
-        losses["bayesian"] = comps[-999]
+    if cfg.allocation_loss_type == "bayesian":
+        losses["bayesian"] = loss_allocation
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+    else:
+        losses["flat_dm16"] = comps.get(16, loss_allocation)
+        if -999 in comps:
+            losses["bayesian"] = comps[-999]
     for bs, val in comps.items():
         if bs != -999:
             losses[f"dm_{bs}"] = val

@@ -69,8 +69,8 @@ model:
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
 
-  # Deep Inverse Solver (T=6 Unrolled SIRT)
-  enable_solver: true
+  # Deep Inverse Solver (Disabled for pure carrier baseline)
+  enable_solver: false
   solver_mode: additive
   iterations: 6
   omega: 1.0
@@ -104,11 +104,12 @@ model:
   dispersion_min: 0.5
   dispersion_max: 500.0
 
-  # Density Activation, Curvature & Hurdle (Purified)
+  # Density Activation, Curvature & Hurdle (Purified: Disabled Product Gating, ReLU Exact Zero Background)
   hurdle_head: false
   hurdle_gating_mode: disabled
   faithful_dispersion_detach: true
-  temp_softplus: true
+  head_activation: relu
+  temp_softplus: false
   use_coord_attn: false
   ema_decay: 0.999
   density_curvature: false
@@ -116,14 +117,17 @@ model:
   asymmetric_trust: false
 
 loss:
-  allocation_loss_type: flat_dm16
-  kappa_flat16: 20.0
-  normalize_flat_dm16: true
-  dm_target: dual
+  allocation_loss_type: bayesian
+  bayesian_norm_mode: count
+  bayesian_sigma: 4.0
+  bayesian_adaptive_sigma: true
+  bayesian_background_ratio: 0.1
+  dm_target: y
 
   # Macro & Spatial Carrier Supervision: Strict Orthogonal 2-Loss
   lambda_count: 1.0
-  lambda_flat_dm16: 1.0
+  lambda_bayesian: 1.0
+  lambda_flat_dm16: 0.0
   lambda_cell: 0.0
 
   # Auxiliary Losses Deactivated
