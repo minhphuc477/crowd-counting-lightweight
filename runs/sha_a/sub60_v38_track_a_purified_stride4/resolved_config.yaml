@@ -45,7 +45,7 @@ model:
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
-  enable_solver: true
+  enable_solver: false
   solver_mode: additive
   iterations: 6
   omega: 1.0
@@ -79,7 +79,8 @@ model:
   hurdle_head: false
   hurdle_gating_mode: disabled
   faithful_dispersion_detach: true
-  temp_softplus: true
+  head_activation: relu
+  temp_softplus: false
   use_coord_attn: false
   ema_decay: 0.999
   density_curvature: false
@@ -89,7 +90,7 @@ loss:
   allocation_loss_type: flat_dm16
   kappa_flat16: 20.0
   normalize_flat_dm16: true
-  dm_target: dual
+  dm_target: y
   lambda_count: 1.0
   lambda_flat_dm16: 1.0
   lambda_cell: 0.0
