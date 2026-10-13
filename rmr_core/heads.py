@@ -167,6 +167,7 @@ class FineMeasureHead(nn.Module):
             density_adaptive_scale=self.density_adaptive_scale,
             density_scale_gamma=self.density_scale_gamma,
             curvature_pade=getattr(self, "curvature_pade", False),
+            head_activation=getattr(self, "head_activation", "softplus"),
         )
 
     def forward_logits(
