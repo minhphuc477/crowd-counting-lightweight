@@ -284,6 +284,8 @@ def format_dynamic_training_banner(
     guidance_head = "Hurdle-NB (Occupancy Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
     if m_cfg.scale_conditioned_fine_head:
         density_head = "ScaleConditionedFineHead (FiLM Continuous Simplex + 3x3 DW Receptive Field)"
+    elif getattr(m_cfg, "head_activation", "softplus") == "relu":
+        density_head = "FineMeasureHead (Exact Zero-Background ReLU)"
     elif m_cfg.temp_softplus:
         density_head = "FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])"
     else:
