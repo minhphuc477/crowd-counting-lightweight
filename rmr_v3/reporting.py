@@ -49,8 +49,17 @@ def format_epoch_row(
     train_allocation = loss_avgs.get("allocation", 0.0)
     train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
 
+    alloc_type = getattr(loss_cfg, "allocation_loss_type", "flat_dm16")
     if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
         alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+    elif alloc_type == "dual_bayesian_dm16":
+        alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
+    elif alloc_type == "bayesian":
+        alloc_repr = f"alloc(bay): {train_allocation:.3f}"
+    elif alloc_type == "fidt":
+        alloc_repr = f"alloc(fidt): {train_allocation:.3f}"
+    elif alloc_type == "ot_sinkhorn":
+        alloc_repr = f"alloc(ot): {train_allocation:.3f}"
     else:
         alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
@@ -100,8 +109,17 @@ def format_eval_block(
     train_allocation = loss_avgs.get("allocation", 0.0)
     train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
 
+    alloc_type = getattr(loss_cfg, "allocation_loss_type", "flat_dm16")
     if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
         alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+    elif alloc_type == "dual_bayesian_dm16":
+        alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
+    elif alloc_type == "bayesian":
+        alloc_repr = f"alloc(bay): {train_allocation:.3f}"
+    elif alloc_type == "fidt":
+        alloc_repr = f"alloc(fidt): {train_allocation:.3f}"
+    elif alloc_type == "ot_sinkhorn":
+        alloc_repr = f"alloc(ot): {train_allocation:.3f}"
     else:
         alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 

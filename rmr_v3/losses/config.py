@@ -15,6 +15,8 @@ class RMRv3LossConfig:
     lambda_region_nb: float = 0.20
     lambda_hurdle: float = 0.10
     lambda_trunc_nb: float = 0.20
+    lambda_fidt: float = 1.0
+    lambda_ot: float = 1.0
 
     # Loss mode selection
     allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt" | "dual_bayesian_dm16"
