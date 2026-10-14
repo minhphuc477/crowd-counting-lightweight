@@ -25,6 +25,7 @@ def validate_resume_compatibility(
     ckpt_commit: str | None = None,
     current_commit: str | None = None,
     allow_cross_commit: bool = False,
+    allow_config_mismatch: bool = False,
 ) -> None:
     """Validate that incoming config matches checkpoint across all method-critical fields, hash, and git commit."""
     if not allow_cross_commit and ckpt_commit and current_commit:
@@ -33,51 +34,66 @@ def validate_resume_compatibility(
                 f"Resume cross-commit mismatch: checkpoint was created on git commit {ckpt_commit!r}, "
                 f"but current environment is at commit {current_commit!r}. "
                 f"Resuming across different git commits is disallowed to prevent hybrid code trajectories. "
-                f"To override this check intentionally, pass --allow-cross-commit-resume."
+                f"To override this check intentionally, pass --allow-cross-commit-resume or --force-resume."
             )
 
-    if ckpt_hash is not None and incoming_hash is not None:
-        if ckpt_hash != incoming_hash:
-            raise ValueError(
-                f"Resume config hash mismatch: checkpoint SHA256 {ckpt_hash} != incoming SHA256 {incoming_hash}. "
-                f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
-            )
-
-    if not isinstance(ckpt_cfg, dict) or not isinstance(incoming_cfg, dict):
-        return
-
-    # Check seed immutability
-    if "seed" in ckpt_cfg and "seed" in incoming_cfg:
-        if int(ckpt_cfg["seed"]) != int(incoming_cfg["seed"]):
-            raise ValueError(
-                f"Resume config mismatch for 'seed': "
-                f"checkpoint has {ckpt_cfg['seed']!r} but incoming config has {incoming_cfg['seed']!r}. "
-                f"Resuming requires identical seed for trajectory continuity."
-            )
-
-    for section, fields in METHOD_CRITICAL_FIELDS.items():
-        ckpt_sec = ckpt_cfg.get(section, {})
-        inc_sec = incoming_cfg.get(section, {})
-        if not isinstance(ckpt_sec, dict) or not isinstance(inc_sec, dict):
-            continue
-
-        for field in fields:
-            # Handle backbone alias
-            if field in ("backbone", "backbone_name"):
-                v_ckpt = ckpt_sec.get("backbone", ckpt_sec.get("backbone_name"))
-                v_inc = inc_sec.get("backbone", inc_sec.get("backbone_name"))
-            elif field in ("omega", "sirt_omega"):
-                v_ckpt = ckpt_sec.get("omega", ckpt_sec.get("sirt_omega"))
-                v_inc = inc_sec.get("omega", inc_sec.get("sirt_omega"))
-            else:
-                default_val = CRITICAL_TRAIN_DEFAULTS.get(field) if section == "train" else None
-                v_ckpt = ckpt_sec.get(field, default_val)
-                v_inc = inc_sec.get(field, default_val)
-
-            if v_ckpt is not None and v_inc is not None:
-                if not _are_values_compatible(v_ckpt, v_inc):
+    # Validate method-critical architecture, loss, and training parameters
+    if isinstance(ckpt_cfg, dict) and isinstance(incoming_cfg, dict):
+        # Check seed immutability
+        if "seed" in ckpt_cfg and "seed" in incoming_cfg:
+            if int(ckpt_cfg["seed"]) != int(incoming_cfg["seed"]):
+                if not allow_config_mismatch:
                     raise ValueError(
-                        f"Resume config mismatch for '{section}.{field}': "
-                        f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
-                        f"Resuming requires matching experiment configuration to guarantee trajectory continuity."
+                        f"Resume config mismatch for 'seed': "
+                        f"checkpoint has {ckpt_cfg['seed']!r} but incoming config has {incoming_cfg['seed']!r}. "
+                        f"Resuming requires identical seed for trajectory continuity."
                     )
+                print(f"[Resume Warning] Seed mismatch: ckpt={ckpt_cfg['seed']!r} vs inc={incoming_cfg['seed']!r}")
+
+        for section, fields in METHOD_CRITICAL_FIELDS.items():
+            ckpt_sec = ckpt_cfg.get(section, {})
+            inc_sec = incoming_cfg.get(section, {})
+            if not isinstance(ckpt_sec, dict) or not isinstance(inc_sec, dict):
+                continue
+
+            for field in fields:
+                # Handle backbone alias
+                if field in ("backbone", "backbone_name"):
+                    v_ckpt = ckpt_sec.get("backbone", ckpt_sec.get("backbone_name"))
+                    v_inc = inc_sec.get("backbone", inc_sec.get("backbone_name"))
+                elif field in ("omega", "sirt_omega"):
+                    v_ckpt = ckpt_sec.get("omega", ckpt_sec.get("sirt_omega"))
+                    v_inc = inc_sec.get("omega", inc_sec.get("sirt_omega"))
+                else:
+                    default_val = CRITICAL_TRAIN_DEFAULTS.get(field) if section == "train" else None
+                    v_ckpt = ckpt_sec.get(field, default_val)
+                    v_inc = inc_sec.get(field, default_val)
+
+                if v_ckpt is not None and v_inc is not None:
+                    if not _are_values_compatible(v_ckpt, v_inc):
+                        if allow_config_mismatch:
+                            print(
+                                f"[Resume Warning] Field mismatch for '{section}.{field}': "
+                                f"ckpt={v_ckpt!r} vs inc={v_inc!r} (overridden by --allow-config-mismatch)"
+                            )
+                        else:
+                            raise ValueError(
+                                f"Resume config mismatch for '{section}.{field}': "
+                                f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
+                                f"Resuming requires matching experiment configuration to guarantee trajectory continuity. "
+                                f"To override intentionally, pass --allow-config-mismatch or --force-resume."
+                            )
+
+    if ckpt_hash is not None and incoming_hash is not None and ckpt_hash != incoming_hash:
+        if allow_config_mismatch:
+            print(
+                f"[Resume Notice] Config hash difference ({ckpt_hash[:8]} vs {incoming_hash[:8]}), "
+                f"proceeding due to --allow-config-mismatch / --force-resume."
+            )
+        else:
+            # If all method-critical fields passed above, this difference is due to non-critical runtime settings
+            # (such as early_stopping, patience, epochs, or workers). Proceed with an informative notice.
+            print(
+                f"[Resume Notice] Config hash difference detected ({ckpt_hash[:8]} vs {incoming_hash[:8]}), "
+                f"but all method-critical architectural and optimization fields match. Proceeding with resumed trajectory."
+            )

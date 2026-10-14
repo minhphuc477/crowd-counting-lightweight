@@ -89,7 +89,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             incoming_hash=run_config_hash,
             ckpt_commit=ckpt_commit,
             current_commit=current_commit,
-            allow_cross_commit=bool(args.allow_cross_commit_resume),
+            allow_cross_commit=bool(getattr(args, "allow_cross_commit_resume", False) or getattr(args, "force_resume", False)),
+            allow_config_mismatch=bool(getattr(args, "allow_config_mismatch", False) or getattr(args, "force_resume", False)),
         )
 
     out_dir = Path(cfg["output_dir"])

@@ -89,6 +89,8 @@ def main() -> None:
     ap.add_argument("--non-deterministic", "--no-deterministic", dest="non_deterministic", action="store_true", default=False, help="Disable strict determinism")
     ap.add_argument("-o", "--overwrite", action="store_true", default=False)
     ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
+    ap.add_argument("--force-resume", action="store_true", default=False, help="Allow resuming even if configuration hash or git commit differs")
+    ap.add_argument("--allow-config-mismatch", action="store_true", default=False, help="Allow resuming even if configuration parameters differ")
     ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
     ap.add_argument("--batch-size", "--batch_size", type=int, default=None, help="Training batch size per step (overrides config)")
     ap.add_argument("--grad-accum", "--grad_accum", type=int, default=None, help="Gradient accumulation steps (overrides config)")

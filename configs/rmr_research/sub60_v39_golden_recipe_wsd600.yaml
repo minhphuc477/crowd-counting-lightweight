@@ -179,9 +179,9 @@ train:
   solver_warmup_epochs: 5
   solver_ramp_epochs: 20
 
-  # Early Stopping Safeguard
-  early_stopping: true
-  patience: 60             # 12 consecutive eval cycles (60 epochs) without MAE gain terminates run
+  # Early Stopping Safeguard (Disabled for WSD to allow full exploration and decay phase to epoch 600)
+  early_stopping: false
+  patience: 0
   eval_every: 5
   deterministic: false
 

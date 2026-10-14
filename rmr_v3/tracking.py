@@ -323,14 +323,15 @@ def format_dynamic_training_banner(
     if extra_loss_tags:
         supervision_desc += f" + [{', '.join(extra_loss_tags)}]"
 
-    budget_pct = (n_params / 105_000) * 100
-    headroom = 105_000 - n_params
+    budget_ceiling = getattr(m_cfg, "max_trainable_params", 105_000) or 105_000
+    budget_pct = (n_params / budget_ceiling) * 100
+    headroom = budget_ceiling - n_params
     run_label = run_id if run_id else Path(cfg.get("output_dir", "unspecified")).name
 
     banner = [
         "=" * 80,
         "  RMR Training Initialized [Dynamic Architecture Engine]",
-        f"  Run: {run_label} | Parameters: {n_params:,} / 105,000 budget ({budget_pct:.1f}% used, +{headroom:,} headroom)",
+        f"  Run: {run_label} | Parameters: {n_params:,} / {budget_ceiling:,} budget ({budget_pct:.1f}% used, +{headroom:,} headroom)",
         f"  Carrier: {carrier_line}",
         f"  Geometry: {reg_desc} | Pooling: {pooling_desc}",
         f"  Solver: {solver_desc}",
