@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 def count_from_map(y: torch.Tensor) -> torch.Tensor:
@@ -188,3 +189,31 @@ def density_stratified_mae(rows: list[dict]) -> dict[str, float]:
         if vals:
             out[name] = float(np.mean(vals))
     return out
+
+
+from .spatial_analysis import (
+    compute_count_confidence_interval,
+    compute_crowd_risk_index,
+    evaluate_point_localization,
+    extract_perspective_field,
+    extract_subpixel_peaks,
+)
+
+__all__ = [
+    "bootstrap_ci",
+    "compute_count_confidence_interval",
+    "compute_crowd_risk_index",
+    "compute_game",
+    "compute_game_exact_points",
+    "compute_mae",
+    "compute_nae",
+    "compute_rmse",
+    "compute_wmae",
+    "count_from_map",
+    "density_stratified_mae",
+    "evaluate_point_localization",
+    "extract_perspective_field",
+    "extract_subpixel_peaks",
+    "summary_metrics",
+]
+

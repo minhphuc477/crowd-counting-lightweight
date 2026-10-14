@@ -623,7 +623,10 @@ class TestCompleteAblationMatrix:
                     continue
                 raise
             n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            assert n_params <= 105000, f"Budget exceeded in {cfg_path}: {n_params} > 105000"
+            budget_cap = int(m_dict.get("max_trainable_params", 105000))
+            if budget_cap <= 0:
+                budget_cap = 105000
+            assert n_params <= budget_cap, f"Budget exceeded in {cfg_path}: {n_params} > {budget_cap}"
             out = model(x)
             assert out["y"].shape[-1] > 0, f"Bad output for {cfg_path}"
             assert (out["y"] >= 0.0).all(), f"Negative densities found in {cfg_path}"

@@ -7,6 +7,7 @@ from rmr_core.heads import build_fine_head
 from rmr_core.necks import (
     AdditiveFPNNeck,
     ASPPLiteFPNNeck,
+    BiFPNLiteNeck,
     HDCLiteFPNNeck,
     RepWeightedFPNNeck,
 )
@@ -49,10 +50,16 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
         )
+    if cfg.neck_type == "bifpn_lite":
+        return BiFPNLiteNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            use_gap=cfg.use_aspp_gap,
+        )
     if cfg.neck_type == "additive":
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
-        f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', 'hdc_lite', or 'rep_weighted'."
+        f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', or 'bifpn_lite'."
     )
 
 

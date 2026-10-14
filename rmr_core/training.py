@@ -1,343 +1,50 @@
 from __future__ import annotations
 
-import hashlib
-import math
-import os
-import random
-import subprocess
-import time
-from pathlib import Path
-from typing import Any
+"""Training Infrastructure Facade.
 
-import numpy as np
-import torch
+Re-exports training, checkpointing, reproducibility, and scheduling utilities:
+  - rmr_core.checkpointing: build_checkpoint, safe_torch_save, safe_torch_load, register_safe_globals
+  - rmr_core.provenance: get_git_info, compute_file_sha256
+  - rmr_core.reproducibility: seed_everything, seed_worker, make_generator, save_rng_state, load_rng_state
+  - rmr_core.schedulers: make_scheduler, make_cosine_scheduler, IdentityScheduler
+"""
 
+from .checkpointing import (
+    build_checkpoint,
+    register_safe_globals,
+    safe_torch_load,
+    safe_torch_save,
+)
+from .provenance import (
+    compute_file_sha256,
+    get_git_info,
+)
+from .reproducibility import (
+    load_rng_state,
+    make_generator,
+    save_rng_state,
+    seed_everything,
+    seed_worker,
+)
+from .schedulers import (
+    IdentityScheduler,
+    make_cosine_scheduler,
+    make_scheduler,
+)
 
-def get_git_info() -> tuple[str, bool]:
-    """Retrieve the current git commit hash and working tree dirty status."""
-    try:
-        commit = (
-            subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
-            )
-            .decode("ascii")
-            .strip()
-        )
-    except Exception:
-        commit = "unknown"
-    try:
-        status = (
-            subprocess.check_output(
-                ["git", "status", "--porcelain"], stderr=subprocess.DEVNULL
-            )
-            .decode("utf-8")
-            .strip()
-        )
-        dirty = bool(status)
-    except Exception:
-        dirty = False
-    return commit, dirty
-
-
-def compute_file_sha256(path: Path | str) -> str:
-    """Compute deterministic SHA256 hex digest of a file in 64KB blocks.
-
-    For text-based manifest/config files, line endings are normalized (\\r\\n -> \\n)
-    to guarantee cross-platform deterministic hashing between Linux (LF) and Windows (CRLF).
-    """
-    p = Path(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"File not found for SHA256 computation: {p}")
-    h = hashlib.sha256()
-    is_text = p.suffix.lower() in (".jsonl", ".json", ".yaml", ".yml", ".txt", ".csv")
-    if is_text:
-        with open(p, "rb") as f:
-            content = f.read().replace(b"\r\n", b"\n")
-            h.update(content)
-    else:
-        with open(p, "rb") as f:
-            while chunk := f.read(65536):
-                h.update(chunk)
-    return h.hexdigest()
-
-
-
-def build_checkpoint(
-    epoch: int,
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scheduler: Any,
-    scaler: Any,
-    config: dict[str, Any],
-    config_hash: str,
-    best_mae: float,
-    epochs_without_improvement: int,
-    solver_strength: float = 1.0,
-    ema_state: dict[str, torch.Tensor] | None = None,
-    extra_fields: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Canonical checkpoint bundle builder ensuring all state elements and provenance are recorded."""
-    git_commit, git_dirty = get_git_info()
-    ckpt: dict[str, Any] = {
-        "epoch": epoch,
-        "model": model.state_dict(),
-        "optimizer": optimizer.state_dict() if optimizer is not None else None,
-        "scheduler": scheduler.state_dict() if scheduler is not None else None,
-        "scaler": scaler.state_dict() if scaler is not None else None,
-        "rng_state": save_rng_state(),
-        "solver_strength": float(solver_strength),
-        "config": config,
-        "config_hash": config_hash,
-        "best_mae": float(best_mae),
-        "epochs_without_improvement": int(epochs_without_improvement),
-        "git_commit": git_commit,
-        "git_dirty": git_dirty,
-    }
-    if ema_state is not None:
-        ckpt["ema_model"] = {
-            k: v.detach().float().cpu() for k, v in ema_state.items()
-        }
-    if extra_fields:
-        ckpt.update(extra_fields)
-    return ckpt
-
-
-def seed_everything(seed: int, deterministic: bool = True, warn_only: bool = True) -> None:
-    """Set seeds across random, numpy, and torch, with deterministic algorithm controls."""
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    if deterministic:
-        if "CUBLAS_WORKSPACE_CONFIG" not in os.environ:
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        try:
-            torch.use_deterministic_algorithms(True, warn_only=warn_only)
-        except RuntimeError:
-            # If CuBLAS workspace wasn't configured prior to process start, fallback to warn_only=True
-            torch.use_deterministic_algorithms(True, warn_only=True)
-    else:
-        torch.backends.cudnn.deterministic = False
-        torch.backends.cudnn.benchmark = True
-        try:
-            torch.use_deterministic_algorithms(False)
-        except Exception:
-            pass
-
-
-def seed_worker(worker_id: int) -> None:
-    """Seed DataLoader worker processes deterministically across numpy, random, and torch."""
-    worker_seed = (torch.initial_seed() + worker_id) % (2**32)
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
-
-
-def make_generator(seed: int = 42) -> torch.Generator:
-    """Create a seeded PyTorch Generator for reproducible DataLoader shuffling."""
-    g = torch.Generator()
-    g.manual_seed(seed)
-    return g
-
-
-
-def save_rng_state() -> dict[str, Any]:
-    """Capture random, numpy, torch, and CUDA RNG states for exact resume reproducibility."""
-    state: dict[str, Any] = {
-        "python": random.getstate(),
-        "numpy": np.random.get_state(),
-        "torch": torch.get_rng_state(),
-    }
-    if torch.cuda.is_available():
-        state["cuda"] = torch.cuda.get_rng_state_all()
-    return state
-
-
-def load_rng_state(state: dict[str, Any] | None, strict: bool = False) -> None:
-    """Restore random, numpy, torch, and CUDA RNG states."""
-    if not isinstance(state, dict):
-        if strict:
-            raise ValueError("RNG state must be a valid dictionary for exact resume.")
-        return
-    py_state = state.get("python", state.get("python_random"))
-    if py_state is not None:
-        try:
-            random.setstate(py_state)
-        except Exception as e:
-            if strict:
-                raise RuntimeError(f"Failed to restore Python RNG state: {e}") from e
-
-    np_state = state.get("numpy")
-    if np_state is not None:
-        try:
-            np.random.set_state(np_state)
-        except Exception as e:
-            if strict:
-                raise RuntimeError(f"Failed to restore NumPy RNG state: {e}") from e
-
-    torch_state = state.get("torch")
-    if torch_state is not None and isinstance(torch_state, torch.Tensor):
-        try:
-            torch.set_rng_state(torch_state)
-        except Exception as e:
-            if strict:
-                raise RuntimeError(f"Failed to restore Torch RNG state: {e}") from e
-
-    cuda_state = state.get("cuda")
-    if cuda_state is not None and torch.cuda.is_available() and isinstance(cuda_state, (list, tuple)):
-        try:
-            torch.cuda.set_rng_state_all(cuda_state)
-        except Exception as e:
-            if strict:
-                raise RuntimeError(f"Failed to restore CUDA RNG state: {e}") from e
-
-
-def make_scheduler(
-    optimizer: torch.optim.Optimizer,
-    epochs: int,
-    warmup: int = 5,
-    *,
-    warmup_epochs: int | None = None,
-    min_lr_ratio: float = 0.05,
-) -> torch.optim.lr_scheduler.LambdaLR:
-    """Linear warmup followed by cosine annealing learning rate scheduler with a minimum floor."""
-    if warmup_epochs is not None:
-        warmup = warmup_epochs
-
-    def fn(epoch: int) -> float:
-        if epoch < warmup:
-            return max(1e-3, (epoch + 1) / max(1, warmup))
-        p = (epoch - warmup) / max(1, epochs - warmup)
-        cosine = 0.5 * (1.0 + math.cos(math.pi * min(1.0, p)))
-        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
-
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fn)
-
-
-def safe_torch_save(
-    state: dict[str, Any],
-    path: str | os.PathLike,
-    retries: int = 5,
-    delay: float = 0.5,
-) -> None:
-    """Windows-safe atomic checkpoint saving with retry logic to avoid file lock collisions."""
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = target.with_name(f"{target.stem}_{os.getpid()}_{time.time_ns()}.tmp")
-
-    saved_directly = False
-    try:
-        try:
-            torch.save(state, tmp_path)
-        except Exception:
-            # Fallback to direct save with retry if temp file creation fails
-            for attempt in range(retries):
-                try:
-                    torch.save(state, target)
-                    saved_directly = True
-                    return
-                except Exception:
-                    if attempt == retries - 1:
-                        raise
-                    time.sleep(delay)
-            return
-
-        # Atomic or retry replacement on Windows
-        for attempt in range(retries):
-            try:
-                os.replace(tmp_path, target)
-                return
-            except OSError:
-                if attempt == retries - 1:
-                    try:
-                        target.unlink(missing_ok=True)
-                        os.replace(tmp_path, target)
-                        return
-                    except Exception:
-                        torch.save(state, target)
-                        saved_directly = True
-                        return
-                time.sleep(delay)
-    finally:
-        # SEC-05: Ensure temporary file is never leaked on disk if an error occurs or direct save was used
-        if not saved_directly and tmp_path.exists():
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-
-_SAFE_GLOBALS_INITIALIZED = False
-
-
-def register_safe_globals() -> None:
-    """Register safe NumPy data structures in PyTorch unpickler allowlist (CWE-502 mitigation)."""
-    global _SAFE_GLOBALS_INITIALIZED
-    if _SAFE_GLOBALS_INITIALIZED:
-        return
-
-    safe_types: list[Any] = []
-    # NumPy internal multiarray reconstructors
-    for mod_name in ("numpy._core.multiarray", "numpy.core.multiarray"):
-        try:
-            mod = __import__(mod_name, fromlist=["_reconstruct", "scalar"])
-            for fn_name in ("_reconstruct", "scalar"):
-                if hasattr(mod, fn_name):
-                    safe_types.append(getattr(mod, fn_name))
-        except (ImportError, AttributeError):
-            pass
-
-    # NumPy arrays, dtypes, and scalar types
-    try:
-        import numpy as np
-        safe_types.extend([np.ndarray, np.dtype])
-        for dt in (np.float32, np.float64, np.int32, np.int64, np.uint32, np.uint64, np.bool_):
-            safe_types.append(dt)
-        if hasattr(np, "dtypes"):
-            for attr in dir(np.dtypes):
-                obj = getattr(np.dtypes, attr)
-                if isinstance(obj, type):
-                    safe_types.append(obj)
-    except (ImportError, AttributeError):
-        pass
-
-    if hasattr(torch.serialization, "add_safe_globals") and safe_types:
-        try:
-            torch.serialization.add_safe_globals(safe_types)
-        except Exception:
-            pass
-
-    _SAFE_GLOBALS_INITIALIZED = True
-
-
-def safe_torch_load(
-    path: str | os.PathLike,
-    map_location: str | torch.device = "cpu",
-    weights_only: bool = True,
-) -> dict[str, Any]:
-    """Safely deserialize PyTorch checkpoints with safe globals allowlisted against CWE-502."""
-    register_safe_globals()
-    p = Path(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"Checkpoint file not found: {p}")
-
-    try:
-        return torch.load(p, map_location=map_location, weights_only=weights_only)
-    except TypeError:
-        # Backward compatibility for PyTorch versions lacking weights_only parameter
-        return torch.load(p, map_location=map_location)
-    except Exception as e:
-        if weights_only:
-            # Fallback for legacy checkpoints containing non-allowlisted custom objects
-            import warnings
-            warnings.warn(
-                f"Loading checkpoint '{p.name}' with weights_only=True failed ({e}). "
-                "Falling back to weights_only=False for local trusted checkpoint.",
-                UserWarning,
-            )
-            return torch.load(p, map_location=map_location, weights_only=False)
-        raise
-
+__all__ = [
+    "IdentityScheduler",
+    "build_checkpoint",
+    "compute_file_sha256",
+    "get_git_info",
+    "load_rng_state",
+    "make_cosine_scheduler",
+    "make_generator",
+    "make_scheduler",
+    "register_safe_globals",
+    "safe_torch_load",
+    "safe_torch_save",
+    "save_rng_state",
+    "seed_everything",
+    "seed_worker",
+]

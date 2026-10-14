@@ -313,3 +313,99 @@ def build_v35_rmr_model(
         model = model.to(device=device)
 
     return model
+
+
+CANONICAL_TRACK_B_PARAM_BUDGET: int = 200000
+
+
+def get_track_b_model_config(
+    variant: str = "full",  # "baseline" | "bifpn" | "full"
+    **overrides: Any,
+) -> RMRv3Config:
+    """Return verified Track B architecture configuration (150,000 - 200,000 params)."""
+    base: dict[str, Any] = {
+        "output_stride": 2,
+        "subpixel_dm": True,
+        "subpixel_kernel_size": 7 if variant == "full" else 3,
+        "feature_width": 64,
+        "backbone_name": "mobilenetv4_conv_small_050.e3000_r224_in1k",
+        "pretrained": True,
+        "backbone_lr_scale": 0.1,
+        "init_m0": 0.015763,
+        "max_trainable_params": CANONICAL_TRACK_B_PARAM_BUDGET,
+        "neck_type": "bifpn_lite" if variant in ("bifpn", "full") else "hdc_lite",
+        "use_aspp_gap": True,
+        "region_sizes_px": (32, 64, 128),
+        "region_overlap": 0.5,
+        "include_full_image": False,
+        "regional_feature_stats": "mean",
+        "region_head_hidden": 128,
+        "dynamic_scale_routing": True,
+        "factorized_scale_routing": False,
+        "scale_router_temperature": 1.0,
+        "pre_solver_scale_gating": True,
+        "scale_gating_power": 1.0,
+        "temp_softplus": True,
+        "density_curvature": True,
+        "gated_density_curvature": True,
+        "curvature_dense_threshold": 0.15,
+        "curvature_gate_beta": 0.03,
+        "curvature_pool_kernel": 9,
+        "curvature_alpha_init": -4.0,
+        "hurdle_head": True,
+        "hurdle_gating_mode": "occupancy",
+        "dispersion_init": 50.0,
+        "dispersion_min": 0.5,
+        "dispersion_max": 500.0,
+        "reliability_mode": "snr",
+        "reliability_rate_std_floor": 0.01,
+        "reliability_weight_min": 0.25,
+        "reliability_weight_max": 4.0,
+        "normalize_reliability_within_scale": True,
+        "detach_region_mean_in_solver": False,
+        "detach_reliability_in_solver": False,
+        "detach_y0_for_solver": False,
+        "enable_solver": True,
+        "solver_mode": "additive",
+        "iterations": 6 if variant == "full" else 2,
+        "omega": 1.0,
+        "residual_clip": 0.0,
+        "eps": 1e-6,
+        "adjoint_mode": "radon_nikodym",
+        "morozov_gamma": 0.75,
+        "morozov_rho_cap": 0.25,
+        "trust_region_kappa": 0.35,
+        "trust_region_floor": 0.005,
+        "use_barzilai_borwein": True,
+        "use_scale_entropy_trust": True,
+        "tv_lambda": 0.02,
+        "tv_type": "laplacian",
+        "proximal_tau": 0.015,
+        "proximal_mode": "firm",
+        "proximal_mu": 3.0,
+        "ema_decay": 0.9995,
+        "learned_solver_steps": True if variant == "full" else False,
+        "morozov_gamma_max": 1.0,
+    }
+    base.update(overrides)
+    return RMRv3Config.from_dict(base)
+
+
+def build_track_b_model(
+    variant: str = "full",
+    pretrained: bool = True,
+    device: str | torch.device | None = None,
+    **overrides: Any,
+) -> RMRv3:
+    """Instantiate and verify Track B architecture model."""
+    cfg = get_track_b_model_config(variant=variant, pretrained=pretrained, **overrides)
+    model = RMRv3(cfg)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if total_params > CANONICAL_TRACK_B_PARAM_BUDGET:
+        raise ValueError(
+            f"Track B model violated parameter ceiling: {total_params} > {CANONICAL_TRACK_B_PARAM_BUDGET}"
+        )
+    if device is not None:
+        model = model.to(device=device)
+    return model
+

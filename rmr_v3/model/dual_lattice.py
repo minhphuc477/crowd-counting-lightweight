@@ -141,10 +141,14 @@ class SubpixelAllocationHead(torch.nn.Module):
       3. Ultra-lightweight: Exactly 452 trainable parameters.
     """
 
-    def __init__(self, in_channels: int = 32) -> None:
+    def __init__(self, in_channels: int = 32, kernel_size: int = 3) -> None:
         super().__init__()
+        self.kernel_size = int(kernel_size)
+        pad = self.kernel_size // 2
         self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1, groups=in_channels),
+            torch.nn.Conv2d(
+                in_channels, in_channels, kernel_size=self.kernel_size, padding=pad, groups=in_channels
+            ),
             torch.nn.SiLU(inplace=True),
             torch.nn.Conv2d(in_channels, 4, kernel_size=1),
         )

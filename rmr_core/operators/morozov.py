@@ -48,9 +48,9 @@ def compute_morozov_discrepancy(
             ).view(1, -1, 1)
             base_gamma: float | torch.Tensor = (pi_box * gamma_s).sum(dim=1, keepdim=True)
         else:
-            base_gamma = float(morozov_gamma)
+            base_gamma = morozov_gamma if isinstance(morozov_gamma, torch.Tensor) else float(morozov_gamma)
     else:
-        base_gamma = float(morozov_gamma)
+        base_gamma = morozov_gamma if isinstance(morozov_gamma, torch.Tensor) else float(morozov_gamma)
 
     if multiscale_morozov and regions.area.numel() > 0:
         reg_area = regions.area.to(device=q.device, dtype=torch.float32).view(1, 1, -1).clamp_min(1.0)

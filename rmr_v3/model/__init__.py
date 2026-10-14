@@ -44,12 +44,15 @@ from .canonical import (
     CANONICAL_EXPECTED_PARAMS,
     CANONICAL_V35_PARAM_BUDGET,
     CANONICAL_V35_EXPECTED_PARAMS,
+    CANONICAL_TRACK_B_PARAM_BUDGET,
     build_canonical_rmr_model,
     build_v35_rmr_model,
+    build_track_b_model,
     get_canonical_model_config,
     get_canonical_loss_config,
     get_v35_model_config,
     get_v35_loss_config,
+    get_track_b_model_config,
 )
 
 __all__ = [
@@ -57,12 +60,15 @@ __all__ = [
     "CANONICAL_EXPECTED_PARAMS",
     "CANONICAL_V35_PARAM_BUDGET",
     "CANONICAL_V35_EXPECTED_PARAMS",
+    "CANONICAL_TRACK_B_PARAM_BUDGET",
     "build_canonical_rmr_model",
     "build_v35_rmr_model",
+    "build_track_b_model",
     "get_canonical_model_config",
     "get_canonical_loss_config",
     "get_v35_model_config",
     "get_v35_loss_config",
+    "get_track_b_model_config",
 
     "AdditiveFPNNeck",
     "ASPPLiteFPNNeck",

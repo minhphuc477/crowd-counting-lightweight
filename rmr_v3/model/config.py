@@ -47,9 +47,10 @@ class RMRv3Config:
     subpixel_stride2: bool = False
     # Sub-60: Sub-pixel Dirichlet-Multinomial Mass-Preserving Allocation Head (DM-DL, +452 params)
     subpixel_dm: bool = False
+    subpixel_kernel_size: int = 3
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted"
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted" | "bifpn_lite"
     context_dilations: tuple[int, ...] = (1, 2, 3)
     use_aspp_gap: bool = True
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
@@ -67,6 +68,8 @@ class RMRv3Config:
     residual_clip: float = 0.0
     eps: float = 1e-6
     detach_y0_for_solver: bool = False
+    learned_solver_steps: bool = False
+    morozov_gamma_max: float = 1.0
 
     # Negative-Binomial regional uncertainty
     dispersion_init: float = 50.0

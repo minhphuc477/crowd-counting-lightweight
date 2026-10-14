@@ -48,66 +48,39 @@ def unrolled_sirt_solver(
     tv_eps_c: float = 0.1,
     laplace_kernel: torch.Tensor | None = None,
     scale_routing_weights: torch.Tensor | None = None,
-    trust_region_kappa: float = 0.0,
-    trust_region_floor: float = 0.005,
-    adjoint_mode: str = "flat",
-    b_variance: torch.Tensor | None = None,
-    morozov_gamma: float = 0.0,
-    use_barzilai_borwein: bool = False,
-    use_alternating_bb: bool = False,
-    bb_clamp_min: float = 0.2,
-    bb_clamp_max: float = 2.0,
-    cyclic_bb_length: int = 1,
-    use_scale_entropy_trust: bool = False,
-    use_nesterov_momentum: bool = False,
-    adaptive_relaxation: bool = False,
-    adaptive_relax_sparse: float = 0.70,
-    adaptive_relax_dense_boost: float = 0.50,
-    adaptive_relax_threshold: float = 0.05,
-    adaptive_relax_scale: float = 0.02,
-    hybrid_recovery_alpha: float = 0.0,
-    density_gated_diffusion: bool = False,
-    diffusion_dense_threshold: float = 0.15,
-    diffusion_gate_beta: float = 0.03,
-    output_stride: int = 4,
-    use_anscombe: bool = False,
-    anscombe_c: float = 0.375,
-    adaptive_tau: bool = False,
-    adaptive_tau_rho0: float = 0.05,
-    anisotropic_diffusion: bool = False,
-    pm_kappa: float = 0.05,
-    density_gated_anscombe: bool = False,
-    anscombe_tau_dense: float = 0.08,
-    area_normalized_adjoint: bool = False,
-    carrier_energy: torch.Tensor | None = None,
-    resonant_lambda: float = 0.0,
-    anscombe_morozov: bool = False,
-    crest_discovery_flux: bool = False,
-    crest_kappa_0: float = 2.0,
-    crest_eps_seed: float = 0.005,
-    asymmetric_morozov: bool = False,
-    morozov_gamma_under: float = 0.20,
-    morozov_rho: float = 0.30,
-    shifted_carrier: bool = False,
-    shifted_carrier_eps: float = 0.02,
-    density_adaptive_trust: bool = False,
-    trust_dense_tau: float = 0.10,
-    trust_dense_kappa: float = 0.80,
-    asymmetric_trust: bool = False,
-    trust_pos_kappa: float = 1.0,
-    spatial_morozov: bool = False,
+    trust_region_kappa: float = 0.0, trust_region_floor: float = 0.005,
+    adjoint_mode: str = "flat", b_variance: torch.Tensor | None = None,
+    morozov_gamma: float = 0.0, use_barzilai_borwein: bool = False,
+    use_alternating_bb: bool = False, bb_clamp_min: float = 0.2,
+    bb_clamp_max: float = 2.0, cyclic_bb_length: int = 1,
+    use_scale_entropy_trust: bool = False, use_nesterov_momentum: bool = False,
+    adaptive_relaxation: bool = False, adaptive_relax_sparse: float = 0.70,
+    adaptive_relax_dense_boost: float = 0.50, adaptive_relax_threshold: float = 0.05,
+    adaptive_relax_scale: float = 0.02, hybrid_recovery_alpha: float = 0.0,
+    density_gated_diffusion: bool = False, diffusion_dense_threshold: float = 0.15,
+    diffusion_gate_beta: float = 0.03, output_stride: int = 4,
+    use_anscombe: bool = False, anscombe_c: float = 0.375,
+    adaptive_tau: bool = False, adaptive_tau_rho0: float = 0.05,
+    anisotropic_diffusion: bool = False, pm_kappa: float = 0.05,
+    density_gated_anscombe: bool = False, anscombe_tau_dense: float = 0.08,
+    area_normalized_adjoint: bool = False, carrier_energy: torch.Tensor | None = None,
+    resonant_lambda: float = 0.0, anscombe_morozov: bool = False,
+    crest_discovery_flux: bool = False, crest_kappa_0: float = 2.0,
+    crest_eps_seed: float = 0.005, asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20, morozov_rho: float = 0.30,
+    shifted_carrier: bool = False, shifted_carrier_eps: float = 0.02,
+    density_adaptive_trust: bool = False, trust_dense_tau: float = 0.10,
+    trust_dense_kappa: float = 0.80, asymmetric_trust: bool = False,
+    trust_pos_kappa: float = 1.0, spatial_morozov: bool = False,
     morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75),
-    scale_routed_trust: bool = False,
-    scale_seeded_carrier: bool = False,
-    scale_seed_eps: float = 0.02,
-    trust_region_floor_dense: float = 0.025,
-    evidence_anchored_trust: bool = False,
-    eatr_alpha: float = 0.5,
-    regional_rate: torch.Tensor | None = None,
-    morozov_rho_cap: float = 0.0,
-    multiscale_morozov: bool = False,
-    morozov_scale_beta: float = 1.0,
+    scale_routed_trust: bool = False, scale_seeded_carrier: bool = False,
+    scale_seed_eps: float = 0.02, trust_region_floor_dense: float = 0.025,
+    evidence_anchored_trust: bool = False, eatr_alpha: float = 0.5,
+    regional_rate: torch.Tensor | None = None, morozov_rho_cap: float = 0.0,
+    multiscale_morozov: bool = False, morozov_scale_beta: float = 1.0,
     compute_energy: bool = True,
+    omega_steps: torch.Tensor | Sequence[float] | None = None,
+    gamma_steps: torch.Tensor | Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
@@ -249,7 +222,12 @@ def unrolled_sirt_solver(
             ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = False, False, False, False
         else:
             b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
-            m_gamma = float(morozov_gamma)
+            if gamma_steps is not None:
+                m_gamma = gamma_steps[iter_idx - 1]
+            elif isinstance(morozov_gamma, torch.Tensor):
+                m_gamma = morozov_gamma
+            else:
+                m_gamma = float(morozov_gamma)
             ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = (
                 anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov
             )
@@ -274,9 +252,12 @@ def unrolled_sirt_solver(
             multiscale_morozov=mscale_morozov, morozov_scale_beta=float(morozov_scale_beta),
         )
 
-        # Adaptive Barzilai-Borwein step size (BB-1, Cyclic BB-1, or Alternating BB-1 / BB-2)
-        current_omega: float | torch.Tensor = effective_omega
-        if (use_barzilai_borwein or use_alternating_bb) and prev_y is not None and prev_field is not None and effective_omega > 0.0:
+        # Adaptive Barzilai-Borwein step size or learned step size
+        if omega_steps is not None:
+            current_omega: float | torch.Tensor = omega_steps[iter_idx - 1] * strength
+        else:
+            current_omega = effective_omega
+        if omega_steps is None and (use_barzilai_borwein or use_alternating_bb) and prev_y is not None and prev_field is not None and effective_omega > 0.0:
             if cyclic_bb_length > 1 and cached_bb_omega is not None and ((iter_idx - 1) % cyclic_bb_length != 0):
                 current_omega = cached_bb_omega
             else:

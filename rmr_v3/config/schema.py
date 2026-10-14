@@ -137,6 +137,9 @@ ALLOWED_MODEL_KEYS = {
     # RMR-v29 additions
     "subpixel_stride2",
     "subpixel_dm",
+    "subpixel_kernel_size",
+    "learned_solver_steps",
+    "morozov_gamma_max",
     # RMR-v30 additions
     "use_anscombe_sirt",
     "anscombe_c",

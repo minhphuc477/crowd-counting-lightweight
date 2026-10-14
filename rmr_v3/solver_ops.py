@@ -136,6 +136,8 @@ def anscombe_discrepancy(
     morozov_rho_cap: float = 0.0,
 ) -> torch.Tensor:
     """Compute Anscombe-stabilized rate discrepancy in float32 with optional A-SAM."""
+    if q.ndim == 2:
+        q = q.unsqueeze(1)
     if b.ndim == 2:
         b = b.unsqueeze(1)
     if b_variance is not None and b_variance.ndim == 2:

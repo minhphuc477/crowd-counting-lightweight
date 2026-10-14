@@ -13,6 +13,7 @@ from rmr_core.operators import RegionSet, build_multiscale_regions
 from .config import (
     RMRv3Config,
     _deep_tuple,
+    _softplus_inverse,
     validate_architecture_contract,
 )
 from .builder import (
@@ -69,8 +70,27 @@ class RMRv3(nn.Module):
 
         self.solver_strength: float = 1.0
         self.subpixel_allocator = (
-            SubpixelAllocationHead(cfg.feature_width) if getattr(cfg, "subpixel_dm", False) else None
+            SubpixelAllocationHead(
+                cfg.feature_width,
+                kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
+            )
+            if getattr(cfg, "subpixel_dm", False)
+            else None
         )
+        if getattr(cfg, "learned_solver_steps", False) and cfg.enable_solver:
+            init_omega_raw = _softplus_inverse(cfg.omega)
+            self.learned_omega_raw = nn.Parameter(
+                torch.full((cfg.iterations,), init_omega_raw, dtype=torch.float32)
+            )
+            step_gammas = torch.linspace(0.8, 0.3, steps=cfg.iterations)
+            init_gamma_raw = torch.logit(
+                (step_gammas / float(getattr(cfg, "morozov_gamma_max", 1.0))).clamp(0.01, 0.99)
+            )
+            self.learned_gamma_raw = nn.Parameter(init_gamma_raw.clone().detach())
+        else:
+            self.register_parameter("learned_omega_raw", None)
+            self.register_parameter("learned_gamma_raw", None)
+
         lap_k = torch.tensor([[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float32).view(1, 1, 3, 3)
         self.register_buffer("_laplace_kernel", lap_k, persistent=False)
         self._region_cache: OrderedDict[tuple, RegionSet] = OrderedDict()
@@ -193,6 +213,13 @@ class RMRv3(nn.Module):
         carrier_energy: torch.Tensor | None = None,
         compute_energy: bool = True,
     ) -> RMRModelOutput:
+        omega_steps = None
+        gamma_steps = None
+        if self.learned_omega_raw is not None:
+            omega_steps = F.softplus(self.learned_omega_raw)
+        if self.learned_gamma_raw is not None:
+            gamma_steps = torch.sigmoid(self.learned_gamma_raw) * float(getattr(self.cfg, "morozov_gamma_max", 1.0))
+
         return solve_inverse_measure(
             cfg=self.cfg, y0=y0, z0=z0, regional_evidence=regional_evidence,
             regions=regions, scale_weights=scale_weights, solver_strength=solver_strength,
@@ -200,6 +227,7 @@ class RMRv3(nn.Module):
             p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
             trust_gate=self.trust_gate, laplace_kernel=self._laplace_kernel,
             carrier_energy=carrier_energy, compute_energy=compute_energy,
+            omega_steps=omega_steps, gamma_steps=gamma_steps,
         )
 
     def forward(
@@ -296,3 +324,68 @@ class RMRv3(nn.Module):
     def switch_to_deploy(self) -> None:
         if hasattr(self.fusion, "switch_to_deploy"):
             self.fusion.switch_to_deploy()
+
+    def predict_comprehensive(
+        self,
+        x: torch.Tensor,
+        *,
+        peak_threshold: float = 0.05,
+        nms_kernel: int = 3,
+        area_sqm: float = 100.0,
+    ) -> dict[str, Any]:
+        """Execute comprehensive multi-task inference on an input image tensor.
+
+        Outputs:
+          - count: scalar estimated crowd count
+          - confidence_interval: (ci_lower, ci_upper, std_err) analytical 95% CI
+          - points: (N, 2) array of detected subpixel head coordinates (x, y)
+          - point_scores: (N,) array of detection peak intensities
+          - density_map: (H_out, W_out) 2D density surface
+          - scale_map: (H_out, W_out) continuous expected head scale in pixels
+          - risk_summary: crowd congestion & stampede risk classification
+        """
+        from rmr_core.metrics import (
+            extract_subpixel_peaks,
+            compute_count_confidence_interval,
+            compute_crowd_risk_index,
+            extract_perspective_field,
+        )
+
+        self.eval()
+        with torch.no_grad():
+            out = self.forward(x)
+
+        density = out.y[0, 0].detach().cpu().numpy()
+        pred_count = float(density.sum())
+        stride = 2 if getattr(self.cfg, "subpixel_dm", False) or self.cfg.subpixel_stride2 else self.cfg.output_stride
+
+        # 1. Subpixel peak localization
+        points_xy, scores = extract_subpixel_peaks(
+            density, threshold=peak_threshold, nms_kernel=nms_kernel, stride=stride
+        )
+
+        # 2. Analytical uncertainty quantification
+        b_var = getattr(out, "solver_count_variance", None)
+        ci_lower, ci_upper, std_err = compute_count_confidence_interval(pred_count, b_var)
+
+        # 3. Continuous perspective scale map
+        scale_weights = getattr(out, "scale_weights", None)
+        if scale_weights is not None:
+            scale_map = extract_perspective_field(scale_weights[0], self.cfg.region_sizes_px)
+        else:
+            scale_map = None
+
+        # 4. Crowd risk index
+        risk_summary = compute_crowd_risk_index(density, scale_map=scale_map, area_sqm=area_sqm)
+
+        return {
+            "count": pred_count,
+            "confidence_interval": (ci_lower, ci_upper, std_err),
+            "points": points_xy,
+            "point_scores": scores,
+            "density_map": density,
+            "scale_map": scale_map,
+            "risk_summary": risk_summary,
+            "model_output": out,
+        }
+

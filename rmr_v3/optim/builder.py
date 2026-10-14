@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from rmr_core.training import make_scheduler
+from rmr_core.schedulers import IdentityScheduler, make_scheduler
 from .lr_finder import SafeLRFinder
 from .safe_prodigy import SafeProdigy
 from .wsd_scheduler import make_wsd_scheduler
@@ -96,25 +96,6 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
 
     return torch.optim.AdamW(param_groups)
 
-
-class IdentityScheduler:
-    """No-op scheduler for schedule-free and parameter-free optimizers."""
-
-    def __init__(self, optimizer: torch.optim.Optimizer) -> None:
-        self.optimizer = optimizer
-        self.base_lrs = [g["lr"] for g in optimizer.param_groups]
-
-    def step(self, epoch: int | None = None) -> None:
-        pass
-
-    def state_dict(self) -> dict[str, Any]:
-        return {"type": "identity"}
-
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        pass
-
-    def get_last_lr(self) -> list[float]:
-        return [g["lr"] for g in self.optimizer.param_groups]
 
 
 def build_v3_scheduler(

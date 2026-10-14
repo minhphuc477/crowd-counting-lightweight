@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+from .additive import (
+    AdditiveFPNNeck,
+    AdditiveFusion,
+)
+from .aspp import (
+    ASPPLiteFPNNeck,
+)
 from .attention import CoordinateAttention
+from .bifpn import (
+    BiFPNLiteNeck,
+)
 from .blocks import (
     ConvGNAct,
     DSResidual,
@@ -8,10 +18,7 @@ from .blocks import (
     TinyIR,
     _gn,
 )
-from .fpn import (
-    AdditiveFPNNeck,
-    AdditiveFusion,
-    ASPPLiteFPNNeck,
+from .hdc import (
     HDCLiteFPNNeck,
 )
 from .rep_fpn import (
@@ -23,6 +30,7 @@ __all__ = [
     "ASPPLiteFPNNeck",
     "AdditiveFPNNeck",
     "AdditiveFusion",
+    "BiFPNLiteNeck",
     "ConvGNAct",
     "CoordinateAttention",
     "DSResidual",
