@@ -78,6 +78,8 @@ def train_transform(
     pad_small_images: bool = False,
     boundary_margin: float = 0.0,
     max_size: int = 2048,
+    saturation_jitter: float = 0.0,
+    grayscale_prob: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
@@ -164,6 +166,10 @@ def train_transform(
         image_t = TF.adjust_contrast(
             image_t, random.uniform(max(0.0, 1.0 - contrast_jitter), 1.0 + contrast_jitter)
         )
+    if saturation_jitter > 0.0 and random.random() < 0.5:
+        image_t = TF.adjust_saturation(
+            image_t, random.uniform(max(0.0, 1.0 - saturation_jitter), 1.0 + saturation_jitter)
+        )
     # Gamma correction: simulates exposure variation and low-light conditions.
     # gamma_jitter = (lo, hi); gamma drawn log-uniformly from [lo, hi].
     # gamma < 1 brightens; gamma > 1 darkens (low-light simulation).
@@ -175,6 +181,9 @@ def train_transform(
     # Random invert: simulates negative film / strong contrast reversal.
     if random_invert_prob > 0.0 and random.random() < random_invert_prob:
         image_t = 1.0 - image_t
+    # Random grayscale: simulates monochrome photography / illumination invariance.
+    if grayscale_prob > 0.0 and random.random() < grayscale_prob:
+        image_t = TF.rgb_to_grayscale(image_t, num_output_channels=3)
 
     return image_t.clamp(0, 1), pts
 

@@ -36,6 +36,8 @@ class CrowdManifestDataset(Dataset):
         pad_small_images: bool = False,
         boundary_margin: float = 0.0,
         max_size: int = 2048,
+        saturation_jitter: float = 0.0,
+        grayscale_prob: float = 0.0,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
@@ -61,6 +63,8 @@ class CrowdManifestDataset(Dataset):
         self.pad_small_images = bool(pad_small_images)
         self.boundary_margin = float(boundary_margin)
         self.max_size = int(max_size)
+        self.saturation_jitter = float(saturation_jitter)
+        self.grayscale_prob = float(grayscale_prob)
         self.cache_images = bool(cache_images)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
@@ -143,6 +147,8 @@ class CrowdManifestDataset(Dataset):
                 pad_small_images=self.pad_small_images,
                 boundary_margin=self.boundary_margin,
                 max_size=self.max_size,
+                saturation_jitter=self.saturation_jitter,
+                grayscale_prob=self.grayscale_prob,
             )
         else:
             image, pts = cap_image_resolution(image, pts, max_size=self.max_size)

@@ -105,7 +105,8 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data_cfg, dict):
         d: dict[str, Any] = {}
         for k in ("crop_size", "scale_range", "hflip_prob", "brightness_jitter", "contrast_jitter",
-                  "gamma_jitter", "random_invert_prob", "pad_small_images"):
+                  "gamma_jitter", "random_invert_prob", "pad_small_images",
+                  "saturation_jitter", "grayscale_prob", "random_grayscale"):
             if k in data_cfg:
                 d[k] = _canonicalize_value(data_cfg[k])
         data_root = data_cfg.get("data_root")

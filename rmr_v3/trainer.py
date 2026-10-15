@@ -124,6 +124,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", True)),
         boundary_margin=float(cfg.get("data", {}).get("boundary_margin", 0.0)),
         max_size=int(cfg.get("data", {}).get("max_size", 2048)),
+        saturation_jitter=float(cfg.get("data", {}).get("saturation_jitter", 0.0)),
+        grayscale_prob=float(cfg.get("data", {}).get("grayscale_prob", cfg.get("data", {}).get("random_grayscale", 0.0))),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
