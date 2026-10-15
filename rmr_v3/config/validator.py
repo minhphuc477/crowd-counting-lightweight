@@ -430,8 +430,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     if "model" in cfg and "loss" in cfg:
         m_cfg, l_cfg = cfg.get("model", {}), cfg.get("loss", {})
         if isinstance(m_cfg, dict) and isinstance(l_cfg, dict) and m_cfg.get("enable_solver", False) is True and len(l_cfg) > 0:
-            if float(l_cfg.get("lambda_region_nb", 0.0)) <= 0.0:
+            allow_unsupervised = bool(
+                m_cfg.get("allow_unsupervised_solver", False)
+                or cfg.get("train", {}).get("allow_unsupervised_solver", False)
+            )
+            has_regional_supervision = (
+                float(l_cfg.get("lambda_region_nb", 0.0)) > 0.0
+                or float(l_cfg.get("lambda_trunc_nb", 0.0)) > 0.0
+            )
+            if not has_regional_supervision and not allow_unsupervised:
                 raise ValueError(
-                    "Invalid configuration: model.enable_solver=True requires loss.lambda_region_nb > 0.0. "
-                    "When lambda_region_nb=0.0, the regional head is never trained. Set model.enable_solver=False for standalone carrier."
+                    "Invalid configuration: model.enable_solver=True requires loss.lambda_region_nb > 0.0 or loss.lambda_trunc_nb > 0.0. "
+                    "When both are <= 0.0, the regional head is never trained. Set model.enable_solver=False for standalone carrier, or set model.allow_unsupervised_solver=True for unconstrained ablation."
                 )
