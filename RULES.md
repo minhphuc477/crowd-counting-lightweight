@@ -26,3 +26,13 @@
   2. `hurdle_gating_mode: product` (hệ số co thắt Lipschitz bảo vệ sóng mang trong SIRT).
   3. `lambda_cell: 0.0` (ngăn hiện tượng đói gradient $\mathcal{O}(1/N)$ ở cụm dày).
 - Báo cáo số liệu trung thực từ file `summary.json` đã đánh giá thật trên tập test chuẩn ShanghaiTech Part A (182 ảnh), không đưa ra số liệu suy đoán hoặc từ ngữ sáo rỗng.
+
+---
+
+## 5. Quy chuẩn Commit & Push Luôn Luôn Khi Edit (CONTINUOUS COMMIT & PUSH INVARIANT)
+- **BẮT BUỘC LUÔN LUÔN COMMIT VÀ PUSH NGAY LẬP TỨC SAU MỖI LẦN EDIT / CHỈNH SỬA**:
+  - Bất kỳ khi nào tạo mới file, chỉnh sửa mã nguồn Python, cập nhật cấu hình YAML, hoặc viết tài liệu/báo cáo: **PHẢI THỰC HIỆN `git add`, `git commit` VÀ `git push` NGAY LẬP TỨC**.
+  - Commit message phải rõ ràng, tuân thủ nghiêm ngặt chuẩn Conventional Commits (ví dụ: `feat:`, `fix:`, `chore:`, `docs:`).
+  - Tuyệt đối không để dồn ứ thay đổi chưa commit (`uncommitted changes`) hoặc commit chưa push (`unpushed commits`) qua các lượt tương tác với người dùng.
+  - Luôn kiểm tra `git status` và `git push` thành công trước khi kết thúc câu trả lời.
+
