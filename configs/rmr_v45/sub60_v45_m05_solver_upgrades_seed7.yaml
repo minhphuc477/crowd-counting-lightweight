@@ -63,7 +63,7 @@ model:
   morozov_gamma: 0.75
   deficit_carrier_seeding: true
   deficit_seed_eps: 0.02
-  density_adaptive_morozov: true
+  density_adaptive_morozov: false
   morozov_density_beta: 2.0
   reliability_mode: snr
   reliability_rate_std_floor: 0.01
@@ -94,7 +94,7 @@ model:
   curvature_alpha_init: -8.0
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
-  hurdle_gating_mode: occupancy
+  hurdle_gating_mode: product
   asymmetric_trust: false
 loss:
   allocation_loss_type: flat_dm16
