@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from rmr_core.operators import (
     RegionSet,
     charbonnier_tv_step,
+    compute_deficit_carrier_seed,
     partition_regions_by_scale,
     regional_adjoint,
     regional_sum,
@@ -234,6 +235,12 @@ def unrolled_sirt_solver(
                 anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov, density_adaptive_morozov
             )
 
+        psi_deficit = None
+        if deficit_carrier_seeding and b_target is not None and regions is not None:
+            psi_deficit = compute_deficit_carrier_seed(
+                z_state, b_target, regions, coverage=cov_w, output_stride=output_stride, eps=eps
+            )
+
         field = weighted_normalized_adjoint_field(
             z_state, b_target, weight_solver, regions,
             weighted_cov=cov_w, residual_clip=residual_clip, eps=eps,
@@ -254,6 +261,7 @@ def unrolled_sirt_solver(
             multiscale_morozov=mscale_morozov, morozov_scale_beta=float(morozov_scale_beta),
             deficit_carrier_seeding=deficit_carrier_seeding, deficit_seed_eps=float(deficit_seed_eps),
             density_adaptive_morozov=dadapt_morozov, morozov_density_beta=float(morozov_density_beta),
+            psi_deficit=psi_deficit,
         )
 
         # Adaptive Barzilai-Borwein step size or learned step size
@@ -332,6 +340,10 @@ def unrolled_sirt_solver(
                 seed_allowance = seed_supp
             else:
                 base_bound_pos = base_bound
+            if deficit_carrier_seeding and psi_deficit is not None:
+                deficit_supp = float(deficit_seed_eps) * psi_deficit.float().detach()
+                base_bound_pos = torch.clamp_min(torch.maximum(base_bound_pos, deficit_supp), eff_floor)
+                seed_allowance = seed_allowance + deficit_supp
             if eatr_floor is not None:
                 base_bound_pos = torch.maximum(base_bound_pos, eatr_floor)
 

@@ -72,7 +72,7 @@ def compute_morozov_discrepancy(
         g_b = 2.0 * torch.sqrt(b32.clamp_min(0.0) + c)
         g_delta = g_q - g_b
         if asymmetric_morozov:
-            gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov) else float(morozov_gamma_under)
+            gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov or density_adaptive_morozov) else float(morozov_gamma_under)
             gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
             gamma_eff = torch.where(g_delta > 0.0, base_gamma, gamma_under)
         else:
@@ -83,7 +83,7 @@ def compute_morozov_discrepancy(
 
     sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
     if asymmetric_morozov:
-        gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov) else float(morozov_gamma_under)
+        gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov or density_adaptive_morozov) else float(morozov_gamma_under)
         gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
         gamma_eff = torch.where(delta > 0.0, base_gamma, gamma_under)
     else:

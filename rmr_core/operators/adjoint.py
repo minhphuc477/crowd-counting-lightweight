@@ -165,6 +165,7 @@ def weighted_normalized_adjoint_field(
     deficit_seed_eps: float = 0.02,
     density_adaptive_morozov: bool = False,
     morozov_density_beta: float = 2.0,
+    psi_deficit: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
@@ -250,6 +251,7 @@ def weighted_normalized_adjoint_field(
             coverage=weighted_cov,
             output_stride=output_stride,
             eps=eps,
+            psi_deficit=psi_deficit,
         )
         if m_base is not y32:
             q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)

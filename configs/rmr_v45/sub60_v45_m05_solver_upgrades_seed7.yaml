@@ -94,7 +94,7 @@ model:
   curvature_alpha_init: -8.0
   use_barzilai_borwein: true
   use_scale_entropy_trust: true
-  hurdle_gating_mode: product
+  hurdle_gating_mode: occupancy
   asymmetric_trust: false
 loss:
   allocation_loss_type: flat_dm16

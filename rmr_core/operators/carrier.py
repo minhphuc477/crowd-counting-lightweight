@@ -91,6 +91,7 @@ def modulate_carrier_field(
     coverage: torch.Tensor | None = None,
     output_stride: int = 4,
     eps: float = 1e-6,
+    psi_deficit: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Modulate continuous Radon carrier field with prior texture, shifts, and deficit seeds.
 
@@ -123,11 +124,12 @@ def modulate_carrier_field(
     if crest_discovery_flux and psi_crest is not None:
         m_carrier = m_carrier + float(crest_eps_seed) * psi_crest
 
-    if deficit_carrier_seeding and b_solver is not None and regions is not None:
-        psi_deficit = compute_deficit_carrier_seed(
-            y, b_solver, regions, coverage=coverage, output_stride=output_stride, eps=eps
-        )
-        if (psi_deficit > 0.0).any():
+    if deficit_carrier_seeding:
+        if psi_deficit is None and b_solver is not None and regions is not None:
+            psi_deficit = compute_deficit_carrier_seed(
+                y, b_solver, regions, coverage=coverage, output_stride=output_stride, eps=eps
+            )
+        if psi_deficit is not None and (psi_deficit > 0.0).any():
             m_carrier = m_carrier + float(deficit_seed_eps) * psi_deficit.float()
 
     m_base = m_carrier

@@ -150,3 +150,57 @@ def test_unrolled_sirt_solver_escapes_dense_zero_support_trap():
 
     # Invariant: Output remains strictly non-negative everywhere
     assert (res_upgraded["y"] >= 0.0).all()
+
+
+def test_trust_region_deficit_allowance_and_asymmetric_density_morozov():
+    """Verify that deficit seed allowance in trust region permits mass injection
+
+    into deficit cells while guaranteeing zero leakage into non-deficit background.
+    Also verify asymmetric Morozov correctly inherits density attenuation.
+    """
+    device = torch.device("cpu")
+    h, w = 32, 32
+    regions = build_multiscale_regions(h, w, 4, region_sizes_px=(16,), device=device)
+
+    y0 = torch.zeros((1, 1, h, w), dtype=torch.float32)
+    y0[0, 0, 1, 1] = 0.1
+
+    b_solver = torch.zeros((1, 1, len(regions.boxes)), dtype=torch.float32)
+    b_solver[0, 0, 0] = 20.0
+    weight_solver = torch.ones_like(b_solver)
+    b_var = torch.ones_like(b_solver) * 20.0
+
+    res = unrolled_sirt_solver(
+        y0=y0, b_solver=b_solver, weight_solver=weight_solver, regions=regions,
+        iterations=6, omega=1.0, trust_region_kappa=0.35, trust_region_floor=0.005,
+        adjoint_mode="radon_nikodym", morozov_gamma=0.75, b_variance=b_var,
+        deficit_carrier_seeding=True, deficit_seed_eps=0.05,
+        density_adaptive_morozov=True, morozov_density_beta=2.0,
+    )
+    y_star = res["y"]
+
+    # 1. Deficit box [0:4, 0:4] unlocked all 16 cells
+    assert (y_star[0, 0, :4, :4] > 0.001).sum().item() == 16
+    # 2. Deficit mass recovered is substantially greater than the tight 0.00175 ceiling
+    assert y_star[0, 0, :4, :4].sum().item() > 2.0
+    # 3. Non-deficit background [8:, 8:] has strictly 0 leakage
+    assert (y_star[0, 0, 8:, 8:] > 0.001).sum().item() == 0
+
+    # 4. Asymmetric Morozov test with density adaptation
+    boxes = torch.tensor([[0, 0, 4, 4]], dtype=torch.int64)
+    reg = RegionSet(boxes=boxes, area=torch.tensor([16], dtype=torch.int64), scale_id=torch.tensor([0], dtype=torch.int64))
+    b = torch.tensor([[[20.0]]], dtype=torch.float32)
+    q = torch.tensor([[[5.0]]], dtype=torch.float32)
+    delta = q - b  # Under-counting by 15
+    var = torch.tensor([[[20.0]]], dtype=torch.float32)
+
+    shrunk_asym = compute_morozov_discrepancy(
+        delta=delta, q=q, b32=b, b_variance=var, regions=reg,
+        morozov_gamma=0.75, asymmetric_morozov=True, morozov_gamma_under=0.20,
+        density_adaptive_morozov=True, morozov_density_beta=2.0,
+    )
+    # Density factor = 1 / (1 + 2 * (20/16)) = 1 / 3.5 = 0.2857
+    # Gamma under = (0.75 * 0.2857) / (1 + 0.3 * sqrt(20)) = 0.2143 / 2.3416 = 0.0915
+    # Shrunk residual retains high magnitude (~ -14.59)
+    assert shrunk_asym.item() < -14.0
+
