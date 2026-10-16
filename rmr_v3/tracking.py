@@ -280,8 +280,7 @@ def format_dynamic_training_banner(
             solver_parts.append(f"TrustRegion(kappa={m_cfg.trust_region_kappa})")
         solver_desc = " | ".join(solver_parts)
 
-    # 4. Heads & Densities
-    guidance_head = "Hurdle-NB (Occupancy Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
+    guidance_head = f"Hurdle-NB ({m_cfg.hurdle_gating_mode.capitalize()} Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
     if m_cfg.scale_conditioned_fine_head:
         density_head = "ScaleConditionedFineHead (FiLM Continuous Simplex + 3x3 DW Receptive Field)"
     elif getattr(m_cfg, "head_activation", "softplus") == "relu":
