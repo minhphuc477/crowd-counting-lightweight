@@ -30,6 +30,7 @@ from .regions import (
     _build_multiscale_regions_cached,
     _canonicalize_region_size,
     build_multiscale_regions,
+    build_perspective_adaptive_regions,
     partition_regions_by_scale,
     region_geometry,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "_canonicalize_region_size",
     "_gather_prefix",
     "build_multiscale_regions",
+    "build_perspective_adaptive_regions",
     "center_scatter",
     "charbonnier_tv_step",
     "compute_morozov_discrepancy",
@@ -61,4 +63,5 @@ __all__ = [
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
 ]
+
 

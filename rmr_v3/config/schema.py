@@ -179,6 +179,8 @@ ALLOWED_MODEL_KEYS = {
     "pad_small_images", "wsd_stable_ratio", "min_lr_ratio", "bayesian_norm_mode",
     "adaptive_sigma", "bayesian_adaptive_sigma", "faithful_dispersion_detach",
     "multiscale_morozov", "morozov_scale_beta",
+    # DPW: Perspective-Adaptive Dynamic Windows
+    "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -357,6 +359,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         # PARK Perspective-Adaptive Regional Kernels
         "use_park", "park_mode", "park_horizon_h", "park_foreground_h",
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
+        # DPW: Perspective-Adaptive Dynamic Windows
+        "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell", "lambda_region_nb", "lambda_hurdle", "lambda_trunc_nb",

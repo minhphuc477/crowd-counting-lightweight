@@ -60,6 +60,11 @@ class RMRv3Config:
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
     region_overlap: float = 0.5
     include_full_image: bool = False
+    # Dynamic Perspective Windows (DPW)
+    dynamic_perspective_windows: bool = False
+    dpw_min_scale_ratio: float = 0.5
+    dpw_horizon_pos: float = 0.1
+    dpw_tilt_levels: int = 5
 
     # Solver
     enable_solver: bool = True
@@ -387,17 +392,14 @@ class RMRv3Config:
                 if v is None:
                     continue
                 if "tuple" in str(f.type) and isinstance(v, (list, tuple)):
-                    kwargs[k] = tuple(
-                        tuple(x) if isinstance(x, (list, tuple)) else x
-                        for x in v
-                    )
-                elif f.type is bool or f.type == "bool":
+                    kwargs[k] = tuple(tuple(x) if isinstance(x, (list, tuple)) else x for x in v)
+                elif f.type in (bool, "bool"):
                     kwargs[k] = bool(v)
-                elif f.type is int or f.type == "int":
+                elif f.type in (int, "int"):
                     kwargs[k] = int(v)
-                elif f.type is float or f.type == "float":
+                elif f.type in (float, "float"):
                     kwargs[k] = float(v)
-                elif f.type is str or f.type == "str":
+                elif f.type in (str, "str"):
                     kwargs[k] = str(v)
                 else:
                     kwargs[k] = v
@@ -426,11 +428,17 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
     if cfg.reliability_weight_min <= 0:
         raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
     if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
-        raise ValueError(
-            f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})"
-        )
+        raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})")
     if cfg.reliability_rate_std_floor <= 0:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
     if cfg.head_activation not in ("softplus", "relu"):
         raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
+    if getattr(cfg, "dynamic_perspective_windows", False):
+        if not (0.0 < cfg.dpw_min_scale_ratio <= 1.0):
+            raise ValueError(f"dpw_min_scale_ratio must be in (0, 1], got {cfg.dpw_min_scale_ratio}")
+        if not (0.0 <= cfg.dpw_horizon_pos < 1.0):
+            raise ValueError(f"dpw_horizon_pos must be in [0, 1), got {cfg.dpw_horizon_pos}")
+        if cfg.dpw_tilt_levels < 1:
+            raise ValueError(f"dpw_tilt_levels must be >= 1, got {cfg.dpw_tilt_levels}")
+
 

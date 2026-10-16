@@ -67,7 +67,8 @@ def build_scale_router(
     cfg: RMRv3Config,
 ) -> tuple[DynamicCameraAnglePredictor | None, nn.Module | None]:
     """Build dynamic scale routing and perspective head."""
-    if cfg.use_diag:
+    use_dpw = getattr(cfg, "dynamic_perspective_windows", False)
+    if cfg.use_diag or use_dpw:
         dcap = DynamicCameraAnglePredictor(
             cfg.feature_width,
             len(cfg.region_sizes_px),
@@ -82,13 +83,19 @@ def build_scale_router(
                 cfg.scale_router_temperature,
                 use_tilt=use_tilt,
             )
-        else:
+        elif cfg.use_diag:
             router = DiAGScaleRoutingHead(
                 cfg.feature_width,
                 len(cfg.region_sizes_px),
                 cfg.scale_router_temperature,
                 use_tilt=use_tilt,
             )
+        elif cfg.dynamic_scale_routing:
+            router = ScaleRoutingHead(
+                cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
+            )
+        else:
+            router = None
         return dcap, router
 
     if cfg.factorized_scale_routing:
@@ -100,6 +107,7 @@ def build_scale_router(
             cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
         )
     return None, None
+
 
 
 def build_1x1_gate(enabled: bool, in_channels: int) -> nn.Conv2d | None:
