@@ -67,8 +67,7 @@ def build_scale_router(
     cfg: RMRv3Config,
 ) -> tuple[DynamicCameraAnglePredictor | None, nn.Module | None]:
     """Build dynamic scale routing and perspective head."""
-    use_dpw = getattr(cfg, "dynamic_perspective_windows", False)
-    if cfg.use_diag or use_dpw:
+    if cfg.use_diag:
         dcap = DynamicCameraAnglePredictor(
             cfg.feature_width,
             len(cfg.region_sizes_px),

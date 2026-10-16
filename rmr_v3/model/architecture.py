@@ -12,7 +12,6 @@ from rmr_core.types import RMRModelOutput
 from rmr_core.operators import (
     RegionSet,
     build_multiscale_regions,
-    build_perspective_adaptive_regions,
 )
 from .config import (
     RMRv3Config,
@@ -115,21 +114,13 @@ class RMRv3(nn.Module):
         w: int,
         device: torch.device,
         stride: int | None = None,
-        tilt: float = 0.5,
     ) -> RegionSet:
         effective_stride = self.cfg.output_stride if stride is None else stride
         dev_idx = (device.index if device.index is not None else 0) if device.type == "cuda" else None
-        use_dpw = getattr(self.cfg, "dynamic_perspective_windows", False)
-        eff_tilt = 0.5
-        if use_dpw:
-            n_levels = max(1, getattr(self.cfg, "dpw_tilt_levels", 5))
-            eff_tilt = round(float(tilt) * (n_levels - 1)) / max(n_levels - 1, 1)
-
         key = (
             h, w, effective_stride,
             _deep_tuple(self.cfg.region_sizes_px), self.cfg.region_overlap,
             device.type, dev_idx,
-            use_dpw, eff_tilt,
         )
 
         if key in self._region_cache:
@@ -139,28 +130,15 @@ class RMRv3(nn.Module):
         if len(self._region_cache) >= 32:
             self._region_cache.popitem(last=False)
 
-        if use_dpw:
-            region_set = build_perspective_adaptive_regions(
-                height=h,
-                width=w,
-                output_stride=effective_stride,
-                base_sizes_px=self.cfg.region_sizes_px,
-                overlap=self.cfg.region_overlap,
-                camera_tilt=eff_tilt,
-                horizon_pos=float(getattr(self.cfg, "dpw_horizon_pos", 0.1)),
-                min_scale_ratio=float(getattr(self.cfg, "dpw_min_scale_ratio", 0.5)),
-                device=device,
-            )
-        else:
-            region_set = build_multiscale_regions(
-                height=h,
-                width=w,
-                output_stride=effective_stride,
-                region_sizes_px=self.cfg.region_sizes_px,
-                overlap=self.cfg.region_overlap,
-                include_full_image=False,
-                device=device,
-            )
+        region_set = build_multiscale_regions(
+            height=h,
+            width=w,
+            output_stride=effective_stride,
+            region_sizes_px=self.cfg.region_sizes_px,
+            overlap=self.cfg.region_overlap,
+            include_full_image=False,
+            device=device,
+        )
         self._region_cache[key] = region_set
         return region_set
 
@@ -298,11 +276,7 @@ class RMRv3(nn.Module):
             if fg_logit is not None:
                 fg_logit = fg_logit[..., :target_h4, :target_w4]
 
-        tilt_val = 0.5
-        if scene_tilt is not None:
-            tilt_val = float(scene_tilt.detach().mean().item())
-
-        regions_feat = self._regions(target_h4, target_w4, x.device, stride=4, tilt=tilt_val)
+        regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
         if self.cfg.subpixel_stride2:
             target_h, target_w = (h_in + 1) // 2, (w_in + 1) // 2
             if y0.shape[-2] != target_h or y0.shape[-1] != target_w:

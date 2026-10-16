@@ -289,6 +289,12 @@ class RMRv3Config:
             raise ValueError("use_perspective_elevation=True is permanently BANNED.")
         if getattr(self, "use_pgh", False):
             raise ValueError("use_pgh=True is permanently BANNED.")
+        if getattr(self, "dynamic_perspective_windows", False):
+            raise ValueError(
+                "dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8: "
+                "tensor-row coordinate aliasing under random cropping and 16px micro-box discretization explosion). "
+                "Use pure feature-driven dynamic scale routing (use_diag=True) instead."
+            )
 
         # Permanently Banned Anti-Pattern Guards
         if self.use_coord_attn:
@@ -433,12 +439,5 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
     if cfg.head_activation not in ("softplus", "relu"):
         raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
-    if getattr(cfg, "dynamic_perspective_windows", False):
-        if not (0.0 < cfg.dpw_min_scale_ratio <= 1.0):
-            raise ValueError(f"dpw_min_scale_ratio must be in (0, 1], got {cfg.dpw_min_scale_ratio}")
-        if not (0.0 <= cfg.dpw_horizon_pos < 1.0):
-            raise ValueError(f"dpw_horizon_pos must be in [0, 1), got {cfg.dpw_horizon_pos}")
-        if cfg.dpw_tilt_levels < 1:
-            raise ValueError(f"dpw_tilt_levels must be >= 1, got {cfg.dpw_tilt_levels}")
 
 

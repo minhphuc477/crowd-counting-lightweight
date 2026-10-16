@@ -231,15 +231,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(f"density_scale_tau must be strictly positive, got {m_cfg['density_scale_tau']}")
         if bool(m_cfg.get("density_scale_gating", False)) and not bool(m_cfg.get("dynamic_scale_routing", True)):
             raise ValueError("density_scale_gating=True requires dynamic_scale_routing=True.")
-        if "curvature_alpha_init" in m_cfg:
-            float(m_cfg["curvature_alpha_init"])
         if bool(m_cfg.get("use_park", False)):
-            h_min, h_max = int(m_cfg.get("park_horizon_h", 16)), int(m_cfg.get("park_foreground_h", 128))
-            asp, bands = float(m_cfg.get("park_max_aspect", 2.0)), int(m_cfg.get("park_altitude_bands", 3))
-            if h_min <= 0 or h_max <= h_min:
-                raise ValueError(f"Invalid park heights: horizon={h_min}, foreground={h_max}")
-            if asp <= 0.0 or bands < 1:
-                raise ValueError(f"Invalid park config: aspect={asp} (>0.0), bands={bands} (>=1)")
+            raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
+        if bool(m_cfg.get("dynamic_perspective_windows", False)):
+            raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8).")
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})

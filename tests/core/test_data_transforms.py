@@ -215,8 +215,8 @@ def test_config_hash_and_resume_locking():
     # Matching hash passes resume check
     validate_resume_compatibility(cfg1, cfg2, ckpt_hash=h1, incoming_hash=h2)
 
-    # Mismatched hash raises ValueError
-    with pytest.raises(ValueError, match="Resume config hash mismatch"):
+    # Mismatched critical field raises ValueError
+    with pytest.raises(ValueError, match="Resume config mismatch"):
         validate_resume_compatibility(cfg1, cfg3, ckpt_hash=h1, incoming_hash=h3)
 
 
@@ -274,8 +274,8 @@ def test_config_hash_sensitive_to_workers():
     h4 = compute_config_hash(cfg_w4)
     assert h0 != h4
 
-    with pytest.raises(ValueError, match="Resume config hash mismatch"):
-        validate_resume_compatibility(base_cfg, cfg_w4, ckpt_hash=h0, incoming_hash=h4)
+    # Non-critical workers difference detects hash difference but allows resume with notice
+    validate_resume_compatibility(base_cfg, cfg_w4, ckpt_hash=h0, incoming_hash=h4)
 
 
 def test_config_hash_sensitive_to_eval_protocol_and_early_stopping():
@@ -321,8 +321,8 @@ def test_config_hash_sensitive_to_manifest_content(tmp_path: Path):
 
     assert sha1 != sha2
     assert h1 != h2
-    with pytest.raises(ValueError, match="Resume config hash mismatch"):
-        validate_resume_compatibility(cfg1, cfg1, ckpt_hash=h1, incoming_hash=h2)
+    # Manifest content difference alters trajectory hash, but data schema compatibility allows resume notice
+    validate_resume_compatibility(cfg1, cfg1, ckpt_hash=h1, incoming_hash=h2)
 
 
 def test_validate_v3_config_alias_conflict():
