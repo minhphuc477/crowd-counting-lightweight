@@ -78,6 +78,8 @@ def unrolled_sirt_solver(
     evidence_anchored_trust: bool = False, eatr_alpha: float = 0.5,
     regional_rate: torch.Tensor | None = None, morozov_rho_cap: float = 0.0,
     multiscale_morozov: bool = False, morozov_scale_beta: float = 1.0,
+    deficit_carrier_seeding: bool = False, deficit_seed_eps: float = 0.02,
+    density_adaptive_morozov: bool = False, morozov_density_beta: float = 2.0,
     compute_energy: bool = True,
     omega_steps: torch.Tensor | Sequence[float] | None = None,
     gamma_steps: torch.Tensor | Sequence[float] | None = None,
@@ -219,7 +221,7 @@ def unrolled_sirt_solver(
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
             b_target = q - rate_res * eff_q.clamp_min(float(eps))
             adj_mode, b_var, m_gamma = "radon_nikodym", None, 0.0
-            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = False, False, False, False
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = False, False, False, False, False
         else:
             b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
             if gamma_steps is not None:
@@ -228,8 +230,8 @@ def unrolled_sirt_solver(
                 m_gamma = morozov_gamma
             else:
                 m_gamma = float(morozov_gamma)
-            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov = (
-                anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = (
+                anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov, density_adaptive_morozov
             )
 
         field = weighted_normalized_adjoint_field(
@@ -250,6 +252,8 @@ def unrolled_sirt_solver(
             scale_seeded_carrier=scale_seeded_carrier, scale_seed_eps=float(scale_seed_eps),
             morozov_rho_cap=float(morozov_rho_cap),
             multiscale_morozov=mscale_morozov, morozov_scale_beta=float(morozov_scale_beta),
+            deficit_carrier_seeding=deficit_carrier_seeding, deficit_seed_eps=float(deficit_seed_eps),
+            density_adaptive_morozov=dadapt_morozov, morozov_density_beta=float(morozov_density_beta),
         )
 
         # Adaptive Barzilai-Borwein step size or learned step size

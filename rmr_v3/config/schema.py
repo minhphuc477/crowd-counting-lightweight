@@ -179,6 +179,7 @@ ALLOWED_MODEL_KEYS = {
     "pad_small_images", "wsd_stable_ratio", "min_lr_ratio", "bayesian_norm_mode",
     "adaptive_sigma", "bayesian_adaptive_sigma", "faithful_dispersion_detach",
     "multiscale_morozov", "morozov_scale_beta",
+    "deficit_carrier_seeding", "deficit_seed_eps", "density_adaptive_morozov", "morozov_density_beta",
     # DPW: Perspective-Adaptive Dynamic Windows
     "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
 }

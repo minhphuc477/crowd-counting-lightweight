@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from .prefix_sums import regional_sum
 from .regions import RegionSet, partition_regions_by_scale
 from .morozov import compute_morozov_discrepancy
+from .carrier import modulate_carrier_field
 
 
 def regional_adjoint(
@@ -160,6 +161,10 @@ def weighted_normalized_adjoint_field(
     morozov_rho_cap: float = 0.0,
     multiscale_morozov: bool = False,
     morozov_scale_beta: float = 1.0,
+    deficit_carrier_seeding: bool = False,
+    deficit_seed_eps: float = 0.02,
+    density_adaptive_morozov: bool = False,
+    morozov_density_beta: float = 2.0,
 ) -> torch.Tensor:
     """Compute normalized adjoint correction field with CRCDF and A-SAM."""
     _, _, h, w = y.shape
@@ -183,8 +188,8 @@ def weighted_normalized_adjoint_field(
     q = regional_sum(y32, regions.boxes, out_dtype=torch.float32)
     delta = q - b32
 
-    # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, Scale-Routed, or Multiscale)
-    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov or multiscale_morozov) and b_variance is not None:
+    # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, Scale-Routed, Multiscale, or Density-Adaptive)
+    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov or multiscale_morozov or density_adaptive_morozov) and b_variance is not None:
         delta = compute_morozov_discrepancy(
             delta=delta,
             q=q,
@@ -202,8 +207,9 @@ def weighted_normalized_adjoint_field(
             morozov_rho_cap=morozov_rho_cap,
             multiscale_morozov=multiscale_morozov,
             morozov_scale_beta=morozov_scale_beta,
+            density_adaptive_morozov=density_adaptive_morozov,
+            morozov_density_beta=morozov_density_beta,
         )
-
 
     area = regions.area.float().view(1, 1, -1)
     eff_area = area * ((float(output_stride) / 4.0) ** 2) if area_normalized else area
@@ -211,45 +217,48 @@ def weighted_normalized_adjoint_field(
     alpha_recov = float(max(0.0, min(1.0, hybrid_recovery_alpha)))
     use_hybrid = (adjoint_mode == "radon_nikodym" and alpha_recov > 0.0)
 
-    # Carrier Texture Modulation & Crest Discovery Flux (CRCDF)
-    m_carrier = y32
-    psi_crest = None
-    if carrier_energy is not None:
-        E = carrier_energy.float()
-        if E.shape[-2:] != (h, w):
-            E = F.interpolate(E, size=(h, w), mode="bilinear", align_corners=False)
-        E_pool = F.avg_pool2d(E, kernel_size=9, stride=1, padding=4, count_include_pad=False)
-        if resonant_lambda > 0.0:
-            phi = (E / (E_pool + 1e-4)).clamp(0.2, 4.0)
-            m_carrier = y32 * ((1.0 - float(resonant_lambda)) + float(resonant_lambda) * phi)
-        if crest_discovery_flux:
-            E_sq_pool = F.avg_pool2d(E.square(), kernel_size=9, stride=1, padding=4, count_include_pad=False)
-            E_var = (E_sq_pool - E_pool.square()).clamp_min(1e-8)
-            z_E = (E - E_pool) / (torch.sqrt(E_var) + 1e-4)
-            psi_crest = torch.relu(z_E - float(crest_kappa_0)).square()
+    if weighted_cov is None:
+        weighted_cov = weighted_coverage(
+            weight32,
+            regions,
+            h,
+            w,
+            eps=eps,
+            scale_routing_weights=scale_routing_weights,
+            scale_partitions=scale_partitions,
+        )
 
-    # Radon-Nikodym Measure-Modulated Adjoint vs Flat Lebesgue Adjoint
+    # Carrier Texture Modulation, Shifts, and Deficit Seeding
     if adjoint_mode == "radon_nikodym":
-        m_base = m_carrier
-        has_base_mod = False
-        if shifted_carrier and y_initial is not None:
-            m_base = m_base + float(shifted_carrier_eps) * y_initial.float()
-            has_base_mod = True
-        if scale_seeded_carrier and scale_routing_weights is not None:
-            m_base = m_base + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach()
-            has_base_mod = True
-        if carrier_energy is not None and (resonant_lambda > 0.0 or (crest_discovery_flux and psi_crest is not None)):
-            if crest_discovery_flux and psi_crest is not None:
-                m_base = m_base + float(crest_eps_seed) * psi_crest
-                has_base_mod = True
-
-        if has_base_mod:
+        m_carrier, m_base = modulate_carrier_field(
+            y=y32,
+            y_initial=y_initial,
+            scale_routing_weights=scale_routing_weights,
+            carrier_energy=carrier_energy,
+            resonant_lambda=resonant_lambda,
+            crest_discovery_flux=crest_discovery_flux,
+            crest_kappa_0=crest_kappa_0,
+            crest_eps_seed=crest_eps_seed,
+            shifted_carrier=shifted_carrier,
+            shifted_carrier_eps=shifted_carrier_eps,
+            scale_seeded_carrier=scale_seeded_carrier,
+            scale_seed_eps=scale_seed_eps,
+            deficit_carrier_seeding=deficit_carrier_seeding,
+            deficit_seed_eps=deficit_seed_eps,
+            b_solver=b32,
+            regions=regions,
+            coverage=weighted_cov,
+            output_stride=output_stride,
+            eps=eps,
+        )
+        if m_base is not y32:
             q_m = regional_sum(m_base, regions.boxes, out_dtype=torch.float32)
             eff_q = q_m + float(eps) * eff_area.clamp_min(1.0)
         else:
             eff_q = q + float(eps) * eff_area.clamp_min(1.0)
         rate_residual = delta / eff_q.clamp_min(float(eps))
     else:
+        m_carrier = y32
         rate_residual = delta / eff_area.clamp_min(1.0)
 
     weighted_residual = weight32 * rate_residual
@@ -294,29 +303,11 @@ def weighted_normalized_adjoint_field(
     back = _scatter_residual(weighted_residual)
 
     if adjoint_mode == "radon_nikodym":
-        m_eff = m_carrier
-        if shifted_carrier and y_initial is not None:
-            m_eff = m_eff + float(shifted_carrier_eps) * y_initial.float()
-        if scale_seeded_carrier and scale_routing_weights is not None:
-            m_eff = m_eff + float(scale_seed_eps) * scale_routing_weights[:, 0:1].float().detach()
-        if crest_discovery_flux and psi_crest is not None:
-            m_eff = m_eff + float(crest_eps_seed) * psi_crest
         if use_hybrid and weighted_residual_leb is not None:
             back_leb = _scatter_residual(weighted_residual_leb)
-            back = (1.0 - alpha_recov) * (m_eff * back) + alpha_recov * back_leb
+            back = (1.0 - alpha_recov) * (m_carrier * back) + alpha_recov * back_leb
         else:
-            back = m_eff * back
-
-    if weighted_cov is None:
-        weighted_cov = weighted_coverage(
-            weight32,
-            regions,
-            h,
-            w,
-            eps=eps,
-            scale_routing_weights=scale_routing_weights,
-            scale_partitions=scale_partitions,
-        )
+            back = m_carrier * back
 
     field = back / weighted_cov.float().clamp_min(eps)
 

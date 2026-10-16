@@ -255,6 +255,10 @@ class RMRv3Config:
     faithful_dispersion_detach: bool = False
     multiscale_morozov: bool = False
     morozov_scale_beta: float = 1.0
+    deficit_carrier_seeding: bool = False
+    deficit_seed_eps: float = 0.02
+    density_adaptive_morozov: bool = False
+    morozov_density_beta: float = 2.0
 
     def __post_init__(self) -> None:
         if (self.subpixel_stride2 or self.subpixel_dm) and self.output_stride != 2:
@@ -340,28 +344,34 @@ class RMRv3Config:
             raise ValueError(
                 f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
             )
-        _require_positive("pm_kappa", self.pm_kappa)
-        _require_positive("anscombe_tau_dense", self.anscombe_tau_dense)
-        _require_non_negative("proximal_tau", self.proximal_tau)
-        _require_non_negative("floor_tau", self.floor_tau)
+        for name, val in [
+            ("pm_kappa", self.pm_kappa), ("anscombe_tau_dense", self.anscombe_tau_dense),
+            ("scale_router_temperature", self.scale_router_temperature),
+            ("trust_region_floor", self.trust_region_floor), ("anscombe_c", self.anscombe_c),
+            ("adaptive_tau_rho0", self.adaptive_tau_rho0), ("shifted_carrier_eps", self.shifted_carrier_eps),
+            ("trust_dense_tau", self.trust_dense_tau), ("trust_dense_kappa", self.trust_dense_kappa),
+            ("density_scale_tau", self.density_scale_tau), ("deficit_seed_eps", self.deficit_seed_eps),
+            ("morozov_density_beta", self.morozov_density_beta),
+        ]:
+            _require_positive(name, val)
+        for name, val in [
+            ("proximal_tau", self.proximal_tau), ("floor_tau", self.floor_tau),
+            ("tv_lambda", self.tv_lambda), ("trust_region_kappa", self.trust_region_kappa),
+            ("morozov_gamma", self.morozov_gamma), ("crest_kappa_0", self.crest_kappa_0),
+            ("crest_eps_seed", self.crest_eps_seed), ("morozov_gamma_under", self.morozov_gamma_under),
+            ("morozov_rho", self.morozov_rho), ("morozov_rho_cap", self.morozov_rho_cap),
+        ]:
+            _require_non_negative(name, val)
         if self.use_cpcm and self.cpcm_hidden <= 0:
             raise ValueError(f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}")
-
         if self.proximal_mode not in ("firm", "soft", "none", "clamp"):
             raise ValueError(f"proximal_mode must be 'firm', 'soft', or 'none', got '{self.proximal_mode}'")
         if self.proximal_mu <= 1.0:
             raise ValueError(f"proximal_mu must be > 1.0, got {self.proximal_mu}")
-        _require_non_negative("tv_lambda", self.tv_lambda)
-        _require_positive("scale_router_temperature", self.scale_router_temperature)
-        _require_non_negative("trust_region_kappa", self.trust_region_kappa)
-        _require_positive("trust_region_floor", self.trust_region_floor)
         if self.adjoint_mode not in ("flat", "radon_nikodym", "anscombe_vst"):
             raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'")
         if self.adjoint_mode == "anscombe_vst":
             self.use_anscombe_sirt = True
-        _require_positive("anscombe_c", self.anscombe_c)
-        _require_positive("adaptive_tau_rho0", self.adaptive_tau_rho0)
-        _require_non_negative("morozov_gamma", self.morozov_gamma)
         if self.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
                 f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
@@ -369,15 +379,6 @@ class RMRv3Config:
         _require_unit_interval("tdsg_floor", self.tdsg_floor)
         _require_unit_interval("fg_gate_floor", self.fg_gate_floor)
         _require_unit_interval("hybrid_recovery_alpha", self.hybrid_recovery_alpha)
-        _require_non_negative("crest_kappa_0", self.crest_kappa_0)
-        _require_non_negative("crest_eps_seed", self.crest_eps_seed)
-        _require_non_negative("morozov_gamma_under", self.morozov_gamma_under)
-        _require_non_negative("morozov_rho", self.morozov_rho)
-        _require_non_negative("morozov_rho_cap", self.morozov_rho_cap)
-        _require_positive("shifted_carrier_eps", self.shifted_carrier_eps)
-        _require_positive("trust_dense_tau", self.trust_dense_tau)
-        _require_positive("trust_dense_kappa", self.trust_dense_kappa)
-        _require_positive("density_scale_tau", self.density_scale_tau)
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -439,5 +440,3 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
     if cfg.head_activation not in ("softplus", "relu"):
         raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
-
-

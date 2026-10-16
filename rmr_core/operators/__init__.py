@@ -8,6 +8,10 @@ from .adjoint import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
+from .carrier import (
+    compute_deficit_carrier_seed,
+    modulate_carrier_field,
+)
 from .diffusion import charbonnier_tv_step
 from .morozov import compute_morozov_discrepancy
 from .pooling import (
@@ -43,11 +47,13 @@ __all__ = [
     "build_multiscale_regions",
     "center_scatter",
     "charbonnier_tv_step",
+    "compute_deficit_carrier_seed",
     "compute_morozov_discrepancy",
     "continuous_prefix_eval",
     "fractional_box_sum",
     "fractional_region_average_features",
     "fractional_region_mean_std_features",
+    "modulate_carrier_field",
     "multiplicative_gated_adjoint",
     "partition_regions_by_scale",
     "prefix2d",
