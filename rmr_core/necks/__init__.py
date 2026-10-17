@@ -21,6 +21,9 @@ from .blocks import (
 from .hdc import (
     HDCLiteFPNNeck,
 )
+from .rep_aspp import (
+    RepASPPLiteNeck,
+)
 from .rep_fpn import (
     RepDWBlock7x7,
     RepWeightedFPNNeck,
@@ -36,6 +39,7 @@ __all__ = [
     "DSResidual",
     "DepthwiseDilated",
     "HDCLiteFPNNeck",
+    "RepASPPLiteNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
     "TinyIR",

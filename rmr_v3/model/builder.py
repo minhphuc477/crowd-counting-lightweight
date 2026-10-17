@@ -9,6 +9,7 @@ from rmr_core.necks import (
     ASPPLiteFPNNeck,
     BiFPNLiteNeck,
     HDCLiteFPNNeck,
+    RepASPPLiteNeck,
     RepWeightedFPNNeck,
 )
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
@@ -50,6 +51,13 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
         )
+    if cfg.neck_type == "rep_aspp_lite":
+        return RepASPPLiteNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            aspp_dilations=cfg.aspp_dilations,
+            use_aspp_gap=cfg.use_aspp_gap,
+        )
     if cfg.neck_type == "bifpn_lite":
         return BiFPNLiteNeck(
             in_channels=in_channels,
@@ -60,7 +68,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
         f"Unsupported neck_type: '{cfg.neck_type}'. "
-        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', or 'bifpn_lite'."
+        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', 'rep_aspp_lite', or 'bifpn_lite'."
     )
 
 

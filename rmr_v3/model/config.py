@@ -48,7 +48,7 @@ class RMRv3Config:
     subpixel_kernel_size: int = 3
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted" | "bifpn_lite"
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted" | "rep_aspp_lite" | "bifpn_lite"
     context_dilations: tuple[int, ...] = (1, 2, 3)
     use_aspp_gap: bool = True
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
