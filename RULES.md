@@ -8,7 +8,10 @@
 ---
 
 ## 2. Parameter Ceiling & Knowledge Distillation (BẤT BIẾN NGHIÊN CỨU)
-- **Tham số mô hình**: Tuyệt đối $\le 105,000$ tham số có thể huấn luyện (`trainable parameters`). Bất kỳ cấu hình nào vượt quá $105,000$ tham số đều bị loại bỏ ngay từ bước preflight check.
+- **Tham số mô hình**:
+  - **Track A (Anchor siêu nhẹ)**: Tuyệt đối $\le 104,441$ tham số có thể huấn luyện (`trainable parameters`).
+  - **Track B (Mở rộng dung lượng)**: Tuyệt đối $\le 200,000$ tham số có thể huấn luyện (theo giới hạn người dùng cho phép).
+  - Bất kỳ cấu hình nào vượt quá trần tham số của từng track tương ứng đều bị loại bỏ ngay từ bước preflight check.
 - **Không dùng Knowledge Distillation**: Tuyệt đối $0.0\%$ tri thức chưng cất, không sử dụng bất kỳ mạng giáo viên (teacher model) nào. Mô hình phải hoạt động độc lập 100% (Standalone).
 
 ---
@@ -35,4 +38,21 @@
   - Commit message phải rõ ràng, tuân thủ nghiêm ngặt chuẩn Conventional Commits (ví dụ: `feat:`, `fix:`, `chore:`, `docs:`).
   - Tuyệt đối không để dồn ứ thay đổi chưa commit (`uncommitted changes`) hoặc commit chưa push (`unpushed commits`) qua các lượt tương tác với người dùng.
   - Luôn kiểm tra `git status` và `git push` thành công trước khi kết thúc câu trả lời.
+
+---
+
+## 6. Tuyệt Đối Nghiêm Cấm Làm Giả Số Liệu & Cấm Dùng Oracle Giả (ABSOLUTE EMPIRICAL INTEGRITY & NO FAKE ORACLES INVARIANT)
+- **TUYỆT ĐỐI NGHIÊM CẤM LÀM GIẢ SỐ LIỆU (ZERO DATA FABRICATION)**:
+  - Mọi chỉ số (MAE, RMSE, NAE, Bias, Help Rate, v.v.) báo cáo cho người dùng **BẮT BUỘC** phải được trích xuất trực tiếp, nguyên bản 100% từ kết quả inference thực tế của mô hình thật trên tập dữ liệu kiểm thử chuẩn ShanghaiTech Part A (182 ảnh test đầy đủ).
+  - Nghiêm cấm mọi hành vi bịa đặt, suy đoán, làm tròn có chủ đích, gọt giũa số liệu (cherry-picking / smoothing), hoặc sửa đổi kết quả trong `summary.json`, `train_log.csv` hay bất kỳ file báo cáo nào.
+
+- **TUYỆT ĐỐI NGHIÊM CẤM DÙNG ORACLE GIẢ ĐỂ BÁO CÁO HAY ĐÁNH LẬN KẾT QUẢ (STRICT BAN ON FAKE ORACLES)**:
+  - **Không bao giờ dùng Oracle làm thước đo thành tựu**: Chỉ số Oracle (chọn mô hình dự đoán tốt nhất cho từng ảnh dựa vào nhãn Ground Truth) là phi thực tế và mang tính "gian lận nhãn kiểm thử" (Test Label Leakage). Tuyệt đối KHÔNG được dùng chỉ số Oracle để làm đẹp báo cáo, tạo ảo tưởng rằng mô hình đã đạt Sub-50 hay Sub-60, hoặc nói giảm nói tránh thất bại của mô hình đơn lẻ.
+  - **Tiêu chuẩn duy nhất được công nhận**: Mọi đánh giá hiệu năng bắt buộc phải là của **MỘT MÔ HÌNH ĐỘC LẬP DUY NHẤT (Single Standalone Model Checkpoint)** chạy inference đầu cuối thực tế, hoàn toàn mù với nhãn Ground Truth.
+  - **Nếu có dùng Ensemble**: Chỉ được phép đánh giá các mô hình Ensemble thực tế có thể triển khai sản xuất độc lập (ví dụ: trung bình cộng tĩnh cố định giữa các mô hình đã huấn luyện xong), tuyệt đối không được dùng Ground Truth để gán nhánh (Gated by GT) hoặc tạo Oracle kết hợp.
+
+- **TRUNG THỰC KHOA HỌC TUYỆT ĐỐI (EMPIRICAL BRUTAL HONESTY)**:
+  - Mô hình đạt kết quả bao nhiêu phải báo cáo chính xác bấy nhiêu.
+  - Khi mô hình bị thoái hóa hoặc thất bại (kết quả xấu hơn mỏ neo cũ), phải thừa nhận thẳng thắn, báo cáo chính xác số điểm tụt lùi, giải phẫu đúng nguyên nhân kỹ thuật, không dùng thuật ngữ hoa mỹ để che đậy hoặc dùng Oracle để "vớt vát" tâm lý.
+
 
