@@ -396,7 +396,10 @@ def apply_scale_consistency_gating(
             if is_vert.any() and grid_h is not None and grid_h > 0:
                 y_center = 0.5 * (boxes_k[:, 0].float() + boxes_k[:, 2].float()) / float(grid_h)
                 geo_gate = torch.sigmoid((y_center - float(horizon_cutoff)) / 0.05).view(1, 1, -1)
-                gate = torch.where(is_vert.view(1, 1, -1), gate * geo_gate.to(device=gate.device, dtype=gate.dtype), gate)
+                geo_gate = geo_gate.to(device=gate.device, dtype=gate.dtype)
+                gate = torch.where(is_vert.view(1, 1, -1), gate * geo_gate, gate)
+
+
 
         if density_scale_gating and k == (k_scales - 1) and regional_rate is not None:
             r_rate = regional_rate.unsqueeze(1) if regional_rate.ndim == 2 else regional_rate

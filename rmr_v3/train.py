@@ -79,23 +79,56 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--output-dir", "--output_dir", default=None, help="Explicit output directory")
     ap.add_argument("--save-dir", "--save_dir", default=None, help="Base save directory for runs (default: runs/sha_a)")
-    ap.add_argument("--run-id", "--run_id", default=None, help="Run identifier (sets output_dir to <save_dir>/<run_id>)")
+    ap.add_argument(
+        "--run-id", "--run_id", default=None,
+        help="Run identifier (sets output_dir to <save_dir>/<run_id>)",
+    )
     ap.add_argument("--device", default=None, help="Computation device (e.g. cuda, cuda:0, cpu)")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--eval-every", type=int, default=None)
     ap.add_argument("--patience", type=int, default=None)
     ap.add_argument("--disable-early-stopping", action="store_true", default=False)
-    ap.add_argument("--deterministic", action="store_true", default=False, help="Enable strict determinism (default: enabled)")
-    ap.add_argument("--non-deterministic", "--no-deterministic", dest="non_deterministic", action="store_true", default=False, help="Disable strict determinism")
+    ap.add_argument(
+        "--deterministic", action="store_true", default=False,
+        help="Enable strict determinism (default: enabled)",
+    )
+    ap.add_argument(
+        "--non-deterministic", "--no-deterministic", dest="non_deterministic",
+        action="store_true", default=False, help="Disable strict determinism",
+    )
     ap.add_argument("-o", "--overwrite", action="store_true", default=False)
-    ap.add_argument("--allow-cross-commit-resume", action="store_true", default=False, help="Allow resuming checkpoint created from different git commit")
-    ap.add_argument("--force-resume", action="store_true", default=False, help="Allow resuming even if configuration hash or git commit differs")
-    ap.add_argument("--allow-config-mismatch", action="store_true", default=False, help="Allow resuming even if configuration parameters differ")
-    ap.add_argument("--workers", type=int, default=None, help="Number of DataLoader worker processes (overrides config)")
-    ap.add_argument("--batch-size", "--batch_size", type=int, default=None, help="Training batch size per step (overrides config)")
-    ap.add_argument("--grad-accum", "--grad_accum", type=int, default=None, help="Gradient accumulation steps (overrides config)")
-    ap.add_argument("--num-threads", type=int, default=None, help="PyTorch CPU intra-op thread count (recommended: 2 for parallel runs)")
-    ap.add_argument("--no-cudnn-benchmark", action="store_true", default=False, help="Disable cuDNN benchmark to eliminate multi-process stalls")
+    ap.add_argument(
+        "--allow-cross-commit-resume", action="store_true", default=False,
+        help="Allow resuming checkpoint created from different git commit",
+    )
+    ap.add_argument(
+        "--force-resume", action="store_true", default=False,
+        help="Allow resuming even if configuration hash or git commit differs",
+    )
+    ap.add_argument(
+        "--allow-config-mismatch", action="store_true", default=False,
+        help="Allow resuming even if configuration parameters differ",
+    )
+    ap.add_argument(
+        "--workers", type=int, default=None,
+        help="Number of DataLoader worker processes (overrides config)",
+    )
+    ap.add_argument(
+        "--batch-size", "--batch_size", type=int, default=None,
+        help="Training batch size per step (overrides config)",
+    )
+    ap.add_argument(
+        "--grad-accum", "--grad_accum", type=int, default=None,
+        help="Gradient accumulation steps (overrides config)",
+    )
+    ap.add_argument(
+        "--num-threads", type=int, default=None,
+        help="PyTorch CPU intra-op thread count (recommended: 2 for parallel runs)",
+    )
+    ap.add_argument(
+        "--no-cudnn-benchmark", action="store_true", default=False,
+        help="Disable cuDNN benchmark to eliminate multi-process stalls",
+    )
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8-sig"))

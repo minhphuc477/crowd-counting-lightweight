@@ -59,8 +59,10 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
     if cfg.neck_type == "additive":
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
-        f"Unsupported neck_type: '{cfg.neck_type}'. Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', or 'bifpn_lite'."
+        f"Unsupported neck_type: '{cfg.neck_type}'. "
+        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', or 'bifpn_lite'."
     )
+
 
 
 def build_scale_router(

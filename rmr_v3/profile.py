@@ -140,16 +140,28 @@ def measure_clean_peak_memory(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Profile RMR-v3 models for latency, memory, and complexity.")
-    ap.add_argument("--config", default=None, help="Path to YAML config (e.g. configs/rmr_v3/reliability_weighted.yaml)")
-    ap.add_argument("--uniform-reliability", dest="uniform_reliability", action="store_true", default=None, help="Profile with uniform reliability (W=I)")
-    ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Profile with weighted reliability (W=diag(w_R))")
+    ap.add_argument(
+        "--config", default=None,
+        help="Path to YAML config (e.g. configs/rmr_v3/reliability_weighted.yaml)",
+    )
+    ap.add_argument(
+        "--uniform-reliability", dest="uniform_reliability", action="store_true",
+        default=None, help="Profile with uniform reliability (W=I)",
+    )
+    ap.add_argument(
+        "--weighted-reliability", dest="uniform_reliability", action="store_false",
+        help="Profile with weighted reliability (W=diag(w_R))",
+    )
     ap.add_argument("--iterations", type=int, default=2)
     ap.add_argument("--height", type=int, default=512)
     ap.add_argument("--width", type=int, default=512)
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--iters", type=int, default=50)
     ap.add_argument("--device", default="cuda")
-    ap.add_argument("--tiling", action="store_true", default=False, help="Profile tiled inference (tile 512 with halo 64)")
+    ap.add_argument(
+        "--tiling", action="store_true", default=False,
+        help="Profile tiled inference (tile 512 with halo 64)",
+    )
     ap.add_argument("--tile-size", type=int, default=512)
     ap.add_argument("--halo", type=int, default=64)
     ap.add_argument("--output", default=None, help="Optional output JSON path")
@@ -205,7 +217,9 @@ def main() -> None:
     supported_flops = profiler_flops(model, x, forward_fn=forward_call) if not args.tiling else None
 
     # Latency profiling: FP32 and AMP
-    fp32_latency = profile_latency(model, x, warmup=args.warmup, iters=args.iters, use_amp=False, forward_fn=forward_call)
+    fp32_latency = profile_latency(
+        model, x, warmup=args.warmup, iters=args.iters, use_amp=False, forward_fn=forward_call
+    )
     amp_latency = (
         profile_latency(model, x, warmup=args.warmup, iters=args.iters, use_amp=True, forward_fn=forward_call)
         if device.type == "cuda"

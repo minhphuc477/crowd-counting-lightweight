@@ -80,8 +80,9 @@ def validate_resume_compatibility(
                             raise ValueError(
                                 f"Resume config mismatch for '{section}.{field}': "
                                 f"checkpoint has {v_ckpt!r} but incoming config has {v_inc!r}. "
-                                f"Resuming requires matching experiment configuration to guarantee trajectory continuity. "
-                                f"To override intentionally, pass --allow-config-mismatch or --force-resume."
+                                "Resuming requires matching experiment configuration to guarantee "
+                                "trajectory continuity. "
+                                "To override intentionally, pass --allow-config-mismatch or --force-resume."
                             )
 
     if ckpt_hash is not None and incoming_hash is not None and ckpt_hash != incoming_hash:
@@ -95,5 +96,7 @@ def validate_resume_compatibility(
             # (such as early_stopping, patience, epochs, or workers). Proceed with an informative notice.
             print(
                 f"[Resume Notice] Config hash difference detected ({ckpt_hash[:8]} vs {incoming_hash[:8]}), "
-                f"but all method-critical architectural and optimization fields match. Proceeding with resumed trajectory."
+                "but all method-critical architectural and optimization fields match. "
+                "Proceeding with resumed trajectory."
             )
+

@@ -25,8 +25,6 @@ def _require_positive(name: str, val: float) -> None:
 def _require_non_negative(name: str, val: float) -> None:
     if val < 0.0:
         raise ValueError(f"{name} must be non-negative, got {val}")
-
-
 def _require_unit_interval(name: str, val: float) -> None:
     if not (0.0 <= val <= 1.0):
         raise ValueError(f"{name} must be in [0.0, 1.0], got {val}")
@@ -344,24 +342,20 @@ class RMRv3Config:
             raise ValueError(
                 f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
             )
-        for name, val in [
-            ("pm_kappa", self.pm_kappa), ("anscombe_tau_dense", self.anscombe_tau_dense),
-            ("scale_router_temperature", self.scale_router_temperature),
-            ("trust_region_floor", self.trust_region_floor), ("anscombe_c", self.anscombe_c),
-            ("adaptive_tau_rho0", self.adaptive_tau_rho0), ("shifted_carrier_eps", self.shifted_carrier_eps),
-            ("trust_dense_tau", self.trust_dense_tau), ("trust_dense_kappa", self.trust_dense_kappa),
-            ("density_scale_tau", self.density_scale_tau), ("deficit_seed_eps", self.deficit_seed_eps),
-            ("morozov_density_beta", self.morozov_density_beta),
-        ]:
-            _require_positive(name, val)
-        for name, val in [
-            ("proximal_tau", self.proximal_tau), ("floor_tau", self.floor_tau),
-            ("tv_lambda", self.tv_lambda), ("trust_region_kappa", self.trust_region_kappa),
-            ("morozov_gamma", self.morozov_gamma), ("crest_kappa_0", self.crest_kappa_0),
-            ("crest_eps_seed", self.crest_eps_seed), ("morozov_gamma_under", self.morozov_gamma_under),
-            ("morozov_rho", self.morozov_rho), ("morozov_rho_cap", self.morozov_rho_cap),
-        ]:
-            _require_non_negative(name, val)
+        for k in (
+            "pm_kappa", "anscombe_tau_dense", "scale_router_temperature",
+            "trust_region_floor", "anscombe_c", "adaptive_tau_rho0",
+            "shifted_carrier_eps", "trust_dense_tau", "trust_dense_kappa",
+            "density_scale_tau", "deficit_seed_eps", "morozov_density_beta",
+        ):
+            _require_positive(k, getattr(self, k))
+        for k in (
+            "proximal_tau", "floor_tau", "tv_lambda", "trust_region_kappa",
+            "morozov_gamma", "crest_kappa_0", "crest_eps_seed",
+            "morozov_gamma_under", "morozov_rho", "morozov_rho_cap",
+        ):
+            _require_non_negative(k, getattr(self, k))
+
         if self.use_cpcm and self.cpcm_hidden <= 0:
             raise ValueError(f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}")
         if self.proximal_mode not in ("firm", "soft", "none", "clamp"):
@@ -369,16 +363,20 @@ class RMRv3Config:
         if self.proximal_mu <= 1.0:
             raise ValueError(f"proximal_mu must be > 1.0, got {self.proximal_mu}")
         if self.adjoint_mode not in ("flat", "radon_nikodym", "anscombe_vst"):
-            raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'")
+            raise ValueError(
+                f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'"
+            )
         if self.adjoint_mode == "anscombe_vst":
             self.use_anscombe_sirt = True
         if self.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
             raise ValueError(
-                f"Unsupported reliability_mode: {self.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
+                f"Unsupported reliability_mode: {self.reliability_mode}. "
+                "Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
             )
         _require_unit_interval("tdsg_floor", self.tdsg_floor)
         _require_unit_interval("fg_gate_floor", self.fg_gate_floor)
         _require_unit_interval("hybrid_recovery_alpha", self.hybrid_recovery_alpha)
+
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
@@ -422,21 +420,22 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
         )
     if cfg.include_full_image:
         raise ValueError("RMR-v3 registered method requires include_full_image=False")
-    if cfg.enable_solver and cfg.iterations < 1:
-        raise ValueError("iterations must be >= 1 when enable_solver=True")
-    if cfg.enable_solver and cfg.omega <= 0:
-        raise ValueError("omega must be > 0 when enable_solver=True")
+    if cfg.enable_solver and (cfg.iterations < 1 or cfg.omega <= 0):
+        raise ValueError("iterations must be >= 1 and omega > 0 when enable_solver=True")
     if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
         raise ValueError(
-            f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
+            f"Unsupported reliability_mode: {cfg.reliability_mode}. "
+            "Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
         )
     if len(cfg.region_sizes_px) == 0:
         raise ValueError("region_sizes_px must not be empty")
-    if cfg.reliability_weight_min <= 0:
-        raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0")
-    if not (cfg.reliability_weight_min < cfg.reliability_weight_max):
-        raise ValueError(f"reliability_weight_min ({cfg.reliability_weight_min}) must be < reliability_weight_max ({cfg.reliability_weight_max})")
+    if cfg.reliability_weight_min <= 0 or not (cfg.reliability_weight_min < cfg.reliability_weight_max):
+        raise ValueError(
+            f"reliability_weight_min ({cfg.reliability_weight_min}) must be > 0 and "
+            f"< reliability_weight_max ({cfg.reliability_weight_max})"
+        )
     if cfg.reliability_rate_std_floor <= 0:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
     if cfg.head_activation not in ("softplus", "relu"):
         raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
+

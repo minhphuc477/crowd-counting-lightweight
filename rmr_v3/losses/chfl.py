@@ -19,7 +19,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-_CANONICAL_CHFL_CACHE: Dict[Tuple[int, int, int, float, int, float, str], Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+ChflKey = Tuple[int, int, int, float, int, float, str]
+ChflTensors = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+_CANONICAL_CHFL_CACHE: Dict[ChflKey, ChflTensors] = {}
+
 
 
 def _build_canonical_chfl_templates(

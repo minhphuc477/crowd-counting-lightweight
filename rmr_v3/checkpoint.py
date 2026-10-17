@@ -159,7 +159,8 @@ class CheckpointManager:
         else:
             if solver_engaged and self.patience > 0:
                 self.epochs_without_improvement += eval_every
-            tag = f" (Solver ramping: epoch {epoch}/{self.solver_warmup_epochs + self.solver_ramp_epochs})" if not solver_engaged else ""
+            ramp_end = self.solver_warmup_epochs + self.solver_ramp_epochs
+            tag = f" (Solver ramping: epoch {epoch}/{ramp_end})" if not solver_engaged else ""
             return False, tag
 
     @property

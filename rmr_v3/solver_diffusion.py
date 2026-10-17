@@ -64,8 +64,10 @@ def laplacian_tv_diffusion(
     if density_gated:
         y_smooth = F.avg_pool2d(y_4d.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
         y_effective = torch.maximum(y_4d.float(), y_smooth)
-        gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / float(max(diffusion_gate_beta, 1e-4)))
+        diff_beta = float(max(diffusion_gate_beta, 1e-4))
+        gate = 1.0 - torch.sigmoid((y_effective - float(diffusion_dense_threshold)) / diff_beta)
         gate_pad = F.pad(gate.to(dtype=y.dtype), (1, 1, 1, 1), mode="replicate")
+
 
         y_c = y_pad[:, :, 1:-1, 1:-1]
         y_n = y_pad[:, :, 0:-2, 1:-1]

@@ -175,11 +175,17 @@ def bayesian_loss(
         c_hat_bg = torch.dot(post_bg, y_flat)
 
         u = y_flat / denom
-        target_person = (
-            targets_list[i].to(device=device, dtype=torch.float32)
-            if targets_list is not None and i < len(targets_list) and targets_list[i] is not None and targets_list[i].shape[0] == n
-            else torch.ones(n, device=device, dtype=torch.float32)
+        has_custom_target = (
+            targets_list is not None
+            and i < len(targets_list)
+            and targets_list[i] is not None
+            and targets_list[i].shape[0] == n
         )
+        if has_custom_target:
+            target_person = targets_list[i].to(device=device, dtype=torch.float32)
+        else:
+            target_person = torch.ones(n, device=device, dtype=torch.float32)
+
         inv_k_arg = inv_sq_pts if inv_sq_pts is not None else inv_two_sigma_sq
         person_err = _BayesianPersonErrorFunction.apply(
             u, pts, gx, gy, inv_k_arg, target_person, chunk_size

@@ -144,8 +144,14 @@ class DiagnosticTracker:
 
     def summarize(self) -> dict[str, float]:
         disps_np = torch.cat(self.all_disps).cpu().numpy() if self.all_disps else np.array([50.0])
-        pred_weights_np = torch.cat(self.all_pred_weights).cpu().numpy() if self.all_pred_weights else np.array([1.0])
-        solver_weights_np = torch.cat(self.all_solver_weights).cpu().numpy() if self.all_solver_weights else np.array([1.0])
+        pred_weights_np = (
+            torch.cat(self.all_pred_weights).cpu().numpy()
+            if self.all_pred_weights else np.array([1.0])
+        )
+        solver_weights_np = (
+            torch.cat(self.all_solver_weights).cpu().numpy()
+            if self.all_solver_weights else np.array([1.0])
+        )
 
         e_b = float(np.mean(self.e_befores)) if self.e_befores else 0.0
         e_a = float(np.mean(self.e_afters)) if self.e_afters else 0.0
@@ -280,7 +286,8 @@ def format_dynamic_training_banner(
             solver_parts.append(f"TrustRegion(kappa={m_cfg.trust_region_kappa})")
         solver_desc = " | ".join(solver_parts)
 
-    guidance_head = f"Hurdle-NB ({m_cfg.hurdle_gating_mode.capitalize()} Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
+    gating_name = m_cfg.hurdle_gating_mode.capitalize()
+    guidance_head = f"Hurdle-NB ({gating_name} Gated)" if m_cfg.hurdle_head else "Negative-Binomial"
     if m_cfg.scale_conditioned_fine_head:
         density_head = "ScaleConditionedFineHead (FiLM Continuous Simplex + 3x3 DW Receptive Field)"
     elif getattr(m_cfg, "head_activation", "softplus") == "relu":
@@ -330,7 +337,10 @@ def format_dynamic_training_banner(
     banner = [
         "=" * 80,
         "  RMR Training Initialized [Dynamic Architecture Engine]",
-        f"  Run: {run_label} | Parameters: {n_params:,} / {budget_ceiling:,} budget ({budget_pct:.1f}% used, +{headroom:,} headroom)",
+        (
+            f"  Run: {run_label} | Parameters: {n_params:,} / {budget_ceiling:,} budget "
+            f"({budget_pct:.1f}% used, +{headroom:,} headroom)"
+        ),
         f"  Carrier: {carrier_line}",
         f"  Geometry: {reg_desc} | Pooling: {pooling_desc}",
         f"  Solver: {solver_desc}",

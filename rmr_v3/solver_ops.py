@@ -23,12 +23,19 @@ from .solver_anscombe import (
     anscombe_discrepancy,
     anscombe_transform,
     density_gated_anscombe_discrepancy,
+    prepare_anscombe_target,
 )
+
 from .solver_softbox import (
     gaussian_softbox_adjoint_step,
     gaussian_softbox_forward,
     make_gaussian_softbox_kernel,
 )
+from .solver_step_adaptation import (
+    compute_adaptive_relaxation_factor,
+    compute_barzilai_borwein_step,
+)
+from .solver_trust import apply_trust_region_clamping
 
 __all__ = [
     "_LAPLACE_KERNEL",
@@ -40,7 +47,13 @@ __all__ = [
     "anscombe_transform",
     "anscombe_discrepancy",
     "density_gated_anscombe_discrepancy",
+    "prepare_anscombe_target",
     "make_gaussian_softbox_kernel",
     "gaussian_softbox_forward",
     "gaussian_softbox_adjoint_step",
+    "apply_trust_region_clamping",
+    "compute_barzilai_borwein_step",
+    "compute_adaptive_relaxation_factor",
 ]
+
+

@@ -105,7 +105,8 @@ def density_gated_anscombe_discrepancy(
     if morozov_gamma > 0.0 and b_variance is not None:
         sigma_b = torch.sqrt(b_variance.float().clamp_min(0.0))
         if asymmetric_morozov:
-            gamma_under = float(morozov_gamma_under) / (1.0 + float(morozov_rho) * torch.sqrt(b.float().clamp_min(0.0)))
+            denom = 1.0 + float(morozov_rho) * torch.sqrt(b.float().clamp_min(0.0))
+            gamma_under = float(morozov_gamma_under) / denom
             gamma_eff = torch.where(delta > 0.0, float(morozov_gamma), gamma_under)
         else:
             gamma_eff = float(morozov_gamma)
@@ -117,3 +118,56 @@ def density_gated_anscombe_discrepancy(
     rate_res_linear = delta / eff_q.clamp_min(float(eps))
 
     return dense_mask * rate_res_anscombe + (1.0 - dense_mask) * rate_res_linear
+
+
+def prepare_anscombe_target(
+    z_state: torch.Tensor,
+    b_solver: torch.Tensor,
+    regions: Any,
+    area_scale: float,
+    area_normalized_adjoint: bool,
+    density_gated_anscombe: bool,
+    anscombe_c: float,
+    b_variance: torch.Tensor | None,
+    morozov_gamma: float,
+    anscombe_tau_dense: float,
+    asymmetric_morozov: bool,
+    morozov_gamma_under: float,
+    morozov_rho: float,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Compute regional discrepancy under Anscombe VST and return adjusted target b_target."""
+    from rmr_core.operators import regional_sum
+
+    q = regional_sum(z_state.float(), regions.boxes, out_dtype=torch.float32)
+    area = regions.area.float().view(1, 1, -1)
+    eff_area = area * area_scale if area_normalized_adjoint else area
+
+    if density_gated_anscombe:
+        rate_res = density_gated_anscombe_discrepancy(
+            q,
+            b_solver,
+            eff_area,
+            c=anscombe_c,
+            b_variance=b_variance,
+            morozov_gamma=float(morozov_gamma),
+            tau_dense=float(anscombe_tau_dense),
+            asymmetric_morozov=asymmetric_morozov,
+            morozov_gamma_under=float(morozov_gamma_under),
+            morozov_rho=float(morozov_rho),
+        )
+    else:
+        rate_res = anscombe_discrepancy(
+            q,
+            b_solver,
+            c=anscombe_c,
+            b_variance=b_variance,
+            morozov_gamma=float(morozov_gamma),
+            asymmetric_morozov=asymmetric_morozov,
+            morozov_gamma_under=float(morozov_gamma_under),
+            morozov_rho=float(morozov_rho),
+        )
+
+    eff_q = q + float(eps) * eff_area.clamp_min(1.0)
+    return q - rate_res * eff_q.clamp_min(float(eps))
+

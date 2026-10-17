@@ -85,7 +85,12 @@ def evaluate_v3(
 
     def sample_callback(sample: dict, out: dict, y: torch.Tensor, row: dict) -> dict:
         target = sample.get("target_device", sample["target_y"].to(device))
-        target_4d = target if target.ndim == 4 else (target.unsqueeze(0) if target.ndim == 3 else target.unsqueeze(0).unsqueeze(0))
+        if target.ndim == 4:
+            target_4d = target
+        elif target.ndim == 3:
+            target_4d = target.unsqueeze(0)
+        else:
+            target_4d = target.unsqueeze(0).unsqueeze(0)
         d_rows = regional_reliability_rows(out, target_4d, max_regions=300)
         all_diag_rows.extend(d_rows)
         t_diag = compute_solver_trajectory_diagnostics(out, target_4d, scale_map=scale_map)

@@ -263,9 +263,12 @@ def _compute_auxiliary_losses(
             alpha=float(cfg.cell_mass_weight_alpha),
             gamma=float(cfg.cell_mass_weight_gamma),
         )
-        losses["cell_carrier"], losses["cell_fine"] = dual["cell_carrier"], losses["cell"]
+        losses["cell_carrier"] = dual["cell_carrier"]
+        losses["cell_fine"] = losses["cell"]
         eff_fine_delta = (cfg.lambda_fine_cell - cfg.lambda_cell) if cfg.lambda_fine_cell > 0.0 else 0.0
-        losses["total"] = losses["total"] + cfg.lambda_carrier_cell * dual["cell_carrier"] + eff_fine_delta * losses["cell"]
+        carrier_boost = cfg.lambda_carrier_cell * dual["cell_carrier"]
+        fine_boost = eff_fine_delta * losses["cell"]
+        losses["total"] = losses["total"] + carrier_boost + fine_boost
     else:
         losses["cell_carrier"] = losses["cell_fine"] = zero_val
 

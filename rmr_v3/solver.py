@@ -19,10 +19,14 @@ from rmr_core.operators import (
 )
 from .solver_ops import (
     anscombe_discrepancy,
+    apply_trust_region_clamping,
+    compute_adaptive_relaxation_factor,
     compute_adaptive_tau,
+    compute_barzilai_borwein_step,
     density_gated_anscombe_discrepancy,
     laplacian_tv_diffusion,
     perona_malik_anisotropic_diffusion,
+    prepare_anscombe_target,
     proximal_firm_threshold,
     proximal_soft_threshold,
 )
@@ -49,42 +53,74 @@ def unrolled_sirt_solver(
     tv_eps_c: float = 0.1,
     laplace_kernel: torch.Tensor | None = None,
     scale_routing_weights: torch.Tensor | None = None,
-    trust_region_kappa: float = 0.0, trust_region_floor: float = 0.005,
-    adjoint_mode: str = "flat", b_variance: torch.Tensor | None = None,
-    morozov_gamma: float = 0.0, use_barzilai_borwein: bool = False,
-    use_alternating_bb: bool = False, bb_clamp_min: float = 0.2,
-    bb_clamp_max: float = 2.0, cyclic_bb_length: int = 1,
-    use_scale_entropy_trust: bool = False, use_nesterov_momentum: bool = False,
-    adaptive_relaxation: bool = False, adaptive_relax_sparse: float = 0.70,
-    adaptive_relax_dense_boost: float = 0.50, adaptive_relax_threshold: float = 0.05,
-    adaptive_relax_scale: float = 0.02, hybrid_recovery_alpha: float = 0.0,
-    density_gated_diffusion: bool = False, diffusion_dense_threshold: float = 0.15,
-    diffusion_gate_beta: float = 0.03, output_stride: int = 4,
-    use_anscombe: bool = False, anscombe_c: float = 0.375,
-    adaptive_tau: bool = False, adaptive_tau_rho0: float = 0.05,
-    anisotropic_diffusion: bool = False, pm_kappa: float = 0.05,
-    density_gated_anscombe: bool = False, anscombe_tau_dense: float = 0.08,
-    area_normalized_adjoint: bool = False, carrier_energy: torch.Tensor | None = None,
-    resonant_lambda: float = 0.0, anscombe_morozov: bool = False,
-    crest_discovery_flux: bool = False, crest_kappa_0: float = 2.0,
-    crest_eps_seed: float = 0.005, asymmetric_morozov: bool = False,
-    morozov_gamma_under: float = 0.20, morozov_rho: float = 0.30,
-    shifted_carrier: bool = False, shifted_carrier_eps: float = 0.02,
-    density_adaptive_trust: bool = False, trust_dense_tau: float = 0.10,
-    trust_dense_kappa: float = 0.80, asymmetric_trust: bool = False,
-    trust_pos_kappa: float = 1.0, spatial_morozov: bool = False,
+    trust_region_kappa: float = 0.0,
+    trust_region_floor: float = 0.005,
+    adjoint_mode: str = "flat",
+    b_variance: torch.Tensor | None = None,
+    morozov_gamma: float = 0.0,
+    use_barzilai_borwein: bool = False,
+    use_alternating_bb: bool = False,
+    bb_clamp_min: float = 0.2,
+    bb_clamp_max: float = 2.0,
+    cyclic_bb_length: int = 1,
+    use_scale_entropy_trust: bool = False,
+    use_nesterov_momentum: bool = False,
+    adaptive_relaxation: bool = False,
+    adaptive_relax_sparse: float = 0.70,
+    adaptive_relax_dense_boost: float = 0.50,
+    adaptive_relax_threshold: float = 0.05,
+    adaptive_relax_scale: float = 0.02,
+    hybrid_recovery_alpha: float = 0.0,
+    density_gated_diffusion: bool = False,
+    diffusion_dense_threshold: float = 0.15,
+    diffusion_gate_beta: float = 0.03,
+    output_stride: int = 4,
+    use_anscombe: bool = False,
+    anscombe_c: float = 0.375,
+    adaptive_tau: bool = False,
+    adaptive_tau_rho0: float = 0.05,
+    anisotropic_diffusion: bool = False,
+    pm_kappa: float = 0.05,
+    density_gated_anscombe: bool = False,
+    anscombe_tau_dense: float = 0.08,
+    area_normalized_adjoint: bool = False,
+    carrier_energy: torch.Tensor | None = None,
+    resonant_lambda: float = 0.0,
+    anscombe_morozov: bool = False,
+    crest_discovery_flux: bool = False,
+    crest_kappa_0: float = 2.0,
+    crest_eps_seed: float = 0.005,
+    asymmetric_morozov: bool = False,
+    morozov_gamma_under: float = 0.20,
+    morozov_rho: float = 0.30,
+    shifted_carrier: bool = False,
+    shifted_carrier_eps: float = 0.02,
+    density_adaptive_trust: bool = False,
+    trust_dense_tau: float = 0.10,
+    trust_dense_kappa: float = 0.80,
+    asymmetric_trust: bool = False,
+    trust_pos_kappa: float = 1.0,
+    spatial_morozov: bool = False,
     morozov_gamma_scales: tuple[float, ...] = (0.25, 0.50, 0.75),
-    scale_routed_trust: bool = False, scale_seeded_carrier: bool = False,
-    scale_seed_eps: float = 0.02, trust_region_floor_dense: float = 0.025,
-    evidence_anchored_trust: bool = False, eatr_alpha: float = 0.5,
-    regional_rate: torch.Tensor | None = None, morozov_rho_cap: float = 0.0,
-    multiscale_morozov: bool = False, morozov_scale_beta: float = 1.0,
-    deficit_carrier_seeding: bool = False, deficit_seed_eps: float = 0.02,
-    density_adaptive_morozov: bool = False, morozov_density_beta: float = 2.0,
+    scale_routed_trust: bool = False,
+    scale_seeded_carrier: bool = False,
+    scale_seed_eps: float = 0.02,
+    trust_region_floor_dense: float = 0.025,
+    evidence_anchored_trust: bool = False,
+    eatr_alpha: float = 0.5,
+    regional_rate: torch.Tensor | None = None,
+    morozov_rho_cap: float = 0.0,
+    multiscale_morozov: bool = False,
+    morozov_scale_beta: float = 1.0,
+    deficit_carrier_seeding: bool = False,
+    deficit_seed_eps: float = 0.02,
+    density_adaptive_morozov: bool = False,
+    morozov_density_beta: float = 2.0,
     compute_energy: bool = True,
     omega_steps: torch.Tensor | Sequence[float] | None = None,
     gamma_steps: torch.Tensor | Sequence[float] | None = None,
 ) -> dict[str, Any]:
+
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
         b_solver = b_solver.unsqueeze(1)
@@ -123,6 +159,7 @@ def unrolled_sirt_solver(
             "effective_omega": effective_omega,
             "effective_tv_lambda": effective_tv_lambda,
         }
+
 
     # Pre-partition regions by scale once before the T-iteration solver loop.
     # This completely eliminates dynamic boolean masking and tensor slicing allocations inside the loop.
@@ -200,29 +237,27 @@ def unrolled_sirt_solver(
         # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
         is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
         if is_anscombe:
-            q = regional_sum(z_state.float(), regions.boxes, out_dtype=torch.float32)
-            area = regions.area.float().view(1, 1, -1)
-            eff_area = area * area_scale if area_normalized_adjoint else area
-            if density_gated_anscombe:
-                rate_res = density_gated_anscombe_discrepancy(
-                    q, b_solver, eff_area, c=anscombe_c, b_variance=b_variance,
-                    morozov_gamma=float(morozov_gamma), tau_dense=float(anscombe_tau_dense),
-                    asymmetric_morozov=asymmetric_morozov,
-                    morozov_gamma_under=float(morozov_gamma_under),
-                    morozov_rho=float(morozov_rho),
-                )
-            else:
-                rate_res = anscombe_discrepancy(
-                    q, b_solver, c=anscombe_c, b_variance=b_variance,
-                    morozov_gamma=float(morozov_gamma),
-                    asymmetric_morozov=asymmetric_morozov,
-                    morozov_gamma_under=float(morozov_gamma_under),
-                    morozov_rho=float(morozov_rho),
-                )
-            eff_q = q + float(eps) * eff_area.clamp_min(1.0)
-            b_target = q - rate_res * eff_q.clamp_min(float(eps))
+            b_target = prepare_anscombe_target(
+                z_state=z_state,
+                b_solver=b_solver,
+                regions=regions,
+                area_scale=area_scale,
+                area_normalized_adjoint=area_normalized_adjoint,
+                density_gated_anscombe=density_gated_anscombe,
+                anscombe_c=anscombe_c,
+                b_variance=b_variance,
+                morozov_gamma=float(morozov_gamma),
+                anscombe_tau_dense=float(anscombe_tau_dense),
+                asymmetric_morozov=asymmetric_morozov,
+                morozov_gamma_under=float(morozov_gamma_under),
+                morozov_rho=float(morozov_rho),
+                eps=eps,
+            )
             adj_mode, b_var, m_gamma = "radon_nikodym", None, 0.0
-            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = False, False, False, False, False
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = (
+                False, False, False, False, False
+            )
+
         else:
             b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
             if gamma_steps is not None:
@@ -272,43 +307,44 @@ def unrolled_sirt_solver(
             current_omega: float | torch.Tensor = omega_steps[iter_idx - 1] * strength
         else:
             current_omega = effective_omega
-        if omega_steps is None and (use_barzilai_borwein or use_alternating_bb) and prev_y is not None and prev_field is not None and effective_omega > 0.0:
-            if cyclic_bb_length > 1 and cached_bb_omega is not None and ((iter_idx - 1) % cyclic_bb_length != 0):
+
+        can_use_bb = (
+            omega_steps is None
+            and (use_barzilai_borwein or use_alternating_bb)
+            and prev_y is not None
+            and prev_field is not None
+            and effective_omega > 0.0
+        )
+        if can_use_bb:
+            if (
+                cyclic_bb_length > 1
+                and cached_bb_omega is not None
+                and ((iter_idx - 1) % cyclic_bb_length != 0)
+            ):
                 current_omega = cached_bb_omega
             else:
-                s_diff = (z_state - prev_y).float()
-                r_diff = (field - prev_field).float()
-                dot_sr = (s_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True)
-                norm_r_sq = (r_diff * r_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
-                norm_s_sq = (s_diff * s_diff).sum(dim=(-3, -2, -1), keepdim=True) + 1e-6
-
-                if use_alternating_bb and (iter_idx % 2 == 1):
-                    # BB-2: Inverse Rayleigh quotient alpha_2 = ||s||^2 / <s, r>
-                    omega_candidate = torch.where(
-                        dot_sr > 1e-7,
-                        norm_s_sq / dot_sr.clamp_min(1e-7),
-                        torch.full_like(dot_sr, effective_omega),
-                    ).detach()
-                else:
-                    # BB-1: Standard Rayleigh quotient alpha_1 = <s, r> / ||r||^2
-                    omega_candidate = torch.where(
-                        dot_sr > 0.0,
-                        dot_sr / norm_r_sq,
-                        torch.full_like(dot_sr, effective_omega),
-                    ).detach()
-
-                current_omega = torch.clamp(
-                    omega_candidate,
-                    min=float(bb_clamp_min) * effective_omega,
-                    max=float(bb_clamp_max) * effective_omega,
+                current_omega = compute_barzilai_borwein_step(
+                    z_state=z_state,
+                    prev_y=prev_y,
+                    field=field,
+                    prev_field=prev_field,
+                    effective_omega=effective_omega,
+                    use_alternating_bb=use_alternating_bb,
+                    iter_idx=iter_idx,
+                    bb_clamp_min=bb_clamp_min,
+                    bb_clamp_max=bb_clamp_max,
                 )
                 cached_bb_omega = current_omega
 
         # Density-Adaptive Over-Relaxation (RMR-v20)
         if adaptive_relaxation:
-            z_smooth = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
-            gate_dense = torch.sigmoid((z_smooth - effective_relax_thresh) / max(effective_relax_scale, 1e-6))
-            omega_mod = float(adaptive_relax_sparse) + (1.0 - float(adaptive_relax_sparse) + float(adaptive_relax_dense_boost)) * gate_dense
+            omega_mod = compute_adaptive_relaxation_factor(
+                z_state=z_state,
+                effective_relax_thresh=effective_relax_thresh,
+                effective_relax_scale=effective_relax_scale,
+                adaptive_relax_sparse=adaptive_relax_sparse,
+                adaptive_relax_dense_boost=adaptive_relax_dense_boost,
+            )
             current_omega = current_omega * omega_mod
 
         step_omegas.append(current_omega)
@@ -316,56 +352,29 @@ def unrolled_sirt_solver(
         # delta_y > 0 adds mass (when under-counting: field < 0 => delta_y > 0).
         # delta_y < 0 removes mass (when over-counting: field > 0 => delta_y < 0).
         delta_y = -current_omega * field
-        if trust_region_kappa > 0.0:
-            eff_kappa = float(trust_region_kappa)
-            if scale_routed_trust and scale_routing_weights is not None:
-                pi_fine = scale_routing_weights[:, 0:1, :, :].float().detach()
-                eff_pos_kappa = eff_kappa + (float(trust_pos_kappa) - eff_kappa) * pi_fine
-                fl_sparse = float(effective_trust_floor)
-                fl_dense = float(trust_region_floor_dense) * area_scale
-                eff_floor = fl_sparse + (fl_dense - fl_sparse) * pi_fine
-            elif density_adaptive_trust:
-                z_local = F.avg_pool2d(z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False)
-                dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
-                eff_pos_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
-                eff_floor = float(effective_trust_floor)
-            else:
-                eff_pos_kappa = eff_kappa
-                eff_floor = float(effective_trust_floor)
 
-            base_bound = torch.clamp_min(z_state.float(), eff_floor)
-            bound_removal = eff_kappa * base_bound
-            if deficit_carrier_seeding and psi_deficit is not None:
-                deficit_ratio = torch.clamp(psi_deficit.float().detach() / (base_bound + 1e-4), max=1.0)
-                bound_removal = bound_removal * (1.0 - 0.75 * deficit_ratio)
+        delta_y = apply_trust_region_clamping(
+            delta_y=delta_y,
+            z_state=z_state,
+            trust_region_kappa=trust_region_kappa,
+            effective_trust_floor=effective_trust_floor,
+            area_scale=area_scale,
+            scale_routed_trust=scale_routed_trust,
+            scale_routing_weights=scale_routing_weights,
+            trust_pos_kappa=trust_pos_kappa,
+            trust_region_floor_dense=trust_region_floor_dense,
+            density_adaptive_trust=density_adaptive_trust,
+            trust_dense_tau=trust_dense_tau,
+            trust_dense_kappa=trust_dense_kappa,
+            deficit_carrier_seeding=deficit_carrier_seeding,
+            psi_deficit=psi_deficit,
+            scale_seeded_carrier=scale_seeded_carrier,
+            scale_seed_eps=scale_seed_eps,
+            eatr_floor=eatr_floor,
+            asymmetric_trust=asymmetric_trust,
+            scale_confidence=scale_confidence,
+        )
 
-            seed_allowance: float | torch.Tensor = 0.0
-            if scale_seeded_carrier and scale_routing_weights is not None:
-                seed_supp = float(scale_seed_eps) * scale_routing_weights[:, 0:1, :, :].float().detach()
-                base_bound_pos = torch.clamp_min(torch.maximum(z_state.float(), seed_supp), eff_floor)
-                seed_allowance = seed_supp
-            else:
-                base_bound_pos = base_bound
-            if deficit_carrier_seeding and psi_deficit is not None:
-                deficit_supp = psi_deficit.float().detach()
-                base_bound_pos = torch.clamp_min(torch.maximum(base_bound_pos, deficit_supp), eff_floor)
-                seed_allowance = seed_allowance + deficit_supp
-            if eatr_floor is not None:
-                base_bound_pos = torch.maximum(base_bound_pos, eatr_floor)
-
-            if asymmetric_trust:
-                pos_k = float(trust_pos_kappa)
-                eff_pos_kappa = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
-            bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
-
-            if scale_confidence is not None:
-                # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions
-                conf_mod = 0.25 + 0.75 * scale_confidence
-                bound_removal = bound_removal * conf_mod
-                bound_addition = bound_addition * conf_mod
-
-            # Lower bound (-bound_removal) restricts removal; Upper bound (+bound_addition) allows addition/seeding
-            delta_y = torch.clamp(delta_y, min=-bound_removal, max=bound_addition)
 
         prev_y = y_curr.detach()   # Track actual iterate (not Nesterov extrapolate) for BB-1 correctness
         prev_field = field.detach()
@@ -395,7 +404,7 @@ def unrolled_sirt_solver(
                 f"Unknown proximal_mode: '{proximal_mode}'. Must be 'firm', 'soft', or 'none'."
             )
 
-        # ── Step 3: Total Variation diffusion ─────────────────────────────────
+        # Step 3: Total Variation diffusion
         if tv_step > 0.0:
             if tv_type == "charbonnier":
                 y_next = charbonnier_tv_step(y_next, tv_step, float(tv_eps_c))
@@ -425,10 +434,8 @@ def unrolled_sirt_solver(
         y_prev = y_curr
         y_curr = y_next
 
-    y = y_curr
-
     return {
-        "y": y,
+        "y": y_curr,
         "iterates": iterates,
         "residual_fields": residual_fields,
         "energy_trace": energy_trace,
@@ -436,3 +443,4 @@ def unrolled_sirt_solver(
         "effective_omega": effective_omega,
         "effective_tv_lambda": effective_tv_lambda,
     }
+

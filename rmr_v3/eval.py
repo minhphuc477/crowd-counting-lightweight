@@ -118,18 +118,42 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate RMR-v3 checkpoint")
     ap.add_argument("--checkpoint", "--ckpt", required=True, help="Path to .pt checkpoint")
     ap.add_argument("--manifest", default=None, help="Path to eval manifest jsonl")
-    ap.add_argument("--output-dir", "--output_dir", "--save-dir", "--save_dir", dest="output_dir", default=None, help="Directory to save evaluation artifacts")
+    ap.add_argument(
+        "--output-dir", "--output_dir", "--save-dir", "--save_dir", dest="output_dir",
+        default=None, help="Directory to save evaluation artifacts",
+    )
     ap.add_argument("--device", default=None, help="Device to run evaluation on (e.g. cuda, cuda:0, cpu)")
-    ap.add_argument("--uniform-reliability", dest="uniform_reliability", action="store_true", default=None, help="Force uniform reliability (W=I)")
-    ap.add_argument("--weighted-reliability", dest="uniform_reliability", action="store_false", help="Force weighted reliability (W=diag(w_R))")
-    ap.add_argument("--tiling", dest="tiling", action="store_true", default=True, help="Enable tiled prediction (default: True)")
+    ap.add_argument(
+        "--uniform-reliability", dest="uniform_reliability", action="store_true",
+        default=None, help="Force uniform reliability (W=I)",
+    )
+    ap.add_argument(
+        "--weighted-reliability", dest="uniform_reliability", action="store_false",
+        help="Force weighted reliability (W=diag(w_R))",
+    )
+    ap.add_argument(
+        "--tiling", dest="tiling", action="store_true", default=True,
+        help="Enable tiled prediction (default: True)",
+    )
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
-    ap.add_argument("--tta", dest="tta", action="store_true", default=False, help="Enable Horizontal Flip Test-Time Augmentation (TTA)")
+    ap.add_argument(
+        "--tta", dest="tta", action="store_true", default=False,
+        help="Enable Horizontal Flip Test-Time Augmentation (TTA)",
+    )
     ap.add_argument("--enable-tta", dest="enable_tta", action="store_true", default=False, help="Alias for --tta")
-    ap.add_argument("--dataset", default=None, help="Dataset identifier (e.g. sha_a, sha_b, qnrf) to resolve data/<dataset>_<split>.jsonl")
+    ap.add_argument(
+        "--dataset", default=None,
+        help="Dataset identifier (e.g. sha_a, sha_b, qnrf) to resolve data/<dataset>_<split>.jsonl",
+    )
     ap.add_argument("--split", default="test", help="Dataset split (default: test, e.g. test, val, train)")
-    ap.add_argument("--config", default=None, help="Optional config YAML path (overrides checkpoint config if provided)")
-    ap.add_argument("--use-live-weights", dest="use_ema", action="store_false", default=True, help="Evaluate live checkpoint weights instead of EMA weights")
+    ap.add_argument(
+        "--config", default=None,
+        help="Optional config YAML path (overrides checkpoint config if provided)",
+    )
+    ap.add_argument(
+        "--use-live-weights", dest="use_ema", action="store_false", default=True,
+        help="Evaluate live checkpoint weights instead of EMA weights",
+    )
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -159,7 +183,8 @@ def main() -> None:
     tiling_tag = "" if args.tiling else "_notiling"
     tta_tag = "_tta" if use_tta else ""
     default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}{tta_tag}"
-    out_dir = Path(args.output_dir) if args.output_dir else (ckpt_path if ckpt_path.is_dir() else ckpt_path.parent) / default_dir_name
+    ckpt_dir = ckpt_path if ckpt_path.is_dir() else ckpt_path.parent
+    out_dir = Path(args.output_dir) if args.output_dir else ckpt_dir / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stride = int(getattr(model.cfg, "output_stride", cfg.get("model", {}).get("output_stride", 4)))
@@ -261,7 +286,10 @@ def main() -> None:
 
     # Weight distribution statistics
     weights = np.array([r["weight"] for r in diag_rows]) if diag_rows else np.array([1.0])
-    solver_weights = np.array([r.get("solver_weight", r["weight"]) for r in diag_rows]) if diag_rows else np.array([1.0])
+    solver_weights = (
+        np.array([r.get("solver_weight", r["weight"]) for r in diag_rows])
+        if diag_rows else np.array([1.0])
+    )
 
     summary["weight_mean"] = float(np.mean(weights))
     summary["weight_std"] = float(np.std(weights))
@@ -304,9 +332,15 @@ def main() -> None:
             writer.writerows(diag_rows)
 
     print("\nEvaluation Results:")
-    print(f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}")
+    print(
+        f"  MAE: {summary['MAE']:.2f} | RMSE: {summary['RMSE']:.2f} | "
+        f"NAE: {summary['NAE']:.3f} | Bias: {summary['Bias']:+.2f}"
+    )
     if "mae_y0" in summary:
-        print(f"  Iterates Full-Image MAE: Y0={summary['mae_y0']:.2f} -> Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}")
+        print(
+            f"  Iterates Full-Image MAE: Y0={summary['mae_y0']:.2f} -> "
+            f"Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}"
+        )
     lo, hi = density_bins
     print(f"  Sparse MAE (<={lo:g}): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
     print(f"  Moderate MAE ({lo:g}-{hi:g}): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")
@@ -316,7 +350,12 @@ def main() -> None:
         print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")
         print(f"  Spearman(weight, err): {summary['spearman_weight_error']:.4f}")
     if "coverage_95" in summary:
-        print(f"  Coverage: 50%={summary['coverage_50']:.1%} (gap: {summary['calib_gap_50']:+.1%}), 80%={summary['coverage_80']:.1%} (gap: {summary['calib_gap_80']:+.1%}), 95%={summary['coverage_95']:.1%} (gap: {summary['calib_gap_95']:+.1%})")
+        cov_info = (
+            f"50%={summary['coverage_50']:.1%} (gap: {summary['calib_gap_50']:+.1%}), "
+            f"80%={summary['coverage_80']:.1%} (gap: {summary['calib_gap_80']:+.1%}), "
+            f"95%={summary['coverage_95']:.1%} (gap: {summary['calib_gap_95']:+.1%})"
+        )
+        print(f"  Coverage: {cov_info}")
     print(f"Saved artifacts to {out_dir}\n")
 
 

@@ -149,11 +149,12 @@ def count_harmonized_cell_loss(
             pos_t, pos_per = tgt_i[pos_mask], per_i[pos_mask]
             w_pos = pos_t.pow(float(gamma)) if abs(float(gamma) - 1.0) > 1e-5 else pos_t
             w_sum = w_pos.sum().clamp_min(float(eps))
-            denom = (
-                w_sum
-                if abs(float(norm_power) - 1.0) <= 1e-5
-                else (w_sum.pow(float(norm_power)) * (float(norm_ref) ** (1.0 - float(norm_power)))).clamp_min(float(eps))
-            )
+            if abs(float(norm_power) - 1.0) <= 1e-5:
+                denom = w_sum
+            else:
+                scale_ref = float(norm_ref) ** (1.0 - float(norm_power))
+                denom = (w_sum.pow(float(norm_power)) * scale_ref).clamp_min(float(eps))
+
             pos_loss = (w_pos / denom * pos_per).sum()
             comb_loss = float(1.0 - fg_ratio) * neg_loss + float(fg_ratio) * pos_loss
             sample_losses.append(comb_loss if neg_mask.any() else pos_loss)

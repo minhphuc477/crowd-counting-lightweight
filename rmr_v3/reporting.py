@@ -11,7 +11,8 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "train_curvature", "train_hard_bg", "train_fg_bce", "train_scale_align",
     "train_spectral", "train_spectral_dc", "train_spectral_ac",
     "train_cell_carrier", "train_cell_fine",
-    "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10", "region_dispersion_p50", "region_dispersion_p90",
+    "region_mu_mean", "region_dispersion_mean", "region_dispersion_p10",
+    "region_dispersion_p50", "region_dispersion_p90",
     "region_weight_mean", "region_weight_std", "region_weight_min", "region_weight_max",
     "solver_weight_mean", "solver_weight_std",
     "weight_clip_low_fraction", "weight_clip_high_fraction",
@@ -25,7 +26,8 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
     "val_mae_sparse", "val_mae_moderate", "val_mae_dense",
     "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
     "spearman_pred_weight_error",
-    "spearman_rate_var_error_16", "spearman_rate_var_error_32", "spearman_rate_var_error_64", "spearman_rate_var_error_128",
+    "spearman_rate_var_error_16", "spearman_rate_var_error_32",
+    "spearman_rate_var_error_64", "spearman_rate_var_error_128",
     "spearman_rate_var_error_band_0", "spearman_rate_var_error_band_1", "spearman_rate_var_error_band_2",
     "spearman_rate_var_error_band_3", "spearman_rate_var_error_band_4",
     "mean_std_residual",
@@ -51,7 +53,10 @@ def format_epoch_row(
 
     alloc_type = getattr(loss_cfg, "allocation_loss_type", "flat_dm16")
     if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
-        alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+        alloc_repr = (
+            f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, "
+            f"32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+        )
     elif alloc_type == "dual_bayesian_dm16":
         alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
     elif alloc_type == "bayesian":
@@ -84,9 +89,12 @@ def format_epoch_row(
     if float(row_log.get("train_count_l1", 0.0)) > 0:
         cnt_repr += f", cnt_l1: {float(row_log['train_count_l1']):.2f}"
 
+    loss_detail = (
+        f"Loss: {row_log['train_total']:.4f} [{cnt_repr}, {alloc_repr}, "
+        f"cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]"
+    )
     return (
-        f"[{epoch+1:04d}/{epochs:04d}] "
-        f"Loss: {row_log['train_total']:.4f} [{cnt_repr}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}] | "
+        f"[{epoch+1:04d}/{epochs:04d}] {loss_detail} | "
         f"SolvStr: {solver_strength:.2f} | "
         f"Disp: {row_log['region_dispersion_p50']:.1f} | "
         f"W_pred: {row_log['region_weight_mean']:.2f} | W_solv: {row_log['solver_weight_mean']:.2f}"
@@ -111,7 +119,10 @@ def format_eval_block(
 
     alloc_type = getattr(loss_cfg, "allocation_loss_type", "flat_dm16")
     if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
-        alloc_repr = f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, 32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+        alloc_repr = (
+            f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, "
+            f"32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
+        )
     elif alloc_type == "dual_bayesian_dm16":
         alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
     elif alloc_type == "bayesian":
@@ -146,15 +157,39 @@ def format_eval_block(
     cov_95 = f"{val_metrics.get('coverage_95', 0.0)*100:.1f}%" if "coverage_95" in val_metrics else "N/A"
     num_samples = int(val_metrics.get("num_samples", 182))
 
+    e_red_pct = diag_summary["solver_energy_reduction"] * 100
+    line_loss = (
+        f"  Train Loss    : {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, "
+        f"{alloc_repr}, cell: {row_log['train_cell']:.3f}, "
+        f"reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]\n"
+    )
+    line_solver = (
+        f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {e_red_pct:.1f}% | "
+        f"W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | "
+        f"W_solv: {row_log['solver_weight_mean']:.2f}\n"
+    )
+    line_val = (
+        f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | "
+        f"NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
+    )
+    line_game = (
+        f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | "
+        f"G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
+    )
+    line_unc = (
+        f"  Uncertainty   : Coverage: 50%={cov_50}, 80%={cov_80}, 95%={cov_95} | "
+        f"Median Disp: {row_log['region_dispersion_p50']:.1f}\n"
+    )
+
     return (
         f"\n{'='*92}\n"
         f"  EPOCH [{epoch+1:04d}/{epochs:04d}] PERIODIC EVALUATION ({num_samples} test samples)\n"
         f"{'-'*92}\n"
-        f"  Train Loss    : {row_log['train_total']:.4f} [cnt: {row_log['train_count']:.2f}, {alloc_repr}, cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]\n"
-        f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {diag_summary['solver_energy_reduction']*100:.1f}% | W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | W_solv: {row_log['solver_weight_mean']:.2f}\n"
-        f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
-        f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
-        f"  Uncertainty   : Coverage: 50%={cov_50}, 80%={cov_80}, 95%={cov_95} | Median Disp: {row_log['region_dispersion_p50']:.1f}\n"
+        f"{line_loss}"
+        f"{line_solver}"
+        f"{line_val}"
+        f"{line_game}"
+        f"{line_unc}"
         f"  Checkpoint    : Current Val MAE: {cur_mae:.2f} | Best Val MAE: {best_mae:.2f}{status_tag}\n"
         f"{'='*92}\n"
     )

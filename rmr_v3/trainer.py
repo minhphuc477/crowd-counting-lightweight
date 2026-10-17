@@ -32,6 +32,14 @@ from rmr_v3.reporting import TRAIN_LOG_FIELDNAMES, format_epoch_row, format_eval
 from rmr_v3.tracking import format_dynamic_training_banner
 
 
+def _get_lr(optimizer: torch.optim.Optimizer, group_name: str, fallback_idx: int) -> float:
+    for g in optimizer.param_groups:
+        if g.get("name") == group_name:
+            return float(g["lr"])
+    idx = fallback_idx if fallback_idx < len(optimizer.param_groups) else -1
+    return float(optimizer.param_groups[idx]["lr"])
+
+
 def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     """Orchestrate dataset loading, model initialization, optimization, and training loop."""
     validate_v3_config(cfg)
@@ -56,7 +64,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         torch.set_num_interop_threads(1)
 
     m_cfg = cfg.setdefault("model", {})
-    eff_stride = 2 if (m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False)) else int(m_cfg.get("output_stride", 4))
+    subpix = bool(m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False))
+    eff_stride = 2 if subpix else int(m_cfg.get("output_stride", 4))
     init_m0_stride = 4 if m_cfg.get("subpixel_dm", False) else eff_stride
     if "init_m0" not in m_cfg and "train_manifest" in cfg.get("data", {}):
         m_cfg["init_m0"] = compute_manifest_density(
@@ -77,7 +86,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                     break
             else:
                 raise FileNotFoundError(
-                    f"--resume was given directory '{args.resume}', but neither 'last.pt' nor 'best_val_mae.pt' was found inside it."
+                    f"--resume was given directory '{args.resume}', but neither "
+                    "'last.pt' nor 'best_val_mae.pt' was found inside it."
                 )
         resume_ckpt = safe_torch_load(resume_path, map_location="cpu", weights_only=True)
         current_commit, _ = get_git_info()
@@ -89,8 +99,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             incoming_hash=run_config_hash,
             ckpt_commit=ckpt_commit,
             current_commit=current_commit,
-            allow_cross_commit=bool(getattr(args, "allow_cross_commit_resume", False) or getattr(args, "force_resume", False)),
-            allow_config_mismatch=bool(getattr(args, "allow_config_mismatch", False) or getattr(args, "force_resume", False)),
+            allow_cross_commit=bool(
+                getattr(args, "allow_cross_commit_resume", False) or getattr(args, "force_resume", False)
+            ),
+            allow_config_mismatch=bool(
+                getattr(args, "allow_config_mismatch", False) or getattr(args, "force_resume", False)
+            ),
         )
 
     out_dir = Path(cfg["output_dir"])
@@ -125,7 +139,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         boundary_margin=float(cfg.get("data", {}).get("boundary_margin", 0.0)),
         max_size=int(cfg.get("data", {}).get("max_size", 2048)),
         saturation_jitter=float(cfg.get("data", {}).get("saturation_jitter", 0.0)),
-        grayscale_prob=float(cfg.get("data", {}).get("grayscale_prob", cfg.get("data", {}).get("random_grayscale", 0.0))),
+        grayscale_prob=float(
+            cfg.get("data", {}).get("grayscale_prob", cfg.get("data", {}).get("random_grayscale", 0.0))
+        ),
     )
     val_manifest = cfg.get("data", {}).get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -139,7 +155,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     )
 
     dev_req = cfg.get("train", {}).get("device")
-    device = torch.device(dev_req if (dev_req and (torch.cuda.is_available() or "cpu" in str(dev_req))) else ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    if dev_req and (torch.cuda.is_available() or "cpu" in str(dev_req)):
+        device = torch.device(dev_req)
+    else:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -240,7 +259,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         start_epoch = int(ckpt.get("epoch", 0))
         best_mae = float(ckpt.get("best_mae", float("inf")))
         epochs_without_improvement = int(ckpt.get("epochs_without_improvement", 0)) if patience > 0 else 0
-        print(f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), best MAE: {best_mae:.2f}")
+        print(
+            f"Resumed from epoch index {start_epoch} (next display: epoch {start_epoch + 1}), "
+            f"best MAE: {best_mae:.2f}"
+        )
 
     ckpt_manager = CheckpointManager(
         out_dir=out_dir,
@@ -277,8 +299,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             solver_strength = min(1.0, float(epoch - solver_warmup_epochs + 1) / max(1.0, float(solver_ramp_epochs)))
         model.set_solver_strength(solver_strength)
 
-        cur_lr_bb = next((g["lr"] for g in optimizer.param_groups if g.get("name") == "backbone_decay"), optimizer.param_groups[0]["lr"])
-        cur_lr_main = next((g["lr"] for g in optimizer.param_groups if g.get("name") == "main_decay"), optimizer.param_groups[2]["lr"] if len(optimizer.param_groups) > 2 else optimizer.param_groups[-1]["lr"])
+        cur_lr_bb = _get_lr(optimizer, "backbone_decay", 0)
+        cur_lr_main = _get_lr(optimizer, "main_decay", 2)
 
         loss_avgs, diag_summary = train_one_epoch(
             model=model,
@@ -311,7 +333,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         for k in train_loss_keys:
             row_log[f"train_{k}"] = loss_avgs.get(k, 0.0)
         row_log["train_flat_dm16"] = loss_avgs.get("allocation", 0.0)
-        row_log["train_dm16"] = loss_avgs.get("dm_16", loss_avgs.get("allocation", 0.0) if "dm_32" not in loss_avgs else 0.0)
+        default_dm16 = loss_avgs.get("allocation", 0.0) if "dm_32" not in loss_avgs else 0.0
+        row_log["train_dm16"] = loss_avgs.get("dm_16", default_dm16)
         row_log["train_dm32"] = loss_avgs.get("dm_32", 0.0)
         row_log["train_dm64"] = loss_avgs.get("dm_64", 0.0)
 
@@ -349,9 +372,13 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 row_log[lk] = float(val_metrics.get(vk, 0.0))
             for k in extra_keys:
                 row_log[k] = float(val_metrics.get(k, 1.0 if k == "energy_monotonic_fraction" else 0.0))
-            has_curv = getattr(model.fine_head, "density_curvature", False) and hasattr(model.fine_head, "curvature_alpha")
+            has_curv = (
+                getattr(model.fine_head, "density_curvature", False)
+                and hasattr(model.fine_head, "curvature_alpha")
+            )
             row_log["curvature_alpha"] = float(model.fine_head.curvature_alpha.item()) if has_curv else 0.0
-            row_log["effective_curvature"] = float(F.softplus(model.fine_head.curvature_alpha).item()) if has_curv else 0.0
+            curv_eff = float(F.softplus(model.fine_head.curvature_alpha).item()) if has_curv else 0.0
+            row_log["effective_curvature"] = curv_eff
 
             cur_mae = float(val_metrics["MAE"])
             is_best, status_tag = ckpt_manager.evaluate_and_save_best(
@@ -401,8 +428,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
 
         if is_eval_epoch and val_loader is not None and ckpt_manager.should_stop_early:
             print(
-                f"\n[Early Stopping] No validation MAE improvement for {ckpt_manager.epochs_without_improvement} epochs "
-                f"(patience={patience}). Terminating training at epoch {epoch + 1}.",
+                f"\n[Early Stopping] No validation MAE improvement for "
+                f"{ckpt_manager.epochs_without_improvement} epochs (patience={patience}). "
+                f"Terminating training at epoch {epoch + 1}.",
                 flush=True,
             )
             break

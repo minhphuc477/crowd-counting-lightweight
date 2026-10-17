@@ -59,7 +59,8 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
         d0 = float(train_cfg.get("prodigy_d0", 1e-5))
 
         logger.info(
-            "[Optimizer] Initializing SafeProdigy: d0=%.2e, d_coef=%.2f, growth_rate=%.4f, d_max_cap=%.4f, warmup_steps=%d",
+            "[Optimizer] Initializing SafeProdigy: d0=%.2e, d_coef=%.2f, "
+            "growth_rate=%.4f, d_max_cap=%.4f, warmup_steps=%d",
             d0, d_coef, growth_rate, d_max_cap, d_warmup,
         )
         return SafeProdigy(
@@ -181,5 +182,8 @@ def maybe_run_safe_lr_finder(
     if scheduler is not None and hasattr(scheduler, "base_lrs"):
         scheduler.base_lrs = [group["lr"] for group in optimizer.param_groups]
 
-    logger.info("[LR Finder] Set discovered optimal LR: %.2e (backbone: %.2e)", suggested_lr, suggested_lr * backbone_scale)
+    logger.info(
+        "[LR Finder] Set discovered optimal LR: %.2e (backbone: %.2e)",
+        suggested_lr, suggested_lr * backbone_scale,
+    )
     return suggested_lr

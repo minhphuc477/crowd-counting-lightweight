@@ -41,7 +41,8 @@ def compute_solver_trajectory_diagnostics(
     results: dict[str, Any] = {}
 
     for t_idx, y_t in enumerate(iterates):
-        boxes_t = outputs["regions_carrier"].boxes if ("regions_carrier" in outputs and y_t.shape[-2:] != target_float.shape[-2:]) else boxes
+        use_carrier_boxes = "regions_carrier" in outputs and y_t.shape[-2:] != target_float.shape[-2:]
+        boxes_t = outputs["regions_carrier"].boxes if use_carrier_boxes else boxes
         reg_t = regional_sum(y_t.float(), boxes_t, out_dtype=torch.float32)
         abs_err = (reg_t - gt_reg).abs()
         disagree = (reg_t - b_region).abs()

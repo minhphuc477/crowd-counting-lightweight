@@ -41,8 +41,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             m_val = str(d_cfg.get(mk, "")).replace("\\", "/")
             if m_val.endswith("sha_a_train.jsonl") or m_val.endswith("sha_a_val.jsonl"):
                 raise ValueError(
-                    f"Ad-hoc split manifest '{m_val}' in data.{mk} is strictly forbidden under the Zero Ad-hoc Split Policy! "
-                    f"For ShanghaiTech Part A, use 'data/sha_a_train_all.jsonl' (300 samples) and 'data/sha_a_test.jsonl' (182 samples)."
+                    f"Ad-hoc split manifest '{m_val}' in data.{mk} is strictly forbidden "
+                    "under the Zero Ad-hoc Split Policy! For ShanghaiTech Part A, use "
+                    "'data/sha_a_train_all.jsonl' (300 samples) and 'data/sha_a_test.jsonl' (182 samples)."
                 )
 
     # Validate logical bounds and alias collisions
@@ -56,7 +57,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             try:
                 float(m_cfg["curvature_alpha_init"])
             except (ValueError, TypeError) as err:
-                raise ValueError(f"curvature_alpha_init must be a float, got {m_cfg['curvature_alpha_init']!r}") from err
+                raise ValueError(
+                    f"curvature_alpha_init must be a float, got {m_cfg['curvature_alpha_init']!r}"
+                ) from err
         if "backbone" in m_cfg and "backbone_name" in m_cfg:
             raise ValueError(
                 "Conflicting alias keys in model config: cannot declare both 'backbone' and 'backbone_name'."
@@ -75,14 +78,24 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 "Inconsistent config: output_stride=2 requires subpixel_stride2=True or subpixel_dm=True."
             )
-        if "reliability_weight_min" in m_cfg:
-            w_min = float(m_cfg["reliability_weight_min"])
-            if w_min <= 0.0:
-                raise ValueError(f"reliability_weight_min must be strictly positive, got {w_min}")
-        if "dispersion_min" in m_cfg:
-            d_min = float(m_cfg["dispersion_min"])
-            if d_min <= 0.0:
-                raise ValueError(f"dispersion_min must be strictly positive, got {d_min}")
+        for k in (
+            "reliability_weight_min", "dispersion_min", "density_gate_rho", "tv_eps_c",
+            "pm_kappa", "anscombe_tau_dense", "scale_router_temperature", "trust_region_floor",
+            "anscombe_c", "adaptive_tau_rho0", "micro_coord_reduction", "adaptive_relax_sparse",
+            "adaptive_relax_threshold", "adaptive_relax_scale", "shifted_carrier_eps",
+            "trust_dense_tau", "trust_dense_kappa", "density_scale_tau",
+        ):
+            if k in m_cfg and float(m_cfg[k]) <= 0.0:
+                raise ValueError(f"{k} must be strictly positive, got {m_cfg[k]}")
+
+        for k in (
+            "proximal_tau", "tv_lambda", "trust_region_kappa", "morozov_gamma",
+            "adaptive_relax_dense_boost", "crest_kappa_0", "crest_eps_seed",
+            "morozov_gamma_under", "morozov_rho",
+        ):
+            if k in m_cfg and float(m_cfg[k]) < 0.0:
+                raise ValueError(f"{k} must be non-negative, got {m_cfg[k]}")
+
         if "iterations" in m_cfg:
             iters = int(m_cfg["iterations"])
             if iters < 1 and bool(m_cfg.get("enable_solver", True)):
@@ -94,9 +107,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "solver_mode" in m_cfg:
             solver_mode = str(m_cfg["solver_mode"])
             if solver_mode not in ("additive", "multiplicative"):
-                raise ValueError(
-                    f"solver_mode must be 'additive' or 'multiplicative', got '{solver_mode}'"
-                )
+                raise ValueError(f"solver_mode must be 'additive' or 'multiplicative', got '{solver_mode}'")
         if "hurdle_gating_mode" in m_cfg:
             hgm = str(m_cfg["hurdle_gating_mode"])
             if hgm not in ("occupancy", "product", "disabled", "unbiased"):
@@ -106,17 +117,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "tv_type" in m_cfg:
             tv_type = str(m_cfg["tv_type"])
             if tv_type not in ("laplacian", "charbonnier", "perona_malik"):
-                raise ValueError(
-                    f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{tv_type}'"
-                )
-        if "density_gate_rho" in m_cfg:
-            rho = float(m_cfg["density_gate_rho"])
-            if rho <= 0.0:
-                raise ValueError(f"density_gate_rho must be strictly positive, got {rho}")
-        if "tv_eps_c" in m_cfg:
-            eps_c = float(m_cfg["tv_eps_c"])
-            if eps_c <= 0.0:
-                raise ValueError(f"tv_eps_c must be strictly positive, got {eps_c}")
+                raise ValueError(f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{tv_type}'")
         if m_cfg.get("tv_type") == "charbonnier":
             tv_lambda = float(m_cfg.get("tv_lambda", 0.0))
             tv_eps_c = float(m_cfg.get("tv_eps_c", 0.1))
@@ -127,18 +128,6 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                         f"Charbonnier TV CFL stability violation: tv_lambda ({tv_lambda}) must be <= "
                         f"tv_eps_c / 4 ({cfl_limit}) to ensure contractivity and prevent numerical divergence."
                     )
-        if "pm_kappa" in m_cfg:
-            pm_k = float(m_cfg["pm_kappa"])
-            if pm_k <= 0.0:
-                raise ValueError(f"pm_kappa must be strictly positive, got {pm_k}")
-        if "anscombe_tau_dense" in m_cfg:
-            at_dense = float(m_cfg["anscombe_tau_dense"])
-            if at_dense <= 0.0:
-                raise ValueError(f"anscombe_tau_dense must be strictly positive, got {at_dense}")
-        if "proximal_tau" in m_cfg:
-            ptau = float(m_cfg["proximal_tau"])
-            if ptau < 0.0:
-                raise ValueError(f"proximal_tau must be non-negative, got {ptau}")
         if "proximal_mode" in m_cfg:
             pmode = str(m_cfg["proximal_mode"])
             if pmode not in ("firm", "soft", "none", "clamp"):
@@ -147,94 +136,33 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             pmu = float(m_cfg["proximal_mu"])
             if pmu <= 1.0:
                 raise ValueError(f"proximal_mu must be > 1.0, got {pmu}")
-        if "tv_lambda" in m_cfg:
-            tvl = float(m_cfg["tv_lambda"])
-            if tvl < 0.0:
-                raise ValueError(f"tv_lambda must be non-negative, got {tvl}")
-        if "scale_router_temperature" in m_cfg:
-            stemp = float(m_cfg["scale_router_temperature"])
-            if stemp <= 0.0:
-                raise ValueError(f"scale_router_temperature must be strictly positive, got {stemp}")
-        if "trust_region_kappa" in m_cfg:
-            kappa = float(m_cfg["trust_region_kappa"])
-            if kappa < 0.0:
-                raise ValueError(f"trust_region_kappa must be non-negative, got {kappa}")
-        if "trust_region_floor" in m_cfg:
-            floor_val = float(m_cfg["trust_region_floor"])
-            if floor_val <= 0.0:
-                raise ValueError(f"trust_region_floor must be strictly positive, got {floor_val}")
         if bool(m_cfg.get("use_coord_attn", False)):
             neck = str(m_cfg.get("neck_type", "additive"))
             if neck != "aspp_lite":
-                raise ValueError(
-                    f"use_coord_attn=True requires neck_type='aspp_lite', got '{neck}'"
-                )
+                raise ValueError(f"use_coord_attn=True requires neck_type='aspp_lite', got '{neck}'")
         if "adjoint_mode" in m_cfg:
             adj = str(m_cfg["adjoint_mode"])
             if adj not in ("flat", "radon_nikodym", "anscombe_vst"):
-                raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{adj}'")
-        if "anscombe_c" in m_cfg:
-            ac = float(m_cfg["anscombe_c"])
-            if ac <= 0.0:
-                raise ValueError(f"anscombe_c must be strictly positive, got {ac}")
-        if "adaptive_tau_rho0" in m_cfg:
-            at_rho = float(m_cfg["adaptive_tau_rho0"])
-            if at_rho <= 0.0:
-                raise ValueError(f"adaptive_tau_rho0 must be strictly positive, got {at_rho}")
-        if "morozov_gamma" in m_cfg:
-            m_gamma = float(m_cfg["morozov_gamma"])
-            if m_gamma < 0.0:
-                raise ValueError(f"morozov_gamma must be non-negative, got {m_gamma}")
+                raise ValueError(
+                    f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{adj}'"
+                )
         if "reliability_mode" in m_cfg:
             rmode = str(m_cfg["reliability_mode"])
             if rmode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
-                raise ValueError(f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'")
-        if "micro_coord_reduction" in m_cfg:
-            mcr = int(m_cfg["micro_coord_reduction"])
-            if mcr <= 0:
-                raise ValueError(f"micro_coord_reduction must be positive, got {mcr}")
-        if "adaptive_relax_sparse" in m_cfg:
-            ars = float(m_cfg["adaptive_relax_sparse"])
-            if ars <= 0.0:
-                raise ValueError(f"adaptive_relax_sparse must be strictly positive, got {ars}")
-        if "adaptive_relax_dense_boost" in m_cfg:
-            ardb = float(m_cfg["adaptive_relax_dense_boost"])
-            if ardb < 0.0:
-                raise ValueError(f"adaptive_relax_dense_boost must be non-negative, got {ardb}")
-        if "adaptive_relax_threshold" in m_cfg:
-            art = float(m_cfg["adaptive_relax_threshold"])
-            if art <= 0.0:
-                raise ValueError(f"adaptive_relax_threshold must be strictly positive, got {art}")
-        if "adaptive_relax_scale" in m_cfg:
-            arsc = float(m_cfg["adaptive_relax_scale"])
-            if arsc <= 0.0:
-                raise ValueError(f"adaptive_relax_scale must be strictly positive, got {arsc}")
+                raise ValueError(
+                    f"reliability_mode must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle', got '{rmode}'"
+                )
         if "hybrid_recovery_alpha" in m_cfg:
             hra = float(m_cfg["hybrid_recovery_alpha"])
             if hra < 0.0 or hra > 1.0:
                 raise ValueError(f"hybrid_recovery_alpha must be in [0.0, 1.0], got {hra}")
-        if "crest_kappa_0" in m_cfg and float(m_cfg["crest_kappa_0"]) < 0.0:
-            raise ValueError(f"crest_kappa_0 must be non-negative, got {m_cfg['crest_kappa_0']}")
-        if "crest_eps_seed" in m_cfg and float(m_cfg["crest_eps_seed"]) < 0.0:
-            raise ValueError(f"crest_eps_seed must be non-negative, got {m_cfg['crest_eps_seed']}")
-        if "morozov_gamma_under" in m_cfg and float(m_cfg["morozov_gamma_under"]) < 0.0:
-            raise ValueError(f"morozov_gamma_under must be non-negative, got {m_cfg['morozov_gamma_under']}")
-        if "morozov_rho" in m_cfg and float(m_cfg["morozov_rho"]) < 0.0:
-            raise ValueError(f"morozov_rho must be non-negative, got {m_cfg['morozov_rho']}")
-        if "shifted_carrier_eps" in m_cfg and float(m_cfg["shifted_carrier_eps"]) <= 0.0:
-            raise ValueError(f"shifted_carrier_eps must be strictly positive, got {m_cfg['shifted_carrier_eps']}")
-        if "trust_dense_tau" in m_cfg and float(m_cfg["trust_dense_tau"]) <= 0.0:
-            raise ValueError(f"trust_dense_tau must be strictly positive, got {m_cfg['trust_dense_tau']}")
-        if "trust_dense_kappa" in m_cfg and float(m_cfg["trust_dense_kappa"]) <= 0.0:
-            raise ValueError(f"trust_dense_kappa must be strictly positive, got {m_cfg['trust_dense_kappa']}")
-        if "density_scale_tau" in m_cfg and float(m_cfg["density_scale_tau"]) <= 0.0:
-            raise ValueError(f"density_scale_tau must be strictly positive, got {m_cfg['density_scale_tau']}")
         if bool(m_cfg.get("density_scale_gating", False)) and not bool(m_cfg.get("dynamic_scale_routing", True)):
             raise ValueError("density_scale_gating=True requires dynamic_scale_routing=True.")
         if bool(m_cfg.get("use_park", False)):
             raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
         if bool(m_cfg.get("dynamic_perspective_windows", False)):
             raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8).")
+
 
     # Validate loss section — Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
@@ -249,15 +177,23 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "count_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["count_loss_mode"])
             if clm not in ("nb", "log1p", "l1", "smooth_l1", "huber", "anscombe"):
-                raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', got '{clm}'")
+                raise ValueError(
+                    f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', got '{clm}'"
+                )
         if "allocation_loss_type" in l_cfg_pre:
             alt = str(l_cfg_pre["allocation_loss_type"])
             if alt not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt", "dual_bayesian_dm16"):
-                raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', or 'dual_bayesian_dm16', got '{alt}'")
+                raise ValueError(
+                    "allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', "
+                    f"'fidt', or 'dual_bayesian_dm16', got '{alt}'"
+                )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])
             if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
-                raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', or 'count_harmonized', got '{clm}'")
+                raise ValueError(
+                    "cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', "
+                    f"or 'count_harmonized', got '{clm}'"
+                )
         if "cell_tau_head" in l_cfg_pre and float(l_cfg_pre["cell_tau_head"]) <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {l_cfg_pre['cell_tau_head']}")
         if "cell_alpha" in l_cfg_pre and float(l_cfg_pre["cell_alpha"]) < 0.0:
@@ -265,7 +201,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "cell_mass_weight_eps" in l_cfg_pre and float(l_cfg_pre["cell_mass_weight_eps"]) <= 0.0:
             raise ValueError(f"cell_mass_weight_eps must be strictly positive, got {l_cfg_pre['cell_mass_weight_eps']}")
         if "cell_mass_weight_gamma" in l_cfg_pre and float(l_cfg_pre["cell_mass_weight_gamma"]) <= 0.0:
-            raise ValueError(f"cell_mass_weight_gamma must be strictly positive, got {l_cfg_pre['cell_mass_weight_gamma']}")
+            raise ValueError(
+                f"cell_mass_weight_gamma must be strictly positive, got {l_cfg_pre['cell_mass_weight_gamma']}"
+            )
         if "hard_bg_ratio" in l_cfg_pre and not (0.0 < float(l_cfg_pre["hard_bg_ratio"]) <= 1.0):
             raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {l_cfg_pre['hard_bg_ratio']}")
         if "cell_fg_ratio" in l_cfg_pre and not (0.0 <= float(l_cfg_pre["cell_fg_ratio"]) <= 1.0):
@@ -330,7 +268,8 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "elementwise_dense_scaling" in l_cfg_pre:
             if not isinstance(l_cfg_pre["elementwise_dense_scaling"], bool):
                 raise ValueError(
-                    f"elementwise_dense_scaling must be a boolean, got {type(l_cfg_pre['elementwise_dense_scaling']).__name__}"
+                    "elementwise_dense_scaling must be a boolean, got "
+                    f"{type(l_cfg_pre['elementwise_dense_scaling']).__name__}"
                 )
         if "output_stride" in l_cfg_pre:
             os_val = int(l_cfg_pre["output_stride"])
@@ -404,14 +343,18 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "min_lr_ratio" in t_cfg and not (0.0 < float(t_cfg["min_lr_ratio"]) < 1.0):
             raise ValueError(f"train.min_lr_ratio must be in (0.0, 1.0), got {t_cfg['min_lr_ratio']}")
         if "grad_scaler_init_scale" in t_cfg and float(t_cfg["grad_scaler_init_scale"]) <= 0.0:
-            raise ValueError(f"train.grad_scaler_init_scale must be strictly positive, got {t_cfg['grad_scaler_init_scale']}")
+            raise ValueError(
+                f"train.grad_scaler_init_scale must be strictly positive, got {t_cfg['grad_scaler_init_scale']}"
+            )
 
     # Validate eval configuration
     e_cfg = cfg.get("eval", {})
     if isinstance(e_cfg, dict) and "density_bins" in e_cfg:
         bins = e_cfg["density_bins"]
         if not isinstance(bins, (list, tuple)) or len(bins) != 2:
-            raise ValueError(f"eval.density_bins must be a list or tuple of exactly 2 thresholds [low, high], got {bins!r}")
+            raise ValueError(
+                f"eval.density_bins must be a list or tuple of exactly 2 thresholds [low, high], got {bins!r}"
+            )
         try:
             b0, b1 = float(bins[0]), float(bins[1])
         except (ValueError, TypeError) as err:
@@ -424,7 +367,11 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     # Cross-section consistency: Solver requires trained regional evidence when both sections are present
     if "model" in cfg and "loss" in cfg:
         m_cfg, l_cfg = cfg.get("model", {}), cfg.get("loss", {})
-        if isinstance(m_cfg, dict) and isinstance(l_cfg, dict) and m_cfg.get("enable_solver", False) is True and len(l_cfg) > 0:
+        solver_active = (
+            isinstance(m_cfg, dict) and isinstance(l_cfg, dict)
+            and m_cfg.get("enable_solver", False) is True and len(l_cfg) > 0
+        )
+        if solver_active:
             allow_unsupervised = bool(
                 m_cfg.get("allow_unsupervised_solver", False)
                 or cfg.get("train", {}).get("allow_unsupervised_solver", False)
@@ -435,6 +382,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             )
             if not has_regional_supervision and not allow_unsupervised:
                 raise ValueError(
-                    "Invalid configuration: model.enable_solver=True requires loss.lambda_region_nb > 0.0 or loss.lambda_trunc_nb > 0.0. "
-                    "When both are <= 0.0, the regional head is never trained. Set model.enable_solver=False for standalone carrier, or set model.allow_unsupervised_solver=True for unconstrained ablation."
+                    "Invalid configuration: model.enable_solver=True requires "
+                    "loss.lambda_region_nb > 0.0 or loss.lambda_trunc_nb > 0.0. "
+                    "When both are <= 0.0, the regional head is never trained. "
+                    "Set model.enable_solver=False for standalone carrier, "
+                    "or set model.allow_unsupervised_solver=True for unconstrained ablation."
                 )

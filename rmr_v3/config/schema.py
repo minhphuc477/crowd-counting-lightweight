@@ -186,7 +186,9 @@ ALLOWED_MODEL_KEYS = {
 
 ALLOWED_LOSS_KEYS = {
     "lambda_count", "lambda_count_l1", "lambda_flat_dm16", "lambda_cell",
-    "lambda_region_nb", "lambda_region_count", "lambda_hurdle", "lambda_trunc_nb", "lambda_kd_spatial", "lambda_kd_count",
+    "lambda_region_nb", "lambda_region_count", "lambda_hurdle", "lambda_trunc_nb",
+    "lambda_kd_spatial", "lambda_kd_count",
+
     "allocation_loss_type", "bayesian_sigma", "bayesian_background_ratio",
     "ot_reg", "ot_num_iters", "count_loss_mode", "count_nb_dispersion",
     "kappa_flat16", "normalize_flat_dm16", "cell_beta",
@@ -364,8 +366,10 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
     ],
     "loss": [
-        "lambda_count", "lambda_flat_dm16", "lambda_cell", "lambda_region_nb", "lambda_region_count", "lambda_hurdle", "lambda_trunc_nb",
+        "lambda_count", "lambda_flat_dm16", "lambda_cell",
+        "lambda_region_nb", "lambda_region_count", "lambda_hurdle", "lambda_trunc_nb",
         "count_loss_mode", "count_nb_dispersion", "kappa_flat16", "normalize_flat_dm16", "cell_beta",
+
         "use_hierarchical_dm", "use_multiscale_dm", "dm_block_sizes_px", "dm_weights", "dm_kappas",
         "cell_loss_mode", "cell_mass_weight_alpha", "cell_mass_weight_eps", "allocation_loss_type", "dm_target",
         "cell_mass_weight_gamma", "lambda_curvature", "lambda_hard_bg", "hard_bg_ratio", "lambda_fg_gate",

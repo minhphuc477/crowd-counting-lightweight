@@ -68,8 +68,9 @@ class RMRv3LossConfig:
     cell_tau_head: float = 0.08
     cell_alpha: float = 2.0             # foreground boost multiplier for CI-Cell v2
     cell_fg_ratio: float = 0.67         # foreground loss weight in count_harmonized cell loss (0 to 1)
-    cell_norm_power: float = 1.0        # power exponent for positive mass normalization (1.0 = standard, 0.5 = square-root balanced)
+    cell_norm_power: float = 1.0        # power exponent for positive mass norm (1.0 = std, 0.5 = sqrt)
     cell_norm_ref: float = 100.0        # reference count for balanced normalization anchor
+
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
@@ -146,15 +147,24 @@ class RMRv3LossConfig:
         if self.dm_target not in ("y", "y0", "dual"):
             raise ValueError(f"dm_target must be 'y', 'y0', or 'dual', got '{self.dm_target}'")
         if self.count_loss_mode not in ("nb", "log1p", "l1", "smooth_l1", "huber", "anscombe"):
-            raise ValueError(f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', got '{self.count_loss_mode}'")
+            raise ValueError(
+                f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', "
+                f"got '{self.count_loss_mode}'"
+            )
         if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
-            raise ValueError(f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', or 'count_harmonized', got '{self.cell_loss_mode}'")
+            raise ValueError(
+                f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', "
+                f"or 'count_harmonized', got '{self.cell_loss_mode}'"
+            )
         if self.cell_tau_head <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
         if self.cell_alpha < 0.0:
             raise ValueError(f"cell_alpha must be non-negative, got {self.cell_alpha}")
         if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt", "dual_bayesian_dm16"):
-            raise ValueError(f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', or 'dual_bayesian_dm16', got '{self.allocation_loss_type}'")
+            raise ValueError(
+                f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', "
+                f"or 'dual_bayesian_dm16', got '{self.allocation_loss_type}'"
+            )
         if self.fidt_k <= 0.0:
             raise ValueError(f"fidt_k must be strictly positive, got {self.fidt_k}")
         if self.lambda_chfl < 0.0:
@@ -185,8 +195,10 @@ class RMRv3LossConfig:
             raise ValueError(f"lambda_fine_cell must be non-negative, got {self.lambda_fine_cell}")
         if self.scale_align_tau_dense <= self.scale_align_tau_sparse:
             raise ValueError(
-                f"scale_align_tau_dense ({self.scale_align_tau_dense}) must be > scale_align_tau_sparse ({self.scale_align_tau_sparse})"
+                f"scale_align_tau_dense ({self.scale_align_tau_dense}) must be > "
+                f"scale_align_tau_sparse ({self.scale_align_tau_sparse})"
             )
+
         if self.scale_align_kernel <= 0 or self.scale_align_kernel % 2 == 0:
             raise ValueError(
                 f"scale_align_kernel must be a positive odd integer, got {self.scale_align_kernel}"
