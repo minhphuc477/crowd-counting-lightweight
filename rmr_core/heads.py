@@ -370,7 +370,7 @@ class ScaleConditionedFineHead(nn.Module):
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         z = self.forward_logits(f, scale_weights=scale_weights)
-        return self.activate(z)
+        return self.activate(z, scale_weights=scale_weights)
 
 
 def build_fine_head(

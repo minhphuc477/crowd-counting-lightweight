@@ -34,6 +34,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Resolved destructive gradient conflict ($\cos \theta = -0.418$) between Flat DM16 and Count loss.
   - Applied faithful Beta-NB variance decoupling (`regional_nb_beta: 0.5`) to eliminate slope compression on dense boxes.
 
+### Fixed
+- **Trust Region Zero-Cell Strangulation (`rmr_v3/solver_trust.py`)**:
+  - Decoupled mass addition bound (`bound_addition`) from existing carrier mass (`eff_floor = 0.005`). Empty or low-carrier cells with positive regional count deficits can now recover full physical crowd density per step (e.g. 0.35 to 1.0 people) instead of being throttled to +0.00175 per step (a 200x recovery improvement), while maintaining strict non-negativity bounds on mass removal (`bound_removal = eff_kappa * base_bound`).
+- **Autograd Gradient Isolation (`rmr_v3/solver.py`)**:
+  - Detached `scale_routing_weights` upon solver entry to guarantee zero autograd gradient leak into continuous scale routing weights from unrolled solver steps.
+- **Interface Consistency (`rmr_core/heads.py`)**:
+  - Forwarded `scale_weights=scale_weights` to `self.activate()` in `ScaleConditionedFineHead.forward()`, ensuring complete polymorphic consistency with `FineMeasureHead`.
+- **DTO Mapping Utility (`rmr_core/types.py`)**:
+  - Added explicit `.to_dict()` method on `RMRModelOutput` returning a shallow copy dictionary representation.
+- **Unit Test Coverage (`tests/test_solver_clamping.py`)**:
+  - Created unit tests verifying unconstrained deficit recovery for zero-carrier cells without background leakage.
+
 ### Removed
 - **Density Curvature Hack**:
   - Bypassed arbitrary quadratic polynomial $y = \text{Softplus}(z)(1 + \alpha \text{ReLU}(z))$ in `rmr_core/heads.py`, restoring strict optimization convexity to the carrier density head.

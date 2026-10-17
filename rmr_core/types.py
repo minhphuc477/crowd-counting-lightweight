@@ -37,6 +37,10 @@ class RMRModelOutput(dict):
         except KeyError:
             raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return a shallow copy of the encapsulated dictionary."""
+        return dict(self)
+
     # Attribute type annotations for IDE autocompletion & static analysis
     y: torch.Tensor
     y0: torch.Tensor

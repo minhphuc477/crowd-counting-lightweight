@@ -131,6 +131,7 @@ def unrolled_sirt_solver(
 
     b, _, h, w = y0.shape
     if scale_routing_weights is not None:
+        scale_routing_weights = scale_routing_weights.detach()
         if scale_routing_weights.shape[-2:] != (h, w):
             scale_routing_weights = F.interpolate(
                 scale_routing_weights, size=(h, w), mode="bilinear", align_corners=False
