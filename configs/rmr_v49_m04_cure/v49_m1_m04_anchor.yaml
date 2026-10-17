@@ -126,7 +126,7 @@ loss:
   cell_norm_power: 0.5
   cell_norm_ref: 100.0
 train:
-  epochs: 550
+  epochs: 1000
   batch_size: 8
   workers: 4
   pin_memory: true
@@ -147,4 +147,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/sha_a/v49_m1_m04_anchor_550ep
+output_dir: runs/sha_a/v49_m1_m04_anchor
