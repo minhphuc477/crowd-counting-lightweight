@@ -190,7 +190,14 @@ def weighted_normalized_adjoint_field(
     delta = q - b32
 
     # Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, Scale-Routed, Multiscale, or Density-Adaptive)
-    if (morozov_gamma > 0.0 or spatial_morozov or asymmetric_morozov or multiscale_morozov or density_adaptive_morozov) and b_variance is not None:
+    needs_morozov = (
+        morozov_gamma > 0.0
+        or spatial_morozov
+        or asymmetric_morozov
+        or multiscale_morozov
+        or density_adaptive_morozov
+    )
+    if needs_morozov and b_variance is not None:
         delta = compute_morozov_discrepancy(
             delta=delta,
             q=q,

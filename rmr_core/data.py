@@ -44,7 +44,10 @@ class CrowdManifestDataset(Dataset):
     ):
         manifest_path = Path(manifest)
         if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
-            raise ValueError(f"Forbidden legacy split '{manifest}' under Zero Ad-hoc Split Policy. Use canonical benchmarks.")
+            raise ValueError(
+                f"Forbidden legacy split '{manifest}' under Zero Ad-hoc Split Policy. "
+                "Use canonical benchmarks."
+            )
 
         resolved_manifest = resolve_manifest_path(manifest, data_root=data_root)
         self.manifest = resolved_manifest if resolved_manifest is not None else Path(manifest)
@@ -96,8 +99,9 @@ class CrowdManifestDataset(Dataset):
             "nwpu_test.jsonl": 1500,
         }
         if self.manifest.name in canonical_counts and len(self.items) != canonical_counts[self.manifest.name]:
+            expected_n = canonical_counts[self.manifest.name]
             raise ValueError(
-                f"Partition '{self.manifest.name}' must contain exactly {canonical_counts[self.manifest.name]} images, got {len(self.items)}."
+                f"Partition '{self.manifest.name}' must contain exactly {expected_n} images, got {len(self.items)}."
             )
 
         for it in self.items:

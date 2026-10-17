@@ -163,7 +163,10 @@ def evaluate_dataset(
 
             # Physical-support GAME when raw points and original dimensions are available
             if "points" in sample and "height" in sample and "width" in sample:
-                game_stride = round(float(sample["height"]) / float(y.shape[-2])) if (y.ndim >= 2 and y.shape[-2] > 0) else eff_output_stride
+                if y.ndim >= 2 and y.shape[-2] > 0:
+                    game_stride = round(float(sample["height"]) / float(y.shape[-2]))
+                else:
+                    game_stride = eff_output_stride
                 game_dict = game_physical_image(
                     y,
                     sample["points"],

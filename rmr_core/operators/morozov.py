@@ -66,28 +66,22 @@ def compute_morozov_discrepancy(
         density_factor = 1.0 / (1.0 + float(morozov_density_beta) * box_density)
         base_gamma = base_gamma * density_factor
 
+    is_adaptive = spatial_morozov or multiscale_morozov or density_adaptive_morozov
+    gamma_under_base = base_gamma if is_adaptive else float(morozov_gamma_under)
+    gamma_under = gamma_under_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
+
     if anscombe_morozov:
         c = 0.375
         g_q = 2.0 * torch.sqrt(q.clamp_min(0.0) + c)
         g_b = 2.0 * torch.sqrt(b32.clamp_min(0.0) + c)
         g_delta = g_q - g_b
-        if asymmetric_morozov:
-            gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov or density_adaptive_morozov) else float(morozov_gamma_under)
-            gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-            gamma_eff = torch.where(g_delta > 0.0, base_gamma, gamma_under)
-        else:
-            gamma_eff = base_gamma
+        gamma_eff = torch.where(g_delta > 0.0, base_gamma, gamma_under) if asymmetric_morozov else base_gamma
         g_shrunk = torch.sign(g_delta) * torch.clamp_min(g_delta.abs() - gamma_eff, 0.0)
         scale_symm = 0.5 * (torch.sqrt(q.clamp_min(0.0) + c) + torch.sqrt(b32.clamp_min(0.0) + c))
         return g_shrunk * scale_symm
 
     sigma_b = torch.sqrt(b_variance.float().clamp_min(1e-12))
-    if asymmetric_morozov:
-        gamma_u_base = base_gamma if (spatial_morozov or multiscale_morozov or density_adaptive_morozov) else float(morozov_gamma_under)
-        gamma_under = gamma_u_base / (1.0 + float(morozov_rho) * torch.sqrt(b32.clamp_min(0.0)))
-        gamma_eff = torch.where(delta > 0.0, base_gamma, gamma_under)
-    else:
-        gamma_eff = base_gamma
+    gamma_eff = torch.where(delta > 0.0, base_gamma, gamma_under) if asymmetric_morozov else base_gamma
     deadband = gamma_eff * sigma_b
     if morozov_rho_cap > 0.0 and not asymmetric_morozov:
         deadband = deadband / (1.0 + float(morozov_rho_cap) * sigma_b)

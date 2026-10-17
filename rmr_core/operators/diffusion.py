@@ -46,7 +46,10 @@ def charbonnier_tv_step(
             return y
         if not (lambda_tv > 0.0).any():
             return y
-        raw_lambda = float(lambda_tv.clamp_min(0.0).mean().item()) if lambda_tv.numel() > 1 else max(float(lambda_tv.item()), 0.0)
+        if lambda_tv.numel() > 1:
+            raw_lambda = float(lambda_tv.clamp_min(0.0).mean().item())
+        else:
+            raw_lambda = max(float(lambda_tv.item()), 0.0)
     else:
         raw_lambda = max(float(lambda_tv), 0.0)
 
