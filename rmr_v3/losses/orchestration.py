@@ -24,6 +24,7 @@ from .allocation import route_allocation_loss
 from .cell import compute_cell_loss
 from .regional import (
     hurdle_focal_bce_loss,
+    scale_balanced_regional_count_loss,
     scale_balanced_regional_nb_nll,
     truncated_nb_nll_loss,
 )
@@ -104,6 +105,13 @@ def _compute_core_losses(
     else:
         losses["region_nb"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
+    # 5. Regional Scale-Balanced Count Conservation Loss
+    lam_reg_count = float(getattr(cfg, "lambda_region_count", 0.0))
+    if lam_reg_count > 0.0:
+        losses["region_count"] = scale_balanced_regional_count_loss(target_region, mean_region, regions)
+    else:
+        losses["region_count"] = torch.zeros((), device=y.device, dtype=y.dtype)
+
     # Composite Total Core Loss
     if cfg.allocation_loss_type == "dual_bayesian_dm16":
         alloc_term = loss_allocation
@@ -123,6 +131,7 @@ def _compute_core_losses(
         + alloc_term
         + cfg.lambda_cell * losses["cell"]
         + cfg.lambda_region_nb * losses["region_nb"]
+        + lam_reg_count * losses["region_count"]
     )
 
     # Optional L1 count supervision

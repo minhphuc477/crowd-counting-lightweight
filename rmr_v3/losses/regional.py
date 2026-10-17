@@ -170,3 +170,37 @@ def scale_balanced_regional_nb_nll(
         scale_losses.append(loss_s)
 
     return torch.stack(scale_losses).mean() if scale_losses else (mean_region.sum()) * 0.0
+
+
+def scale_balanced_regional_count_loss(
+    target_region: torch.Tensor,
+    mean_region: torch.Tensor,
+    regions: RegionSet,
+) -> torch.Tensor:
+    """Scale-level count conservation loss for regional evidence.
+
+    Forces the sum of predicted regional box counts to match ground-truth regional box counts
+    on every scale dictionary, eliminating the systematic scale drift (+100% on sparse, -25% on dense)
+    that previously corrupted b_solver.
+    """
+    if target_region.ndim == 3 and mean_region.ndim == 2 and target_region.shape[1] == 1:
+        target_region = target_region.squeeze(1)
+    elif mean_region.ndim == 3 and target_region.ndim == 2 and mean_region.shape[1] == 1:
+        mean_region = mean_region.squeeze(1)
+
+    if target_region.shape != mean_region.shape:
+        raise ValueError(f"target/mean mismatch: {target_region.shape} vs {mean_region.shape}")
+
+    num_scales = int(getattr(regions, "num_scales", 3))
+    scale_losses = []
+    for sid in range(num_scales):
+        mask = (regions.scale_id == sid)
+        if not mask.any():
+            continue
+        pred_sum = mean_region[..., mask].sum(dim=-1)
+        gt_sum = target_region[..., mask].sum(dim=-1)
+        rel_error = (pred_sum - gt_sum).abs() / (gt_sum + 1.0)
+        scale_losses.append(rel_error.mean())
+
+    return torch.stack(scale_losses).mean() if scale_losses else (mean_region.sum()) * 0.0
+

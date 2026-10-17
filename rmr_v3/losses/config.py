@@ -13,6 +13,7 @@ class RMRv3LossConfig:
     lambda_bayesian: float = 0.025
     lambda_cell: float = 0.50
     lambda_region_nb: float = 0.20
+    lambda_region_count: float = 0.0
     lambda_hurdle: float = 0.10
     lambda_trunc_nb: float = 0.20
     lambda_fidt: float = 1.0

@@ -26,6 +26,8 @@ def compute_deficit_carrier_seed(
     b_solver: torch.Tensor,
     regions: RegionSet,
     coverage: torch.Tensor | None = None,
+    scale_routing_weights: torch.Tensor | None = None,
+    scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
     output_stride: int = 4,
     eps: float = 1e-6,
 ) -> torch.Tensor:
@@ -47,6 +49,7 @@ def compute_deficit_carrier_seed(
     3. Self-terminating: As Ay -> b_solver, deficit -> 0 and psi_deficit -> 0 automatically.
     """
     from .adjoint import regional_adjoint
+    from .regions import partition_regions_by_scale
 
     if b_solver.ndim == 2:
         b_solver = b_solver.unsqueeze(1)
@@ -64,6 +67,32 @@ def compute_deficit_carrier_seed(
     eff_area = area * ((float(output_stride) / 4.0) ** 2)
     norm_deficit = deficit / eff_area.clamp_min(1.0)
 
+    # Multi-scale partition-aware deficit backprojection:
+    num_scales = int(getattr(regions, "num_scales", 3))
+    if num_scales > 1 and regions.boxes.shape[0] > 0:
+        if scale_partitions is None:
+            scale_partitions = partition_regions_by_scale(regions, num_scales, device=y.device)
+        sc_weights = scale_routing_weights
+        if sc_weights is not None and sc_weights.shape[-2:] != (h, w):
+            sc_weights = F.interpolate(sc_weights, size=(h, w), mode="bilinear", align_corners=False)
+
+        psi_tot = torch.zeros((b, 1, h, w), device=y.device, dtype=torch.float32)
+        for sid, mask_s, boxes_s in scale_partitions:
+            if mask_s is None or boxes_s is None or boxes_s.shape[0] == 0:
+                continue
+            norm_def_s = norm_deficit[:, :, mask_s]
+            if not (norm_def_s > 0.0).any():
+                continue
+            ones_s = torch.ones((1, 1, len(boxes_s)), device=y.device, dtype=torch.float32)
+            cov_s = regional_adjoint(ones_s, boxes_s, h, w, out_dtype=torch.float32).clamp_min(1.0)
+            psi_s = regional_adjoint(norm_def_s, boxes_s, h, w, out_dtype=torch.float32) / cov_s
+            if sc_weights is not None and sc_weights.shape[1] > sid:
+                pi_s = sc_weights[:, sid:sid + 1, :, :].float()
+                psi_tot = psi_tot + pi_s * psi_s
+            else:
+                psi_tot = psi_tot + psi_s / float(num_scales)
+        return psi_tot.to(dtype=y.dtype)
+
     psi = regional_adjoint(norm_deficit, regions.boxes, h, w, out_dtype=torch.float32)
     if coverage is not None:
         psi = psi / coverage.float().clamp_min(eps)
@@ -75,6 +104,7 @@ def modulate_carrier_field(
     y: torch.Tensor,
     y_initial: torch.Tensor | None = None,
     scale_routing_weights: torch.Tensor | None = None,
+    scale_partitions: list[tuple[int, torch.Tensor | None, torch.Tensor | None]] | None = None,
     carrier_energy: torch.Tensor | None = None,
     resonant_lambda: float = 0.0,
     crest_discovery_flux: bool = False,
@@ -85,7 +115,7 @@ def modulate_carrier_field(
     scale_seeded_carrier: bool = False,
     scale_seed_eps: float = 0.02,
     deficit_carrier_seeding: bool = False,
-    deficit_seed_eps: float = 0.02,
+    deficit_seed_eps: float = 1.0,
     b_solver: torch.Tensor | None = None,
     regions: RegionSet | None = None,
     coverage: torch.Tensor | None = None,
@@ -127,7 +157,10 @@ def modulate_carrier_field(
     if deficit_carrier_seeding:
         if psi_deficit is None and b_solver is not None and regions is not None:
             psi_deficit = compute_deficit_carrier_seed(
-                y, b_solver, regions, coverage=coverage, output_stride=output_stride, eps=eps
+                y, b_solver, regions, coverage=coverage,
+                scale_routing_weights=scale_routing_weights,
+                scale_partitions=scale_partitions,
+                output_stride=output_stride, eps=eps,
             )
         if psi_deficit is not None and (psi_deficit > 0.0).any():
             m_carrier = m_carrier + float(deficit_seed_eps) * psi_deficit.float()

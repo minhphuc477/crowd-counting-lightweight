@@ -238,7 +238,10 @@ def unrolled_sirt_solver(
         psi_deficit = None
         if deficit_carrier_seeding and b_target is not None and regions is not None:
             psi_deficit = compute_deficit_carrier_seed(
-                z_state, b_target, regions, coverage=cov_w, output_stride=output_stride, eps=eps
+                z_state, b_target, regions, coverage=cov_w,
+                scale_routing_weights=scale_routing_weights,
+                scale_partitions=scale_partitions,
+                output_stride=output_stride, eps=eps,
             )
 
         field = weighted_normalized_adjoint_field(
@@ -332,6 +335,9 @@ def unrolled_sirt_solver(
 
             base_bound = torch.clamp_min(z_state.float(), eff_floor)
             bound_removal = eff_kappa * base_bound
+            if deficit_carrier_seeding and psi_deficit is not None:
+                deficit_ratio = torch.clamp(psi_deficit.float().detach() / (base_bound + 1e-4), max=1.0)
+                bound_removal = bound_removal * (1.0 - 0.75 * deficit_ratio)
 
             seed_allowance: float | torch.Tensor = 0.0
             if scale_seeded_carrier and scale_routing_weights is not None:
@@ -341,22 +347,16 @@ def unrolled_sirt_solver(
             else:
                 base_bound_pos = base_bound
             if deficit_carrier_seeding and psi_deficit is not None:
-                deficit_supp = float(deficit_seed_eps) * psi_deficit.float().detach()
+                deficit_supp = psi_deficit.float().detach()
                 base_bound_pos = torch.clamp_min(torch.maximum(base_bound_pos, deficit_supp), eff_floor)
                 seed_allowance = seed_allowance + deficit_supp
             if eatr_floor is not None:
                 base_bound_pos = torch.maximum(base_bound_pos, eatr_floor)
 
-            if scale_routed_trust and scale_routing_weights is not None:
-                bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
-            elif asymmetric_trust:
+            if asymmetric_trust:
                 pos_k = float(trust_pos_kappa)
-                eff_pos = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
-                bound_addition = eff_pos * base_bound_pos + seed_allowance
-            elif density_adaptive_trust:
-                bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
-            else:
-                bound_addition = eff_kappa * base_bound_pos + seed_allowance
+                eff_pos_kappa = torch.clamp_min(eff_kappa, pos_k) if isinstance(eff_kappa, torch.Tensor) else max(float(eff_kappa), pos_k)
+            bound_addition = eff_pos_kappa * base_bound_pos + seed_allowance
 
             if scale_confidence is not None:
                 # Modulate trust bound: 25% floor on maximally ambiguous regions, 100% on confident regions

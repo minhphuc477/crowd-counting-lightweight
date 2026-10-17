@@ -235,6 +235,7 @@ def weighted_normalized_adjoint_field(
             y=y32,
             y_initial=y_initial,
             scale_routing_weights=scale_routing_weights,
+            scale_partitions=scale_partitions,
             carrier_energy=carrier_energy,
             resonant_lambda=resonant_lambda,
             crest_discovery_flux=crest_discovery_flux,
