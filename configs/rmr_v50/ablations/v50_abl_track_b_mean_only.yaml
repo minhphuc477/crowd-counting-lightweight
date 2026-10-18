@@ -114,7 +114,7 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 600
+  epochs: 1000
   batch_size: 8
   workers: 4
   pin_memory: true
