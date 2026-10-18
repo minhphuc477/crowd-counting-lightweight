@@ -6,6 +6,7 @@ and validation-driven early stopping.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import csv
 import json
 from pathlib import Path
 from typing import Any
@@ -128,6 +129,7 @@ class CheckpointManager:
         solver_strength: float,
         ema_manager: EMAManager,
         eval_every: int,
+        val_rows: list[dict[str, Any]] | None = None,
     ) -> tuple[bool, str]:
         solver_enabled = bool(model.cfg.enable_solver)
         solver_engaged = (not solver_enabled) or (
@@ -153,8 +155,16 @@ class CheckpointManager:
             )
             safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
             safe_torch_save(ckpt, self.out_dir / "best_model.pt")
-            (self.out_dir / "eval_val").mkdir(parents=True, exist_ok=True)
-            (self.out_dir / "eval_val" / "summary.json").write_text(json.dumps(val_metrics, indent=2))
+            eval_dir = self.out_dir / "eval_val"
+            eval_dir.mkdir(parents=True, exist_ok=True)
+            (eval_dir / "summary.json").write_text(json.dumps(val_metrics, indent=2))
+            if val_rows:
+                pred_path = eval_dir / "predictions.csv"
+                fieldnames = list(val_rows[0].keys())
+                with pred_path.open("w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(val_rows)
             return True, " >>> [NEW BEST CHECKPOINT SAVED] <<<"
         else:
             if solver_engaged and self.patience > 0:

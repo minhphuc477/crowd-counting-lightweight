@@ -17,11 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Track B Configuration (`configs/rmr_v50/v50_track_b_nextgen.yaml`)**:
   - Extended feature width $W=64$ with Subpixel Stride 2 via `PixelShuffle(2)` outputting $256\times 256$ continuous Radon measures.
   - Alleviates micro-head spatial overlap ($< 4\text{ px}$) on dense crowd scenes.
-- **Unit Test Suites (`tests/test_rep_aspp_neck.py`, `tests/test_v50_architecture.py`)**:
+- **Unit Test Suites (`tests/test_rep_aspp_neck.py`, `tests/test_v50_architecture.py`, `tests/test_v50_components.py`)**:
   - Exact algebraic equivalence test for `switch_to_deploy()`.
   - Shape preservation tests on regular ($512\times 512$) and arbitrary ($409\times 513$) resolutions.
   - Parameter budget assertions and forward/loss/backward verification.
   - Loss orthogonality validation ensuring zero auxiliary interference.
+  - Decoupled trust region clamping recovery & non-negativity verification.
+- **Granular Experiment Evaluation Artifacts (`rmr_v3/checkpoint.py`, `rmr_v3/engine.py`, `rmr_v3/trainer.py`)**:
+  - Automatically exports full per-sample test predictions (`eval_val/predictions.csv`) alongside `summary.json` upon reaching any new best validation checkpoint.
+  - Captures exact sample ID, ground truth count, predicted count, absolute error, squared error, and multi-level GAME metrics ($G_0, G_1, G_2, G_3$) for detailed error analysis across density slices.
 
 ### Changed
 - **Regional Evidence Gating**:

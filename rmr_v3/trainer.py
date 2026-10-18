@@ -342,10 +342,10 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         is_eval_epoch = (epoch + 1) % eval_every == 0 or (epoch + 1) == epochs
         if is_eval_epoch and val_loader is not None:
             with ema_manager.swap_into(model, device):
-                val_metrics = evaluate_v3(
+                val_metrics, val_rows = evaluate_v3(
                     model, val_loader, device,
                     uniform_reliability=uniform_reliability, density_bins=density_bins,
-                    run_tiling=eval_run_tiling,
+                    run_tiling=eval_run_tiling, return_rows=True,
                 )
             if device.type == "cuda":
                 torch.cuda.empty_cache()
@@ -357,17 +357,16 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 "val_game0": "GAME0", "val_game1": "GAME1", "val_game2": "GAME2", "val_game3": "GAME3",
                 "val_mae_sparse": "mae_sparse", "val_mae_moderate": "mae_moderate", "val_mae_dense": "mae_dense",
             }
-            extra_keys = [
+            extra_keys = (
                 "pearson_rate_var_error", "spearman_rate_var_error", "spearman_weight_error",
                 "spearman_pred_weight_error", "spearman_rate_var_error_16", "spearman_rate_var_error_32",
                 "spearman_rate_var_error_64", "spearman_rate_var_error_128",
                 "spearman_rate_var_error_band_0", "spearman_rate_var_error_band_1", "spearman_rate_var_error_band_2",
-                "spearman_rate_var_error_band_3", "spearman_rate_var_error_band_4",
-                "mean_std_residual",
+                "spearman_rate_var_error_band_3", "spearman_rate_var_error_band_4", "mean_std_residual",
                 "coverage_50", "coverage_80", "coverage_95", "calib_gap_50", "calib_gap_80", "calib_gap_95",
                 "dispersion_sat_low_fraction", "dispersion_sat_high_fraction", "solver_help_fraction",
                 "solver_harm_fraction", "energy_monotonic_fraction", "mae_reg_y0", "mae_reg_y1", "mae_reg_y2",
-            ]
+            )
             for lk, vk in eval_map.items():
                 row_log[lk] = float(val_metrics.get(vk, 0.0))
             for k in extra_keys:
@@ -392,6 +391,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 solver_strength=solver_strength,
                 ema_manager=ema_manager,
                 eval_every=eval_every,
+                val_rows=val_rows,
             )
 
             print(

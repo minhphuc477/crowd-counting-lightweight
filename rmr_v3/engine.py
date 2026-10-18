@@ -76,7 +76,8 @@ def evaluate_v3(
     uniform_reliability: bool = False,
     density_bins: tuple[float, float] = (100.0, 500.0),
     run_tiling: bool = False,
-) -> dict:
+    return_rows: bool = False,
+) -> dict[str, Any] | tuple[dict[str, Any], list[dict[str, Any]]]:
     all_diag_rows = []
     traj_rows = []
 
@@ -132,6 +133,8 @@ def evaluate_v3(
             vals = [tr[k] for tr in traj_rows if k in tr]
             summary[k] = float(np.mean(vals)) if vals else 0.0
 
+    if return_rows:
+        return summary, rows
     return summary
 
 
