@@ -45,7 +45,7 @@ model:
   region_overlap: 0.5
   include_full_image: false
   native_scale_pooling: true
-  regional_feature_stats: mean
+  regional_feature_stats: mean_std
   region_head_hidden: 64
   dispersion_init: 50.0
   dispersion_min: 0.5
