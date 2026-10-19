@@ -109,6 +109,7 @@ class RMRv3Config:
     solver_mode: str = "additive"
     rn_trust_alpha: float = 0.15
     rn_trust_alpha_up: float | None = None
+    rn_iterations: int = 1
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"
@@ -349,7 +350,7 @@ class RMRv3Config:
             "pm_kappa", "anscombe_tau_dense", "scale_router_temperature",
             "trust_region_floor", "anscombe_c", "adaptive_tau_rho0",
             "shifted_carrier_eps", "trust_dense_tau", "trust_dense_kappa",
-            "density_scale_tau", "deficit_seed_eps", "morozov_density_beta",
+            "density_scale_tau", "deficit_seed_eps", "morozov_density_beta", "rn_iterations",
         ):
             _require_positive(k, getattr(self, k))
         for k in (

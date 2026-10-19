@@ -245,4 +245,45 @@ def test_asymmetric_trust_region_damping():
     assert s_down_asym.min().item() == pytest.approx(0.88, abs=1e-3)
 
 
+def test_multi_iteration_radon_nikodym_unrolling():
+    """Verify multi-step unrolled contraction mapping of closed-form Radon-Nikodym transport."""
+    cfg = RMRv3Config(
+        output_stride=4,
+        feature_width=32,
+        pretrained=False,
+        solver_mode="closed_form_rn",
+        enable_solver=True,
+        head_blocks=1,
+        rn_iterations=3,
+        rn_trust_alpha=0.12,
+        rn_trust_alpha_up=0.35,
+    )
+    model = RMRv3(cfg)
+    model.train()
+
+    x = torch.randn(2, 3, 128, 128, requires_grad=False)
+    out = model(x)
+
+    # 3 iterations -> iterates has [y0, y1, y2, y3] (length 4)
+    assert len(out.iterates) == 4
+    assert out.y.shape == out.y0.shape
+    assert out.rn_multiplier is not None
+    assert out.rn_multiplier.shape == out.y0.shape
+
+    # Loss and backward pass verification through all 3 unrolled steps
+    loss_cfg = RMRv3LossConfig(
+        lambda_count=1.0,
+        lambda_flat_dm16=1.0,
+        lambda_rn_transport=0.10,
+    )
+    target_y = torch.zeros(2, 1, 32, 32, dtype=torch.float32)
+    target_y[0, 0, 5, 5] = 2.0
+    pts = [torch.tensor([[20.0, 20.0]]), torch.tensor([[40.0, 40.0]])]
+    losses = compute_rmr_v3_losses(out, target_y, loss_cfg, points=pts)
+    losses["total"].backward()
+
+    has_grad = any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
+    assert has_grad, "Gradients failed to backpropagate through 3-step unrolled RN solver"
+
+
 

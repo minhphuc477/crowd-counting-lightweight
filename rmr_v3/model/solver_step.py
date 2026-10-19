@@ -88,24 +88,36 @@ def solve_inverse_measure(
         trust_alpha = float(getattr(cfg, "rn_trust_alpha", 0.15))
         trust_alpha_up_val = getattr(cfg, "rn_trust_alpha_up", None)
         trust_alpha_up = float(trust_alpha_up_val) if trust_alpha_up_val is not None else None
-        y_rn, s_field = closed_form_radon_nikodym_transport(
-            y0=y0_solver_input,
-            b_solver=b_solver,
-            weight_solver=weight_solver,
-            regions=regions,
-            eps=cfg.eps,
-            scale_weights=scale_weights,
-            trust_alpha=trust_alpha,
-            trust_alpha_up=trust_alpha_up,
-            return_multiplier=True,
-        )
+        num_iters = max(1, int(getattr(cfg, "rn_iterations", 1)))
+        y_curr = y0_solver_input
+        s_accum = torch.ones_like(y0_solver_input)
+        iterates = [y0]
+        for _ in range(num_iters):
+            y_next, s_step = closed_form_radon_nikodym_transport(
+                y0=y_curr,
+                b_solver=b_solver,
+                weight_solver=weight_solver,
+                regions=regions,
+                eps=cfg.eps,
+                scale_weights=scale_weights,
+                trust_alpha=trust_alpha,
+                trust_alpha_up=trust_alpha_up,
+                return_multiplier=True,
+            )
+            s_accum = s_accum * s_step
+            y_curr = y_next
+            iterates.append(y_curr)
+
+        y_rn = y_curr
+        s_field = s_accum
         if effective_strength < 1.0:
             y_final = (1.0 - effective_strength) * y0 + effective_strength * y_rn
         else:
             y_final = y_rn
+        iterates[-1] = y_final
         base_out.update({
             "y": y_final,
-            "iterates": [y0, y_final],
+            "iterates": iterates,
             "residual_fields": [],
             "energy_trace": [],
             "solver_strength": effective_strength,
