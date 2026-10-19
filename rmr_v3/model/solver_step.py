@@ -95,9 +95,13 @@ def solve_inverse_measure(
             scale_weights=scale_weights,
             trust_alpha=trust_alpha,
         )
+        if effective_strength < 1.0:
+            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_rn
+        else:
+            y_final = y_rn
         base_out.update({
-            "y": y_rn,
-            "iterates": [y0, y_rn],
+            "y": y_final,
+            "iterates": [y0, y_final],
             "residual_fields": [],
             "energy_trace": [],
             "solver_strength": effective_strength,
