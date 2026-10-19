@@ -183,6 +183,8 @@ ALLOWED_MODEL_KEYS = {
     "deficit_carrier_seeding", "deficit_seed_eps", "density_adaptive_morozov", "morozov_density_beta",
     # DPW: Perspective-Adaptive Dynamic Windows
     "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
+    # Radon-Nikodym Closed-Form Solver & Unsupervised Ablations
+    "allow_unsupervised_solver", "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -230,6 +232,7 @@ ALLOWED_LOSS_KEYS = {
     "bayesian_adaptive_sigma", "adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
     "lambda_bayesian", "lambda_fidt", "lambda_ot", "strict_loss_triad",
     "lambda_strauss", "strauss_radius",
+    "lambda_rn_transport", "cell_power",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -238,6 +241,7 @@ ALLOWED_TRAIN_KEYS = {
     "patience", "solver_warmup_epochs", "solver_ramp_epochs", "deterministic",
     "ema_decay", "min_lr_ratio", "grad_scaler_init_scale",
     "device", "num_threads", "cudnn_benchmark", "gradient_accumulation_steps",
+    "allow_unsupervised_solver",
     # Optimizer & Scheduler additions (Gen 18 / Gen 22)
     "optimizer", "scheduler_type", "wsd_stable_ratio", "betas",
     "schedule_free_warmup_steps", "schedule_free_r", "schedule_free_weight_lr_power",
@@ -366,11 +370,13 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
         # DPW: Perspective-Adaptive Dynamic Windows
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
+        "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell",
         "lambda_region_nb", "lambda_region_count", "lambda_hurdle", "lambda_trunc_nb",
         "count_loss_mode", "count_nb_dispersion", "kappa_flat16", "normalize_flat_dm16", "cell_beta",
+        "lambda_rn_transport",
 
         "use_hierarchical_dm", "use_multiscale_dm", "dm_block_sizes_px", "dm_weights", "dm_kappas",
         "cell_loss_mode", "cell_mass_weight_alpha", "cell_mass_weight_eps", "allocation_loss_type", "dm_target",

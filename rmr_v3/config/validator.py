@@ -91,10 +91,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         for k in (
             "proximal_tau", "tv_lambda", "trust_region_kappa", "morozov_gamma",
             "adaptive_relax_dense_boost", "crest_kappa_0", "crest_eps_seed",
-            "morozov_gamma_under", "morozov_rho",
+            "morozov_gamma_under", "morozov_rho", "rn_trust_alpha",
         ):
             if k in m_cfg and float(m_cfg[k]) < 0.0:
                 raise ValueError(f"{k} must be non-negative, got {m_cfg[k]}")
+
+        if "rn_iterations" in m_cfg and int(m_cfg["rn_iterations"]) < 1:
+            raise ValueError(f"rn_iterations must be >= 1, got {m_cfg['rn_iterations']}")
+        if "rn_trust_alpha_up" in m_cfg and m_cfg["rn_trust_alpha_up"] is not None:
+            if float(m_cfg["rn_trust_alpha_up"]) < 0.0:
+                raise ValueError(f"rn_trust_alpha_up must be >= 0.0, got {m_cfg['rn_trust_alpha_up']}")
 
         if "iterations" in m_cfg:
             iters = int(m_cfg["iterations"])
@@ -213,10 +219,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         for key in (
             "lambda_curvature", "lambda_hard_bg", "lambda_fg_gate", "lambda_carrier_cell",
             "lambda_fine_cell", "lambda_spectral", "lambda_spectral_dc", "lambda_scale_align",
-            "lambda_kd_spatial", "lambda_kd_count",
+            "lambda_kd_spatial", "lambda_kd_count", "lambda_rn_transport",
         ):
             if key in l_cfg_pre and float(l_cfg_pre[key]) < 0.0:
                 raise ValueError(f"{key} must be non-negative, got {l_cfg_pre[key]}")
+        if "dm_norm_mode" in l_cfg_pre:
+            dnm = str(l_cfg_pre["dm_norm_mode"])
+            if dnm not in ("count", "head_balanced", "none", "unnorm_ref"):
+                raise ValueError(
+                    f"dm_norm_mode must be 'count', 'head_balanced', 'none', or 'unnorm_ref', got '{dnm}'"
+                )
         if "bayesian_norm_mode" in l_cfg_pre:
             bnm = str(l_cfg_pre["bayesian_norm_mode"])
             if bnm not in ("canonical", "count", "square_root"):

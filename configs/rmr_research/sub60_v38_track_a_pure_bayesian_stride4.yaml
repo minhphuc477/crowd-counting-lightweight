@@ -111,6 +111,7 @@ model:
   density_curvature: false
   gated_density_curvature: false
   asymmetric_trust: false
+  allow_unsupervised_solver: true
 
 loss:
   allocation_loss_type: bayesian
