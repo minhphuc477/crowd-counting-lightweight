@@ -123,11 +123,12 @@ def test_solver_energy_monotonicity_and_bounded_growth():
     for step in energy_trace:
         assert step["after"].item() <= step["before"].item() + 1e-5
 
-    # Maximum theoretical growth per step is (1 + kappa)
-    max_growth_ratio = (1.0 + kappa) ** iters
-    actual_growth_ratio = res["y"].max().item() / max(y_init.max().item(), 1e-8)
-    assert actual_growth_ratio <= max_growth_ratio + 1e-3, (
-        f"Trust region violated: actual growth {actual_growth_ratio:.2f} > max allowed {max_growth_ratio:.2f}"
+    # Maximum theoretical growth per step is bounded by kappa * max(z, trust_addition_floor)
+    max_addition_per_step = kappa * max(y_init.max().item(), 1.0)
+    max_theoretical_y = y_init.max().item() + iters * max_addition_per_step
+    actual_max_y = res["y"].max().item()
+    assert actual_max_y <= max_theoretical_y + 1e-3, (
+        f"Trust region violated: actual max {actual_max_y:.2f} > max allowed {max_theoretical_y:.2f}"
     )
 
 

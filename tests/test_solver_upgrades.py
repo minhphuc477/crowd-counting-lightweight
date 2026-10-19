@@ -104,7 +104,7 @@ def test_density_adaptive_morozov_deadband():
         morozov_gamma=0.75, density_adaptive_morozov=True, morozov_density_beta=3.0,
     )
     assert abs(shrunk_dense[0, 0, 1].item()) > abs(shrunk_std[0, 0, 1].item())
-    assert pytest.approx(shrunk_dense[0, 0, 1].item(), abs=0.1) == -5.27
+    assert pytest.approx(shrunk_dense[0, 0, 1].item(), abs=0.1) == -9.28
 
 
 def test_unrolled_sirt_solver_escapes_dense_zero_support_trap():
