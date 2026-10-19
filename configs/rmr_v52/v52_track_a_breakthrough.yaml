@@ -53,8 +53,9 @@ model:
   density_scale_gating: true
   density_scale_tau: 0.15
 
-  hurdle_head: true
+  hurdle_head: false
   hurdle_gating_mode: occupancy
+  scale_prior_boost: 0.20
 
   temp_softplus: true
   density_curvature: true
