@@ -133,8 +133,8 @@ class DiAGScaleRoutingHead(nn.Module):
         self.act = nn.SiLU(inplace=True)
         self.pw = nn.Conv2d(self.in_channels, self.num_scales, kernel_size=1, bias=True)
 
-        # Zero-initialization: Step 0 Identity Parity
-        nn.init.zeros_(self.pw.weight)
+        # Small normal initialization: Step 0 Identity Parity (std=0.001 preserves uniform softmax while unblocking backward gradient)
+        nn.init.normal_(self.pw.weight, std=0.001)
         nn.init.zeros_(self.pw.bias)
 
     def forward(
@@ -211,12 +211,12 @@ class DiAGFactorizedRoutingHead(nn.Module):
 
         # Branch 1: Marginal Scale Head (S=3: 32, 64, 128)
         self.pw_scale = nn.Conv2d(self.in_channels, self.num_scales, kernel_size=1, bias=True)
-        nn.init.zeros_(self.pw_scale.weight)
+        nn.init.normal_(self.pw_scale.weight, std=0.001)
         nn.init.zeros_(self.pw_scale.bias)
 
         # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
         self.pw_aspect = nn.Conv2d(self.in_channels, self.num_aspects, kernel_size=1, bias=True)
-        nn.init.zeros_(self.pw_aspect.weight)
+        nn.init.normal_(self.pw_aspect.weight, std=0.001)
         nn.init.zeros_(self.pw_aspect.bias)
 
     def forward(

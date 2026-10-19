@@ -90,6 +90,8 @@ model:
 
   trust_region_kappa: 0.35
   trust_region_floor: 0.005
+  deficit_carrier_seeding: true
+  deficit_seed_eps: 0.02
 
   tv_lambda: 0.02
   tv_type: laplacian

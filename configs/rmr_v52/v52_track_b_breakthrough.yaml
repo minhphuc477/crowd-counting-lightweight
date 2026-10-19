@@ -95,6 +95,7 @@ model:
 
   # Deficit Carrier Seeding: Injects positive support in under-counting deficit regions
   deficit_carrier_seeding: true
+  deficit_seed_eps: 0.02
 
   reliability_mode: snr
   reliability_rate_std_floor: 0.01

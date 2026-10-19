@@ -57,7 +57,7 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        nn.init.zeros_(self.pw.weight)
+        nn.init.normal_(self.pw.weight, std=0.001)
         nn.init.zeros_(self.pw.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -150,7 +150,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        nn.init.zeros_(self.pw_scale.weight)
+        nn.init.normal_(self.pw_scale.weight, std=0.001)
         nn.init.zeros_(self.pw_scale.bias)
 
         # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
@@ -160,7 +160,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        nn.init.zeros_(self.pw_aspect.weight)
+        nn.init.normal_(self.pw_aspect.weight, std=0.001)
         nn.init.zeros_(self.pw_aspect.bias)
 
     def forward(
