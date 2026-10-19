@@ -17,7 +17,8 @@ def closed_form_radon_nikodym_transport(
     scale_weights: torch.Tensor | None = None,
     ratio_clamp_max: float = 10.0,
     trust_alpha: float = 0.15,
-) -> torch.Tensor:
+    return_multiplier: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Exact 1-step Closed-Form Radon-Nikodym Mass Transport Operator (0 Parameters).
 
     Projects fine carrier density y0 onto regional evidence b_solver in closed-form:
@@ -109,4 +110,7 @@ def closed_form_radon_nikodym_transport(
 
     # 6. Push-forward projected measure
     y_projected = (y0_f * s_field).to(dtype=y0.dtype)
+    if return_multiplier:
+        return y_projected, s_field.to(dtype=y0.dtype)
     return y_projected
+

@@ -32,6 +32,7 @@ from .spatial_priors import (
     curvature_power_loss,
     foreground_gating_bce_loss,
     physical_scale_alignment_loss,
+    radon_nikodym_transport_energy_loss,
     strauss_repulsion_loss,
     topk_hard_background_loss,
 )
@@ -255,6 +256,15 @@ def _compute_auxiliary_losses(
     else:
         losses["scale_align"] = zero_val
 
+    # Radon-Nikodym Transport Information Energy Loss
+    rn_mult = outputs.get("rn_multiplier", None)
+    if rn_mult is not None and getattr(cfg, "lambda_rn_transport", 0.0) > 0.0:
+        loss_rn_trans = radon_nikodym_transport_energy_loss(y0, rn_mult)
+        losses["rn_transport"] = loss_rn_trans
+        losses["total"] = losses["total"] + float(cfg.lambda_rn_transport) * loss_rn_trans
+    else:
+        losses["rn_transport"] = zero_val
+
     # Dual-Lattice Carrier Supervision (Subpixel stride-2)
     y_carrier = outputs.get("y_carrier", None)
     is_dual_lattice = (
@@ -366,7 +376,7 @@ def compute_rmr_v3_losses(
         empty_val = (y.sum() + y0.sum()) * 0.0
         keys = [
             "total", "count", "count_l1", "cell", "allocation", "flat_dm16", "region_nb", "curvature",
-            "hard_bg", "fg_bce", "hurdle_bce", "trunc_nb", "scale_align", "cell_carrier", "cell_fine",
+            "hard_bg", "fg_bce", "hurdle_bce", "trunc_nb", "scale_align", "rn_transport", "cell_carrier", "cell_fine",
             "spectral", "spectral_dc", "spectral_ac", "chfl",
         ]
         return {k: empty_val for k in keys}

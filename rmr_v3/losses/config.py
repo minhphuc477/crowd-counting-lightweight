@@ -18,6 +18,7 @@ class RMRv3LossConfig:
     lambda_trunc_nb: float = 0.20
     lambda_fidt: float = 1.0
     lambda_ot: float = 1.0
+    lambda_rn_transport: float = 0.0
 
     # Loss mode selection
     allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt" | "dual_bayesian_dm16"
@@ -194,6 +195,8 @@ class RMRv3LossConfig:
             raise ValueError(f"lambda_fg_gate must be non-negative, got {self.lambda_fg_gate}")
         if self.lambda_scale_align < 0.0:
             raise ValueError(f"lambda_scale_align must be non-negative, got {self.lambda_scale_align}")
+        if self.lambda_rn_transport < 0.0:
+            raise ValueError(f"lambda_rn_transport must be non-negative, got {self.lambda_rn_transport}")
         if self.lambda_carrier_cell < 0.0:
             raise ValueError(f"lambda_carrier_cell must be non-negative, got {self.lambda_carrier_cell}")
         if self.lambda_fine_cell < 0.0:

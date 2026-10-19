@@ -244,3 +244,48 @@ def strauss_repulsion_loss(
     return normalized_loss.mean()
 
 
+def radon_nikodym_transport_energy_loss(
+    y0: torch.Tensor,
+    s_field: torch.Tensor,
+    eps: float = 1e-4,
+) -> torch.Tensor:
+    """Radon-Nikodym Transport Information Energy Loss.
+
+    Measures the transport work required by the continuous Radon-Nikodym
+    derivative S(u) to reconcile the fine carrier measure y0 with regional
+    box evidence:
+        L_transport = (1 / (int y0 + eps)) * int y0(u) * (S(u) - 1)^2 du
+
+    Properties:
+    1. Perfect consistency: S(u) == 1 everywhere -> L_transport == 0.
+    2. Background protection: y0(u) == 0 -> zero gradient, no spurious updates.
+    3. Self-regulating scale/density alignment without heuristic auxiliary crutches.
+    4. Bounded quadratic metric: under trust-damping, (S(u) - 1)^2 <= alpha^2,
+       guaranteeing numerical stability under mixed-precision FP16/AMP.
+    """
+    if y0.ndim == 2:
+        y0 = y0.unsqueeze(0).unsqueeze(0)
+    elif y0.ndim == 3:
+        y0 = y0.unsqueeze(1)
+    if s_field.ndim == 2:
+        s_field = s_field.unsqueeze(0).unsqueeze(0)
+    elif s_field.ndim == 3:
+        s_field = s_field.unsqueeze(1)
+
+    work_dtype = y0.dtype if y0.dtype in (torch.float32, torch.float64) else torch.float32
+    y0_f = torch.where(y0 >= 0.0, y0, torch.zeros_like(y0)).to(dtype=work_dtype)
+    s_f = s_field.to(dtype=work_dtype)
+
+    if s_f.shape[-2:] != y0_f.shape[-2:]:
+        s_f = F.interpolate(s_f, size=y0_f.shape[-2:], mode="bilinear", align_corners=False)
+
+    diff_sq = (s_f - 1.0).square()
+    weighted_work = (y0_f * diff_sq).sum(dim=(-2, -1), keepdim=True)
+    total_mass = y0_f.sum(dim=(-2, -1), keepdim=True)
+    has_mass = (total_mass > float(eps)).float()
+    norm_denom = total_mass.clamp_min(float(eps)).detach()
+    sample_loss = (weighted_work / norm_denom) * has_mass
+    return sample_loss.mean()
+
+
+

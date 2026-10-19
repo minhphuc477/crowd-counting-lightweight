@@ -86,7 +86,7 @@ def solve_inverse_measure(
 
     if cfg.solver_mode == "closed_form_rn":
         trust_alpha = float(getattr(cfg, "rn_trust_alpha", 0.15))
-        y_rn = closed_form_radon_nikodym_transport(
+        y_rn, s_field = closed_form_radon_nikodym_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
             weight_solver=weight_solver,
@@ -94,6 +94,7 @@ def solve_inverse_measure(
             eps=cfg.eps,
             scale_weights=scale_weights,
             trust_alpha=trust_alpha,
+            return_multiplier=True,
         )
         if effective_strength < 1.0:
             y_final = (1.0 - effective_strength) * y0 + effective_strength * y_rn
@@ -105,6 +106,7 @@ def solve_inverse_measure(
             "residual_fields": [],
             "energy_trace": [],
             "solver_strength": effective_strength,
+            "rn_multiplier": s_field,
         })
         return RMRModelOutput(**base_out)
 
