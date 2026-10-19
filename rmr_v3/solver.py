@@ -262,7 +262,8 @@ def unrolled_sirt_solver(
         else:
             b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
             if gamma_steps is not None:
-                m_gamma = gamma_steps[iter_idx - 1]
+                step_idx = min(iter_idx, len(gamma_steps) - 1)
+                m_gamma = gamma_steps[step_idx]
             elif isinstance(morozov_gamma, torch.Tensor):
                 m_gamma = morozov_gamma
             else:
@@ -305,7 +306,8 @@ def unrolled_sirt_solver(
 
         # Adaptive Barzilai-Borwein step size or learned step size
         if omega_steps is not None:
-            current_omega: float | torch.Tensor = omega_steps[iter_idx - 1] * strength
+            step_idx = min(iter_idx, len(omega_steps) - 1)
+            current_omega: float | torch.Tensor = omega_steps[step_idx] * strength
         else:
             current_omega = effective_omega
 

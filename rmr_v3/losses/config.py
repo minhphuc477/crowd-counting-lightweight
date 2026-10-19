@@ -69,6 +69,7 @@ class RMRv3LossConfig:
     cell_alpha: float = 2.0             # foreground boost multiplier for CI-Cell v2
     cell_fg_ratio: float = 0.67         # foreground loss weight in count_harmonized cell loss (0 to 1)
     cell_norm_power: float = 1.0        # power exponent for positive mass norm (1.0 = std, 0.5 = sqrt)
+    cell_power: float | None = None      # alias for cell_norm_power
     cell_norm_ref: float = 100.0        # reference count for balanced normalization anchor
 
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
@@ -130,6 +131,8 @@ class RMRv3LossConfig:
     faithful_regional_nb: bool = False
 
     def __post_init__(self) -> None:
+        if self.cell_power is not None:
+            self.cell_norm_power = float(self.cell_power)
         if self.spectral_transform not in ("fft", "dct"):
             raise ValueError(f"spectral_transform must be 'fft' or 'dct', got '{self.spectral_transform}'")
         if self.regional_mass_weight_alpha < 0.0:

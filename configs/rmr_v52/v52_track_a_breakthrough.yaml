@@ -121,10 +121,10 @@ loss:
   count_nb_dispersion: 50.0
 
   lambda_region_nb: 0.20
-  lambda_hurdle: 0.10
-  lambda_trunc_nb: 0.20
+  faithful_regional_nb: true
+  regional_nb_beta: 0.5
 
-  lambda_cell: 0.50
+  lambda_cell: 0.35
   cell_loss_mode: count_harmonized
   cell_beta: 1.0
   cell_mass_weight_eps: 0.001
@@ -133,18 +133,12 @@ loss:
   cell_norm_power: 0.0
   cell_norm_ref: 100.0
 
-  lambda_scale_align: 0.05
-  scale_align_tau_dense: 0.12
-  scale_align_tau_sparse: 0.03
-  scale_align_kernel: 5
-  scale_align_mask_bg: true
-  lambda_curvature: 0.50
-  curvature_gate_threshold: 0.08
-  curvature_gate_kernel: 5
-  curvature_gate_mode: hard
-  curvature_gate_scale: 0.02
-  lambda_hard_bg: 0.15
-  hard_bg_ratio: 0.05
+  # Eliminate conflicting auxiliary heuristics
+  lambda_hurdle: 0.0
+  lambda_trunc_nb: 0.0
+  lambda_scale_align: 0.0
+  lambda_curvature: 0.0
+  lambda_hard_bg: 0.0
   lambda_fg_gate: 0.0
 
 train:
