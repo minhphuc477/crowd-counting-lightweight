@@ -51,9 +51,13 @@ By the Radon-Nikodym Theorem, there exists a unique measurable function $S(u) = 
 #### Closed-Form Operator Definition:
 For each observation window $R \in \mathcal{R}$, define the regional mass discrepancy ratio:
 $$s_R = \frac{b_R}{\hat{b}_R + \epsilon_0}, \quad \text{where } \hat{b}_R = \int_R y_0(u) \, du = \langle \chi_R, y_0 \rangle$$
-To synthesize overlapping multi-scale observations, we pull back the ratios to the continuous plane weighted by inverse variance / reliability weights $w_R$:
-$$S(u) = \frac{\mathcal{A}^T (w \odot s)(u)}{\mathcal{A}^T w(u) + \epsilon_1} = \frac{\sum_{R \in \mathcal{R}} w_R \cdot s_R \cdot \chi_R(u)}{\sum_{R \in \mathcal{R}} w_R \cdot \chi_R(u) + \epsilon_1}$$
-The transport map pushes forward the carrier field:
+To synthesize overlapping multi-scale observations with continuous scale routing weights $\pi(u) \in \Delta^{K-1}$, we pull back the ratios to the continuous plane weighted consistently by inverse variance / reliability weights $w_R$ and scale routing probabilities $\pi_k(u)$:
+$$S(u) = \frac{\sum_{k=0}^{K-1} \pi_k(u) \cdot (\mathcal{A}_k^T (w_k \odot s_k))(u)}{\sum_{k=0}^{K-1} \pi_k(u) \cdot (\mathcal{A}_k^T w_k)(u) + \epsilon_1}$$
+where $\mathcal{A}_k^T$ denotes the adjoint summation operator restricted to scale $k$.
+
+Notice that when the carrier field $y_0$ is already exact (i.e. $s_k \equiv 1$ everywhere), the numerator and denominator become identically equal:
+$$\sum_{k=0}^{K-1} \pi_k(u) \cdot (\mathcal{A}_k^T (w_k \cdot 1))(u) \equiv \sum_{k=0}^{K-1} \pi_k(u) \cdot (\mathcal{A}_k^T w_k)(u) \implies S(u) \equiv 1.000000000$$
+This eliminates any multi-scale amplification distortion while dynamically routing observation confidence across head scales. The transport map pushes forward the carrier field:
 $$y^*(u) = y_0(u) \cdot \text{clamp}(S(u), \rho_{\min}, \rho_{\max})$$
 
 #### Theorem 2 (Local Mass Conservation on Partitions):

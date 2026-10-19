@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from .adjoint import regional_adjoint, weighted_coverage
 from .prefix_sums import regional_sum
-from .regions import RegionSet
+from .regions import RegionSet, partition_regions_by_scale
 
 
 def closed_form_radon_nikodym_transport(
@@ -58,6 +58,15 @@ def closed_form_radon_nikodym_transport(
     if float(ratio_clamp_max) > 0.0:
         scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
+    scale_partitions = None
+    if scale_weights is not None:
+        b_sw, k_scales = scale_weights.shape[:2]
+        if scale_weights.shape[-2:] != (h, w):
+            scale_weights = F.interpolate(
+                scale_weights, size=(h, w), mode="bilinear", align_corners=False
+            )
+        scale_partitions = partition_regions_by_scale(regions, k_scales, device=y0.device)
+
     # 3. Adjoint coverage normalization field D_{c,w} = A^T w
     cov = weighted_coverage(
         w_s_f,
@@ -66,17 +75,28 @@ def closed_form_radon_nikodym_transport(
         width=w,
         eps=eps,
         scale_routing_weights=scale_weights,
+        scale_partitions=scale_partitions,
     ).to(dtype=work_dtype)
 
     # 4. Adjoint pull-back of weighted scaling factor
     weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
-    adjoint_s = regional_adjoint(
-        weighted_s,
-        regions.boxes,
-        height=h,
-        width=w,
-        out_dtype=work_dtype,
-    )
+    if scale_weights is not None and scale_partitions is not None:
+        adjoint_s = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
+        for k, mask_k, boxes_k in scale_partitions:
+            if mask_k is None or boxes_k is None:
+                continue
+            w_s_k = weighted_s[:, :, mask_k]
+            adj_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
+            pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
+            adjoint_s = adjoint_s + pi_k * adj_k
+    else:
+        adjoint_s = regional_adjoint(
+            weighted_s,
+            regions.boxes,
+            height=h,
+            width=w,
+            out_dtype=work_dtype,
+        )
 
     # 5. Continuous Radon-Nikodym spatial density multiplier
     s_field = adjoint_s / cov.clamp_min(float(eps))

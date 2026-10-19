@@ -174,3 +174,33 @@ def test_batch_independence_and_odd_resolution():
     # Finite tensors on prime dimensions
     assert torch.all(torch.isfinite(out_single.y)), "Non-finite output on prime resolution!"
 
+
+def test_closed_form_rn_scale_routing_consistency():
+    """Verify that scale_weights does not distort mass when ratios are 1.0."""
+    h, w = 64, 64
+    regions = build_multiscale_regions(
+        height=h,
+        width=w,
+        output_stride=4,
+        region_sizes_px=(32, 64),
+    )
+    y0 = torch.ones((1, 1, h, w), dtype=torch.float32) * 0.05
+    b_exact = regional_sum(y0, regions.boxes)
+
+    # Dynamic non-uniform scale routing weights
+    raw = torch.rand(1, 2, h, w)
+    scale_weights = torch.softmax(raw, dim=1)
+
+    y_star = closed_form_radon_nikodym_transport(
+        y0=y0,
+        b_solver=b_exact,
+        weight_solver=None,
+        regions=regions,
+        scale_weights=scale_weights,
+    )
+
+    # When regional targets match exactly, y_star must equal y0
+    diff = (y_star - y0).abs().max().item()
+    assert diff < 1e-5, f"Scale routing caused mass distortion: max diff = {diff}"
+
+
