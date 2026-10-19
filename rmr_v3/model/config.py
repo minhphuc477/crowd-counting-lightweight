@@ -43,6 +43,7 @@ class RMRv3Config:
 
     # RMR-v29: Sub-pixel Stride-2 Reconstruction Head (+99 params)
     subpixel_stride2: bool = False
+    head_blocks: int = 1
     # Sub-60: Sub-pixel Dirichlet-Multinomial Mass-Preserving Allocation Head (DM-DL, +452 params)
     subpixel_dm: bool = False
     subpixel_kernel_size: int = 3
@@ -334,9 +335,9 @@ class RMRv3Config:
                 "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
                 "Keep hybrid_recovery_alpha=0.0."
             )
-        if self.solver_mode not in ("additive", "multiplicative"):
+        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "direct"):
             raise ValueError(
-                f"solver_mode must be 'additive' or 'multiplicative', got '{self.solver_mode}'"
+                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', or 'direct', got '{self.solver_mode}'"
             )
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(

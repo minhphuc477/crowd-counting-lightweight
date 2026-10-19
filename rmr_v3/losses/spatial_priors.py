@@ -210,3 +210,37 @@ def foreground_gating_bce_loss(
         fg_pred = F.interpolate(fg_pred, size=t_dilated.shape[-2:], mode="bilinear", align_corners=False)
     return F.binary_cross_entropy_with_logits(fg_pred, t_dilated)
 
+
+def strauss_repulsion_loss(
+    y: torch.Tensor,
+    radius: int = 1,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Strauss Spatial Point Process hard-core repulsion regularizer.
+
+    Penalizes mass overlap within the hard-core radius d_min, enforcing spatial
+    dispersion consistent with physical human cranial volume exclusion:
+        E_Strauss = sum_u y(u) * (K_hollow * y)(u) / (||y||_1 + eps)
+    where K_hollow has 0 at the center and 1 within the exclusion radius.
+    """
+    if y.ndim == 2:
+        y = y.unsqueeze(0).unsqueeze(0)
+    elif y.ndim == 3:
+        y = y.unsqueeze(1)
+
+    work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
+    y_f = torch.where(y >= 0.0, y, torch.zeros_like(y)).to(dtype=work_dtype)
+    total_mass = y_f.sum(dim=(-2, -1), keepdim=True)
+    if total_mass.max() < float(eps):
+        return y_f.sum() * 0.0
+
+    k_size = 2 * int(radius) + 1
+    kernel = torch.ones((1, 1, k_size, k_size), device=y.device, dtype=work_dtype)
+    kernel[0, 0, radius, radius] = 0.0  # Hollow center: do not penalize self-interaction
+
+    neighbor_mass = F.conv2d(y_f, kernel, padding=radius)
+    overlap_energy = (y_f * neighbor_mass).sum(dim=(-2, -1), keepdim=True)
+    normalized_loss = overlap_energy / total_mass.clamp_min(float(eps))
+    return normalized_loss.mean()
+
+

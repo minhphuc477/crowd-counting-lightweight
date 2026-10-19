@@ -28,6 +28,7 @@ from .prefix_sums import (
     rectangle_sum_from_prefix,
     regional_sum,
 )
+from .radon_nikodym import closed_form_radon_nikodym_transport
 from .regions import (
     RegionSet,
     _axis_starts,
@@ -47,6 +48,7 @@ __all__ = [
     "build_multiscale_regions",
     "center_scatter",
     "charbonnier_tv_step",
+    "closed_form_radon_nikodym_transport",
     "compute_deficit_carrier_seed",
     "compute_morozov_discrepancy",
     "continuous_prefix_eval",

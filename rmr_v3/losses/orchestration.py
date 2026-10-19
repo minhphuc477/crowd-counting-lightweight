@@ -32,6 +32,7 @@ from .spatial_priors import (
     curvature_power_loss,
     foreground_gating_bce_loss,
     physical_scale_alignment_loss,
+    strauss_repulsion_loss,
     topk_hard_background_loss,
 )
 from .dual_supervision import align_target_to_prediction, compute_dual_lattice_losses
@@ -200,6 +201,19 @@ def _compute_auxiliary_losses(
         losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
     else:
         losses["fg_bce"] = zero_val
+
+    # Strauss Hard-Core Point Process Repulsion Loss
+    if getattr(cfg, "lambda_strauss", 0.0) > 0.0:
+        def _compute_strauss(dmap: torch.Tensor) -> torch.Tensor:
+            return strauss_repulsion_loss(
+                dmap,
+                radius=int(getattr(cfg, "strauss_radius", 1)),
+            )
+        loss_strauss, _ = router.dispatch(_compute_strauss, y, y0)
+        losses["strauss"] = loss_strauss
+        losses["total"] = losses["total"] + float(cfg.lambda_strauss) * loss_strauss
+    else:
+        losses["strauss"] = zero_val
 
     # Regional Hurdle BCE & Truncated NB Loss
     hurdle_logit = outputs.get("hurdle_logit", None)

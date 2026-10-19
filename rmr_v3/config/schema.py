@@ -62,6 +62,7 @@ ALLOWED_MODEL_KEYS = {
     "ema_decay",
     "temp_softplus",
     "head_activation",
+    "head_blocks",
     # RMR-v8 Stage 2
     "solver_mode",
     "density_gate_rho",
@@ -228,6 +229,7 @@ ALLOWED_LOSS_KEYS = {
     "count_target", "cell_target", "bayesian_norm_mode", "bayesian_canonical_bg",
     "bayesian_adaptive_sigma", "adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
     "lambda_bayesian", "lambda_fidt", "lambda_ot", "strict_loss_triad",
+    "lambda_strauss", "strauss_radius",
 }
 
 ALLOWED_TRAIN_KEYS = {

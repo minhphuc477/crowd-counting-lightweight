@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from rmr_core.operators import RegionSet
+from rmr_core.operators import RegionSet, closed_form_radon_nikodym_transport
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
 from .config import RMRv3Config
@@ -70,7 +70,7 @@ def solve_inverse_measure(
     if fg_logit is not None:
         base_out["fg_logit"] = fg_logit
 
-    if not cfg.enable_solver:
+    if not cfg.enable_solver or cfg.solver_mode == "direct":
         base_out.update({
             "y": y0,
             "iterates": [y0],
@@ -83,6 +83,24 @@ def solve_inverse_measure(
     effective_strength = default_solver_strength if solver_strength is None else solver_strength
 
     y0_solver_input = y0.detach() if getattr(cfg, "detach_y0_for_solver", False) else y0
+
+    if cfg.solver_mode == "closed_form_rn":
+        y_rn = closed_form_radon_nikodym_transport(
+            y0=y0_solver_input,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            eps=cfg.eps,
+            scale_weights=scale_weights,
+        )
+        base_out.update({
+            "y": y_rn,
+            "iterates": [y0, y_rn],
+            "residual_fields": [],
+            "energy_trace": [],
+            "solver_strength": effective_strength,
+        })
+        return RMRModelOutput(**base_out)
 
     solver_res = unrolled_sirt_solver(
         y0=y0_solver_input,

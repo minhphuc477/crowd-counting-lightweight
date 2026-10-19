@@ -63,6 +63,7 @@ class FineMeasureHead(nn.Module):
         scale_prior_boost: float = 0.0,
         curvature_pade: bool = False,
         head_activation: str = "softplus",
+        head_blocks: int = 1,
     ):
         super().__init__()
         self.head_activation = str(head_activation).lower()
@@ -70,11 +71,12 @@ class FineMeasureHead(nn.Module):
         self.subpixel_stride2 = bool(subpixel_stride2)
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
-        self.body = nn.Sequential(
-            ConvGNAct(width, width, 3, groups=width),
-            ConvGNAct(width, width, 1),
-            nn.Conv2d(width, out_channels, 1),
-        )
+        blocks = []
+        for _ in range(max(1, int(head_blocks))):
+            blocks.append(ConvGNAct(width, width, 3, groups=width))
+            blocks.append(ConvGNAct(width, width, 1))
+        blocks.append(nn.Conv2d(width, out_channels, 1))
+        self.body = nn.Sequential(*blocks)
         final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
         nn.init.normal_(final_conv.weight, std=0.01)
         m0 = math.log1p(math.exp(float(init_bias)))
@@ -394,6 +396,7 @@ def build_fine_head(
     scale_prior_boost: float = 0.0,
     curvature_pade: bool = False,
     head_activation: str = "softplus",
+    head_blocks: int = 1,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     kw = {
@@ -420,5 +423,6 @@ def build_fine_head(
         num_scales=num_scales,
         subpixel_stride2=subpixel_stride2,
         scale_prior_boost=scale_prior_boost,
+        head_blocks=head_blocks,
         **kw,
     )
