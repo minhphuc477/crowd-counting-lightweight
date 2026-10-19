@@ -108,6 +108,7 @@ class RMRv3Config:
     # Solver update rule
     solver_mode: str = "additive"
     rn_trust_alpha: float = 0.15
+    rn_trust_alpha_up: float | None = None
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"
@@ -352,11 +353,13 @@ class RMRv3Config:
         ):
             _require_positive(k, getattr(self, k))
         for k in (
-            "proximal_tau", "floor_tau", "tv_lambda", "trust_region_kappa",
+            "proximal_tau", "floor_tau", "tv_lambda", "trust_region_kappa", "rn_trust_alpha",
             "morozov_gamma", "crest_kappa_0", "crest_eps_seed",
             "morozov_gamma_under", "morozov_rho", "morozov_rho_cap",
         ):
             _require_non_negative(k, getattr(self, k))
+        if self.rn_trust_alpha_up is not None and self.rn_trust_alpha_up < 0.0:
+            raise ValueError(f"rn_trust_alpha_up must be >= 0.0, got {self.rn_trust_alpha_up}")
 
         if self.use_cpcm and self.cpcm_hidden <= 0:
             raise ValueError(f"cpcm_hidden must be positive when use_cpcm=True, got {self.cpcm_hidden}")

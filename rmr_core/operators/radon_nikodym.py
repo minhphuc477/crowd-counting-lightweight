@@ -17,6 +17,7 @@ def closed_form_radon_nikodym_transport(
     scale_weights: torch.Tensor | None = None,
     ratio_clamp_max: float = 10.0,
     trust_alpha: float = 0.15,
+    trust_alpha_up: float | None = None,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Exact 1-step Closed-Form Radon-Nikodym Mass Transport Operator (0 Parameters).
@@ -59,9 +60,17 @@ def closed_form_radon_nikodym_transport(
 
     # 2. Regional Radon-Nikodym scaling derivative with Trust-Region Damping
     scaling_ratio = b_s_f / b_hat.clamp_min(float(eps))
-    if float(trust_alpha) > 0.0:
-        ta = float(trust_alpha)
-        scaling_ratio = 1.0 + ta * torch.tanh((scaling_ratio - 1.0) / ta)
+    ta_down = float(trust_alpha)
+    ta_up = float(trust_alpha_up) if trust_alpha_up is not None else ta_down
+    if ta_down > 0.0 or ta_up > 0.0:
+        delta_s = scaling_ratio - 1.0
+        damped_pos = (
+            ta_up * torch.tanh(delta_s.clamp_min(0.0) / ta_up) if ta_up > 0.0 else delta_s.clamp_min(0.0)
+        )
+        damped_neg = (
+            ta_down * torch.tanh(delta_s.clamp_max(0.0) / ta_down) if ta_down > 0.0 else delta_s.clamp_max(0.0)
+        )
+        scaling_ratio = 1.0 + damped_pos + damped_neg
     elif float(ratio_clamp_max) > 0.0:
         scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 

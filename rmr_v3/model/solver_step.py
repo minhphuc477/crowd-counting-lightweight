@@ -86,6 +86,8 @@ def solve_inverse_measure(
 
     if cfg.solver_mode == "closed_form_rn":
         trust_alpha = float(getattr(cfg, "rn_trust_alpha", 0.15))
+        trust_alpha_up_val = getattr(cfg, "rn_trust_alpha_up", None)
+        trust_alpha_up = float(trust_alpha_up_val) if trust_alpha_up_val is not None else None
         y_rn, s_field = closed_form_radon_nikodym_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
@@ -94,6 +96,7 @@ def solve_inverse_measure(
             eps=cfg.eps,
             scale_weights=scale_weights,
             trust_alpha=trust_alpha,
+            trust_alpha_up=trust_alpha_up,
             return_multiplier=True,
         )
         if effective_strength < 1.0:

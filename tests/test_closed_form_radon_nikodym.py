@@ -204,3 +204,45 @@ def test_closed_form_rn_scale_routing_consistency():
     assert diff < 1e-5, f"Scale routing caused mass distortion: max diff = {diff}"
 
 
+def test_asymmetric_trust_region_damping():
+    """Verify mathematical properties of asymmetric trust region damping."""
+    h, w = 32, 32
+    regions = build_multiscale_regions(
+        height=h,
+        width=w,
+        output_stride=4,
+        region_sizes_px=(32,),
+    )
+    y0 = torch.full((1, 1, h, w), 0.1, dtype=torch.float32)
+    b_exact = regional_sum(y0, regions.boxes)
+
+    # Test 1: Symmetric vs Asymmetric on 3x Undercount
+    b_undercount = b_exact * 3.0
+    _, s_sym = closed_form_radon_nikodym_transport(
+        y0=y0, b_solver=b_undercount, weight_solver=None, regions=regions,
+        trust_alpha=0.12, trust_alpha_up=0.12, return_multiplier=True,
+    )
+    _, s_asym = closed_form_radon_nikodym_transport(
+        y0=y0, b_solver=b_undercount, weight_solver=None, regions=regions,
+        trust_alpha=0.12, trust_alpha_up=0.35, return_multiplier=True,
+    )
+    # Symmetric is capped at 1.12
+    assert s_sym.max().item() == pytest.approx(1.12, abs=1e-3)
+    # Asymmetric expands up to 1.35
+    assert s_asym.max().item() == pytest.approx(1.35, abs=1e-3)
+
+    # Test 2: Downward suppression remains identically 0.88 for both
+    b_zero = torch.zeros_like(b_exact)
+    _, s_down_sym = closed_form_radon_nikodym_transport(
+        y0=y0, b_solver=b_zero, weight_solver=None, regions=regions,
+        trust_alpha=0.12, trust_alpha_up=0.12, return_multiplier=True,
+    )
+    _, s_down_asym = closed_form_radon_nikodym_transport(
+        y0=y0, b_solver=b_zero, weight_solver=None, regions=regions,
+        trust_alpha=0.12, trust_alpha_up=0.35, return_multiplier=True,
+    )
+    assert s_down_sym.min().item() == pytest.approx(0.88, abs=1e-3)
+    assert s_down_asym.min().item() == pytest.approx(0.88, abs=1e-3)
+
+
+
