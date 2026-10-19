@@ -107,6 +107,7 @@ class RMRv3Config:
 
     # Solver update rule
     solver_mode: str = "additive"
+    rn_trust_alpha: float = 0.15
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"

@@ -16,20 +16,23 @@ def closed_form_radon_nikodym_transport(
     eps: float = 1e-6,
     scale_weights: torch.Tensor | None = None,
     ratio_clamp_max: float = 10.0,
+    trust_alpha: float = 0.15,
 ) -> torch.Tensor:
     """Exact 1-step Closed-Form Radon-Nikodym Mass Transport Operator (0 Parameters).
 
     Projects fine carrier density y0 onto regional evidence b_solver in closed-form:
         b_hat = regional_sum(y0, regions)
         s_R   = b_solver / clamp_min(b_hat, eps)
-        S(u)  = (A^T (w * s))(u) / (A^T w)(u)
+        s_damped = 1.0 + trust_alpha * tanh((s_R - 1.0) / trust_alpha)
+        S(u)  = (A^T (w * s_damped))(u) / (A^T w)(u)
         y*(u) = y0(u) * S(u)
 
     Mathematical Guarantees:
     1. Exact 1-step closed-form projection (0 unrolled iterations, O(1) latency).
     2. Strict support preservation (y*(u) = 0 wherever y0(u) = 0, zero false alarms).
     3. Non-negativity preservation (y*(u) >= 0 for all u).
-    4. 0 trainable parameters, 0 unrolled computational graph buffers.
+    4. Trust-Region bounded variance: ratio changes bounded within [1 - alpha, 1 + alpha].
+    5. 0 trainable parameters, 0 unrolled computational graph buffers.
     """
     if y0.ndim == 2:
         y0 = y0.unsqueeze(0).unsqueeze(0)
@@ -53,9 +56,12 @@ def closed_form_radon_nikodym_transport(
     boxes_tensor = regions.boxes if hasattr(regions, "boxes") else regions
     b_hat = regional_sum(y0_f, boxes_tensor)  # [B, 1, M]
 
-    # 2. Regional Radon-Nikodym scaling derivative s_R = d(mu_target) / d(mu_hat)
+    # 2. Regional Radon-Nikodym scaling derivative with Trust-Region Damping
     scaling_ratio = b_s_f / b_hat.clamp_min(float(eps))
-    if float(ratio_clamp_max) > 0.0:
+    if float(trust_alpha) > 0.0:
+        ta = float(trust_alpha)
+        scaling_ratio = 1.0 + ta * torch.tanh((scaling_ratio - 1.0) / ta)
+    elif float(ratio_clamp_max) > 0.0:
         scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
     scale_partitions = None

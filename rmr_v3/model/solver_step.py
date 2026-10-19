@@ -85,6 +85,7 @@ def solve_inverse_measure(
     y0_solver_input = y0.detach() if getattr(cfg, "detach_y0_for_solver", False) else y0
 
     if cfg.solver_mode == "closed_form_rn":
+        trust_alpha = float(getattr(cfg, "rn_trust_alpha", 0.15))
         y_rn = closed_form_radon_nikodym_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
@@ -92,6 +93,7 @@ def solve_inverse_measure(
             regions=regions,
             eps=cfg.eps,
             scale_weights=scale_weights,
+            trust_alpha=trust_alpha,
         )
         base_out.update({
             "y": y_rn,
