@@ -79,7 +79,7 @@ model:
   ema_decay: 0.999
 
 loss:
-  allocation_loss_type: flat_dm16
+  allocation_loss_type: dual_bayesian_dm16
   lambda_count: 1.0
   count_loss_mode: nb
   count_nb_dispersion: 50.0
