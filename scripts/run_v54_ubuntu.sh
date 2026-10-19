@@ -4,10 +4,12 @@
 # Focus: Trust-Damped Closed-Form Radon-Nikodym vs Unrolled SIRT (5 runs)
 #
 # Usage:
-#   ./scripts/run_v54_ubuntu.sh                # Run all 5 sequentially
-#   ./scripts/run_v54_ubuntu.sh parallel       # Run Track A & B proposed in parallel
-#   ./scripts/run_v54_ubuntu.sh proposed       # Run only proposed Track A & B
-#   ./scripts/run_v54_ubuntu.sh <config_key>   # Run a single specific model
+#   ./scripts/run_v54_ubuntu.sh                     # Run all 5 sequentially
+#   ./scripts/run_v54_ubuntu.sh parallel            # Run all 5 in 3 parallel waves
+#   ./scripts/run_v54_ubuntu.sh proposed            # Run only proposed Track A & B
+#   ./scripts/run_v54_ubuntu.sh ablation            # Run only 3 ablations sequentially
+#   ./scripts/run_v54_ubuntu.sh parallel-ablation   # Run 3 ablations in parallel waves
+#   ./scripts/run_v54_ubuntu.sh <config_key>        # Run a single specific model
 # ==============================================================================
 set -euo pipefail
 
@@ -68,7 +70,6 @@ run_single_model() {
     echo "    Config: $cfg"
     echo "    Log:    $log"
 
-    # Check if already completed
     local out_dir="runs/sha_a/rmr_v54/${key}"
     if [ -f "${out_dir}/best.pth" ]; then
         echo "    [SKIPPED] Model already completed (${out_dir}/best.pth exists). Set --force to re-run."
@@ -93,6 +94,52 @@ run_single_model() {
     fi
 }
 
+run_pair_parallel() {
+    local key_a="$1"
+    local key_b="$2"
+
+    echo ""
+    echo "================================================================================"
+    echo ">>> LAUNCHING PARALLEL PAIR: [$key_a] AND [${key_b:-<none>}]"
+    echo "================================================================================"
+
+    local pid_a=""
+    local pid_b=""
+
+    if [ -n "$key_a" ]; then
+        local out_a="runs/sha_a/rmr_v54/${key_a}"
+        if [ -f "${out_a}/best.pth" ]; then
+            echo "    [$key_a] already completed (${out_a}/best.pth exists). Skipping."
+        else
+            "$PYTHON_EXE" train.py --config "${RUN_CONFIGS[$key_a]}" > "${LOG_DIR}/${key_a}.log" 2>&1 &
+            pid_a=$!
+            echo "    [$key_a] launched with PID: $pid_a -> ${LOG_DIR}/${key_a}.log"
+        fi
+    fi
+
+    sleep 3
+
+    if [ -n "$key_b" ]; then
+        local out_b="runs/sha_a/rmr_v54/${key_b}"
+        if [ -f "${out_b}/best.pth" ]; then
+            echo "    [$key_b] already completed (${out_b}/best.pth exists). Skipping."
+        else
+            "$PYTHON_EXE" train.py --config "${RUN_CONFIGS[$key_b]}" > "${LOG_DIR}/${key_b}.log" 2>&1 &
+            pid_b=$!
+            echo "    [$key_b] launched with PID: $pid_b -> ${LOG_DIR}/${key_b}.log"
+        fi
+    fi
+
+    if [ -n "$pid_a" ]; then
+        wait "$pid_a" || echo "WARNING: [$key_a] exited with error"
+    fi
+    if [ -n "$pid_b" ]; then
+        wait "$pid_b" || echo "WARNING: [$key_b] exited with error"
+    fi
+
+    echo ">>> BATCH COMPLETED."
+}
+
 case "$MODE" in
     "sequential")
         echo "Executing all 5 V54 models sequentially..."
@@ -105,24 +152,26 @@ case "$MODE" in
         run_single_model "v54_track_a_trust_damped_rn"
         run_single_model "v54_track_b_trust_damped_rn"
         ;;
-    "parallel")
-        echo "Launching Proposed Track A & Track B in parallel (~5.5 GB VRAM)..."
-        "$PYTHON_EXE" train.py --config "${RUN_CONFIGS['v54_track_a_trust_damped_rn']}" \
-            > "${LOG_DIR}/v54_track_a_trust_damped_rn.log" 2>&1 &
-        pid_a=$!
-        echo "Track A PID: $pid_a"
-
-        sleep 3
-
-        "$PYTHON_EXE" train.py --config "${RUN_CONFIGS['v54_track_b_trust_damped_rn']}" \
-            > "${LOG_DIR}/v54_track_b_trust_damped_rn.log" 2>&1 &
-        pid_b=$!
-        echo "Track B PID: $pid_b"
-
-        echo "Waiting for parallel jobs to complete..."
-        wait $pid_a
-        wait $pid_b
-        echo "Parallel runs completed!"
+    "ablation")
+        echo "Executing all 3 V54 Ablation & Control models sequentially..."
+        run_single_model "v54_track_a_raw_rn_ablation"
+        run_single_model "v54_track_a_control_sirt"
+        run_single_model "v54_track_b_control_sirt"
+        ;;
+    "parallel"|"parallel-all")
+        echo "Executing ALL 5 V54 models in parallel waves (Proposed -> Ablations)..."
+        run_pair_parallel "v54_track_a_trust_damped_rn" "v54_track_b_trust_damped_rn"
+        run_pair_parallel "v54_track_a_raw_rn_ablation" "v54_track_a_control_sirt"
+        run_pair_parallel "v54_track_b_control_sirt" ""
+        ;;
+    "parallel-proposed")
+        echo "Executing only Proposed V54 Track A & Track B in parallel..."
+        run_pair_parallel "v54_track_a_trust_damped_rn" "v54_track_b_trust_damped_rn"
+        ;;
+    "parallel-ablation")
+        echo "Executing only Ablation V54 models in parallel waves..."
+        run_pair_parallel "v54_track_a_raw_rn_ablation" "v54_track_a_control_sirt"
+        run_pair_parallel "v54_track_b_control_sirt" ""
         ;;
     *)
         if [[ -v "RUN_CONFIGS[$MODE]" ]]; then
@@ -130,6 +179,7 @@ case "$MODE" in
         else
             echo "Unknown mode/config: $MODE"
             echo "Available models: ${ORDERED_RUNS[*]}"
+            echo "Available modes:  sequential | ablation | proposed | parallel | parallel-proposed | parallel-ablation"
             exit 1
         fi
         ;;
