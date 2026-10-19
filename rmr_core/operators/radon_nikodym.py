@@ -74,6 +74,11 @@ def closed_form_radon_nikodym_transport(
     elif float(ratio_clamp_max) > 0.0:
         scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
+    # Neutral fallback when both carrier and evidence are zero
+    both_zero = (b_s_f < float(eps)) & (b_hat < float(eps))
+    scaling_ratio = torch.where(both_zero, torch.ones_like(scaling_ratio), scaling_ratio)
+    scaling_ratio = scaling_ratio.clamp_min(0.0)
+
     scale_partitions = None
     if scale_weights is not None:
         b_sw, k_scales = scale_weights.shape[:2]
@@ -115,10 +120,13 @@ def closed_form_radon_nikodym_transport(
         )
 
     # 5. Continuous Radon-Nikodym spatial density multiplier
-    s_field = adjoint_s / cov.clamp_min(float(eps))
+    # When a pixel is uncovered by evidence (cov <= eps), preserve carrier identity S(u) = 1.0
+    s_field = torch.where(
+        cov > float(eps), adjoint_s / cov.clamp_min(float(eps)), torch.ones_like(adjoint_s)
+    )
 
-    # 6. Push-forward projected measure
-    y_projected = (y0_f * s_field).to(dtype=y0.dtype)
+    # 6. Push-forward projected measure (strict non-negativity preservation)
+    y_projected = torch.clamp_min(y0_f * s_field, 0.0).to(dtype=y0.dtype)
     if return_multiplier:
         return y_projected, s_field.to(dtype=y0.dtype)
     return y_projected

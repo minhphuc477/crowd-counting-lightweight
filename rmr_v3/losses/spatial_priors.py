@@ -230,6 +230,8 @@ def strauss_repulsion_loss(
 
     work_dtype = y.dtype if y.dtype in (torch.float32, torch.float64) else torch.float32
     y_f = torch.where(y >= 0.0, y, torch.zeros_like(y)).to(dtype=work_dtype)
+    if y_f.numel() == 0:
+        return y_f.sum() * 0.0
     total_mass = y_f.sum(dim=(-2, -1), keepdim=True)
     if total_mass.max() < float(eps):
         return y_f.sum() * 0.0
@@ -275,6 +277,8 @@ def radon_nikodym_transport_energy_loss(
     work_dtype = y0.dtype if y0.dtype in (torch.float32, torch.float64) else torch.float32
     y0_f = torch.where(y0 >= 0.0, y0, torch.zeros_like(y0)).to(dtype=work_dtype)
     s_f = s_field.to(dtype=work_dtype)
+    if y0_f.numel() == 0 or s_f.numel() == 0:
+        return (y0_f.sum() + s_f.sum()) * 0.0
 
     if s_f.shape[-2:] != y0_f.shape[-2:]:
         s_f = F.interpolate(s_f, size=y0_f.shape[-2:], mode="bilinear", align_corners=False)

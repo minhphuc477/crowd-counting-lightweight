@@ -109,10 +109,11 @@ def solve_inverse_measure(
             iterates.append(y_curr)
 
         y_rn = y_curr
-        s_field = s_accum
         if effective_strength < 1.0:
+            s_field = (1.0 - effective_strength) + effective_strength * s_accum
             y_final = (1.0 - effective_strength) * y0 + effective_strength * y_rn
         else:
+            s_field = s_accum
             y_final = y_rn
         iterates[-1] = y_final
         base_out.update({

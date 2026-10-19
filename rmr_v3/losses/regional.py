@@ -133,6 +133,19 @@ def scale_balanced_regional_nb_nll(
     faithful_regional_nb: bool = False,
 ) -> torch.Tensor:
     """Average proper NB NLL within scale, then average across multiscale dictionaries."""
+    if target_region.ndim == 1:
+        target_region = target_region.unsqueeze(0).unsqueeze(0)
+    elif target_region.ndim == 2:
+        target_region = target_region.unsqueeze(1)
+    if mean_region.ndim == 1:
+        mean_region = mean_region.unsqueeze(0).unsqueeze(0)
+    elif mean_region.ndim == 2:
+        mean_region = mean_region.unsqueeze(1)
+    if dispersion_region.ndim == 1:
+        dispersion_region = dispersion_region.unsqueeze(0).unsqueeze(0)
+    elif dispersion_region.ndim == 2:
+        dispersion_region = dispersion_region.unsqueeze(1)
+
     if target_region.shape != mean_region.shape:
         raise ValueError(
             f"target/mean mismatch: {target_region.shape} vs {mean_region.shape}"
