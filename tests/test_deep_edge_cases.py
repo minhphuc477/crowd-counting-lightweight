@@ -235,3 +235,22 @@ def test_empty_tensor_safeguards():
     l_transport = radon_nikodym_transport_energy_loss(empty_y, empty_s)
     assert torch.isfinite(l_transport)
     assert l_transport.item() == 0.0
+
+
+def test_balanced_smooth_l1_dimension_and_empty_scene_invariance():
+    """Edge Case H: balanced_smooth_l1 must accept 3D/4D targets without indexing errors and penalize empty scenes at 1.0 weight."""
+    from rmr_core.cell_loss import balanced_smooth_l1
+
+    p = torch.ones(1, 1, 10, 10) * 0.5
+    # 3D target on empty scene
+    t_3d = torch.zeros(1, 10, 10)
+    loss_empty = balanced_smooth_l1(p, t_3d)
+    # Smooth L1 of 0.5 vs 0 with beta=1 is 0.5 * 0.5^2 = 0.125
+    assert abs(loss_empty.item() - 0.125) < 1e-5
+
+    # 4D target with mixed foreground/background
+    t_4d = torch.zeros(1, 1, 10, 10)
+    t_4d[0, 0, 0, 0] = 1.0
+    loss_both = balanced_smooth_l1(p, t_4d)
+    assert torch.isfinite(loss_both)
+    assert loss_both.item() > 0.0
