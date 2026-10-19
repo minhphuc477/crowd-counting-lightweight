@@ -217,6 +217,7 @@ def weighted_normalized_adjoint_field(
             morozov_scale_beta=morozov_scale_beta,
             density_adaptive_morozov=density_adaptive_morozov,
             morozov_density_beta=morozov_density_beta,
+            stride=output_stride,
         )
 
     area = regions.area.float().view(1, 1, -1)

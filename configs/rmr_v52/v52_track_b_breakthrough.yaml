@@ -57,6 +57,8 @@ model:
   scale_router_temperature: 1.0
   pre_solver_scale_gating: true
   scale_gating_power: 1.0
+  density_scale_gating: true
+  density_scale_tau: 0.15
 
   # Hurdle & Density Gating: Clean occupancy mode preserving 100% mass on b >= 1.0
   hurdle_head: false
@@ -81,12 +83,15 @@ model:
   eps: 1.0e-06
   adjoint_mode: radon_nikodym
 
-  # Density-Adaptive Morozov: Deadband automatically shrinks from 0.75 to 0.20 on high-density boxes
+  # Density-Adaptive & Asymmetric Morozov: Deadband automatically shrinks on dense boxes and undercounting
   morozov_gamma: 0.75
   multiscale_morozov: true
   morozov_scale_beta: 1.0
   density_adaptive_morozov: true
   morozov_density_beta: 2.0
+  asymmetric_morozov: true
+  morozov_gamma_under: 0.20
+  morozov_rho: 0.30
 
   # Deficit Carrier Seeding: Injects positive support in under-counting deficit regions
   deficit_carrier_seeding: true
@@ -170,6 +175,8 @@ train:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
+  scheduler_type: wsd
+  wsd_stable_ratio: 0.85
   warmup_epochs: 10
   min_lr_ratio: 0.05
   grad_clip: 1.0

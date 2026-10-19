@@ -30,6 +30,7 @@ def compute_morozov_discrepancy(
     morozov_scale_beta: float = 1.0,
     density_adaptive_morozov: bool = False,
     morozov_density_beta: float = 2.0,
+    stride: int = 4,
 ) -> torch.Tensor:
     """Apply Morozov Discrepancy Shrinkage (Symmetric, Asymmetric, Scale-Routed, or Multiscale Nemirovski).
 
@@ -62,8 +63,9 @@ def compute_morozov_discrepancy(
 
     if density_adaptive_morozov and regions.area.numel() > 0:
         reg_area = regions.area.to(device=q.device, dtype=torch.float32).view(1, 1, -1).clamp_min(1.0)
-        box_density = b32.clamp_min(0.0) / reg_area
-        density_factor = 1.0 / (1.0 + float(morozov_density_beta) * box_density)
+        ref_cells = (32.0 / float(stride)) ** 2
+        norm_density = (b32.clamp_min(0.0) / reg_area) * ref_cells
+        density_factor = 1.0 / (1.0 + float(morozov_density_beta) * 0.25 * norm_density)
         base_gamma = base_gamma * density_factor
 
     is_adaptive = spatial_morozov or multiscale_morozov or density_adaptive_morozov

@@ -19,13 +19,13 @@ class RepDWBlock7x7(nn.Module):
         self.channels = channels
         self.rbr_dense = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels, bias=False),
-            nn.BatchNorm2d(channels),
+            nn.BatchNorm2d(channels, momentum=0.01),
         )
         self.rbr_1x1 = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=1, padding=0, groups=channels, bias=False),
-            nn.BatchNorm2d(channels),
+            nn.BatchNorm2d(channels, momentum=0.01),
         )
-        self.rbr_identity = nn.BatchNorm2d(channels)
+        self.rbr_identity = nn.BatchNorm2d(channels, momentum=0.01)
         self.act = nn.SiLU(inplace=True) if act else nn.Identity()
         self.is_deployed = False
 
