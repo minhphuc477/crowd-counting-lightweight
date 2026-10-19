@@ -86,6 +86,8 @@ loss:
   allocation_loss_type: flat_dm16
   kappa_flat16: 20.0
   normalize_flat_dm16: true
+  dm_norm_mode: unnorm_ref
+  dm_ref_count: 100.0
   dm_target: dual
   count_loss_mode: nb
   count_nb_dispersion: 50.0
