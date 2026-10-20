@@ -1,0 +1,23 @@
+{
+  "run_id": "run_20261020_rmr_50mae",
+  "round": 1,
+  "threadId": null,
+  "reviewer_profile": "adversarial-reviewer",
+  "reviewer_backend": "auto",
+  "executor_model": "antigravity",
+  "executor_model_source": "host-session-event",
+  "executor_family": "google",
+  "requested_reviewer_model": null,
+  "reported_reviewer_model": "pro",
+  "reviewer_model_source": "system",
+  "reviewer_family": "google",
+  "family_relation": "independent",
+  "identity_assurance": "host_event_verified",
+  "independence_verified": true,
+  "status": "in_progress",
+  "difficulty": "hard",
+  "last_score": 5.0,
+  "last_verdict": "not ready",
+  "pending_experiments": [],
+  "timestamp": "2026-10-20T11:35:00Z"
+}

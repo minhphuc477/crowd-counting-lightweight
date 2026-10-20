@@ -132,6 +132,7 @@ class RMRv3LossConfig:
     regional_mass_weight_alpha: float = 0.0
     regional_nb_beta: float = 0.0
     faithful_regional_nb: bool = False
+    normalize_beta_weights: bool = False
 
     def __post_init__(self) -> None:
         if self.cell_power is not None:

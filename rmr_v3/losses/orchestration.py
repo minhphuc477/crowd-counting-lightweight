@@ -103,6 +103,7 @@ def _compute_core_losses(
             mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
             regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
             faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
+            normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
         )
     else:
         losses["region_nb"] = torch.zeros((), device=y.device, dtype=y.dtype)
@@ -231,6 +232,7 @@ def _compute_auxiliary_losses(
                 target_region,
                 regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
                 faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
+                normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
             )
             if cfg.lambda_trunc_nb > 0.0
             else zero_val

@@ -15,12 +15,20 @@ from rmr_core.operators import (
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
+from .solver_diffusion import (
+    laplacian_tv_diffusion,
+    perona_malik_anisotropic_diffusion,
+)
 from .solver_ops import (
     apply_proximal_shrinkage,
     apply_trust_region_clamping,
     apply_tv_diffusion,
     resolve_discrepancy_target,
     resolve_step_omega,
+)
+from .solver_threshold import (
+    proximal_firm_threshold,
+    proximal_soft_threshold,
 )
 
 

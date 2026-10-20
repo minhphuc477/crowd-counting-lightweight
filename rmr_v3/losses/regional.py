@@ -54,8 +54,16 @@ def _decoupled_beta_nb_nll(
     beta: float,
     faithful: bool,
     norm_mask: torch.Tensor | None = None,
+    normalize_weights: bool = False,
 ) -> torch.Tensor:
-    """Compute Seitzer et al. (ICLR 2022) Beta-NB NLL with Stirn et al. (AISTATS 2023) faithful decoupling."""
+    """Compute Seitzer et al. (ICLR 2022) Beta-NB NLL with Stirn et al. (AISTATS 2023) faithful decoupling.
+
+    When normalize_weights=False (default, faithful Seitzer et al.):
+        w_beta = var_d^beta (elementwise, unnormalized).
+        For beta=1.0, d L / d mu = mu - target (pure linear regression score without O(1/mu^2) attenuation).
+    When normalize_weights=True:
+        Divides w_beta by spatial/batch mean (legacy behavior).
+    """
     beta_val = float(max(0.0, min(1.0, beta)))
     if not (beta_val > 0.0 or faithful):
         return negative_binomial_nll_mean_dispersion(
@@ -73,12 +81,14 @@ def _decoupled_beta_nb_nll(
         r_d = dispersion.detach().float().clamp_min(1e-6)
         var_d = mu_d + mu_d.square() / r_d
         w_beta = var_d.pow(beta_val)
-        if norm_mask is not None:
-            m_sum = norm_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
-            w_mean = ((w_beta * norm_mask).sum(dim=-1, keepdim=True) / m_sum).clamp_min(1e-6)
-        else:
-            w_mean = w_beta.mean(dim=-1, keepdim=True).clamp_min(1e-6)
-        w_beta = (w_beta / w_mean).to(dtype=nll_mean.dtype)
+        if normalize_weights:
+            if norm_mask is not None:
+                m_sum = norm_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+                w_mean = ((w_beta * norm_mask).sum(dim=-1, keepdim=True) / m_sum).clamp_min(1e-6)
+            else:
+                w_mean = w_beta.mean(dim=-1, keepdim=True).clamp_min(1e-6)
+            w_beta = w_beta / w_mean
+        w_beta = w_beta.to(dtype=nll_mean.dtype)
     else:
         w_beta = torch.ones_like(nll_mean)
 
@@ -91,6 +101,7 @@ def truncated_nb_nll_loss(
     target_region: torch.Tensor,
     regional_nb_beta: float = 0.0,
     faithful_regional_nb: bool = False,
+    normalize_beta_weights: bool = False,
 ) -> torch.Tensor:
     """Truncated NB NLL computed only on occupied regions (target >= 1)."""
     if target_region.ndim == 1:
@@ -116,6 +127,7 @@ def truncated_nb_nll_loss(
         beta=regional_nb_beta,
         faithful=faithful_regional_nb,
         norm_mask=occ_mask,
+        normalize_weights=normalize_beta_weights,
     )
     sample_nll = (per_region_nll * occ_mask).sum(dim=-1, keepdim=True) / occ_count.clamp_min(1.0)
     has_occ = (occ_count > 0).float()
@@ -131,6 +143,7 @@ def scale_balanced_regional_nb_nll(
     mass_weight_alpha: float = 0.0,
     regional_nb_beta: float = 0.0,
     faithful_regional_nb: bool = False,
+    normalize_beta_weights: bool = False,
 ) -> torch.Tensor:
     """Average proper NB NLL within scale, then average across multiscale dictionaries."""
     if target_region.ndim == 1:
@@ -169,6 +182,7 @@ def scale_balanced_regional_nb_nll(
             dispersion=dispersion_region[..., mask],
             beta=regional_nb_beta,
             faithful=faithful_regional_nb,
+            normalize_weights=normalize_beta_weights,
         )
 
         if mass_weight_alpha > 0.0:
