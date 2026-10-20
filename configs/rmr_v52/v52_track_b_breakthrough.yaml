@@ -1,4 +1,4 @@
-﻿# V52 Breakthrough Synthesis Architecture - Track B: RepASPP-Lite (Width=64) + Subpixel Stride 2 + Dual Point-Macro Supervision
+# V52 Breakthrough Synthesis Architecture - Track B: RepASPP-Lite (Width=64) + Subpixel Stride 2 + Dual Point-Macro Supervision
 # Parameter Budget: Strictly <= 200,000 trainable parameters (Actual: ~136,150 params, 0.0% Knowledge Distillation)
 # Standalone single-model configuration for ShanghaiTech Part A
 seed: 42

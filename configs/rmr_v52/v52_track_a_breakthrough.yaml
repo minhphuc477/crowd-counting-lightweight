@@ -1,4 +1,4 @@
-﻿# V52 Breakthrough Synthesis Architecture - Track A: Canonical Anchor (Width=32, Stride 4) + Dual Point-Macro Supervision
+# V52 Breakthrough Synthesis Architecture - Track A: Canonical Anchor (Width=32, Stride 4) + Dual Point-Macro Supervision
 # Parameter Budget: Strictly <= 104,441 trainable parameters (Actual: ~101,763 params, 0.0% Knowledge Distillation)
 # Standalone single-model configuration for ShanghaiTech Part A
 seed: 42

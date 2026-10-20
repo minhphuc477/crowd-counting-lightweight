@@ -1,4 +1,4 @@
-﻿# SUB60-E85: Pure e5 Zero-Cell Loss + WSD Plateau50
+# SUB60-E85: Pure e5 Zero-Cell Loss + WSD Plateau50
 # Scientific Purpose:
 # Direct single-variable ablation of Warmup-Stable-Decay (WSD) on sub60_e5 (70.26 TTA MAE):
 # 1. Zero Dirac delta cell loss conflict (lambda_cell: 0.0).

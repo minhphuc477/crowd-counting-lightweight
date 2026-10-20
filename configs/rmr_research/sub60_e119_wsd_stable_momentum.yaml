@@ -1,4 +1,4 @@
-﻿# SUB60-E119: Nyquist Bayesian (sigma: 4.0) + WSD Scheduler (stable: 70%, cosine decay: 30%)
+# SUB60-E119: Nyquist Bayesian (sigma: 4.0) + WSD Scheduler (stable: 70%, cosine decay: 30%)
 # Scientific Purpose:
 # Directly tests whether maintaining flat full learning rate (1e-4) through Epoch 700
 # maintains optimization momentum, avoiding the premature freeze of Cosine Annealing

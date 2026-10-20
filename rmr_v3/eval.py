@@ -187,7 +187,11 @@ def main() -> None:
     out_dir = Path(args.output_dir) if args.output_dir else ckpt_dir / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    stride = int(getattr(model.cfg, "output_stride", cfg.get("model", {}).get("output_stride", 4)))
+    model_cfg = getattr(model, "cfg", None)
+    if getattr(model_cfg, "subpixel_stride2", False) or getattr(model_cfg, "subpixel_dm", False):
+        stride = 2
+    else:
+        stride = int(getattr(model_cfg, "output_stride", cfg.get("model", {}).get("output_stride", 4)))
     dataset = CrowdManifestDataset(
         manifest_path,
         train=False,

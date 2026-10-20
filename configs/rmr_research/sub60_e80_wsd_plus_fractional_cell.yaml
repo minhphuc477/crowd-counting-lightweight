@@ -1,4 +1,4 @@
-﻿# SUB60-E80: WSD Schedule + Count-Harmonized Fractional Cell Guidance (p=0.5)
+# SUB60-E80: WSD Schedule + Count-Harmonized Fractional Cell Guidance (p=0.5)
 # Scientific Purpose:
 # Directly attacks the Dense MAE 123.73 bottleneck by combining the WSD schedule with
 # repository-record Fractional Cell Loss (p=0.5, from m04 record 71.03 MAE):

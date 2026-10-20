@@ -56,7 +56,13 @@ def predict_tiled(
     model.eval()
     try:
         _, h, w = image.shape
-        s = output_stride
+        model_cfg = getattr(model, "cfg", getattr(getattr(model, "module", None), "cfg", None))
+        if getattr(model_cfg, "subpixel_stride2", False) or getattr(model_cfg, "subpixel_dm", False):
+            s = 2
+        elif getattr(model_cfg, "output_stride", None) is not None and getattr(model_cfg, "output_stride") in (1, 2, 4, 8):
+            s = int(model_cfg.output_stride)
+        else:
+            s = output_stride
         tile_size = max(s, _aligned_floor(tile_size, s))
         halo = max(0, _aligned_floor(halo, s))
         gh, gw = math.ceil(h / s), math.ceil(w / s)
@@ -128,7 +134,13 @@ def predict_multiscale_tta(
     model.eval()
     try:
         _, h, w = image.shape
-        s = output_stride
+        model_cfg = getattr(model, "cfg", getattr(getattr(model, "module", None), "cfg", None))
+        if getattr(model_cfg, "subpixel_stride2", False) or getattr(model_cfg, "subpixel_dm", False):
+            s = 2
+        elif getattr(model_cfg, "output_stride", None) is not None and getattr(model_cfg, "output_stride") in (1, 2, 4, 8):
+            s = int(model_cfg.output_stride)
+        else:
+            s = output_stride
         gh, gw = math.ceil(h / s), math.ceil(w / s)
 
         accum_density = image.new_zeros((1, gh, gw))
@@ -152,7 +164,7 @@ def predict_multiscale_tta(
             d_orig = predict_tiled(
                 model=model,
                 image=img_scaled,
-                output_stride=output_stride,
+                output_stride=s,
                 tile_size=tile_size,
                 halo=halo,
                 forward_kwargs=forward_kwargs,
@@ -164,7 +176,7 @@ def predict_multiscale_tta(
                 d_flip = predict_tiled(
                     model=model,
                     image=img_flip,
-                    output_stride=output_stride,
+                    output_stride=s,
                     tile_size=tile_size,
                     halo=halo,
                     forward_kwargs=forward_kwargs,

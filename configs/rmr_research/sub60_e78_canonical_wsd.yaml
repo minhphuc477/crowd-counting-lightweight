@@ -1,4 +1,4 @@
-﻿# SUB60-E78: Canonical WSD Schedule (Single-Variable Ablation: WSD vs Cosine)
+# SUB60-E78: Canonical WSD Schedule (Single-Variable Ablation: WSD vs Cosine)
 # Scientific Purpose:
 # Isolates the causal impact of the Warmup-Stable-Decay (WSD) schedule on the exact canonical base:
 # (1) Keeps canonical learning rate fixed at lr=0.0001 (auto_lr_finder: false) to isolate scheduler effect.

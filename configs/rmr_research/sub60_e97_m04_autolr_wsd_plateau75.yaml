@@ -1,4 +1,4 @@
-﻿# SUB60-E97: M04 with Autonomous SafeLRFinder + WSD Plateau 75%
+# SUB60-E97: M04 with Autonomous SafeLRFinder + WSD Plateau 75%
 # Scientific Purpose:
 # Directly implements autonomous learning rate discovery and exploitation:
 # 1. Before Epoch 1: SafeLRFinder automatically sweeps 70 iterations from 1e-6 to 1e-2,

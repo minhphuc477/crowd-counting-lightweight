@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # SUB-60 EXPERIMENT 5: Grand Synthesis (SOTA Sub-60 Master - 174k Parameters)
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (Official 300 Train / 182 Test Partition, 0.0% KD)

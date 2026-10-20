@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # SUB-60 V40 NEXT-GEN 200K RECIPE: Full Next-Gen Architecture (< 200,000 params)
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target Benchmark: ShanghaiTech Part A (Official 300 Train / 182 Test, 0.0% KD)

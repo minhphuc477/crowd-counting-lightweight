@@ -70,7 +70,11 @@ def evaluate_dataset(
         summary: Dictionary of aggregated dataset metrics.
     """
     forward_kwargs = forward_kwargs or {}
-    model_stride = int(getattr(getattr(model, "cfg", None), "output_stride", output_stride))
+    model_cfg = getattr(model, "cfg", getattr(getattr(model, "module", None), "cfg", None))
+    if getattr(model_cfg, "subpixel_stride2", False) or getattr(model_cfg, "subpixel_dm", False):
+        model_stride = 2
+    else:
+        model_stride = int(getattr(model_cfg, "output_stride", output_stride))
     eff_output_stride = model_stride if model_stride in (1, 2, 4, 8) else output_stride
     model.eval()
 

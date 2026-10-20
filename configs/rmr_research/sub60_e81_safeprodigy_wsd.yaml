@@ -1,4 +1,4 @@
-﻿# SUB60-E81: SafeProdigy Distance-Adaptive Optimizer with WSD Phased Schedule
+# SUB60-E81: SafeProdigy Distance-Adaptive Optimizer with WSD Phased Schedule
 # Scientific Purpose:
 # Synthesizes distance-adaptive step sizing with explicit schedule phasing:
 # (1) SafeProdigy autonomously adapts effective learning rate via parameter distance D_k.

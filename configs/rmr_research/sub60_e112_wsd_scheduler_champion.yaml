@@ -1,4 +1,4 @@
-﻿# SUB60-E112: Single-Variable Control - Warmup-Stable-Decay (WSD) Optimization
+# SUB60-E112: Single-Variable Control - Warmup-Stable-Decay (WSD) Optimization
 # Scientific Purpose:
 # Isolates Factor 3 (Optimization Schedule): replaces Cosine Annealing with WSD (stable_ratio: 0.70).
 # In e108a, the model achieved peak convergence at Epoch 695 (75.23 MAE, Bias -15.26), but subsequent

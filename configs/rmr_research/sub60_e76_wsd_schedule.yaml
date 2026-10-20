@@ -1,4 +1,4 @@
-﻿# SUB60-E76: SafeLRFinder + Warmup-Stable-Decay (WSD) Schedule
+# SUB60-E76: SafeLRFinder + Warmup-Stable-Decay (WSD) Schedule
 # Scientific Purpose:
 # Validates Solution A for optimal LR exploration and sustained convergence:
 # (1) SafeLRFinder autonomously explores learning rate landscape before epoch 1,

@@ -1,4 +1,4 @@
-﻿# SUB60-E89: M04 Restored + Calibrated SafeProdigy + WSD Plateau 80%
+# SUB60-E89: M04 Restored + Calibrated SafeProdigy + WSD Plateau 80%
 # Scientific Purpose:
 # Grand Synthesis: Combine the restored Fractional Cell Loss (p=0.5, ref=100.0, lambda=0.5, bugfix restored)
 # with the distance-adaptive dynamics of SafeProdigy (d_max=0.020, wsd_stable_ratio=0.80).

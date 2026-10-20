@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # SUB-60 TRACK B-K20: Subpixel Stride 2 Anchor with Constant Kappa=20 Concentration
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (Official 300 Train / 182 Test Partition, 0.0% KD)

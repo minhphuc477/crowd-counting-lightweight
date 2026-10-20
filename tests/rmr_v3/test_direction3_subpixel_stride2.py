@@ -354,6 +354,11 @@ def test_tiled_prediction_and_game_physical_parity_at_stride2():
     expected_gw = math.ceil(w_odd / 2)
     assert pred_tiled.shape == (1, expected_gh, expected_gw), f"Shape mismatch: {pred_tiled.shape}"
 
+    # Auto-detection check: even if output_stride=4 is passed, model.cfg specifies Stride 2
+    pred_tiled_auto = predict_tiled(model, img, output_stride=4, tile_size=256, halo=32)
+    assert pred_tiled_auto.shape == (1, expected_gh, expected_gw), "predict_tiled must auto-detect model stride=2"
+    assert torch.allclose(pred_tiled_auto, pred_tiled, atol=1e-5), "Stride 2 auto-detection parity violated"
+
     game_dict = game_physical_image(
         pred_tiled, pts, image_h=h_odd, image_w=w_odd, stride=2, levels=(0, 1, 2)
     )
