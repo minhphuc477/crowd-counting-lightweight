@@ -54,5 +54,18 @@
 - **TRUNG THỰC KHOA HỌC TUYỆT ĐỐI (EMPIRICAL BRUTAL HONESTY)**:
   - Mô hình đạt kết quả bao nhiêu phải báo cáo chính xác bấy nhiêu.
   - Khi mô hình bị thoái hóa hoặc thất bại (kết quả xấu hơn mỏ neo cũ), phải thừa nhận thẳng thắn, báo cáo chính xác số điểm tụt lùi, giải phẫu đúng nguyên nhân kỹ thuật, không dùng thuật ngữ hoa mỹ để che đậy hoặc dùng Oracle để "vớt vát" tâm lý.
+---
 
+## 7. Lệnh Cấm Vĩnh Viễn WSD & Lịch Trình Cắt Ngắn 650 Epoch (PERMANENT BAN ON WSD & SHORT DECAY)
+- **TUYỆT ĐỐI CẤM SỬ DỤNG WSD (Warmup-Stable-Decay)**: Cấm vĩnh viễn việc sử dụng `scheduler_type: wsd`, `warmup_stable_decay`, hoặc tham số `wsd_stable_ratio` trong toàn bộ cấu hình YAML và mã nguồn Python.
+- **CƠ CHẾ THẤT BẠI ĐÃ CHỨNG MINH**: Trên 300 ảnh train nhỏ, giữ LR cao quá lâu khiến tham số dao động tán loạn, sau đó decay gấp gáp chỉ trong 100 epoch làm đóng băng mô hình ở lòng chảo cực tiểu tồi, kéo kết quả thoái hóa lên 98-102 MAE.
+- **QUY CHUẨN BẮT BUỘC**:
+  1. Bắt buộc dùng **Cosine Annealing chuẩn (1,000 epochs, warmup 10, min_lr 0.05)**.
+  2. Tuyệt đối không dùng Early Stopping cắt ngắn quá trình huấn luyện.
 
+---
+
+## 8. Quy Chuẩn Vệ Sinh Mã Nguồn & Công Cụ (CODEBASE HYGIENE & TOOL STANDARDIZATION)
+- **TUYỆT ĐỐI KHÔNG TẠO SCRIPT DÙNG 1 LẦN BỪA BÃI**: Cấm để lại các script tạm bợ (`analyze_*.py`, `step*.py`, `inspect_*.py`) trong `tools/`, `scripts/` hay `scratch/`.
+- **THƯ MỤC `tools/` CHỈ CHỨA CLI TOOLS TÁI SỬ DỤNG**: Chỉ giữ lại các công cụ tổng quát có tham số CLI rõ ràng (`--config`, `--checkpoint`).
+- **DỌN DẸP NGAY LẬP TỨC**: Mọi file tạm sinh ra trong quá trình gỡ lỗi phải được xóa sạch trước khi commit.
