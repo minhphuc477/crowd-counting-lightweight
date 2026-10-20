@@ -1,33 +1,39 @@
 # Reviewer Memory: Autonomous Research & Review Loop
 **Run ID**: `run_20261020_rmr_50mae`
 **Topic**: First-Principles Radon Measure Recovery for Sub-50 MAE Crowd Counting on ShanghaiTech Part A
-**Current Round**: 2 (Pre-training Verification Complete)
-**Reviewer Verdict**: ACCEPT (Score: 8.5 / 10.0)
+**Current Round**: 3 (V60 Evaluation Complete, Planning V61)
+**Reviewer Verdict**: REVISE WITH CELL SUPERVISION (Score: 8.0 / 10.0)
 
 ---
 
-## 1. Resolved Invariants & Mathematical Fixes (Round 1 -> Round 2)
-1. **Un-attenuated Beta-NLL Gradient Score ($\beta=1.0$)**:
-   - Fixed `rmr_v3/losses/regional.py` to remove unintended batch normalization `w_beta / w_mean`.
-   - Elementwise variance-detached weighting restores $\frac{\partial \mathcal{L}_{\beta=1}}{\partial \mu} \equiv \mu - b$, guaranteeing an exact linear slope across dense crops ($N > 1000$).
-2. **Support Absorption & Upward Transport Headroom**:
-   - Configured `rn_trust_alpha_up: 1.5 - 2.0` in `configs/rmr_v60/`, allowing the closed-form mass transport operator to deliver full mass to dense regions without getting choked by symmetric 15% bounds.
-3. **Loss Purification & Minimal 3-Loss Suite**:
-   - Removed all 6 conflicting auxiliary losses ($\lambda_{\text{cell}}=0, \lambda_{\text{hurdle}}=0, \lambda_{\text{trunc}}=0, \lambda_{\text{scale\_align}}=0, \lambda_{\text{curv}}=0, \lambda_{\text{hard\_bg}}=0$).
-   - Retained only 3 mutually orthogonal objectives: Count Poisson/NB ($\lambda=1.0$), Allocation DM16/ChfL ($\lambda=1.0 / 0.35$), and Regional Beta-NB ($\lambda=0.20$).
-4. **Subpixel Stride 2 via Zero-Parameter PixelShuffle**:
-   - Track B configuration slashes cell collision from 38.3% to 4.1% at 144,960 params ($\le 200,000$).
-5. **Strict Training Protocol**:
-   - Strictly 1,000 epochs with Cosine Annealing.
-   - Permanent ban on WSD and 650-epoch premature decay.
-   - 100% Standalone (0.0% Knowledge Distillation).
-6. **Code Quality & Test Integrity**:
-   - All files $\le 450$ lines.
-   - 142/142 tests passing across mathematical essence, adversarial stress, and unit suites.
+## 1. Verified Empirical Results from V60 (1000 Epochs)
+1. **Track B (Subpixel Stride 2)**:
+   - Best Val MAE: **83.75** at epoch 585 (RMSE: 140.62, NAE: 0.2067).
+   - **Median AE reached 48.48** (over 50% of test images achieved Sub-50 MAE!).
+   - Moderate density MAE reached **60.94** (129 images).
+   - Sparse density MAE remained rock-solid at **18.36** (7 images).
+2. **Track A (Stride 4)**:
+   - Best Val MAE: **89.07** at epoch 465 (RMSE: 136.56, NAE: 0.2292).
+   - Bias: **+3.78** (near zero systematic bias).
+3. **Stride 2 vs Stride 4 Performance**:
+   - Subpixel Stride 2 beats Stride 4 by **-5.32 MAE** and improves Median AE by **-12.12 AE**.
 
 ---
 
-## 2. Active Configs Ready for Execution
-- `configs/rmr_v60/v60_track_a_closed_form_rn.yaml` (103,959 params)
-- `configs/rmr_v60/v60_track_b_subpixel_stride2_rn.yaml` (144,960 params)
-- `configs/rmr_v60/v60_track_b_chfl_subpixel_rn.yaml` (144,960 params)
+## 2. Forensic Findings & Root Cause of the 83.75 Gap
+1. **Lack of Microscopic Point/Cell Supervision**:
+   - V60 used only macro-area integrals (`flat_dm16` 16px blocks and `region_nb` 32-128px boxes).
+   - Without point/cell loss (`lambda_cell: 0.0`), the carrier density smeared out flatly inside each 16px block, losing peak sharpness.
+2. **Missing Dynamic Range Expansion**:
+   - With `density_curvature: false`, Softplus ceiling prevented dense clusters from scaling up to 1,300+ people.
+3. **Four Outlier Images**:
+   - `IMG_92`, `IMG_90`, `IMG_8`, `IMG_127` alone accounted for **+13.91 MAE** (35% of total test error).
+4. **Late-Epoch Overfitting**:
+   - Models peaked at epochs 465–585, then degraded by +11 to +16 MAE by epoch 1000 as LR dropped to $10^{-6}$.
+
+---
+
+## 3. Next Actionable Phase (V61)
+- Re-introduce `cell_loss_mode: count_harmonized` ($\lambda=0.5$, power 0.5) to restore micro point supervision.
+- Re-activate `density_curvature: true` on Subpixel Stride 2 to break Softplus ceiling.
+- Execute pending Fourier Characteristic Function experiment (`v60_track_b_chfl_subpixel_rn.yaml`).
