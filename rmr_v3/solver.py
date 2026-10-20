@@ -1,34 +1,26 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Sequence
 
 import torch
 import torch.nn.functional as F
 
 from rmr_core.operators import (
     RegionSet,
-    charbonnier_tv_step,
     compute_deficit_carrier_seed,
     partition_regions_by_scale,
     regional_adjoint,
-    regional_sum,
     weighted_coverage,
     weighted_normalized_adjoint_field,
     weighted_regional_energy,
 )
 from .solver_ops import (
-    anscombe_discrepancy,
+    apply_proximal_shrinkage,
     apply_trust_region_clamping,
-    compute_adaptive_relaxation_factor,
-    compute_adaptive_tau,
-    compute_barzilai_borwein_step,
-    density_gated_anscombe_discrepancy,
-    laplacian_tv_diffusion,
-    perona_malik_anisotropic_diffusion,
-    prepare_anscombe_target,
-    proximal_firm_threshold,
-    proximal_soft_threshold,
+    apply_tv_diffusion,
+    resolve_discrepancy_target,
+    resolve_step_omega,
 )
 
 
@@ -120,7 +112,6 @@ def unrolled_sirt_solver(
     omega_steps: torch.Tensor | Sequence[float] | None = None,
     gamma_steps: torch.Tensor | Sequence[float] | None = None,
 ) -> dict[str, Any]:
-
     """Execute unrolled Proximal Reliability-Weighted SIRT measure reconciliation."""
     if b_solver.ndim == 2:
         b_solver = b_solver.unsqueeze(1)
@@ -161,9 +152,7 @@ def unrolled_sirt_solver(
             "effective_tv_lambda": effective_tv_lambda,
         }
 
-
     # Pre-partition regions by scale once before the T-iteration solver loop.
-    # This completely eliminates dynamic boolean masking and tensor slicing allocations inside the loop.
     scale_partitions = None
     if scale_routing_weights is not None:
         k_scales = scale_routing_weights.shape[1]
@@ -221,8 +210,7 @@ def unrolled_sirt_solver(
         if use_nesterov_momentum and iter_idx > 0:
             theta_next = (1.0 + math.sqrt(1.0 + 4.0 * (theta_curr ** 2))) / 2.0
             beta = (theta_curr - 1.0) / theta_next
-            z_state = y_curr + beta * (y_curr - y_prev)
-            z_state = torch.clamp_min(z_state, 0.0)
+            z_state = torch.clamp_min(y_curr + beta * (y_curr - y_prev), 0.0)
             theta_curr = theta_next
         else:
             z_state = y_curr
@@ -230,47 +218,27 @@ def unrolled_sirt_solver(
         if compute_energy:
             if iter_idx == 0 or energy_after is None:
                 energy_before = weighted_regional_energy(
-                    y_curr, b_solver, weight_solver, regions,
+                    y_curr, b_solver, weight_solver, regions
                 ).detach()
             else:
                 energy_before = energy_after
 
-        # ── Step 1: Adjoint discrepancy scatter evaluated at extrapolated state z ──
-        is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
-        if is_anscombe:
-            b_target = prepare_anscombe_target(
-                z_state=z_state,
-                b_solver=b_solver,
-                regions=regions,
-                area_scale=area_scale,
-                area_normalized_adjoint=area_normalized_adjoint,
-                density_gated_anscombe=density_gated_anscombe,
-                anscombe_c=anscombe_c,
-                b_variance=b_variance,
-                morozov_gamma=float(morozov_gamma),
-                anscombe_tau_dense=float(anscombe_tau_dense),
-                asymmetric_morozov=asymmetric_morozov,
-                morozov_gamma_under=float(morozov_gamma_under),
-                morozov_rho=float(morozov_rho),
-                eps=eps,
-            )
-            adj_mode, b_var, m_gamma = "radon_nikodym", None, 0.0
-            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = (
-                False, False, False, False, False
-            )
-
-        else:
-            b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
-            if gamma_steps is not None:
-                step_idx = min(iter_idx, len(gamma_steps) - 1)
-                m_gamma = gamma_steps[step_idx]
-            elif isinstance(morozov_gamma, torch.Tensor):
-                m_gamma = morozov_gamma
-            else:
-                m_gamma = float(morozov_gamma)
-            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov = (
-                anscombe_morozov, asymmetric_morozov, spatial_morozov, multiscale_morozov, density_adaptive_morozov
-            )
+        # Step 1: Resolve discrepancy target & Morozov regime
+        (
+            b_target, adj_mode, b_var, m_gamma,
+            ansc_morozov, asym_morozov, spat_morozov, mscale_morozov, dadapt_morozov
+        ) = resolve_discrepancy_target(
+            iter_idx=iter_idx, z_state=z_state, b_solver=b_solver, regions=regions,
+            area_scale=area_scale, area_normalized_adjoint=area_normalized_adjoint,
+            density_gated_anscombe=density_gated_anscombe, anscombe_c=anscombe_c,
+            b_variance=b_variance, morozov_gamma=morozov_gamma,
+            anscombe_tau_dense=float(anscombe_tau_dense), asymmetric_morozov=asymmetric_morozov,
+            morozov_gamma_under=float(morozov_gamma_under), morozov_rho=float(morozov_rho),
+            eps=eps, use_anscombe=use_anscombe, adjoint_mode=adjoint_mode,
+            gamma_steps=gamma_steps, anscombe_morozov=anscombe_morozov,
+            spatial_morozov=spatial_morozov, multiscale_morozov=multiscale_morozov,
+            density_adaptive_morozov=density_adaptive_morozov,
+        )
 
         psi_deficit = None
         if deficit_carrier_seeding and b_target is not None and regions is not None:
@@ -304,132 +272,57 @@ def unrolled_sirt_solver(
             psi_deficit=psi_deficit,
         )
 
-        # Adaptive Barzilai-Borwein step size or learned step size
-        if omega_steps is not None:
-            step_idx = min(iter_idx, len(omega_steps) - 1)
-            current_omega: float | torch.Tensor = omega_steps[step_idx] * strength
-        else:
-            current_omega = effective_omega
-
-        can_use_bb = (
-            omega_steps is None
-            and (use_barzilai_borwein or use_alternating_bb)
-            and prev_y is not None
-            and prev_field is not None
-            and effective_omega > 0.0
+        current_omega, cached_bb_omega = resolve_step_omega(
+            iter_idx=iter_idx, omega_steps=omega_steps, strength=strength,
+            effective_omega=effective_omega, use_barzilai_borwein=use_barzilai_borwein,
+            use_alternating_bb=use_alternating_bb, prev_y=prev_y, prev_field=prev_field,
+            cyclic_bb_length=cyclic_bb_length, cached_bb_omega=cached_bb_omega,
+            z_state=z_state, field=field, bb_clamp_min=bb_clamp_min, bb_clamp_max=bb_clamp_max,
+            adaptive_relaxation=adaptive_relaxation, effective_relax_thresh=effective_relax_thresh,
+            effective_relax_scale=effective_relax_scale, adaptive_relax_sparse=adaptive_relax_sparse,
+            adaptive_relax_dense_boost=adaptive_relax_dense_boost,
         )
-        if can_use_bb:
-            if (
-                cyclic_bb_length > 1
-                and cached_bb_omega is not None
-                and ((iter_idx - 1) % cyclic_bb_length != 0)
-            ):
-                current_omega = cached_bb_omega
-            else:
-                current_omega = compute_barzilai_borwein_step(
-                    z_state=z_state,
-                    prev_y=prev_y,
-                    field=field,
-                    prev_field=prev_field,
-                    effective_omega=effective_omega,
-                    use_alternating_bb=use_alternating_bb,
-                    iter_idx=iter_idx,
-                    bb_clamp_min=bb_clamp_min,
-                    bb_clamp_max=bb_clamp_max,
-                )
-                cached_bb_omega = current_omega
-
-        # Density-Adaptive Over-Relaxation (RMR-v20)
-        if adaptive_relaxation:
-            omega_mod = compute_adaptive_relaxation_factor(
-                z_state=z_state,
-                effective_relax_thresh=effective_relax_thresh,
-                effective_relax_scale=effective_relax_scale,
-                adaptive_relax_sparse=adaptive_relax_sparse,
-                adaptive_relax_dense_boost=adaptive_relax_dense_boost,
-            )
-            current_omega = current_omega * omega_mod
-
         step_omegas.append(current_omega)
-        # Gradient descent on 0.5 * ||Ay - b||^2: negative gradient step direction is -field.
-        # delta_y > 0 adds mass (when under-counting: field < 0 => delta_y > 0).
-        # delta_y < 0 removes mass (when over-counting: field > 0 => delta_y < 0).
-        delta_y = -current_omega * field
 
+        delta_y = -current_omega * field
         delta_y = apply_trust_region_clamping(
-            delta_y=delta_y,
-            z_state=z_state,
-            trust_region_kappa=trust_region_kappa,
-            effective_trust_floor=effective_trust_floor,
-            area_scale=area_scale,
-            scale_routed_trust=scale_routed_trust,
-            scale_routing_weights=scale_routing_weights,
-            trust_pos_kappa=trust_pos_kappa,
-            trust_region_floor_dense=trust_region_floor_dense,
-            density_adaptive_trust=density_adaptive_trust,
-            trust_dense_tau=trust_dense_tau,
-            trust_dense_kappa=trust_dense_kappa,
-            deficit_carrier_seeding=deficit_carrier_seeding,
-            psi_deficit=psi_deficit,
-            scale_seeded_carrier=scale_seeded_carrier,
-            scale_seed_eps=scale_seed_eps,
-            eatr_floor=eatr_floor,
-            asymmetric_trust=asymmetric_trust,
-            scale_confidence=scale_confidence,
+            delta_y=delta_y, z_state=z_state, trust_region_kappa=trust_region_kappa,
+            effective_trust_floor=effective_trust_floor, area_scale=area_scale,
+            scale_routed_trust=scale_routed_trust, scale_routing_weights=scale_routing_weights,
+            trust_pos_kappa=trust_pos_kappa, trust_region_floor_dense=trust_region_floor_dense,
+            density_adaptive_trust=density_adaptive_trust, trust_dense_tau=trust_dense_tau,
+            trust_dense_kappa=trust_dense_kappa, deficit_carrier_seeding=deficit_carrier_seeding,
+            psi_deficit=psi_deficit, scale_seeded_carrier=scale_seeded_carrier,
+            scale_seed_eps=scale_seed_eps, eatr_floor=eatr_floor,
+            asymmetric_trust=asymmetric_trust, scale_confidence=scale_confidence,
         )
 
-
-        prev_y = y_curr.detach()   # Track actual iterate (not Nesterov extrapolate) for BB-1 correctness
+        prev_y = y_curr.detach()
         prev_field = field.detach()
-
         y_step = z_state.float() + delta_y
 
-        # ── Step 2: Proximal thresholding L1-shrinkage ────────────────────
-        tau_current: float | torch.Tensor = tau_step
-        if adaptive_tau and tau_step > 0.0:
-            tau_current = compute_adaptive_tau(
-                tau_step,
-                z_state,
-                stride=output_stride,
-                mode="density_adaptive",
-                rho0=float(adaptive_tau_rho0),
-                pool_kernel=5,
-            )
-
-        if proximal_mode == "firm":
-            y_next = proximal_firm_threshold(y_step, tau=tau_current, mu=float(proximal_mu))
-        elif proximal_mode == "soft":
-            y_next = proximal_soft_threshold(y_step, tau=tau_current)
-        elif proximal_mode in ("none", "clamp"):
-            y_next = torch.clamp_min(y_step, 0.0)
-        else:
-            raise ValueError(
-                f"Unknown proximal_mode: '{proximal_mode}'. Must be 'firm', 'soft', or 'none'."
-            )
+        # Step 2: Proximal thresholding shrinkage
+        y_next = apply_proximal_shrinkage(
+            y_step=y_step, z_state=z_state, tau_step=tau_step,
+            proximal_mode=proximal_mode, proximal_mu=proximal_mu,
+            adaptive_tau=adaptive_tau, output_stride=output_stride,
+            adaptive_tau_rho0=adaptive_tau_rho0,
+        )
 
         # Step 3: Total Variation diffusion
-        if tv_step > 0.0:
-            if tv_type == "charbonnier":
-                y_next = charbonnier_tv_step(y_next, tv_step, float(tv_eps_c))
-            elif tv_type == "perona_malik" or anisotropic_diffusion:
-                y_next = perona_malik_anisotropic_diffusion(y_next, tv_step, kappa=float(pm_kappa))
-            else:
-                y_next = laplacian_tv_diffusion(
-                    y_next,
-                    tv_step,
-                    kernel=laplace_kernel,
-                    density_gated=density_gated_diffusion,
-                    diffusion_dense_threshold=effective_diff_thresh,
-                    diffusion_gate_beta=effective_diff_beta,
-                )
+        y_next = apply_tv_diffusion(
+            y=y_next, tv_step=tv_step, tv_type=tv_type, tv_eps_c=tv_eps_c,
+            anisotropic_diffusion=anisotropic_diffusion, pm_kappa=pm_kappa,
+            kernel=laplace_kernel, density_gated_diffusion=density_gated_diffusion,
+            effective_diff_thresh=effective_diff_thresh, effective_diff_beta=effective_diff_beta,
+        )
 
         y_next = y_next.to(dtype=y_curr.dtype)
-        # Zero-host-sync numerical divergence guard: restore y_curr on NaN/Inf
         y_next = torch.where(torch.isfinite(y_next), y_next, y_curr)
 
         if compute_energy:
             energy_after = weighted_regional_energy(
-                y_next, b_solver, weight_solver, regions,
+                y_next, b_solver, weight_solver, regions
             ).detach()
             energy_trace.append({"before": energy_before, "after": energy_after})
         residual_fields.append(field.detach())
@@ -446,4 +339,3 @@ def unrolled_sirt_solver(
         "effective_omega": effective_omega,
         "effective_tv_lambda": effective_tv_lambda,
     }
-

@@ -11,10 +11,12 @@ from __future__ import annotations
 
 from .solver_diffusion import (
     _LAPLACE_KERNEL,
+    apply_tv_diffusion,
     laplacian_tv_diffusion,
     perona_malik_anisotropic_diffusion,
 )
 from .solver_threshold import (
+    apply_proximal_shrinkage,
     compute_adaptive_tau,
     proximal_firm_threshold,
     proximal_soft_threshold,
@@ -24,6 +26,7 @@ from .solver_anscombe import (
     anscombe_transform,
     density_gated_anscombe_discrepancy,
     prepare_anscombe_target,
+    resolve_discrepancy_target,
 )
 
 from .solver_softbox import (
@@ -34,6 +37,7 @@ from .solver_softbox import (
 from .solver_step_adaptation import (
     compute_adaptive_relaxation_factor,
     compute_barzilai_borwein_step,
+    resolve_step_omega,
 )
 from .solver_trust import apply_trust_region_clamping
 
@@ -41,19 +45,23 @@ __all__ = [
     "_LAPLACE_KERNEL",
     "laplacian_tv_diffusion",
     "perona_malik_anisotropic_diffusion",
+    "apply_tv_diffusion",
     "proximal_soft_threshold",
     "proximal_firm_threshold",
     "compute_adaptive_tau",
+    "apply_proximal_shrinkage",
     "anscombe_transform",
     "anscombe_discrepancy",
     "density_gated_anscombe_discrepancy",
     "prepare_anscombe_target",
+    "resolve_discrepancy_target",
     "make_gaussian_softbox_kernel",
     "gaussian_softbox_forward",
     "gaussian_softbox_adjoint_step",
     "apply_trust_region_clamping",
     "compute_barzilai_borwein_step",
     "compute_adaptive_relaxation_factor",
+    "resolve_step_omega",
 ]
 
 

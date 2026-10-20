@@ -8,6 +8,7 @@ __all__ = [
     "proximal_soft_threshold",
     "proximal_firm_threshold",
     "compute_adaptive_tau",
+    "apply_proximal_shrinkage",
 ]
 
 
@@ -92,3 +93,38 @@ def proximal_firm_threshold(
     ramp = slope * (y - tau_val)
     out = torch.where(y > mu_tau, y, ramp)
     return torch.clamp_min(out, 0.0)
+
+
+def apply_proximal_shrinkage(
+    y_step: torch.Tensor,
+    z_state: torch.Tensor,
+    tau_step: float,
+    proximal_mode: str = "soft",
+    proximal_mu: float = 3.0,
+    adaptive_tau: bool = False,
+    output_stride: int = 4,
+    adaptive_tau_rho0: float = 0.05,
+) -> torch.Tensor:
+    """Execute proximal L1-shrinkage thresholding (soft, firm, or clamp) with optional adaptive tau."""
+    tau_current: float | torch.Tensor = tau_step
+    if adaptive_tau and tau_step > 0.0:
+        tau_current = compute_adaptive_tau(
+            tau_step,
+            z_state,
+            stride=output_stride,
+            mode="density_adaptive",
+            rho0=float(adaptive_tau_rho0),
+            pool_kernel=5,
+        )
+
+    if proximal_mode == "firm":
+        return proximal_firm_threshold(y_step, tau=tau_current, mu=float(proximal_mu))
+    elif proximal_mode == "soft":
+        return proximal_soft_threshold(y_step, tau=tau_current)
+    elif proximal_mode in ("none", "clamp"):
+        return torch.clamp_min(y_step, 0.0)
+    else:
+        raise ValueError(
+            f"Unknown proximal_mode: '{proximal_mode}'. Must be 'firm', 'soft', or 'none'."
+        )
+

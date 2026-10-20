@@ -7,6 +7,7 @@ import torch.nn.functional as F
 __all__ = [
     "laplacian_tv_diffusion",
     "perona_malik_anisotropic_diffusion",
+    "apply_tv_diffusion",
 ]
 
 # Standard 2D 5-point discrete Laplacian kernel for isotropic TV diffusion
@@ -164,3 +165,36 @@ def perona_malik_anisotropic_diffusion(
     elif orig_ndim == 3:
         return out.squeeze(0)
     return out
+
+
+def apply_tv_diffusion(
+    y: torch.Tensor,
+    tv_step: float,
+    tv_type: str = "laplacian",
+    tv_eps_c: float = 0.1,
+    anisotropic_diffusion: bool = False,
+    pm_kappa: float = 0.05,
+    kernel: torch.Tensor | None = None,
+    density_gated_diffusion: bool = False,
+    effective_diff_thresh: float = 0.15,
+    effective_diff_beta: float = 0.03,
+) -> torch.Tensor:
+    """Execute total-variation diffusion step (Laplacian, Perona-Malik, or Charbonnier)."""
+    if tv_step <= 0.0:
+        return y
+    if tv_type == "charbonnier":
+        from rmr_core.operators import charbonnier_tv_step
+
+        return charbonnier_tv_step(y, tv_step, float(tv_eps_c))
+    elif tv_type == "perona_malik" or anisotropic_diffusion:
+        return perona_malik_anisotropic_diffusion(y, tv_step, kappa=float(pm_kappa))
+    else:
+        return laplacian_tv_diffusion(
+            y,
+            tv_step,
+            kernel=kernel,
+            density_gated=density_gated_diffusion,
+            diffusion_dense_threshold=effective_diff_thresh,
+            diffusion_gate_beta=effective_diff_beta,
+        )
+

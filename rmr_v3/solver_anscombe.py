@@ -7,6 +7,8 @@ __all__ = [
     "anscombe_transform",
     "anscombe_discrepancy",
     "density_gated_anscombe_discrepancy",
+    "prepare_anscombe_target",
+    "resolve_discrepancy_target",
 ]
 
 
@@ -170,4 +172,71 @@ def prepare_anscombe_target(
 
     eff_q = q + float(eps) * eff_area.clamp_min(1.0)
     return q - rate_res * eff_q.clamp_min(float(eps))
+
+
+def resolve_discrepancy_target(
+    iter_idx: int,
+    z_state: torch.Tensor,
+    b_solver: torch.Tensor,
+    regions: Any,
+    area_scale: float,
+    area_normalized_adjoint: bool,
+    density_gated_anscombe: bool,
+    anscombe_c: float,
+    b_variance: torch.Tensor | None,
+    morozov_gamma: float | torch.Tensor,
+    anscombe_tau_dense: float,
+    asymmetric_morozov: bool,
+    morozov_gamma_under: float,
+    morozov_rho: float,
+    eps: float,
+    use_anscombe: bool,
+    adjoint_mode: str,
+    gamma_steps: Any,
+    anscombe_morozov: bool,
+    spatial_morozov: bool,
+    multiscale_morozov: bool,
+    density_adaptive_morozov: bool,
+) -> tuple[torch.Tensor, str, torch.Tensor | None, float | torch.Tensor, bool, bool, bool, bool, bool]:
+    """Resolve discrepancy target b_target, adjoint mode, variance, and Morozov configuration."""
+    is_anscombe = use_anscombe or (adjoint_mode == "anscombe_vst")
+    if is_anscombe:
+        b_target = prepare_anscombe_target(
+            z_state=z_state,
+            b_solver=b_solver,
+            regions=regions,
+            area_scale=area_scale,
+            area_normalized_adjoint=area_normalized_adjoint,
+            density_gated_anscombe=density_gated_anscombe,
+            anscombe_c=anscombe_c,
+            b_variance=b_variance,
+            morozov_gamma=float(morozov_gamma),
+            anscombe_tau_dense=float(anscombe_tau_dense),
+            asymmetric_morozov=asymmetric_morozov,
+            morozov_gamma_under=float(morozov_gamma_under),
+            morozov_rho=float(morozov_rho),
+            eps=eps,
+        )
+        return b_target, "radon_nikodym", None, 0.0, False, False, False, False, False
+
+    b_target, adj_mode, b_var = b_solver, adjoint_mode, b_variance
+    if gamma_steps is not None:
+        step_idx = min(iter_idx, len(gamma_steps) - 1)
+        m_gamma = gamma_steps[step_idx]
+    elif isinstance(morozov_gamma, torch.Tensor):
+        m_gamma = morozov_gamma
+    else:
+        m_gamma = float(morozov_gamma)
+    return (
+        b_target,
+        adj_mode,
+        b_var,
+        m_gamma,
+        anscombe_morozov,
+        asymmetric_morozov,
+        spatial_morozov,
+        multiscale_morozov,
+        density_adaptive_morozov,
+    )
+
 
