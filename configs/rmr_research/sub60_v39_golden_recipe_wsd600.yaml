@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # SUB-60 V39 GOLDEN RECIPE: 600-Epoch Warmup-Stable-Decay (WSD) Optimization
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target Benchmark: ShanghaiTech Part A (Official 300 Train / 182 Test, 0.0% KD)
@@ -169,9 +169,8 @@ train:
   grad_clip: 1.0           # Gradient Clip: 1.0 (numerical stability during deep inverse solver unrolling)
 
   # WSD Learning Rate Schedule (Warmup -> Stable -> Decay)
-  scheduler_type: wsd
+  scheduler_type: cosine
   warmup_epochs: 15        # 0 -> 15 ep: Linear ascent stabilizing AdamW moments
-  wsd_stable_ratio: 0.80   # 15 -> 480 ep: High exploration kinetic energy at 100% peak LR
   min_lr_ratio: 0.01       # 480 -> 600 ep: Rapid cosine decay settling into deepest flat minima
 
   # Precision & Stabilization

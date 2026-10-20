@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # RMR-v36 Ablation: Scaled Master with T=2 Solver (Isolating T=2 vs T=6)
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (Official 300 Train / 182 Test Partition, 0.0% KD)
@@ -161,8 +161,7 @@ train:
   weight_decay: 0.0001
   warmup_epochs: 10
   min_lr_ratio: 0.05
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from rmr_v3.optim.builder import build_v3_optimizer, build_v3_scheduler, maybe_run_safe_lr_finder
 from rmr_v3.optim.lr_finder import SafeLRFinder
 from rmr_v3.optim.safe_prodigy import SafeProdigy
-from rmr_v3.optim.wsd_scheduler import make_wsd_scheduler
 
 
 class ToyModel(nn.Module):
@@ -33,47 +32,16 @@ class ToyModel(nn.Module):
 
 
 def test_wsd_scheduler_phases() -> None:
-    """Test Warmup-Stable-Decay schedule across all three distinct phases."""
+    """Verify that WSD schedule is permanently banned and raises ValueError."""
     param = nn.Parameter(torch.zeros(1))
     opt = torch.optim.SGD([param], lr=1e-3)
-    epochs = 100
-    warmup_epochs = 10
-    stable_ratio = 0.70  # Stable until 10 + 0.70 * 90 = 73
-    min_lr_ratio = 0.05
+    cfg = {"train": {"scheduler_type": "wsd"}}
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        build_v3_scheduler(opt, cfg, epochs=100)
 
-    sched = make_wsd_scheduler(
-        opt,
-        epochs=epochs,
-        warmup_epochs=warmup_epochs,
-        stable_ratio=stable_ratio,
-        min_lr_ratio=min_lr_ratio,
-    )
-
-    # Epoch 0 (Warmup start: (0 + 1) / 10 = 0.1)
-    lr0 = opt.param_groups[0]["lr"]
-    assert lr0 == pytest.approx(1e-3 * (1.0 / warmup_epochs), rel=1e-3)
-
-    # Epoch 10 (Warmup end / Start of flat plateau)
-    for _ in range(10):
-        opt.step()
-        sched.step()
-    lr10 = opt.param_groups[0]["lr"]
-    assert lr10 == pytest.approx(1e-3, rel=1e-3)
-
-    # Epoch 50 (In the middle of flat stable plateau)
-    for _ in range(40):
-        opt.step()
-        sched.step()
-    lr50 = opt.param_groups[0]["lr"]
-    assert lr50 == pytest.approx(1e-3, rel=1e-3)
-
-    # Epoch 99 (Decay end)
-    for _ in range(49):
-        opt.step()
-        sched.step()
-    lr_end = opt.param_groups[0]["lr"]
-    assert lr_end <= 1e-3 * 0.15
-    assert lr_end >= 1e-3 * min_lr_ratio * 0.95
+    cfg_ratio = {"train": {"wsd_stable_ratio": 0.75}}
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        build_v3_scheduler(opt, cfg_ratio, epochs=100)
 
 
 def test_safe_prodigy_invariants() -> None:
@@ -190,9 +158,8 @@ def test_builder_factories() -> None:
     cfg_prodigy = {
         "train": {
             "optimizer": "safeprodigy",
-            "scheduler_type": "wsd",
-            "wsd_stable_ratio": 0.75,
-            "prodigy_d_coef": 0.5,
+            "scheduler_type": "cosine",
+                        "prodigy_d_coef": 0.5,
             "prodigy_growth_rate": 1.015,
             "prodigy_d_max_cap": 0.08,
             "prodigy_d_warmup_steps": 200,
@@ -218,7 +185,7 @@ def test_auto_lr_finder_scheduler_sync() -> None:
     cfg = {
         "train": {
             "optimizer": "adamw",
-            "scheduler_type": "wsd",
+            "scheduler_type": "cosine",
             "lr": 1e-4,
             "auto_lr_finder": True,
             "lr_finder_num_iter": 15,
@@ -242,14 +209,14 @@ def test_auto_lr_finder_scheduler_sync() -> None:
     assert suggested_lr is not None
     assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-5)
 
-    # Now build scheduler — it must capture suggested_lr in its base_lrs
+    # Now build scheduler Ã¢â‚¬â€ it must capture suggested_lr in its base_lrs
     sched = build_v3_scheduler(opt, cfg, epochs=50)
     assert sched.base_lrs[2] == pytest.approx(suggested_lr, rel=1e-5)
 
-    # Step scheduler into plateau (epoch > 5)
-    for _ in range(6):
+        # Step scheduler through warmup (epoch 5 reaches 100% of suggested_lr)
+    for _ in range(5):
         opt.step()
         sched.step()
 
-    # The LR in plateau must equal 100% of suggested_lr, NOT the old 1e-4!
-    assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-5)
+    # At the end of warmup, LR must equal 100% of suggested_lr, NOT the old 1e-4!
+    assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-3)

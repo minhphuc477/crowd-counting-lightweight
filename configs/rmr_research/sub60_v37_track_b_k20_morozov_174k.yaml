@@ -1,11 +1,11 @@
-# ==============================================================================
+﻿# ==============================================================================
 # SUB-60 TRACK B-K20: Subpixel Stride 2 Anchor with Constant Kappa=20 Concentration
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (Official 300 Train / 182 Test Partition, 0.0% KD)
 # Scientific Rationale:
 # 1. Identical to Track B (FOV-64 Cured) in all aspects EXCEPT auto_scale_kappa: false.
 # 2. In Track B, auto_scale_kappa: true scales eff_kappa = kappa * (32/16)^2 = 80.0,
-#    which tightly concentrates the Dirichlet distribution (variance ∝ 1/81).
+#    which tightly concentrates the Dirichlet distribution (variance âˆ 1/81).
 # 3. Holding eff_kappa = 20.0 (auto_scale_kappa: false) provides a gentler, more flexible
 #    Dirichlet concentration that prevents early-training local minima while maintaining
 #    macro-block count conservation at dm_block_px: 32.
@@ -177,8 +177,7 @@ train:
   weight_decay: 0.0001
   warmup_epochs: 10
   min_lr_ratio: 0.05
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

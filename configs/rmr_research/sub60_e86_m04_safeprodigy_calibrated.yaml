@@ -1,4 +1,4 @@
-# SUB60-E86: m04 Fractional Cell Loss + Calibrated SafeProdigy
+﻿# SUB60-E86: m04 Fractional Cell Loss + Calibrated SafeProdigy
 # Scientific Purpose:
 # Synergy synthesis: combines m04's fractional cell loss (p=0.5) with SafeProdigy distance adaptation:
 # 1. m04 fractional cell loss (norm_power: 0.5, norm_ref: 100.0) provides 10x stronger per-head gradient in dense crowds.
@@ -141,8 +141,7 @@ train:
   prodigy_use_rms_clipping: true
   warmup_epochs: 20
   min_lr_ratio: 0.01
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.60
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

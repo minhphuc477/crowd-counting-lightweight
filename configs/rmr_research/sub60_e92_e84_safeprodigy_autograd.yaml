@@ -1,4 +1,4 @@
-# SUB60-E92: E84 SafeProdigy Autograd Restored (Calibrated SafeProdigy with Active Router)
+﻿# SUB60-E92: E84 SafeProdigy Autograd Restored (Calibrated SafeProdigy with Active Router)
 # Scientific Purpose:
 # sub60_e84 demonstrated record-breaking Moderate MAE (47.52) and Sparse MAE (24.85) in Gen 20
 # using SafeProdigy (d_max_cap: 0.020, d_coef: 0.5, WSD schedule).
@@ -136,8 +136,7 @@ train:
   prodigy_use_rms_clipping: true
   warmup_epochs: 20
   min_lr_ratio: 0.01
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.60
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

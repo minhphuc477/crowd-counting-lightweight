@@ -1,10 +1,10 @@
-# SUB60-E78: Canonical WSD Schedule (Single-Variable Ablation: WSD vs Cosine)
+﻿# SUB60-E78: Canonical WSD Schedule (Single-Variable Ablation: WSD vs Cosine)
 # Scientific Purpose:
 # Isolates the causal impact of the Warmup-Stable-Decay (WSD) schedule on the exact canonical base:
 # (1) Keeps canonical learning rate fixed at lr=0.0001 (auto_lr_finder: false) to isolate scheduler effect.
 # (2) WSD Schedule:
-#     - 15 epochs warmup (Leo dốc tuyến tính để ổn định Adam moving averages).
-#     - 75% flat hold (epochs 15 -> 750) at 100% peak LR (chống momentum freeze ở epoch 550).
+#     - 15 epochs warmup (Leo dá»‘c tuyáº¿n tÃ­nh Ä‘á»ƒ á»•n Ä‘á»‹nh Adam moving averages).
+#     - 75% flat hold (epochs 15 -> 750) at 100% peak LR (chá»‘ng momentum freeze á»Ÿ epoch 550).
 #     - 250 epochs rapid cosine decay (settle into flat minima).
 # Base: sub60_e34 clean anchor (MAE 73.04, Sparse 33.85, Dense 123.73).
 # Trainable Parameters: EXACTLY 104,441 (<= 105,000 budget, Zero KD).
@@ -130,9 +130,8 @@ train:
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
   optimizer: adamw
-  scheduler_type: wsd
+  scheduler_type: cosine
   warmup_epochs: 15
-  wsd_stable_ratio: 0.75
   min_lr_ratio: 0.01
   auto_lr_finder: false
   grad_clip: 1.0

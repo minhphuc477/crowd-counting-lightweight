@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # RMR-v35 WSD Schedule 104k Baseline Configuration
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (SHA)
@@ -158,8 +158,7 @@ train:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   warmup_epochs: 10
   min_lr_ratio: 0.05
   grad_clip: 1.0

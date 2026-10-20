@@ -21,7 +21,7 @@ from rmr_v3.config import load_config, validate_v3_config
 from rmr_v3.engine import make_loss_cfg, make_model
 from rmr_v3.losses import compute_rmr_v3_losses
 from rmr_v3.optim.safe_prodigy import SafeProdigy
-from rmr_v3.optim.wsd_scheduler import make_wsd_scheduler
+from rmr_v3.optim.builder import build_v3_scheduler
 
 
 GEN19_CONFIGS = [
@@ -153,36 +153,9 @@ def test_safeprodigy_adversarial_nan_and_spike_gating() -> None:
 
 
 def test_wsd_scheduler_exact_mathematical_transitions() -> None:
-    """Test WSD schedule boundary continuity and floor clamp."""
+    """Verify that WSD schedule is permanently banned."""
     p = nn.Parameter(torch.ones(1))
     opt = torch.optim.SGD([p], lr=2e-4)
-    sched = make_wsd_scheduler(
-        opt,
-        epochs=1000,
-        warmup_epochs=20,
-        stable_ratio=0.60,  # stable until 600
-        min_lr_ratio=0.01,  # floor 2e-6
-    )
-
-    # Epoch 0: warmup start
-    assert opt.param_groups[0]["lr"] == pytest.approx(2e-4 * (1.0 / 20.0), rel=1e-4)
-
-    # Epoch 20: warmup complete, peak reached
-    for _ in range(20):
-        opt.step()
-        sched.step()
-    assert opt.param_groups[0]["lr"] == pytest.approx(2e-4, rel=1e-4)
-
-    # Epoch 599: still at peak
-    for _ in range(579):
-        opt.step()
-        sched.step()
-    assert opt.param_groups[0]["lr"] == pytest.approx(2e-4, rel=1e-4)
-
-    # Epoch 999: final decay reached near floor
-    for _ in range(400):
-        opt.step()
-        sched.step()
-    final_lr = opt.param_groups[0]["lr"]
-    assert final_lr >= 2e-4 * 0.01 * 0.99
-    assert final_lr <= 2e-4 * 0.02
+    cfg = {"train": {"scheduler_type": "wsd"}}
+    with pytest.raises(ValueError, match="permanently BANNED"):
+        build_v3_scheduler(opt, cfg, epochs=1000)

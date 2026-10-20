@@ -1,4 +1,4 @@
-# SUB60-E79: WSD Schedule with 50% Flat Hold + Extended Cosine Decay (500ep -> 1000ep)
+﻿# SUB60-E79: WSD Schedule with 50% Flat Hold + Extended Cosine Decay (500ep -> 1000ep)
 # Scientific Purpose:
 # Explores the optimal trade-off between exploration duration and fine convergence:
 # In e71-e75, validation MAE reached peak performance around Epoch 550 before drifting.
@@ -128,9 +128,8 @@ train:
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
   optimizer: adamw
-  scheduler_type: wsd
+  scheduler_type: cosine
   warmup_epochs: 15
-  wsd_stable_ratio: 0.50
   min_lr_ratio: 0.01
   auto_lr_finder: false
   grad_clip: 1.0

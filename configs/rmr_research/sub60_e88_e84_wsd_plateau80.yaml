@@ -1,4 +1,4 @@
-# SUB60-E88: e84 SafeProdigy with Extended WSD Plateau 80%
+﻿# SUB60-E88: e84 SafeProdigy with Extended WSD Plateau 80%
 # Scientific Purpose:
 # Fix the late-epoch dense overfitting drift in champion e84 (74.07 Val MAE, record 47.52 Moderate MAE).
 # In e84, stable ratio was 0.60, causing LR to decay too early and overfit between ep 825 and 1000.
@@ -136,8 +136,7 @@ train:
   prodigy_use_rms_clipping: true
   warmup_epochs: 20
   min_lr_ratio: 0.01
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.80
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

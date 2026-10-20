@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 from rmr_core.schedulers import IdentityScheduler, make_scheduler
 from .lr_finder import SafeLRFinder
 from .safe_prodigy import SafeProdigy
-from .wsd_scheduler import make_wsd_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -111,22 +110,19 @@ def build_v3_scheduler(
         return IdentityScheduler(optimizer)
 
     sched_type = str(train_cfg.get("scheduler_type", "cosine")).lower().strip()
+    if sched_type in ("wsd", "warmup_stable_decay"):
+        raise ValueError(
+            "WSD (Warmup-Stable-Decay) scheduler is permanently BANNED! "
+            "Use standard Cosine Annealing ('cosine') with 1000 epochs instead."
+        )
+    if "wsd_stable_ratio" in train_cfg:
+        raise ValueError(
+            "train.wsd_stable_ratio is permanently BANNED! "
+            "WSD schedule has been removed from the project. Remove this field from config."
+        )
+
     warmup_epochs = int(train_cfg.get("warmup_epochs", 5))
     min_lr_ratio = float(train_cfg.get("min_lr_ratio", 0.05))
-
-    if sched_type in ("wsd", "warmup_stable_decay"):
-        stable_ratio = float(train_cfg.get("wsd_stable_ratio", 0.75))
-        logger.info(
-            "[Scheduler] Initializing WSD Schedule: warmup=%d ep, stable_ratio=%.2f, floor=%.4f",
-            warmup_epochs, stable_ratio, min_lr_ratio,
-        )
-        return make_wsd_scheduler(
-            optimizer,
-            epochs=epochs,
-            warmup_epochs=warmup_epochs,
-            stable_ratio=stable_ratio,
-            min_lr_ratio=min_lr_ratio,
-        )
 
     return make_scheduler(
         optimizer,

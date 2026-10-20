@@ -1,4 +1,4 @@
-# V52 Breakthrough Synthesis Architecture - Track B: RepASPP-Lite (Width=64) + Subpixel Stride 2 + Dual Point-Macro Supervision
+﻿# V52 Breakthrough Synthesis Architecture - Track B: RepASPP-Lite (Width=64) + Subpixel Stride 2 + Dual Point-Macro Supervision
 # Parameter Budget: Strictly <= 200,000 trainable parameters (Actual: ~136,150 params, 0.0% Knowledge Distillation)
 # Standalone single-model configuration for ShanghaiTech Part A
 seed: 42
@@ -64,7 +64,7 @@ model:
   hurdle_head: false
   hurdle_gating_mode: occupancy
 
-  # Carrier Head: Temperature softplus + Gated Padé [1/1] Curvature for dense clusters + Scale Prior Boost
+  # Carrier Head: Temperature softplus + Gated PadÃ© [1/1] Curvature for dense clusters + Scale Prior Boost
   temp_softplus: true
   density_curvature: true
   gated_density_curvature: true
@@ -176,8 +176,7 @@ train:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.85
+  scheduler_type: cosine
   warmup_epochs: 10
   min_lr_ratio: 0.05
   grad_clip: 1.0

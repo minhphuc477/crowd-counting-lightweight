@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # SUB-60 EXPERIMENT 5: Grand Synthesis (SOTA Sub-60 Master - 174k Parameters)
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target: ShanghaiTech Part A (Official 300 Train / 182 Test Partition, 0.0% KD)
@@ -6,7 +6,7 @@
 # What is the cumulative empirical performance when unifying Subpixel Stride 2,
 # 174k representation capacity, Faithful Beta-NB uncompressed regional regression,
 # Zero-Flux Multiscale Morozov inverse solving (T=6), and WSD optimization?
-# Target: 50–58 MAE on ShanghaiTech Part A (< 300k parameters, 0.0% KD).
+# Target: 50â€“58 MAE on ShanghaiTech Part A (< 300k parameters, 0.0% KD).
 # Trainable Parameters: Exactly ~174,340 (<= 200,000 budget, 0.0% KD)
 # Memory Optimizations: workers=2, num_threads=2, pin_memory=true
 # ==============================================================================
@@ -168,8 +168,7 @@ train:
   weight_decay: 0.0001
   warmup_epochs: 10
   min_lr_ratio: 0.05
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

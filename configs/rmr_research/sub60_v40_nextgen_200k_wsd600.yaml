@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # SUB-60 V40 NEXT-GEN 200K RECIPE: Full Next-Gen Architecture (< 200,000 params)
 # Framework: Radon Measure Recovery (RMR) for Crowd Counting
 # Target Benchmark: ShanghaiTech Part A (Official 300 Train / 182 Test, 0.0% KD)
@@ -174,9 +174,8 @@ train:
   grad_clip: 1.0
 
   # WSD Learning Rate Schedule
-  scheduler_type: wsd
+  scheduler_type: cosine
   warmup_epochs: 15
-  wsd_stable_ratio: 0.80
   min_lr_ratio: 0.01
 
   # Precision & Stabilization

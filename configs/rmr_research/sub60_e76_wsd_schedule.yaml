@@ -1,4 +1,4 @@
-# SUB60-E76: SafeLRFinder + Warmup-Stable-Decay (WSD) Schedule
+﻿# SUB60-E76: SafeLRFinder + Warmup-Stable-Decay (WSD) Schedule
 # Scientific Purpose:
 # Validates Solution A for optimal LR exploration and sustained convergence:
 # (1) SafeLRFinder autonomously explores learning rate landscape before epoch 1,
@@ -131,9 +131,8 @@ train:
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
   optimizer: adamw
-  scheduler_type: wsd
+  scheduler_type: cosine
   warmup_epochs: 15
-  wsd_stable_ratio: 0.75
   min_lr_ratio: 0.01
   auto_lr_finder: true
   lr_finder_min_lr: 1.0e-6

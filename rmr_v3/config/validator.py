@@ -172,7 +172,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8).")
 
 
-    # Validate loss section — Stage 2 extensions
+    # Validate loss section Ã¢â‚¬â€ Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
     if isinstance(l_cfg_pre, dict):
         if "dm_target" in l_cfg_pre:
@@ -352,8 +352,16 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         for k in ("patience", "warmup_epochs", "solver_warmup_epochs", "solver_ramp_epochs"):
             if k in t_cfg and int(t_cfg[k]) < 0:
                 raise ValueError(f"train.{k} must be >= 0, got {t_cfg[k]}")
-        if "wsd_stable_ratio" in t_cfg and not (0.0 <= float(t_cfg["wsd_stable_ratio"]) <= 1.0):
-            raise ValueError(f"train.wsd_stable_ratio must be in [0.0, 1.0], got {t_cfg['wsd_stable_ratio']}")
+        if "scheduler_type" in t_cfg and str(t_cfg["scheduler_type"]).lower().strip() in ("wsd", "warmup_stable_decay"):
+            raise ValueError(
+                "scheduler_type='wsd' is permanently BANNED! "
+                "Warmup-Stable-Decay schedule has been removed. Use standard 'cosine' with 1000 epochs."
+            )
+        if "wsd_stable_ratio" in t_cfg:
+            raise ValueError(
+                "train.wsd_stable_ratio is permanently BANNED! "
+                "WSD schedule has been removed from the project. Remove this field from config."
+            )
         if "min_lr_ratio" in t_cfg and not (0.0 < float(t_cfg["min_lr_ratio"]) < 1.0):
             raise ValueError(f"train.min_lr_ratio must be in (0.0, 1.0), got {t_cfg['min_lr_ratio']}")
         if "grad_scaler_init_scale" in t_cfg and float(t_cfg["grad_scaler_init_scale"]) <= 0.0:

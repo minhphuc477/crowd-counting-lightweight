@@ -1,4 +1,4 @@
-# SUB60-E84: sub60_e5 Pure Zero-Cell Baseline with Calibrated SafeProdigy
+﻿# SUB60-E84: sub60_e5 Pure Zero-Cell Baseline with Calibrated SafeProdigy
 # Scientific Purpose:
 # Synthesizes the cleanest baseline in repository history (sub60_e5 achieved 70.26 TTA / 71.51 Direct MAE)
 # with the distance-adaptive exploration of SafeProdigy (e77 set all-time 14.50 Sparse MAE, e81 set 48.36 Moderate MAE):
@@ -136,8 +136,7 @@ train:
   prodigy_use_rms_clipping: true
   warmup_epochs: 20
   min_lr_ratio: 0.01
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.60
+  scheduler_type: cosine
   grad_clip: 1.0
   amp: true
   solver_warmup_epochs: 5

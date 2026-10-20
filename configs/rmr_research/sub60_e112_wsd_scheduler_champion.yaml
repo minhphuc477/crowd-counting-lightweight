@@ -1,11 +1,11 @@
-# SUB60-E112: Single-Variable Control - Warmup-Stable-Decay (WSD) Optimization
+﻿# SUB60-E112: Single-Variable Control - Warmup-Stable-Decay (WSD) Optimization
 # Scientific Purpose:
 # Isolates Factor 3 (Optimization Schedule): replaces Cosine Annealing with WSD (stable_ratio: 0.70).
 # In e108a, the model achieved peak convergence at Epoch 695 (75.23 MAE, Bias -15.26), but subsequent
 # cosine decay to 5e-6 caused weight decay contraction and drifted Net Bias to -48.48 (Dense MAE from 147 to 179).
 # WSD holds peak LR (1e-4) flat through Epoch 700, then rapidly decays to lock in the optimal minimum without drift.
 # Base: sub60_e108a champion (75.23 MAE, 123.48 RMSE, morozov_rho_cap: 0.25, 104,441 params, Zero KD).
-# Single change vs e108a: scheduler_type: wsd, wsd_stable_ratio: 0.70.
+# Single change vs e108a: scheduler_type: cosine, wsd_stable_ratio: 0.70.
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -133,8 +133,7 @@ train:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   warmup_epochs: 10
   min_lr_ratio: 0.05
   grad_clip: 1.0

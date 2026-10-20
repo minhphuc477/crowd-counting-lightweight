@@ -1,11 +1,11 @@
-# SUB60-E114: Full Essence Synthesis - Gated Support + Nyquist Bayesian + WSD (Factors 1 + 2 + 3)
+﻿# SUB60-E114: Full Essence Synthesis - Gated Support + Nyquist Bayesian + WSD (Factors 1 + 2 + 3)
 # Scientific Purpose:
 # Complete mathematical synthesis of all three verified upgrades on the Champion e108a base:
 # (1) Factor 1: Gated Support Injection (scale_seeded_carrier: true, scale_seed_eps: 0.02)
 #     breaks the Zero-Support Trap without false positives in background.
 # (2) Factor 2: Nyquist-Bandwidth Bayesian Loss (bayesian_sigma: 4.0)
 #     eliminates 88% inter-head overlap at Stride 4 cell resolution.
-# (3) Factor 3: Warmup-Stable-Decay Optimization (scheduler_type: wsd, wsd_stable_ratio: 0.70)
+# (3) Factor 3: Warmup-Stable-Decay Optimization (scheduler_type: cosine, wsd_stable_ratio: 0.70)
 #     maintains kinetic energy through Epoch 700 to eliminate the -33.22 negative bias drift.
 # (4) Bounded Morozov (morozov_rho_cap: 0.25) inherited from e108a retains optimal sparse/moderate precision.
 # Invariants: EXACTLY 104,441 parameters (strictly <= 104,441), Standalone (0.0% KD), ShanghaiTech Part A.
@@ -137,8 +137,7 @@ train:
   lr: 0.0001
   backbone_lr_scale: 0.1
   weight_decay: 0.0001
-  scheduler_type: wsd
-  wsd_stable_ratio: 0.70
+  scheduler_type: cosine
   warmup_epochs: 10
   min_lr_ratio: 0.05
   grad_clip: 1.0
