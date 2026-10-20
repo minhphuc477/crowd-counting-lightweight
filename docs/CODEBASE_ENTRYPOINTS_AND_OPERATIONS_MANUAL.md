@@ -73,7 +73,6 @@ F:\lightweightcrcn\ (Repository Root)
 │   └── rmr_research/       # Các file cấu hình YAML nghiên cứu thực nghiệm
 │       ├── rmr_v35_purified_104k.yaml  # Run 1: Baseline 104k thanh lọc (Cosine 1000ep)
 │       ├── rmr_v35_scaled_165k.yaml    # Run 2: Mở rộng dung lượng 174k params
-│       ├── rmr_v35_wsd_104k.yaml       # Run 3: Baseline 104k với WSD schedule
 │       └── rmr_v35_bayesian_104k.yaml  # Run 4: Baseline 104k với Adaptive Bayesian loss
 ├── data/
 │   ├── sha_a_train_all.jsonl # Đúng 300 ảnh huấn luyện ShanghaiTech Part A
@@ -90,7 +89,6 @@ F:\lightweightcrcn\ (Repository Root)
 │   ├── trainer.py            # [ENTRYPOINT HUẤN LUYỆN CHÍNH] run_training_loop & main()
 │   ├── train.py              # CLI wrapper và arg parsing cho training
 │   ├── eval.py               # [ENTRYPOINT ĐÁNH GIÁ CHÍNH] load checkpoint, evaluate & metrics
-│   ├── evaluate.py           # CLI bridge alias trỏ sang rmr_v3.eval
 │   ├── model.py              # Lớp mạng RMRv3 hợp nhất (Encoder + Neck + Heads + Solver)
 │   ├── solver.py             # Bộ giải SIRT không cuộn (T=2) với Barzilai-Borwein & Morozov
 │   ├── losses/               # Hệ thống hàm loss đa tầng đã thanh lọc
@@ -101,7 +99,6 @@ F:\lightweightcrcn\ (Repository Root)
 │   │   └── cell.py           # Cell loss cân bằng mật độ
 │   └── optim/                # Bộ điều phối Optimizer và LR Scheduler
 │       ├── builder.py        # build_v3_optimizer và build_v3_scheduler
-│       ├── wsd_scheduler.py  # Warmup-Stable-Decay scheduler
 │       └── safe_prodigy.py   # Khoảng cách thích ứng an toàn
 ├── tests/                    # 1,176 unit và integration tests (100% passed)
 │   ├── rmr_v3/

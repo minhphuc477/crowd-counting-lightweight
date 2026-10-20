@@ -16,7 +16,7 @@
 
 Every configuration and code modification strictly adheres to [`RULES.md`](RULES.md):
 1. **Script Immutability**: All shell/PowerShell scripts are strictly immutable without explicit permission. Individual executable commands are provided directly in documentation.
-2. **Strict Parameter Ceiling**: $\le 105,000$ trainable parameters. Standalone only ($0.0\%$ Knowledge Distillation / Zero Teacher).
+2. **Strict Parameter Ceilings**: Track A $\le 104,441$ trainable parameters; Track B $\le 200,000$ trainable parameters. Standalone only ($0.0\%$ Knowledge Distillation / Zero Teacher).
 3. **Code Health Invariant**: Every Python source file in `rmr_core/` and `rmr_v3/` strictly satisfies $\le 450$ lines of code.
 4. **Anti-Regression Protocol**: Benchmarked on official ShanghaiTech Part A (300 train, 182 test) with verified `summary.json` outputs.
 
@@ -50,11 +50,12 @@ crowd-counting-lightweight/
 │   ├── spectral.py         # Count-preserving DCT-II spectral loss
 │   └── metrics.py          # NAE, GAME(L) with fractional cell boundary integration
 ├── rmr_v3/                 # Active research engine
-│   ├── model.py            # Unified RMR architecture
+│   ├── model/              # Unified RMR architecture, dual-lattice and evidence heads
 │   ├── solver.py           # Unrolled SIRT solver with Barzilai-Borwein step sizes
 │   ├── solver_ops.py       # Morozov discrepancy, firm thresholding, Lipschitz damping
-│   ├── losses/             # Dirichlet-Multinomial, Bayesian, and Characteristic Function losses
-│   ├── trainer.py          # Core training orchestrator (python -m rmr_v3.trainer)
+│   ├── losses/             # Purified Bayesian, DM16, Negative-Binomial & cell losses
+│   ├── optim/              # Cosine Annealing, SafeProdigy, Schedule-Free factories
+│   ├── trainer.py          # Core training orchestrator
 │   ├── train.py            # CLI wrapper (python -m rmr_v3.train)
 │   └── eval.py             # Evaluation module (python -m rmr_v3.eval)
 ├── tests/                  # 1,176 automated tests (100% passed)

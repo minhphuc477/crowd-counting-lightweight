@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -89,7 +89,6 @@ def extract_trajectory_config(cfg: dict[str, Any]) -> dict[str, Any]:
             "eval_every",
             "early_stopping",
             "patience",
-            "wsd_stable_ratio",
             "min_lr_ratio",
         }
         t: dict[str, Any] = {}

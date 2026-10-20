@@ -45,10 +45,10 @@ Implements Meta FAIR's Schedule-Free optimization (Defazio et al. 2024):
 * Training evaluates gradients at exploration points $y_k$, while inference evaluates the smoothed iterate $z_k$.
 * Requires no preset epoch budget, maintaining convergence whether training for 300 or 1,000 epochs.
 
-### 2.3. Warmup-Stable-Decay (WSD) Scheduler ([`rmr_v3/optim/wsd_scheduler.py`](file:///f:/lightweightcrcn/rmr_v3/optim/wsd_scheduler.py))
-* **Phase 1 (Warmup):** Linear warm-up across $5\text{--}10\%$ of steps.
-* **Phase 2 (Stable):** Flat learning rate across $70\text{--}80\%$ of training for broad parameter exploration.
-* **Phase 3 (Decay):** Rapid cosine annealing to zero across final $15\text{--}20\%$ of training for sharp basin convergence.
+### 2.3. Canonical Cosine Annealing Scheduler ([`rmr_core/schedulers.py`](file:///f:/lightweightcrcn/rmr_core/schedulers.py))
+* **Warmup Phase:** Linear warmup across initial $5\text{--}10$ epochs to stabilize unrolled adjoint and multi-scale routing gradients.
+* **Cosine Annealing:** Smooth half-cosine decay down to `min_lr_ratio` ($0.05$ or $0.01$) over 1,000 epochs, allowing fine-grained convergence.
+* **Note on WSD:** Warmup-Stable-Decay (WSD) was empirically proven to degrade performance on ShanghaiTech Part A due to high-LR oscillation on small datasets, and is permanently banned and removed.
 
 ---
 
@@ -70,7 +70,7 @@ flowchart TD
         LOSS --> CLIP["Gradient Clipping (clip_norm = 1.0)"]
         CLIP --> OPT["Optimizer Step (AdamW / SafeProdigy / Schedule-Free)"]
         OPT --> EMA["EMA Update (decay = 0.999)"]
-        OPT --> SCHED["LR Scheduler Step (Cosine / WSD)"]
+        OPT --> SCHED["LR Scheduler Step (Cosine Annealing)"]
     end
 
     subgraph Val ["4. Validation Loop (Every N Epochs)"]

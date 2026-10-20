@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -177,7 +177,7 @@ ALLOWED_MODEL_KEYS = {
     "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
     "evidence_anchored_trust", "eatr_alpha", "scale_prior_boost",
     "morozov_rho_cap",
-    "pad_small_images", "wsd_stable_ratio", "min_lr_ratio", "bayesian_norm_mode",
+    "pad_small_images", "min_lr_ratio", "bayesian_norm_mode",
     "adaptive_sigma", "bayesian_adaptive_sigma", "faithful_dispersion_detach",
     "multiscale_morozov", "morozov_scale_beta",
     "deficit_carrier_seeding", "deficit_seed_eps", "density_adaptive_morozov", "morozov_density_beta",
@@ -243,7 +243,7 @@ ALLOWED_TRAIN_KEYS = {
     "device", "num_threads", "cudnn_benchmark", "gradient_accumulation_steps",
     "allow_unsupervised_solver",
     # Optimizer & Scheduler additions (Gen 18 / Gen 22)
-    "optimizer", "scheduler_type", "wsd_stable_ratio", "betas",
+    "optimizer", "scheduler_type", "betas",
     "schedule_free_warmup_steps", "schedule_free_r", "schedule_free_weight_lr_power",
     "auto_lr_finder", "lr_finder_min_lr", "lr_finder_max_lr", "lr_finder_num_iter", "lr_finder_max_safe_lr",
     "prodigy_d_coef", "prodigy_growth_rate", "prodigy_d_max_cap", "prodigy_d_warmup_steps",
@@ -402,7 +402,6 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "deterministic",
         "solver_warmup_epochs",
         "solver_ramp_epochs",
-        "wsd_stable_ratio",
         "min_lr_ratio",
     ],
     "data": [
@@ -429,6 +428,5 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "solver_ramp_epochs": 5,
     "warmup_epochs": 5,
     "freeze_bn_after_epoch": -1,
-    "wsd_stable_ratio": 0.75,
     "min_lr_ratio": 0.01,
 }

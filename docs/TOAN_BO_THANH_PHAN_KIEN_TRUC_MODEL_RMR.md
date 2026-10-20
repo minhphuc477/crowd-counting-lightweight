@@ -528,14 +528,14 @@ classDiagram
 ---
 
 ### 3.13. Tối Ưu Hóa & Lịch Trình Huấn Luyện (`rmr_v3/optim/`)
-- **File**: [`rmr_v3/optim/builder.py`](file:///f:/lightweightcrcn/rmr_v3/optim/builder.py), [`rmr_v3/optim/wsd_scheduler.py`](file:///f:/lightweightcrcn/rmr_v3/optim/wsd_scheduler.py), [`rmr_v3/optim/schedule_free.py`](file:///f:/lightweightcrcn/rmr_v3/optim/schedule_free.py), [`rmr_v3/optim/safe_prodigy.py`](file:///f:/lightweightcrcn/rmr_v3/optim/safe_prodigy.py), [`rmr_v3/optim/lr_finder.py`](file:///f:/lightweightcrcn/rmr_v3/optim/lr_finder.py)
+- **File**: [`rmr_v3/optim/builder.py`](file:///f:/lightweightcrcn/rmr_v3/optim/builder.py), [`rmr_v3/optim/schedule_free.py`](file:///f:/lightweightcrcn/rmr_v3/optim/schedule_free.py), [`rmr_v3/optim/safe_prodigy.py`](file:///f:/lightweightcrcn/rmr_v3/optim/safe_prodigy.py), [`rmr_v3/optim/lr_finder.py`](file:///f:/lightweightcrcn/rmr_v3/optim/lr_finder.py)
 
 1. **Bộ Tối Ưu (Optimizers)**:
    - `AdamW`: Tách biệt Learning Rate giữa Backbone (`lr * 0.1` hoặc `lr * 0.2`) và Heads (`lr`).
    - [`AdamWScheduleFree`](file:///f:/lightweightcrcn/rmr_v3/optim/schedule_free.py#L15): Thuật toán Schedule-Free (Defazio et al., Meta FAIR 2024) tự động nội suy trọng số mà không cần lập lịch suy giảm LR.
    - [`SafeProdigy`](file:///f:/lightweightcrcn/rmr_v3/optim/safe_prodigy.py#L15): Tự động tìm bước nhảy thích ứng (Adaptive Step-Size).
 2. **Lập Lịch Học (Learning Rate Schedulers)**:
-   - [`WSDScheduler`](file:///f:/lightweightcrcn/rmr_v3/optim/wsd_scheduler.py#L12) (Warmup-Stable-Decay): Giai đoạn Warmup ($10\%$) $\to$ Giai đoạn Ổn định duy trì LR cao ($70\%$) $\to$ Giai đoạn Suy giảm nhanh Annealing ($20\%$).
+   - [`make_scheduler`](file:///f:/lightweightcrcn/rmr_core/schedulers.py): Linear Warmup + Cosine Annealing chuẩn (1,000 epochs, min_lr_ratio=0.05). (WSD bị loại bỏ và cấm vĩnh viễn).
    - `CosineAnnealingLR`: Suy giảm hình cosin kinh điển với chu kỳ nửa bước sóng.
    - [`IdentityScheduler`](file:///f:/lightweightcrcn/rmr_core/schedulers.py#L10): Giữ nguyên LR cố định.
 3. [`SafeLRFinder`](file:///f:/lightweightcrcn/rmr_v3/optim/lr_finder.py#L15):
@@ -597,7 +597,7 @@ classDiagram
 | `rasterize_points` | Function | [`rmr_core/transforms.py`](file:///f:/lightweightcrcn/rmr_core/transforms.py#L12) | Tạo bản đồ mật độ điểm có sửa lỗi half-pixel shift |
 | `extract_subpixel_peaks` | Function | [`rmr_core/spatial_analysis.py`](file:///f:/lightweightcrcn/rmr_core/spatial_analysis.py#L15) | Trích xuất tọa độ đầu người subpixel bằng parabol 2D |
 | `predict_tiled` | Function | [`rmr_core/tiling.py`](file:///f:/lightweightcrcn/rmr_core/tiling.py#L35) | Suy luận phân mảnh ghép ảnh mượt mà bằng Hann window |
-| `WSDScheduler` | Function | [`rmr_v3/optim/wsd_scheduler.py`](file:///f:/lightweightcrcn/rmr_v3/optim/wsd_scheduler.py#L12) | Lập lịch Warmup-Stable-Decay tối ưu cho inverse solver |
+| `make_scheduler` | Function | [`rmr_core/schedulers.py`](file:///f:/lightweightcrcn/rmr_core/schedulers.py#L28) | Lập lịch Linear Warmup + Cosine Annealing chuẩn mực |
 | `RMRv3` | Class | [`rmr_v3/model/architecture.py`](file:///f:/lightweightcrcn/rmr_v3/model/architecture.py#L37) | Module PyTorch tối cao kết nối toàn bộ hệ thống |
 
 ---

@@ -109,7 +109,6 @@ lightweightcrcn/
 │   ├── optim/                      # Optimization & scheduling infrastructure
 │   │   ├── safe_prodigy.py         # Rate-limited & ceiling-bounded SafeProdigy optimizer
 │   │   ├── schedule_free.py        # Meta FAIR Schedule-Free AdamW wrapper
-│   │   ├── wsd_scheduler.py        # Warmup-Stable-Decay learning rate scheduler
 │   │   ├── lr_finder.py            # Leslie Smith LR range test
 │   │   └── builder.py              # Optimizer & scheduler factory
 │   ├── diagnostics/                # Model inspection, calibration & trajectory profiling
@@ -159,7 +158,7 @@ Detailed chapter-by-chapter walkthroughs:
 4. **[04. Data Pipeline, Training Engine & Numerical Stability](file:///f:/lightweightcrcn/docs/code_explanation/04_data_pipeline_and_training_engine.md)**
    * Dynamic reflection padding vs. scaling distortion prevention.
    * Exact half-pixel continuous coordinate scaling: $(x + 0.5) \cdot s - 0.5$.
-   * Exponential Moving Average (EMA), SafeProdigy, Schedule-Free AdamW, and WSD.
+   * Exponential Moving Average (EMA), SafeProdigy, Schedule-Free AdamW, and Cosine Annealing.
    * Sliding-window evaluation and density-sliced error attribution.
 
 5. **[05. Deep Architectural Audit & Mathematical Invariants Guide](file:///f:/lightweightcrcn/docs/code_explanation/05_deep_audit_and_invariants_guide.md)**

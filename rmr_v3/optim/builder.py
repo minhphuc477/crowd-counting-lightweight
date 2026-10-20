@@ -1,4 +1,4 @@
-"""Unified optimizer and scheduler factory with autonomous LR probing for RMR."""
+﻿"""Unified optimizer and scheduler factory with autonomous LR probing for RMR."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def build_v3_scheduler(
     cfg: dict[str, Any],
     epochs: int,
 ) -> Any:
-    """Build LR scheduler supporting Cosine Annealing, WSD, and Schedule-Free."""
+    """Build LR scheduler supporting Cosine Annealing and Schedule-Free (WSD is banned)."""
     train_cfg = cfg.get("train", {})
     opt_type = str(train_cfg.get("optimizer", "adamw")).lower().strip()
     if opt_type in ("schedule_free", "schedulefree", "adamw_schedulefree"):
