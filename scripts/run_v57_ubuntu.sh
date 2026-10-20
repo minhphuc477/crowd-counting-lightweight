@@ -2,9 +2,10 @@
 # ==============================================================================
 # RMR V57 Experiment Suite Runner for Ubuntu Linux (RTX 5070 Ti 16GB)
 # Focus: Multi-Step Radon-Nikodym Contraction Mapping & Faithful Beta-NB (4 runs)
+# Auto-detects interrupted runs and automatically resumes from last.pt!
 #
 # Usage:
-#   ./scripts/run_v57_ubuntu.sh                     # Run all 4 sequentially
+#   ./scripts/run_v57_ubuntu.sh                     # Run all 4 sequentially (auto-resume)
 #   ./scripts/run_v57_ubuntu.sh parallel            # Run all 4 in 2 parallel waves
 #   ./scripts/run_v57_ubuntu.sh proposed            # Run only proposed Track A & B
 #   ./scripts/run_v57_ubuntu.sh ablation            # Run only 2 ablations sequentially
@@ -48,7 +49,7 @@ ORDERED_RUNS=(
 )
 
 echo "================================================================================"
-echo "  RMR-V57 EXPERIMENT SUITE (Ubuntu RTX 5070 Ti)"
+echo "  RMR-V57 EXPERIMENT SUITE (Ubuntu RTX 5070 Ti - Auto Resume Enabled)"
 echo "  Python: $PYTHON_EXE"
 echo "  Date:   $(date '+%Y-%m-%d %H:%M:%S')"
 if command -v nvidia-smi &>/dev/null; then
@@ -58,26 +59,70 @@ echo "==========================================================================
 
 MODE="${1:-sequential}"
 
+get_train_action() {
+    local out_dir="$1"
+    local cfg="$2"
+
+    if [ ! -d "$out_dir" ]; then
+        echo "FRESH"
+        return
+    fi
+
+    local target_epochs=650
+    if [ -f "$cfg" ]; then
+        local found
+        found=$(grep -E '^[[:space:]]*epochs:[[:space:]]*[0-9]+' "$cfg" | head -n1 | awk '{print $2}')
+        if [ -n "$found" ]; then
+            target_epochs="$found"
+        fi
+    fi
+
+    local done_epochs=0
+    if [ -f "${out_dir}/train_log.csv" ]; then
+        done_epochs=$(wc -l < "${out_dir}/train_log.csv" 2>/dev/null || echo 0)
+        done_epochs=$((done_epochs > 0 ? done_epochs - 1 : 0))
+    fi
+
+    if [ "$done_epochs" -ge "$target_epochs" ]; then
+        echo "COMPLETED"
+    elif [ -f "${out_dir}/last.pt" ]; then
+        echo "RESUME"
+    else
+        echo "FRESH"
+    fi
+}
+
 run_single_model() {
     local key="$1"
     local cfg="${RUN_CONFIGS[$key]}"
     local log="${LOG_DIR}/${key}.log"
+    local out_dir="runs/sha_a/rmr_v57/${key}"
 
     echo ""
-    echo ">>> [STARTING] $key"
+    echo ">>> [CHECKING] $key"
     echo "    Config: $cfg"
     echo "    Log:    $log"
 
-    local out_dir="runs/sha_a/rmr_v57/${key}"
-    if [ -f "${out_dir}/best.pth" ]; then
-        echo "    [SKIPPED] Model already completed (${out_dir}/best.pth exists)."
+    local action
+    action=$(get_train_action "$out_dir" "$cfg")
+
+    if [ "$action" = "COMPLETED" ]; then
+        echo "    [SKIPPED] Model already completed all epochs (${out_dir}/best_val_mae.pt exists)."
         return 0
+    fi
+
+    local extra_args=""
+    if [ "$action" = "RESUME" ]; then
+        echo "    [AUTO-RESUME] Interrupted run detected. Resuming from ${out_dir}/last.pt..."
+        extra_args="--resume ${out_dir}/last.pt --force-resume"
+    else
+        echo "    [FRESH] Starting new training run..."
     fi
 
     local t_start
     t_start=$(date +%s)
 
-    "$PYTHON_EXE" train.py --config "$cfg" > "$log" 2>&1
+    "$PYTHON_EXE" train.py --config "$cfg" $extra_args >> "$log" 2>&1
     local ret=$?
 
     local t_end
@@ -105,10 +150,19 @@ run_pair_parallel() {
     local pid_b=""
 
     local out_a="runs/sha_a/rmr_v57/${key_a}"
-    if [ -f "${out_a}/best.pth" ]; then
-        echo "    [$key_a] already completed (${out_a}/best.pth exists). Skipping."
+    local cfg_a="${RUN_CONFIGS[$key_a]}"
+    local action_a
+    action_a=$(get_train_action "$out_a" "$cfg_a")
+
+    if [ "$action_a" = "COMPLETED" ]; then
+        echo "    [$key_a] already completed. Skipping."
     else
-        "$PYTHON_EXE" train.py --config "${RUN_CONFIGS[$key_a]}" > "${LOG_DIR}/${key_a}.log" 2>&1 &
+        local res_a=""
+        if [ "$action_a" = "RESUME" ]; then
+            res_a="--resume ${out_a}/last.pt --force-resume"
+            echo "    [$key_a] AUTO-RESUMING from ${out_a}/last.pt..."
+        fi
+        "$PYTHON_EXE" train.py --config "$cfg_a" $res_a >> "${LOG_DIR}/${key_a}.log" 2>&1 &
         pid_a=$!
         echo "    [$key_a] launched with PID: $pid_a -> ${LOG_DIR}/${key_a}.log"
     fi
@@ -116,10 +170,19 @@ run_pair_parallel() {
     sleep 3
 
     local out_b="runs/sha_a/rmr_v57/${key_b}"
-    if [ -f "${out_b}/best.pth" ]; then
-        echo "    [$key_b] already completed (${out_b}/best.pth exists). Skipping."
+    local cfg_b="${RUN_CONFIGS[$key_b]}"
+    local action_b
+    action_b=$(get_train_action "$out_b" "$cfg_b")
+
+    if [ "$action_b" = "COMPLETED" ]; then
+        echo "    [$key_b] already completed. Skipping."
     else
-        "$PYTHON_EXE" train.py --config "${RUN_CONFIGS[$key_b]}" > "${LOG_DIR}/${key_b}.log" 2>&1 &
+        local res_b=""
+        if [ "$action_b" = "RESUME" ]; then
+            res_b="--resume ${out_b}/last.pt --force-resume"
+            echo "    [$key_b] AUTO-RESUMING from ${out_b}/last.pt..."
+        fi
+        "$PYTHON_EXE" train.py --config "$cfg_b" $res_b >> "${LOG_DIR}/${key_b}.log" 2>&1 &
         pid_b=$!
         echo "    [$key_b] launched with PID: $pid_b -> ${LOG_DIR}/${key_b}.log"
     fi
@@ -136,7 +199,7 @@ run_pair_parallel() {
 
 case "$MODE" in
     "sequential")
-        echo "Executing all 4 V57 models sequentially..."
+        echo "Executing all 4 V57 models sequentially (with auto-resume)..."
         for key in "${ORDERED_RUNS[@]}"; do
             run_single_model "$key"
         done
