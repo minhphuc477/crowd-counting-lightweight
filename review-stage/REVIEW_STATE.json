@@ -1,6 +1,6 @@
 {
   "run_id": "run_20261020_rmr_50mae",
-  "round": 1,
+  "round": 2,
   "threadId": null,
   "reviewer_profile": "adversarial-reviewer",
   "reviewer_backend": "auto",
@@ -14,10 +14,14 @@
   "family_relation": "independent",
   "identity_assurance": "host_event_verified",
   "independence_verified": true,
-  "status": "in_progress",
+  "status": "ready_for_remote_training",
   "difficulty": "hard",
-  "last_score": 5.0,
-  "last_verdict": "not ready",
-  "pending_experiments": [],
-  "timestamp": "2026-10-20T11:35:00Z"
+  "last_score": 8.5,
+  "last_verdict": "accept",
+  "pending_experiments": [
+    "configs/rmr_v60/v60_track_a_closed_form_rn.yaml",
+    "configs/rmr_v60/v60_track_b_subpixel_stride2_rn.yaml",
+    "configs/rmr_v60/v60_track_b_chfl_subpixel_rn.yaml"
+  ],
+  "timestamp": "2026-10-20T11:50:00Z"
 }
