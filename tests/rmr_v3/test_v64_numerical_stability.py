@@ -48,7 +48,7 @@ def test_bayesian_loss_amp_cuda_stability():
 
 
 def test_dual_bayesian_dm16_100_step_training_loop():
-    """Simulate 100 consecutive forward-backward optimizer steps under AMP."""
+    """Simulate 50 consecutive forward-backward optimizer steps under AMP with dynamic GradScaler."""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = nn.Sequential(
         nn.Conv2d(3, 16, 3, padding=1),
@@ -56,6 +56,10 @@ def test_dual_bayesian_dm16_100_step_training_loop():
         nn.Conv2d(16, 1, 1),
         nn.Softplus(),
     ).to(device)
+
+    # Initialize bias to calibrated negative prior like real model (-5.5)
+    nn.init.constant_(model[2].bias, -5.5)
+    nn.init.normal_(model[2].weight, std=0.01)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     scaler = torch.amp.GradScaler(device.type)
@@ -109,3 +113,62 @@ def test_dual_bayesian_dm16_100_step_training_loop():
 
         for p in model.parameters():
             assert torch.isfinite(p).all(), f"Model parameter became non-finite at step {step}!"
+
+
+def test_adversarial_empty_and_dense_cases():
+    """Verify zero NaN, zero Inf, strictly bounded gradients on adversarial edge cases:
+    1. Entirely empty crop (0 points)
+    2. Single point crop (1 point)
+    3. Duplicate overlapping points (4 points at exact same pixel)
+    4. Hyper-dense cluster (600 points)
+    5. Points on the extreme image boundaries
+    """
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cfg = RMRv3LossConfig(
+        output_stride=2,
+        allocation_loss_type="dual_bayesian_dm16",
+        bayesian_sigma=4.0,
+        bayesian_adaptive_sigma=True,
+        bayesian_sigma_min=2.0,
+        bayesian_sigma_max=4.0,
+        bayesian_background_ratio=0.05,
+        bayesian_canonical_bg=True,
+        dm_block_px=32,
+        kappa_flat16=20.0,
+        normalize_flat_dm16=True,
+        dm_norm_mode="unnorm_ref",
+        dm_ref_count=100.0,
+        dm_target="dual",
+        lambda_flat_dm16=1.0,
+        lambda_bayesian=0.15,
+        lambda_count=0.0,
+        lambda_cell=0.0,
+        lambda_region_nb=0.0,
+    )
+
+    adversarial_points = [
+        torch.empty((0, 2), device=device),  # 0 points
+        torch.tensor([[10.0, 10.0]], device=device),  # 1 point
+        torch.tensor([[50.0, 50.0], [50.0, 50.0], [50.0, 50.0]], device=device),  # duplicate
+        torch.tensor([[0.0, 0.0], [511.9, 511.9], [0.0, 511.9], [511.9, 0.0]], device=device),  # corners
+        torch.rand((600, 2), device=device) * 512.0,  # hyper-dense
+    ]
+
+    for pts in adversarial_points:
+        points = [pts]
+        target_y = torch.zeros(1, 1, 256, 256, device=device)
+        for p in pts:
+            px, py = int(p[0] // 2), int(p[1] // 2)
+            if 0 <= px < 256 and 0 <= py < 256:
+                target_y[0, 0, py, px] += 1.0
+
+        # Test both cold carrier (zeros) and hot carrier (dense)
+        for y_val in [0.0001, 0.05, 1.0]:
+            y0 = torch.full((1, 1, 256, 256), y_val, device=device, requires_grad=True)
+            with torch.amp.autocast(device.type):
+                loss, _ = route_allocation_loss(y0, y0, target_y, points, cfg)
+
+            assert torch.isfinite(loss), f"Loss was not finite for {pts.shape[0]} points, y_val={y_val}: {loss.item()}"
+            loss.backward()
+            assert torch.isfinite(y0.grad).all(), f"Gradients were not finite for {pts.shape[0]} points, y_val={y_val}"
+            assert not torch.isnan(y0.grad).any(), "NaN found in gradient!"

@@ -62,7 +62,6 @@ def compute_single_allocation(
 
             comps[b_px], comps[-999] = l_dm, l_bay
             loss_val = float(cfg.lambda_bayesian) * l_bay + float(cfg.lambda_flat_dm16) * l_dm
-            loss_val = torch.nan_to_num(loss_val, nan=0.0, posinf=1e4, neginf=0.0)
         else:
             s_max = float(getattr(cfg, "bayesian_sigma_max", 8.0))
             loss_val = bayesian_loss(
@@ -151,7 +150,6 @@ def route_allocation_loss(
             y if cfg.dm_target == "y" else y0, target_float, points, cfg
         )
 
-    loss_allocation = torch.nan_to_num(loss_allocation, nan=0.0, posinf=1e4, neginf=0.0)
     losses["allocation"] = loss_allocation
     if cfg.allocation_loss_type == "bayesian":
         losses["bayesian"] = loss_allocation

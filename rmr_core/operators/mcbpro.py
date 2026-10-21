@@ -128,9 +128,11 @@ def closed_form_mcbpro_transport(
 
         # Integrate gap capacity over regions
         gap_capacity = regional_sum(gap_weight, boxes_tensor)
+        # 1 grid cell has physical volume 1.0; deficit density cannot divide by vanishing sub-pixel capacity
+        eff_capacity = gap_capacity.clamp_min(1.0)
         rho_deficit = torch.where(
             gap_capacity > float(eps),
-            delta_deficit / gap_capacity.clamp_min(float(eps)),
+            (delta_deficit / eff_capacity).clamp(0.0, 10.0),
             torch.zeros_like(delta_deficit),
         )
 

@@ -45,7 +45,6 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
                 k_chunk = torch.exp(d2)
                 c_hat[c : c + chunk_size] = torch.matmul(k_chunk, u_f)
 
-            c_hat = torch.nan_to_num(c_hat, nan=0.0, posinf=1e4, neginf=0.0)
             diff = c_hat - target_person.float()
             err = diff.abs().sum()
             sign = torch.sign(diff)
@@ -80,7 +79,6 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
                 grad_u.addmv_(k_chunk.t(), s_chunk)
 
             grad_u.mul_(grad_err.float())
-            grad_u = torch.nan_to_num(grad_u, nan=0.0, posinf=1.0, neginf=-1.0)
             return grad_u, None, None, None, None, None, None
 
 
@@ -168,11 +166,12 @@ def bayesian_loss(
                     inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
                     d2.mul_(-inv_k)
                     points_sum.add_(torch.exp(d2).sum(dim=0))
-                bg_dis_sq = ((st_size * float(background_ratio)) ** 2) / (min_dist_sq + 1e-5)
+                bg_ratio_eff = max(float(background_ratio), 0.01)
+                bg_dis_sq = ((st_size * bg_ratio_eff) ** 2) / (min_dist_sq + 1e-5)
                 s_bg = -bg_dis_sq * inv_two_sigma_sq
-                exp_bg = torch.exp(s_bg)
+                exp_bg = torch.exp(s_bg).clamp_min(1e-4)
             else:
-                tau = float(background_ratio)
+                tau = max(float(background_ratio), 1e-4)
                 exp_bg = torch.full((m_total,), tau, device=device, dtype=torch.float32)
                 for c_idx in range(0, n, chunk_size):
                     p_chunk = pts[c_idx : c_idx + chunk_size]
@@ -183,7 +182,7 @@ def bayesian_loss(
                     d2.mul_(-inv_k)
                     points_sum.add_(torch.exp(d2).sum(dim=0))
 
-            denom = (exp_bg + points_sum).clamp_min_(1e-4)
+            denom = (exp_bg + points_sum).clamp_min(1e-4)
             post_bg = exp_bg / denom
 
         c_hat_bg = torch.dot(post_bg, y_flat)
@@ -207,7 +206,6 @@ def bayesian_loss(
 
         bg_err = c_hat_bg
         raw_sample_loss = person_err + bg_err
-        raw_sample_loss = torch.nan_to_num(raw_sample_loss, nan=0.0, posinf=1e4, neginf=0.0)
 
         if norm_mode == "canonical":
             sample_loss = raw_sample_loss
@@ -217,7 +215,6 @@ def bayesian_loss(
         else:
             sample_loss = raw_sample_loss / float(max(n, 1))
 
-        sample_loss = torch.nan_to_num(sample_loss, nan=0.0, posinf=1e4, neginf=0.0)
         losses.append(sample_loss)
 
     if not losses:

@@ -188,17 +188,24 @@ def train_one_epoch(
             losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
             loss = losses["total"] / accum_steps
 
-        # Numerical safety guard against non-finite loss
-        if torch.isnan(loss) or torch.isinf(loss):
-            optimizer.zero_grad(set_to_none=True)
-            loss_tracker.update({k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in losses.items()})
-            continue
+        # Strict mathematical invariant: training loss must be finite by construction
+        if not torch.isfinite(loss):
+            comp_str = ", ".join(
+                f"{k}: {v.item():.4f}" if isinstance(v, torch.Tensor) else f"{k}: {v}"
+                for k, v in losses.items()
+            )
+            raise FloatingPointError(
+                f"Non-finite loss encountered at epoch {epoch+1}, batch {batch_idx+1}: {loss.item()}. "
+                f"Components: [{comp_str}]"
+            )
 
         scaler.scale(loss).backward()
 
         is_step = ((batch_idx + 1) % accum_steps == 0) or (batch_idx + 1 == n_batches)
         if is_step:
             scaler.unscale_(optimizer)
+            # error_if_nonfinite=False allows PyTorch AMP GradScaler to safely detect FP16 scale
+            # overflows, skip optimizer.step, and dynamically halve scale factor (e.g. 65536 -> 32768)
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=False)
             scaler.step(optimizer)
             scaler.update()

@@ -77,16 +77,16 @@ def _decoupled_beta_nb_nll(
         target, mean.detach(), dispersion=dispersion, reduction="none", check_bounds=False
     )
     if beta_val > 0.0:
-        mu_d = mean.detach().float().clamp_min(1e-6)
-        r_d = dispersion.detach().float().clamp_min(1e-6)
+        mu_d = mean.detach().float().clamp_min(1e-4)
+        r_d = dispersion.detach().float().clamp_min(1e-4)
         var_d = mu_d + mu_d.square() / r_d
         w_beta = var_d.pow(beta_val)
         if normalize_weights:
             if norm_mask is not None:
                 m_sum = norm_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
-                w_mean = ((w_beta * norm_mask).sum(dim=-1, keepdim=True) / m_sum).clamp_min(1e-6)
+                w_mean = ((w_beta * norm_mask).sum(dim=-1, keepdim=True) / m_sum).clamp_min(1e-4)
             else:
-                w_mean = w_beta.mean(dim=-1, keepdim=True).clamp_min(1e-6)
+                w_mean = w_beta.mean(dim=-1, keepdim=True).clamp_min(1e-4)
             w_beta = w_beta / w_mean
         w_beta = w_beta.to(dtype=nll_mean.dtype)
     else:

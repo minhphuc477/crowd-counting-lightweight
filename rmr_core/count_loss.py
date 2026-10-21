@@ -15,8 +15,9 @@ def negative_binomial_nll_mean_dispersion(
     check_bounds: bool = True,
 ) -> torch.Tensor:
     """Negative-Binomial NLL with Var(Y) = mu + mu^2 / r evaluated in float32."""
+    eff_eps = max(float(eps), 1e-4)
     y = target.to(device=mean.device, dtype=torch.float32)
-    mu = mean.to(dtype=torch.float32).clamp_min(eps)
+    mu = mean.to(dtype=torch.float32).clamp_min(eff_eps)
     r = torch.as_tensor(dispersion, device=mean.device, dtype=torch.float32)
 
     if check_bounds:
@@ -28,15 +29,16 @@ def negative_binomial_nll_mean_dispersion(
             raise ValueError("Negative-Binomial targets must be finite non-negative numbers")
     else:
         y = y.clamp_min(0.0)
-        r = r.clamp(1e-6, _MAX_DISPERSION)
+        r = r.clamp(1e-4, _MAX_DISPERSION)
 
     log_r_plus_mu = torch.log(r + mu)
+    y_term = torch.where(y > 0, y * (torch.log(mu) - log_r_plus_mu), torch.zeros_like(y))
     nll = -(
         torch.lgamma(y + r)
         - torch.lgamma(r)
         - torch.lgamma(y + 1.0)
         + r * (torch.log(r) - log_r_plus_mu)
-        + y * (torch.log(mu) - log_r_plus_mu)
+        + y_term
     )
     if reduction == "none":
         return nll

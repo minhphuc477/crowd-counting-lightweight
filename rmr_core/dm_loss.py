@@ -47,14 +47,20 @@ def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 0.05) -> torch.Te
     k_blocks = mass_f.shape[-1]
     eps = max(float(tiny), 0.01)
     prior = eps / float(max(k_blocks, 1))
-    denom = (mass_f.sum(dim=-1, keepdim=True) + eps).clamp_min(1e-4)
+    denom = mass_f.sum(dim=-1, keepdim=True) + eps
     return (mass_f + prior) / denom
 
 
 def dm_nll_none(
     y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-4, check_bounds: bool = False
 ) -> torch.Tensor:
-    """Dirichlet-Multinomial NLL; empty parents contribute exactly zero."""
+    """Dirichlet-Multinomial NLL; empty parents contribute exactly zero.
+    
+    Analytically stable active-block formulation:
+    For any block with y_k == 0, log Gamma(0 + alpha_k) - log Gamma(alpha_k) == 0 identically.
+    Evaluating only on y_k > 0 eliminates catastrophic cancellation in digamma(alpha)
+    and prevents non-finite gradients without requiring ad-hoc nan_to_num masking.
+    """
     y = y.float()
     eff_eps = max(float(eps), 1e-4)
     alpha = alpha.float().clamp(min=eff_eps, max=1e4)
@@ -62,14 +68,19 @@ def dm_nll_none(
         raise ValueError("Dirichlet-Multinomial targets must be non-negative")
     n = y.sum(dim=-1)
     alpha0 = alpha.sum(dim=-1).clamp(min=eff_eps, max=1e5)
+
+    active = y > 0
+    log_gamma_diff = torch.zeros_like(y)
+    if active.any():
+        log_gamma_diff[active] = torch.lgamma(y[active] + alpha[active]) - torch.lgamma(alpha[active])
+
     log_prob = (
         torch.lgamma(n + 1.0)
         - torch.lgamma(y + 1.0).sum(dim=-1)
         + torch.lgamma(alpha0)
         - torch.lgamma(n + alpha0)
-        + (torch.lgamma(y + alpha) - torch.lgamma(alpha)).sum(dim=-1)
+        + log_gamma_diff.sum(dim=-1)
     )
-    log_prob = torch.nan_to_num(log_prob, nan=0.0, posinf=1e4, neginf=-1e4)
     return torch.where(n == 0, torch.zeros_like(n), -log_prob)
 
 
