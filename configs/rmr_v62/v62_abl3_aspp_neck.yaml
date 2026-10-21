@@ -92,15 +92,16 @@ loss:
   dm_norm_mode: unnorm_ref
   dm_ref_count: 100.0
   dm_target: dual
-  count_loss_mode: l1
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
 
   # Purified Orthogonal 3-Loss Suite
   lambda_flat_dm16: 1.0
-  lambda_region_nb: 1.0
+  lambda_region_nb: 0.5
   faithful_regional_nb: true
   regional_nb_beta: 1.0
   normalize_beta_weights: false
-  lambda_count: 1.0
+  lambda_count: 0.5
 
   # All 7 Conflicting Auxiliary Losses Eliminated
   lambda_cell: 0.0
