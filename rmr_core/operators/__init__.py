@@ -13,6 +13,7 @@ from .carrier import (
     modulate_carrier_field,
 )
 from .diffusion import charbonnier_tv_step
+from .mcbpro import closed_form_mcbpro_transport
 from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
@@ -48,6 +49,7 @@ __all__ = [
     "build_multiscale_regions",
     "center_scatter",
     "charbonnier_tv_step",
+    "closed_form_mcbpro_transport",
     "closed_form_radon_nikodym_transport",
     "compute_deficit_carrier_seed",
     "compute_morozov_discrepancy",
@@ -69,5 +71,3 @@ __all__ = [
     "weighted_normalized_adjoint_field",
     "weighted_regional_energy",
 ]
-
-

@@ -5,7 +5,11 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from rmr_core.operators import RegionSet, closed_form_radon_nikodym_transport
+from rmr_core.operators import (
+    RegionSet,
+    closed_form_mcbpro_transport,
+    closed_form_radon_nikodym_transport,
+)
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
 from .config import RMRv3Config
@@ -119,6 +123,41 @@ def solve_inverse_measure(
         base_out.update({
             "y": y_final,
             "iterates": iterates,
+            "residual_fields": [],
+            "energy_trace": [],
+            "solver_strength": effective_strength,
+            "rn_multiplier": s_field,
+        })
+        return RMRModelOutput(**base_out)
+
+    if cfg.solver_mode == "mcbpro":
+        deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
+        valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
+        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.05))
+        fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
+
+        y_mcbpro, s_field = closed_form_mcbpro_transport(
+            y0=y0_solver_input,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            eps=cfg.eps,
+            scale_weights=scale_weights,
+            fg_mask=fg_mask,
+            deficit_seeding=deficit_seeding,
+            valley_power=valley_power,
+            reg_threshold=reg_threshold,
+            return_multiplier=True,
+        )
+
+        if effective_strength < 1.0:
+            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_mcbpro
+        else:
+            y_final = y_mcbpro
+
+        base_out.update({
+            "y": y_final,
+            "iterates": [y0, y_final],
             "residual_fields": [],
             "energy_trace": [],
             "solver_strength": effective_strength,

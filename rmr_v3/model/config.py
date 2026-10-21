@@ -110,6 +110,9 @@ class RMRv3Config:
     rn_trust_alpha: float = 0.15
     rn_trust_alpha_up: float | None = None
     rn_iterations: int = 1
+    mcbpro_deficit_seeding: bool = True
+    mcbpro_valley_power: float = 2.0
+    mcbpro_reg_threshold: float = 0.05
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"
@@ -320,8 +323,6 @@ class RMRv3Config:
                 "use_alternating_bb=True is permanently BANNED (Anti-Pattern #7: exploding variance in dense clumps). "
                 "Remove this field from your config. Use pure BB-1 with trust damping instead."
             )
-        # Note: density_gated_diffusion now uses symmetric product conductance (g_c * g_n),
-        # which strictly preserves isolated Dirac peaks (zero boundary flux when g_c -> 0).
         if self.use_top_down_semantic_gate:
             raise ValueError(
                 "use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: 90% gradient suppression). "
@@ -338,9 +339,9 @@ class RMRv3Config:
                 "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
                 "Keep hybrid_recovery_alpha=0.0."
             )
-        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "direct"):
+        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "direct"):
             raise ValueError(
-                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', or 'direct', got '{self.solver_mode}'"
+                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', or 'direct', got '{self.solver_mode}'"
             )
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(
