@@ -185,6 +185,9 @@ ALLOWED_MODEL_KEYS = {
     "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
     # Radon-Nikodym Closed-Form Solver & Unsupervised Ablations
     "allow_unsupervised_solver", "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up",
+    # MC-BPRO Closed-Form Recovery Operator
+    "mcbpro_deficit_seeding", "mcbpro_valley_power", "mcbpro_reg_threshold",
+    "tau_peak", "ratio_clamp_max",
 }
 
 ALLOWED_LOSS_KEYS = {

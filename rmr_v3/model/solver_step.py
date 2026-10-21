@@ -134,6 +134,8 @@ def solve_inverse_measure(
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
         reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
+        tau_peak = float(getattr(cfg, "tau_peak", 0.05))
+        ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
 
         y_mcbpro, s_field = closed_form_mcbpro_transport(
@@ -147,6 +149,8 @@ def solve_inverse_measure(
             deficit_seeding=deficit_seeding,
             valley_power=valley_power,
             reg_threshold=reg_threshold,
+            tau_peak=tau_peak,
+            ratio_clamp_max=ratio_clamp_max,
             return_multiplier=True,
         )
 

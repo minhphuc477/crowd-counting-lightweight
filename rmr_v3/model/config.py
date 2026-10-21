@@ -113,11 +113,12 @@ class RMRv3Config:
     mcbpro_deficit_seeding: bool = True
     mcbpro_valley_power: float = 2.0
     mcbpro_reg_threshold: float = 0.001
+    tau_peak: float = 0.05
+    ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"
     tv_eps_c: float = 0.1
-
     # Banned coordinate attention (retained for validator rejection)
     use_coord_attn: bool = False
     use_micro_coord_attn: bool = False
@@ -289,7 +290,6 @@ class RMRv3Config:
             self.context_dilations = _deep_tuple(self.context_dilations)
         if self.morozov_gamma_scales is not None:
             self.morozov_gamma_scales = _deep_tuple(self.morozov_gamma_scales)
-
         if self.use_park:
             raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
         if self.use_cpcm:
