@@ -18,6 +18,7 @@ ALLOWED_DATA_KEYS = {
     "random_invert_prob", "data_root", "cache_images", "preload",
     "pad_small_images", "max_size", "boundary_margin",
     "saturation_jitter", "grayscale_prob", "random_grayscale",
+    "random_erasing_prob", "erasing_scale", "erasing_ratio", "erasing_max_patches",
 }
 
 ALLOWED_MODEL_KEYS = {
@@ -187,7 +188,7 @@ ALLOWED_MODEL_KEYS = {
     "allow_unsupervised_solver", "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up",
     # MC-BPRO Closed-Form Recovery Operator
     "mcbpro_deficit_seeding", "mcbpro_valley_power", "mcbpro_reg_threshold",
-    "tau_peak", "ratio_clamp_max",
+    "tau_peak", "ratio_clamp_max", "mcbpro_peak_kernel_size",
 }
 
 ALLOWED_LOSS_KEYS = {

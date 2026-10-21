@@ -38,6 +38,10 @@ class CrowdManifestDataset(Dataset):
         max_size: int = 2048,
         saturation_jitter: float = 0.0,
         grayscale_prob: float = 0.0,
+        random_erasing_prob: float = 0.0,
+        erasing_scale: tuple[float, float] = (0.005, 0.03),
+        erasing_ratio: tuple[float, float] = (0.5, 2.0),
+        erasing_max_patches: int = 2,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
@@ -68,6 +72,10 @@ class CrowdManifestDataset(Dataset):
         self.max_size = int(max_size)
         self.saturation_jitter = float(saturation_jitter)
         self.grayscale_prob = float(grayscale_prob)
+        self.random_erasing_prob = float(random_erasing_prob)
+        self.erasing_scale = (float(erasing_scale[0]), float(erasing_scale[1]))
+        self.erasing_ratio = (float(erasing_ratio[0]), float(erasing_ratio[1]))
+        self.erasing_max_patches = int(erasing_max_patches)
         self.cache_images = bool(cache_images)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
@@ -153,6 +161,10 @@ class CrowdManifestDataset(Dataset):
                 max_size=self.max_size,
                 saturation_jitter=self.saturation_jitter,
                 grayscale_prob=self.grayscale_prob,
+                random_erasing_prob=self.random_erasing_prob,
+                erasing_scale=self.erasing_scale,
+                erasing_ratio=self.erasing_ratio,
+                erasing_max_patches=self.erasing_max_patches,
             )
         else:
             image, pts = cap_image_resolution(image, pts, max_size=self.max_size)

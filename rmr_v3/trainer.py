@@ -15,18 +15,11 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.training import (
-    get_git_info, load_rng_state, make_generator,
-    safe_torch_load, seed_everything, seed_worker,
+    get_git_info, load_rng_state, make_generator, safe_torch_load, seed_everything, seed_worker,
 )
-
 from rmr_v3.checkpoint import CheckpointManager, EMAManager
 from rmr_v3.config import compute_config_hash, validate_resume_compatibility, validate_v3_config
-from rmr_v3.engine import (
-    evaluate_v3,
-    make_loss_cfg,
-    make_model,
-    train_one_epoch,
-)
+from rmr_v3.engine import evaluate_v3, make_loss_cfg, make_model, train_one_epoch
 from rmr_v3.optim import build_v3_optimizer, build_v3_scheduler, maybe_run_safe_lr_finder
 from rmr_v3.reporting import TRAIN_LOG_FIELDNAMES, format_epoch_row, format_eval_block
 from rmr_v3.tracking import format_dynamic_training_banner
@@ -121,37 +114,40 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
+    d_cfg = cfg.get("data", {})
     train_ds = CrowdManifestDataset(
-        cfg["data"]["train_manifest"],
+        d_cfg["train_manifest"],
         train=True,
         output_stride=eff_stride,
-        crop_size=cfg.get("data", {}).get("crop_size", 512),
-        scale_range=tuple(cfg.get("data", {}).get("scale_range", [0.75, 1.25])),
-        hflip_prob=float(cfg.get("data", {}).get("hflip_prob", 0.5)),
-        brightness_jitter=float(cfg.get("data", {}).get("brightness_jitter", 0.0)),
-        contrast_jitter=float(cfg.get("data", {}).get("contrast_jitter", 0.0)),
-        gamma_jitter=tuple(cfg.get("data", {}).get("gamma_jitter", [1.0, 1.0])),
-        random_invert_prob=float(cfg.get("data", {}).get("random_invert_prob", 0.0)),
-        data_root=cfg.get("data", {}).get("data_root"),
-        cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
-        preload=bool(cfg.get("data", {}).get("preload", False)),
-        pad_small_images=bool(cfg.get("data", {}).get("pad_small_images", True)),
-        boundary_margin=float(cfg.get("data", {}).get("boundary_margin", 0.0)),
-        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
-        saturation_jitter=float(cfg.get("data", {}).get("saturation_jitter", 0.0)),
-        grayscale_prob=float(
-            cfg.get("data", {}).get("grayscale_prob", cfg.get("data", {}).get("random_grayscale", 0.0))
-        ),
+        crop_size=d_cfg.get("crop_size", 512),
+        scale_range=tuple(d_cfg.get("scale_range", [0.75, 1.25])),
+        hflip_prob=float(d_cfg.get("hflip_prob", 0.5)),
+        brightness_jitter=float(d_cfg.get("brightness_jitter", 0.0)),
+        contrast_jitter=float(d_cfg.get("contrast_jitter", 0.0)),
+        gamma_jitter=tuple(d_cfg.get("gamma_jitter", [1.0, 1.0])),
+        random_invert_prob=float(d_cfg.get("random_invert_prob", 0.0)),
+        data_root=d_cfg.get("data_root"),
+        cache_images=bool(d_cfg.get("cache_images", True)),
+        preload=bool(d_cfg.get("preload", False)),
+        pad_small_images=bool(d_cfg.get("pad_small_images", True)),
+        boundary_margin=float(d_cfg.get("boundary_margin", 0.0)),
+        max_size=int(d_cfg.get("max_size", 2048)),
+        saturation_jitter=float(d_cfg.get("saturation_jitter", 0.0)),
+        grayscale_prob=float(d_cfg.get("grayscale_prob", d_cfg.get("random_grayscale", 0.0))),
+        random_erasing_prob=float(d_cfg.get("random_erasing_prob", 0.0)),
+        erasing_scale=tuple(d_cfg.get("erasing_scale", [0.005, 0.03])),
+        erasing_ratio=tuple(d_cfg.get("erasing_ratio", [0.5, 2.0])),
+        erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
     )
-    val_manifest = cfg.get("data", {}).get("val_manifest")
+    val_manifest = d_cfg.get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
         val_manifest,
         train=False,
         output_stride=eff_stride,
-        data_root=cfg.get("data", {}).get("data_root"),
-        cache_images=bool(cfg.get("data", {}).get("cache_images", True)),
-        preload=bool(cfg.get("data", {}).get("preload", False)),
-        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
+        data_root=d_cfg.get("data_root"),
+        cache_images=bool(d_cfg.get("cache_images", True)),
+        preload=bool(d_cfg.get("preload", False)),
+        max_size=int(d_cfg.get("max_size", 2048)),
     )
 
     dev_req = cfg.get("train", {}).get("device")

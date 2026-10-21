@@ -84,3 +84,44 @@ def test_v63_champion_forward_pass():
     assert out["y"].shape == (2, 1, 256, 256), f"Unexpected y shape: {out['y'].shape}"
     assert out["y0"].shape == (2, 1, 256, 256), f"Unexpected y0 shape: {out['y0'].shape}"
     assert (out["y"] >= 0).all(), "Recovered measure y contains negative values"
+
+
+def test_point_preserving_random_erasing():
+    """Verify that Point-Preserving Random Erasing preserves all points while erasing image pixels."""
+    from rmr_core.transforms import point_preserving_random_erasing
+
+    # Synthetic image tensor (C=3, H=100, W=100) with gradient
+    img_t = torch.linspace(0, 1, 100).view(1, 1, 100).expand(3, 100, 100).clone()
+    pts = torch.tensor([[50.0, 50.0], [20.0, 20.0], [80.0, 80.0]], dtype=torch.float32)
+
+    # Force erase with prob 1.0
+    erased_img, kept_pts = point_preserving_random_erasing(
+        img_t,
+        pts,
+        prob=1.0,
+        scale=(0.1, 0.2),  # large enough to definitely erase a patch
+        ratio=(1.0, 1.0),
+        max_patches=1,
+    )
+
+    # Points must be 100% preserved in number and exact coordinates
+    assert len(kept_pts) == len(pts), "Points were dropped by erasing!"
+    assert torch.allclose(kept_pts, pts), "Points were altered by erasing!"
+    assert erased_img.shape == img_t.shape, "Image shape altered by erasing!"
+    # Ensure some pixels were modified to channel mean
+    assert not torch.allclose(erased_img, img_t), "Image was not modified by erasing!"
+
+
+def test_all_core_files_under_450_lines():
+    """Verify strictly that all Python source files in rmr_core/ and rmr_v3/ have <= 450 lines."""
+    root = Path(__file__).resolve().parent.parent.parent
+    violations = []
+    for pkg in ["rmr_core", "rmr_v3"]:
+        for py_path in (root / pkg).rglob("*.py"):
+            with open(py_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) > 450:
+                violations.append((str(py_path.relative_to(root)), len(lines)))
+
+    assert not violations, f"Files exceeding 450 lines: {violations}"
+

@@ -30,6 +30,7 @@ def closed_form_mcbpro_transport(
     reg_threshold: float = 0.001,
     tau_peak: float = 0.05,
     ratio_clamp_max: float = 25.0,
+    peak_kernel_size: int = 7,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the 3-stage MC-BPRO measure recovery operator.
@@ -119,7 +120,9 @@ def closed_form_mcbpro_transport(
 
     if deficit_seeding and (delta_deficit > float(eps)).any():
         # Local peak tracking with peak-significance activation
-        y0_local_max = F.max_pool2d(y0_f, kernel_size=7, stride=1, padding=3)
+        k_peak = max(3, int(peak_kernel_size))
+        pad_peak = k_peak // 2
+        y0_local_max = F.max_pool2d(y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
         peak_dom = (y0_f / (y0_local_max + float(eps))) * torch.tanh(y0_local_max / float(tau_peak))
         gap_weight = m_effective * ((1.0 - peak_dom.clamp(0.0, 1.0)) ** float(valley_power))
 

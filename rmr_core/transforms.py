@@ -80,6 +80,10 @@ def train_transform(
     max_size: int = 2048,
     saturation_jitter: float = 0.0,
     grayscale_prob: float = 0.0,
+    random_erasing_prob: float = 0.0,
+    erasing_scale: tuple[float, float] = (0.005, 0.03),
+    erasing_ratio: tuple[float, float] = (0.5, 2.0),
+    erasing_max_patches: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
@@ -185,7 +189,49 @@ def train_transform(
     if grayscale_prob > 0.0 and random.random() < grayscale_prob:
         image_t = TF.rgb_to_grayscale(image_t, num_output_channels=3)
 
+    # Point-Preserving Random Erasing / Patch Occlusion Augmentation
+    image_t, pts = point_preserving_random_erasing(
+        image_t,
+        pts,
+        prob=random_erasing_prob,
+        scale=erasing_scale,
+        ratio=erasing_ratio,
+        max_patches=erasing_max_patches,
+    )
+
     return image_t.clamp(0, 1), pts
+
+
+def point_preserving_random_erasing(
+    image_t: torch.Tensor,
+    pts: torch.Tensor,
+    prob: float = 0.25,
+    scale: tuple[float, float] = (0.005, 0.03),
+    ratio: tuple[float, float] = (0.5, 2.0),
+    max_patches: int = 2,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Point-Preserving Random Erasing / Patch Occlusion Augmentation.
+
+    Simulates physical crowd occlusions (umbrellas, shoulders, signs, foreground obstacles).
+    Ground-truth points inside erased patches are PRESERVED 100%, forcing the network
+    to infer occluded heads from surrounding crowd context and regional density.
+    """
+    if prob <= 0.0 or random.random() >= prob:
+        return image_t, pts
+    c, h, w = image_t.shape
+    num_patches = random.randint(1, max(1, max_patches))
+    for _ in range(num_patches):
+        target_area = float(h * w) * random.uniform(float(scale[0]), float(scale[1]))
+        aspect_ratio = math.exp(random.uniform(math.log(float(ratio[0])), math.log(float(ratio[1]))))
+        h_e = int(round(math.sqrt(target_area * aspect_ratio)))
+        w_e = int(round(math.sqrt(target_area / aspect_ratio)))
+        if 0 < h_e < h and 0 < w_e < w:
+            top_e = random.randint(0, h - h_e)
+            left_e = random.randint(0, w - w_e)
+            c_mean = image_t.mean(dim=(-2, -1), keepdim=True)
+            image_t = image_t.clone()
+            image_t[:, top_e : top_e + h_e, left_e : left_e + w_e] = c_mean
+    return image_t, pts
 
 
 def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
@@ -199,4 +245,5 @@ __all__ = [
     "cap_image_resolution",
     "train_transform",
     "normalize_image",
+    "point_preserving_random_erasing",
 ]

@@ -138,6 +138,10 @@ def solve_inverse_measure(
             reg_threshold = reg_threshold * 0.25
         tau_peak = float(getattr(cfg, "tau_peak", 0.05))
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
+        peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
+        peak_kernel_size = (
+            int(peak_k) if peak_k is not None else (7 if getattr(cfg, "subpixel_stride2", False) else 5)
+        )
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
 
         y_mcbpro, s_field = closed_form_mcbpro_transport(
@@ -153,6 +157,7 @@ def solve_inverse_measure(
             reg_threshold=reg_threshold,
             tau_peak=tau_peak,
             ratio_clamp_max=ratio_clamp_max,
+            peak_kernel_size=peak_kernel_size,
             return_multiplier=True,
         )
 
