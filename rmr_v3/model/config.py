@@ -112,7 +112,7 @@ class RMRv3Config:
     rn_iterations: int = 1
     mcbpro_deficit_seeding: bool = True
     mcbpro_valley_power: float = 2.0
-    mcbpro_reg_threshold: float = 0.05
+    mcbpro_reg_threshold: float = 0.001
     density_gate_rho: float = 0.02
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"

@@ -28,6 +28,8 @@ def closed_form_mcbpro_transport(
     deficit_seeding: bool = True,
     valley_power: float = 2.0,
     reg_threshold: float = 0.001,
+    tau_peak: float = 0.05,
+    ratio_clamp_max: float = 25.0,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the 3-stage MC-BPRO measure recovery operator.
@@ -107,10 +109,10 @@ def closed_form_mcbpro_transport(
     delta_deficit = torch.relu(b_s_f - mu_0)
 
     if deficit_seeding and (delta_deficit > float(eps)).any():
-        # Local peak tracking (7x7 kernel corresponds to ~28px at stride 4, ~14px at stride 2)
+        # Local peak tracking with peak-significance activation
         y0_local_max = F.max_pool2d(y0_f, kernel_size=7, stride=1, padding=3)
-        y0_norm = y0_f / (y0_local_max + float(eps))
-        gap_weight = m_effective * ((1.0 - y0_norm.clamp(0.0, 1.0)) ** float(valley_power))
+        peak_dom = (y0_f / (y0_local_max + float(eps))) * torch.tanh(y0_local_max / float(tau_peak))
+        gap_weight = m_effective * ((1.0 - peak_dom.clamp(0.0, 1.0)) ** float(valley_power))
 
         # Integrate gap capacity over regions
         gap_capacity = regional_sum(gap_weight, boxes_tensor)
@@ -147,10 +149,10 @@ def closed_form_mcbpro_transport(
     mu_aug = regional_sum(y_aug, boxes_tensor)
     scaling_ratio = b_s_f / mu_aug.clamp_min(float(eps))
 
-    # Neutral fallback for unpopulated regions
+    # Neutral fallback for unpopulated regions and generous safety clamp
     both_zero = (b_s_f < float(eps)) & (mu_aug < float(eps))
     scaling_ratio = torch.where(both_zero, torch.ones_like(scaling_ratio), scaling_ratio)
-    scaling_ratio = scaling_ratio.clamp_min(0.0)
+    scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
     weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
 

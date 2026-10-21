@@ -133,7 +133,7 @@ def solve_inverse_measure(
     if cfg.solver_mode == "mcbpro":
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
-        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.05))
+        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
 
         y_mcbpro, s_field = closed_form_mcbpro_transport(
