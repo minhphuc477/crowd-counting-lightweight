@@ -82,3 +82,13 @@ def test_v64_synergy_forward_pass():
     assert out["y"].shape == (2, 1, 256, 256), f"Unexpected y shape: {out['y'].shape}"
     assert out["y0"].shape == (2, 1, 256, 256), f"Unexpected y0 shape: {out['y0'].shape}"
     assert (out["y"] >= 0).all(), "Recovered measure y contains negative values"
+
+
+def test_v64_diag_vertical_gradient_edge_case():
+    """Verify DiAG DynamicCameraAnglePredictor never produces NaN even on h=1 feature maps."""
+    from rmr_v3.model.perspective_geometry import DynamicCameraAnglePredictor
+    dcap = DynamicCameraAnglePredictor(in_channels=32, num_scales=3, use_vertical_gradient=True)
+    p16 = torch.randn(2, 32, 1, 16)
+    tilt, delta = dcap(p16)
+    assert not torch.isnan(tilt).any(), 'NaN in scene tilt'
+    assert not torch.isnan(delta).any(), 'NaN in delta scale'

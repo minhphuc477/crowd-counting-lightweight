@@ -69,10 +69,13 @@ class DynamicCameraAnglePredictor(nn.Module):
         gap = p16.mean(dim=(-2, -1))  # [B, C]
         if self.use_vertical_gradient:
             h = p16.shape[-2]
-            h_mid = max(1, h // 2)
-            top = p16[..., :h_mid, :].mean(dim=(-2, -1))
-            bot = p16[..., h_mid:, :].mean(dim=(-2, -1))
-            v_diff = bot - top
+            if h > 1:
+                h_mid = h // 2
+                top = p16[..., :h_mid, :].mean(dim=(-2, -1))
+                bot = p16[..., h_mid:, :].mean(dim=(-2, -1))
+                v_diff = bot - top
+            else:
+                v_diff = torch.zeros_like(gap)
             feat = torch.cat([gap, v_diff], dim=-1)
         else:
             feat = gap
