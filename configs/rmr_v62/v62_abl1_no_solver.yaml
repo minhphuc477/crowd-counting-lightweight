@@ -97,7 +97,7 @@ loss:
   lambda_region_nb: 0.5
   faithful_regional_nb: true
   regional_nb_beta: 1.0
-  normalize_beta_weights: false
+  normalize_beta_weights: true
   lambda_count: 0.5
 
   # All 7 Conflicting Auxiliary Losses Eliminated

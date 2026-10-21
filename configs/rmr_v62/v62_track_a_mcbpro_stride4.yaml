@@ -108,7 +108,7 @@ loss:
   lambda_region_nb: 0.5
   faithful_regional_nb: true
   regional_nb_beta: 1.0
-  normalize_beta_weights: false
+  normalize_beta_weights: true
   # 3. Global Count Conservation (Negative-Binomial count loss on recovered measure y*)
   lambda_count: 0.5
 
