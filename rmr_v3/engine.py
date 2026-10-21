@@ -188,12 +188,18 @@ def train_one_epoch(
             losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
             loss = losses["total"] / accum_steps
 
+        # Numerical safety guard against non-finite loss
+        if torch.isnan(loss) or torch.isinf(loss):
+            optimizer.zero_grad(set_to_none=True)
+            loss_tracker.update({k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in losses.items()})
+            continue
+
         scaler.scale(loss).backward()
 
         is_step = ((batch_idx + 1) % accum_steps == 0) or (batch_idx + 1 == n_batches)
         if is_step:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=False)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)

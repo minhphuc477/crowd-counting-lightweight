@@ -109,8 +109,8 @@ loss:
   bayesian_adaptive_sigma: true
   bayesian_sigma_min: 2.0
   bayesian_sigma_max: 4.0
-  bayesian_background_ratio: 0.0
-  bayesian_canonical_bg: false
+  bayesian_background_ratio: 0.05
+  bayesian_canonical_bg: true
   dm_block_px: 32
   kappa_flat16: 20.0
   normalize_flat_dm16: true

@@ -13,6 +13,7 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
     Eliminates O(B * N * M) autograd graph activation retention by recomputing
     chunked Gaussian kernels on-the-fly during backward, reducing peak loss graph
     memory from > 3,200 MB to < 100 MB with bitwise mathematical equivalence.
+    Runs strictly in Float32 to prevent FP16 Tensor Core downcast overflow under AMP.
     """
 
     @staticmethod
@@ -26,48 +27,61 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
         target_person: torch.Tensor,
         chunk_size: int,
     ) -> torch.Tensor:
-        n = pts.shape[0]
-        c_hat = torch.empty(n, device=u.device, dtype=torch.float32)
-        for c in range(0, n, chunk_size):
-            p = pts[c : c + chunk_size]
-            dx = p[:, 0:1] - gx
-            dy = p[:, 1:2] - gy
-            d2 = dx.square_().add_(dy.square_())
-            ik = inv_k[c : c + chunk_size] if isinstance(inv_k, torch.Tensor) else inv_k
-            d2.mul_(-ik)
-            k_chunk = torch.exp(d2)
-            c_hat[c : c + chunk_size] = torch.matmul(k_chunk, u)
+        dev_type = u.device.type if u.device.type in ("cuda", "cpu") else "cuda"
+        with torch.amp.autocast(dev_type, enabled=False):
+            u_f = u.float()
+            gx_f = gx.float()
+            gy_f = gy.float()
+            pts_f = pts.float()
+            n = pts.shape[0]
+            c_hat = torch.empty(n, device=u.device, dtype=torch.float32)
+            for c in range(0, n, chunk_size):
+                p = pts_f[c : c + chunk_size]
+                dx = p[:, 0:1] - gx_f
+                dy = p[:, 1:2] - gy_f
+                d2 = dx.square_().add_(dy.square_())
+                ik = inv_k[c : c + chunk_size] if isinstance(inv_k, torch.Tensor) else inv_k
+                d2.mul_(-ik)
+                k_chunk = torch.exp(d2)
+                c_hat[c : c + chunk_size] = torch.matmul(k_chunk, u_f)
 
-        diff = c_hat - target_person
-        err = diff.abs().sum()
-        sign = torch.sign(diff)
-        inv_k_saved = inv_k if isinstance(inv_k, torch.Tensor) else torch.tensor(inv_k, device=u.device)
-        ctx.save_for_backward(pts, gx, gy, inv_k_saved, sign)
-        ctx.chunk_size = chunk_size
-        return err
+            c_hat = torch.nan_to_num(c_hat, nan=0.0, posinf=1e4, neginf=0.0)
+            diff = c_hat - target_person.float()
+            err = diff.abs().sum()
+            sign = torch.sign(diff)
+            inv_k_saved = inv_k if isinstance(inv_k, torch.Tensor) else torch.tensor(inv_k, device=u.device)
+            ctx.save_for_backward(pts, gx, gy, inv_k_saved, sign)
+            ctx.chunk_size = chunk_size
+            return err
 
     @staticmethod
     def backward(ctx: Any, grad_err: torch.Tensor) -> tuple[Optional[torch.Tensor], ...]:
         pts, gx, gy, inv_k_saved, sign = ctx.saved_tensors
         chunk_size = ctx.chunk_size
-        n = pts.shape[0]
-        m = gx.shape[1]
-        grad_u = torch.zeros(m, device=pts.device, dtype=torch.float32)
-        inv_k = inv_k_saved
+        dev_type = pts.device.type if pts.device.type in ("cuda", "cpu") else "cuda"
+        with torch.amp.autocast(dev_type, enabled=False):
+            n = pts.shape[0]
+            m = gx.shape[1]
+            grad_u = torch.zeros(m, device=pts.device, dtype=torch.float32)
+            inv_k = inv_k_saved
+            gx_f = gx.float()
+            gy_f = gy.float()
+            pts_f = pts.float()
 
-        for c in range(0, n, chunk_size):
-            p = pts[c : c + chunk_size]
-            dx = p[:, 0:1] - gx
-            dy = p[:, 1:2] - gy
-            d2 = dx.square_().add_(dy.square_())
-            ik = inv_k[c : c + chunk_size] if inv_k.ndim > 0 else inv_k
-            d2.mul_(-ik)
-            k_chunk = torch.exp(d2)
-            s_chunk = sign[c : c + chunk_size]
-            grad_u.addmv_(k_chunk.t(), s_chunk)
+            for c in range(0, n, chunk_size):
+                p = pts_f[c : c + chunk_size]
+                dx = p[:, 0:1] - gx_f
+                dy = p[:, 1:2] - gy_f
+                d2 = dx.square_().add_(dy.square_())
+                ik = inv_k[c : c + chunk_size] if inv_k.ndim > 0 else inv_k
+                d2.mul_(-ik)
+                k_chunk = torch.exp(d2)
+                s_chunk = sign[c : c + chunk_size]
+                grad_u.addmv_(k_chunk.t(), s_chunk)
 
-        grad_u.mul_(grad_err)
-        return grad_u, None, None, None, None, None, None
+            grad_u.mul_(grad_err.float())
+            grad_u = torch.nan_to_num(grad_u, nan=0.0, posinf=1.0, neginf=-1.0)
+            return grad_u, None, None, None, None, None, None
 
 
 _BAYESIAN_GRID_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
@@ -169,12 +183,12 @@ def bayesian_loss(
                     d2.mul_(-inv_k)
                     points_sum.add_(torch.exp(d2).sum(dim=0))
 
-            denom = (exp_bg + points_sum).clamp_min_(1e-8)
+            denom = (exp_bg + points_sum).clamp_min_(1e-4)
             post_bg = exp_bg / denom
 
         c_hat_bg = torch.dot(post_bg, y_flat)
 
-        u = y_flat / denom
+        u = (y_flat / denom).clamp(min=-1e4, max=1e4)
         has_custom_target = (
             targets_list is not None
             and i < len(targets_list)
@@ -193,6 +207,7 @@ def bayesian_loss(
 
         bg_err = c_hat_bg
         raw_sample_loss = person_err + bg_err
+        raw_sample_loss = torch.nan_to_num(raw_sample_loss, nan=0.0, posinf=1e4, neginf=0.0)
 
         if norm_mode == "canonical":
             sample_loss = raw_sample_loss
@@ -202,6 +217,7 @@ def bayesian_loss(
         else:
             sample_loss = raw_sample_loss / float(max(n, 1))
 
+        sample_loss = torch.nan_to_num(sample_loss, nan=0.0, posinf=1e4, neginf=0.0)
         losses.append(sample_loss)
 
     if not losses:

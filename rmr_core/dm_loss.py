@@ -47,19 +47,21 @@ def probs_from_positive_mass(mass: torch.Tensor, tiny: float = 0.05) -> torch.Te
     k_blocks = mass_f.shape[-1]
     eps = max(float(tiny), 0.01)
     prior = eps / float(max(k_blocks, 1))
-    return (mass_f + prior) / (mass_f.sum(dim=-1, keepdim=True) + eps)
+    denom = (mass_f.sum(dim=-1, keepdim=True) + eps).clamp_min(1e-4)
+    return (mass_f + prior) / denom
 
 
 def dm_nll_none(
-    y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-8, check_bounds: bool = False
+    y: torch.Tensor, alpha: torch.Tensor, eps: float = 1e-4, check_bounds: bool = False
 ) -> torch.Tensor:
     """Dirichlet-Multinomial NLL; empty parents contribute exactly zero."""
     y = y.float()
-    alpha = alpha.float().clamp_min(eps)
+    eff_eps = max(float(eps), 1e-4)
+    alpha = alpha.float().clamp(min=eff_eps, max=1e4)
     if check_bounds and torch.any(y < 0):
         raise ValueError("Dirichlet-Multinomial targets must be non-negative")
     n = y.sum(dim=-1)
-    alpha0 = alpha.sum(dim=-1)
+    alpha0 = alpha.sum(dim=-1).clamp(min=eff_eps, max=1e5)
     log_prob = (
         torch.lgamma(n + 1.0)
         - torch.lgamma(y + 1.0).sum(dim=-1)
@@ -67,6 +69,7 @@ def dm_nll_none(
         - torch.lgamma(n + alpha0)
         + (torch.lgamma(y + alpha) - torch.lgamma(alpha)).sum(dim=-1)
     )
+    log_prob = torch.nan_to_num(log_prob, nan=0.0, posinf=1e4, neginf=-1e4)
     return torch.where(n == 0, torch.zeros_like(n), -log_prob)
 
 

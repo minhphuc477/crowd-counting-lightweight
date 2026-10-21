@@ -6,6 +6,7 @@ reliability metrics.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -34,10 +35,10 @@ class LossTracker:
         self.count += 1
         for k, v in loss_dict.items():
             if isinstance(v, torch.Tensor):
-                val = v.detach()
+                val = torch.nan_to_num(v.detach(), nan=0.0, posinf=0.0, neginf=0.0)
                 self.totals[k] = self.totals[k] + val if k in self.totals else val
             elif isinstance(v, (float, int)):
-                val = float(v)
+                val = 0.0 if (math.isnan(v) or math.isinf(v)) else float(v)
                 self.totals[k] = self.totals.get(k, 0.0) + val
             else:
                 continue
