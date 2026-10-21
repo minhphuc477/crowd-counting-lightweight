@@ -100,7 +100,7 @@ def closed_form_mcbpro_transport(
     if fg_mask is not None:
         if fg_mask.shape[-2:] != (h, w):
             fg_mask = F.interpolate(fg_mask, size=(h, w), mode="bilinear", align_corners=False)
-        m_effective = (fg_mask.to(dtype=work_dtype).clamp(0.0, 1.0) * (m_reg > 0.0).float()).clamp(0.0, 1.0)
+        m_effective = (fg_mask.to(dtype=work_dtype).clamp(0.0, 1.0) * m_reg).clamp(0.0, 1.0)
     else:
         m_effective = m_reg
 
