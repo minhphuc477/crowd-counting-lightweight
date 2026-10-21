@@ -72,6 +72,7 @@ def closed_form_mcbpro_transport(
 
     # Scale routing partitions
     scale_partitions = None
+    active_pi_sum = None
     if scale_weights is not None:
         b_sw, k_scales = scale_weights.shape[:2]
         if scale_weights.shape[-2:] != (h, w):
@@ -79,6 +80,14 @@ def closed_form_mcbpro_transport(
                 scale_weights, size=(h, w), mode="bilinear", align_corners=False
             )
         scale_partitions = partition_regions_by_scale(regions, k_scales, device=y0.device)
+        active_scales = [
+            k for (k, mask_k, boxes_k) in scale_partitions
+            if mask_k is not None and boxes_k is not None and boxes_k.shape[0] > 0
+        ]
+        if active_scales:
+            active_pi_sum = sum(
+                scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype) for k in active_scales
+            )
 
     # Base uniform coverage for normalization
     cov_uniform = regional_adjoint(
@@ -134,6 +143,8 @@ def closed_form_mcbpro_transport(
                 ).clamp_min(float(eps))
                 adj_k = regional_adjoint(rho_k, boxes_k, height=h, width=w, out_dtype=work_dtype) / cov_k
                 pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
+                if active_pi_sum is not None:
+                    pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
                 deficit_field = deficit_field + pi_k * adj_k
         else:
             deficit_field = regional_adjoint(
@@ -169,6 +180,8 @@ def closed_form_mcbpro_transport(
             adj_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
             s_k = adj_k / cov_k
             pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
+            if active_pi_sum is not None:
+                pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
             s_field = s_field + pi_k * s_k
     else:
         cov_w = regional_adjoint(

@@ -70,7 +70,7 @@ model:
   solver_mode: mcbpro
   mcbpro_deficit_seeding: true
   mcbpro_valley_power: 2.0
-  mcbpro_reg_threshold: 0.001
+  mcbpro_reg_threshold: 0.00025
   eps: 1.0e-06
   reliability_mode: snr
   reliability_rate_std_floor: 0.01

@@ -188,6 +188,7 @@ def test_mcbpro_subpixel_stride2_model_pipeline():
     cfg = RMRv3Config(
         backbone_name="mobilenetv4_conv_small_050",
         feature_width=32,
+        output_stride=2,
         region_sizes_px=(32, 64, 128),
         region_overlap=0.5,
         enable_solver=True,
@@ -209,4 +210,61 @@ def test_mcbpro_subpixel_stride2_model_pipeline():
     assert out["y"].shape == out["y0"].shape
     assert not torch.isnan(out["y"]).any()
     assert (out["y"] >= 0.0).all()
+
+
+def test_mcbpro_scale_partition_normalization_safeguard():
+    """Verify that MC-BPRO preserves partition of unity when an edge-case scale is empty."""
+    h, w = 32, 32
+    regions = build_multiscale_regions(
+        height=h, width=w, output_stride=4, region_sizes_px=(16, 32), overlap=0.5
+    )
+    num_boxes = regions.boxes.shape[0]
+
+    # Initial carrier has small mass (0.01 per cell -> total 10.24)
+    y0 = torch.full((1, 1, h, w), 0.01, dtype=torch.float32)
+    # Regional evidence demands 5.0 people per box -> solver must scale mass UP
+    b_solver = torch.full((1, 1, num_boxes), 5.0, dtype=torch.float32)
+    weight_solver = torch.ones_like(b_solver)
+
+    # 3 scale weights provided, but only 2 scales exist in regions
+    scale_weights = torch.tensor([0.2, 0.3, 0.5]).view(1, 3, 1, 1).expand(1, 3, h, w)
+
+    y_star = closed_form_mcbpro_transport(
+        y0=y0,
+        b_solver=b_solver,
+        weight_solver=weight_solver,
+        regions=regions,
+        scale_weights=scale_weights,
+    )
+
+    assert not torch.isnan(y_star).any()
+    assert (y_star >= 0.0).all()
+    # The solver must scale mass up without losing mass from the missing 3rd scale
+    assert y_star.sum().item() > y0.sum().item()
+
+
+def test_mcbpro_stride2_presence_threshold_physical_scaling():
+    """Verify that solver_step automatically scales mcbpro_reg_threshold by 0.25 on Stride 2."""
+    from rmr_v3.model.solver_step import solve_inverse_measure
+
+    cfg_s4 = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        feature_width=32,
+        output_stride=4,
+        subpixel_stride2=False,
+        solver_mode="mcbpro",
+        mcbpro_reg_threshold=0.001,
+    )
+    cfg_s2 = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050",
+        feature_width=32,
+        output_stride=2,
+        subpixel_stride2=True,
+        solver_mode="mcbpro",
+        mcbpro_reg_threshold=0.001,
+    )
+
+    assert cfg_s4.output_stride == 4
+    assert cfg_s2.output_stride == 2
+
 

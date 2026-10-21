@@ -33,7 +33,10 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
 def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
     loss_d = dict(cfg.get("loss", {})) if "loss" in cfg else dict(cfg)
     if "output_stride" not in loss_d and "model" in cfg:
-        loss_d["output_stride"] = cfg["model"].get("output_stride", 4)
+        if cfg["model"].get("subpixel_stride2", False) or cfg["model"].get("subpixel_dm", False):
+            loss_d["output_stride"] = 2
+        else:
+            loss_d["output_stride"] = cfg["model"].get("output_stride", 4)
     return RMRv3LossConfig.from_dict(loss_d)
 
 

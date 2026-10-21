@@ -134,6 +134,8 @@ def solve_inverse_measure(
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
         reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
+        if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
+            reg_threshold = reg_threshold * 0.25
         tau_peak = float(getattr(cfg, "tau_peak", 0.05))
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
