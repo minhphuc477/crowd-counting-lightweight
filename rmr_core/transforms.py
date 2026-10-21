@@ -101,7 +101,7 @@ def train_transform(
     w0, h0 = image.size
     max_dim, min_dim = max(w0, h0), min(w0, h0)
     if pad_small_images:
-        scale_lo = max(1.0, float(scale_range[0])) if min_dim < crop_size else float(scale_range[0])
+        scale_lo = float(scale_range[0])
         scale_hi = max(scale_lo, float(scale_range[1]))
         scale = random.uniform(scale_lo, scale_hi)
         w1 = int(round(w0 * scale))

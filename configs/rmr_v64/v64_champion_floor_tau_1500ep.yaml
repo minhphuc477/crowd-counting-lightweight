@@ -13,6 +13,7 @@ data:
   train_manifest: data/sha_a_train_all.jsonl
   val_manifest: data/sha_a_test.jsonl
   crop_size: 512
+  pad_small_images: true
   scale_range:
   - 0.60
   - 1.40
