@@ -59,7 +59,7 @@ model:
 
   # Fine Carrier Head on Subpixel Stride 2 Lattice
   head_blocks: 1
-  hurdle_head: false
+  hurdle_head: true
   density_curvature: false
   temp_softplus: true
   use_coord_attn: false

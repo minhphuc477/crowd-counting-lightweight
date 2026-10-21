@@ -268,3 +268,64 @@ def test_mcbpro_stride2_presence_threshold_physical_scaling():
     assert cfg_s2.output_stride == 2
 
 
+def test_v62_abl4_hurdle_head_integration():
+    """Verify that v62_abl4 with hurdle_head=True activates hurdle_bce and trunc_nb losses."""
+    import yaml
+    from rmr_v3.engine import make_loss_cfg, make_model
+    from rmr_v3.losses import compute_rmr_v3_losses
+
+    with open("configs/rmr_v62/v62_abl4_unpurified_8loss.yaml") as f:
+        cfg = yaml.safe_load(f)
+
+    assert cfg["model"]["hurdle_head"] is True
+    assert cfg["loss"]["lambda_hurdle"] > 0.0
+    assert cfg["loss"]["lambda_trunc_nb"] > 0.0
+
+    model, _ = make_model(cfg)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert total_params <= 200000, f"Params {total_params} exceeded 200,000 ceiling"
+
+    # Forward pass on small dummy batch
+    x = torch.randn(2, 3, 256, 256)
+    out = model(x)
+    assert "hurdle_logit" in out, "hurdle_logit must be present in model output"
+    assert out["hurdle_logit"] is not None
+
+    # Compute losses with dummy target
+    loss_cfg = make_loss_cfg(cfg)
+    target_y = torch.zeros(2, 1, 128, 128)
+    target_y[0, 0, 10, 10] = 1.0
+    target_y[1, 0, 20, 20] = 2.0
+
+    losses = compute_rmr_v3_losses(out, target_y, loss_cfg)
+    assert "hurdle_bce" in losses
+    assert "trunc_nb" in losses
+    assert not torch.isnan(losses["total"])
+    assert losses["hurdle_bce"].item() >= 0.0
+
+
+def test_subpixel_stride2_initial_bias_calibration():
+    """Verify carrier head initial bias produces consistent mass on Stride 2 vs Stride 4."""
+    from rmr_core.heads import build_fine_head
+
+    head_s4 = build_fine_head(width=48, subpixel_stride2=False, temp_softplus=True)
+    head_s2 = build_fine_head(width=48, subpixel_stride2=True, temp_softplus=True)
+
+    x_s4 = torch.zeros(1, 48, 128, 128)
+    x_s2 = torch.zeros(1, 48, 128, 128)
+
+    z_s4 = head_s4.forward_logits(x_s4)
+    y_s4 = head_s4.activate(z_s4)
+
+    z_s2 = head_s2.forward_logits(x_s2)
+    y_s2 = head_s2.activate(z_s2)
+
+    # Stride 2 cell density should be 1/4 of Stride 4 cell density
+    ratio = y_s4.mean().item() / y_s2.mean().item()
+    assert abs(ratio - 4.0) < 1e-3, f"Expected ratio ~4.0, got {ratio}"
+
+    # Over a 512x512 image (128x128 at S4, 256x256 at S2), total initial mass must match
+    assert abs(y_s4.sum().item() - y_s2.sum().item()) < 0.1
+
+
+
