@@ -1,0 +1,132 @@
+seed: 42
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
+  crop_size: 512
+  pad_small_images: true
+  scale_range:
+  - 0.4
+  - 1.8
+  hflip_prob: 0.5
+  brightness_jitter: 0.2
+  contrast_jitter: 0.2
+  saturation_jitter: 0.3
+  grayscale_prob: 0.3
+  gamma_jitter:
+  - 0.6
+  - 1.5
+  random_invert_prob: 0.0
+  random_erasing_prob: 0.35
+  erasing_scale:
+  - 0.005
+  - 0.03
+  erasing_ratio:
+  - 0.5
+  - 2.0
+  erasing_max_patches: 3
+model:
+  output_stride: 2
+  subpixel_stride2: true
+  feature_width: 48
+  max_trainable_params: 200000
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+  init_m0: 0.015763
+  neck_type: aspp_lite
+  aspp_dilations:
+  - 2
+  - 4
+  - 8
+  use_aspp_gap: true
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  use_diag: true
+  use_vertical_gradient_dcap: true
+  native_scale_pooling: true
+  regional_feature_stats: mean_std
+  region_head_hidden: 96
+  dynamic_scale_routing: true
+  factorized_scale_routing: false
+  scale_router_temperature: 1.0
+  pre_solver_scale_gating: true
+  scale_gating_power: 1.0
+  foreground_gate: false
+  dynamic_trust_gate: false
+  use_top_down_semantic_gate: false
+  scale_conditioned_prior: false
+  head_blocks: 1
+  hurdle_head: false
+  density_curvature: false
+  temp_softplus: true
+  floor_tau: 0.0025
+  use_coord_attn: false
+  ema_decay: 0.999
+  enable_solver: true
+  solver_mode: mcbpro
+  mcbpro_deficit_seeding: true
+  mcbpro_valley_power: 1.0
+  mcbpro_reg_threshold: 0.00025
+  mcbpro_peak_kernel_size: 7
+  eps: 1.0e-06
+  reliability_mode: snr
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+loss:
+  output_stride: 2
+  allocation_loss_type: flat_dm16
+  dm_block_px: 32
+  kappa_flat16: 20.0
+  normalize_flat_dm16: true
+  dm_norm_mode: unnorm_ref
+  dm_ref_count: 100.0
+  dm_target: dual
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+  lambda_flat_dm16: 1.0
+  lambda_region_nb: 0.5
+  faithful_regional_nb: true
+  regional_nb_beta: 1.0
+  normalize_beta_weights: true
+  lambda_count: 0.5
+  lambda_cell: 0.0
+  lambda_hurdle: 0.0
+  lambda_trunc_nb: 0.0
+  lambda_scale_align: 0.0
+  lambda_curvature: 0.0
+  lambda_hard_bg: 0.0
+  lambda_fg_gate: 0.0
+train:
+  epochs: 1500
+  batch_size: 8
+  workers: 4
+  pin_memory: true
+  lr: 0.0001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.0001
+  warmup_epochs: 15
+  min_lr_ratio: 0.2
+  grad_clip: 1.0
+  amp: true
+  solver_warmup_epochs: 0
+  solver_ramp_epochs: 10
+  early_stopping: false
+  patience: 0
+  eval_every: 5
+  deterministic: false
+eval:
+  density_bins:
+  - 100.0
+  - 500.0
+output_dir: runs/sha_a/rmr_v65/v65_champion_tau_sweep_25_1500ep
