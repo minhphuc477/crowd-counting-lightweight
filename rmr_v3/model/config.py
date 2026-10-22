@@ -326,9 +326,9 @@ class RMRv3Config:
                 "Remove this field from your config. Use pure BB-1 with trust damping instead."
             )
         if self.use_top_down_semantic_gate:
-            raise ValueError("use_top_down_semantic_gate=True is BANNED (Anti-Pattern #4: gradient suppression).")
+            raise ValueError("use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: gradient suppression).")
         if self.foreground_gate:
-            raise ValueError("foreground_gate=True is BANNED (Anti-Pattern #4: Hard FG-Gate suppression).")
+            raise ValueError("foreground_gate=True is permanently BANNED (Anti-Pattern #4: Hard FG-Gate suppression).")
         if self.hybrid_recovery_alpha > 0.0:
             raise ValueError(
                 f"hybrid_recovery_alpha={self.hybrid_recovery_alpha} > 0 is permanently BANNED "
