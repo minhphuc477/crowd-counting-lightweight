@@ -113,6 +113,8 @@ class RMRv3Config:
     mcbpro_deficit_seeding: bool = True
     mcbpro_valley_power: float = 2.0
     mcbpro_reg_threshold: float = 0.001
+    mcbpro_tau_count_null: float = 0.5
+    mcbpro_feat_energy_weight: float = 0.5
     tau_peak: float = 0.05
     ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02
@@ -324,24 +326,18 @@ class RMRv3Config:
                 "Remove this field from your config. Use pure BB-1 with trust damping instead."
             )
         if self.use_top_down_semantic_gate:
-            raise ValueError(
-                "use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: 90% gradient suppression). "
-                "Remove this field from your config."
-            )
+            raise ValueError("use_top_down_semantic_gate=True is BANNED (Anti-Pattern #4: gradient suppression).")
         if self.foreground_gate:
-            raise ValueError(
-                "foreground_gate=True is permanently BANNED (Anti-Pattern #4: Hard FG-Gate gradient suppression). "
-                "Remove this field from your config."
-            )
+            raise ValueError("foreground_gate=True is BANNED (Anti-Pattern #4: Hard FG-Gate suppression).")
         if self.hybrid_recovery_alpha > 0.0:
             raise ValueError(
                 f"hybrid_recovery_alpha={self.hybrid_recovery_alpha} > 0 is permanently BANNED "
                 "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
                 "Keep hybrid_recovery_alpha=0.0."
             )
-        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "direct"):
+        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "direct"):
             raise ValueError(
-                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', or 'direct', got '{self.solver_mode}'"
+                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', or 'direct', got '{self.solver_mode}'"
             )
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(

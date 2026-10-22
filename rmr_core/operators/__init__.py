@@ -14,6 +14,10 @@ from .carrier import (
 )
 from .diffusion import charbonnier_tv_step
 from .mcbpro import closed_form_mcbpro_transport
+from .perspective_mcbpro import (
+    compute_feature_high_pass_energy,
+    perspective_mcbpro_transport,
+)
 from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
@@ -52,6 +56,7 @@ __all__ = [
     "closed_form_mcbpro_transport",
     "closed_form_radon_nikodym_transport",
     "compute_deficit_carrier_seed",
+    "compute_feature_high_pass_energy",
     "compute_morozov_discrepancy",
     "continuous_prefix_eval",
     "fractional_box_sum",
@@ -60,6 +65,7 @@ __all__ = [
     "modulate_carrier_field",
     "multiplicative_gated_adjoint",
     "partition_regions_by_scale",
+    "perspective_mcbpro_transport",
     "prefix2d",
     "rectangle_sum_from_prefix",
     "region_average_features",

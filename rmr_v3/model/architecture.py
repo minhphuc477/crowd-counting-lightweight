@@ -219,6 +219,7 @@ class RMRv3(nn.Module):
         fg_logit: torch.Tensor | None,
         pi_scale: torch.Tensor | None,
         pi_aspect: torch.Tensor | None,
+        p4: torch.Tensor | None = None,
         carrier_energy: torch.Tensor | None = None,
         compute_energy: bool = True,
     ) -> RMRModelOutput:
@@ -233,7 +234,7 @@ class RMRv3(nn.Module):
             cfg=self.cfg, y0=y0, z0=z0, regional_evidence=regional_evidence,
             regions=regions, scale_weights=scale_weights, solver_strength=solver_strength,
             default_solver_strength=self.solver_strength, uniform_reliability=uniform_reliability,
-            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
+            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect, p4=p4,
             trust_gate=self.trust_gate, laplace_kernel=self._laplace_kernel,
             carrier_energy=carrier_energy, compute_energy=compute_energy,
             omega_steps=omega_steps, gamma_steps=gamma_steps,
@@ -309,7 +310,7 @@ class RMRv3(nn.Module):
             y0=y0, z0=z0, regional_evidence=regional_evidence, regions=regions_solver,
             scale_weights=scale_weights, solver_strength=solver_strength,
             uniform_reliability=uniform_reliability,
-            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect,
+            p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect, p4=p4,
             carrier_energy=carrier_energy, compute_energy=compute_energy,
         )
 

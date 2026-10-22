@@ -9,6 +9,7 @@ from rmr_core.operators import (
     RegionSet,
     closed_form_mcbpro_transport,
     closed_form_radon_nikodym_transport,
+    perspective_mcbpro_transport,
 )
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
@@ -31,6 +32,7 @@ def solve_inverse_measure(
     pi_aspect: torch.Tensor | None,
     trust_gate: nn.Linear | None,
     laplace_kernel: torch.Tensor,
+    p4: torch.Tensor | None = None,
     carrier_energy: torch.Tensor | None = None,
     compute_energy: bool = True,
     omega_steps: torch.Tensor | None = None,
@@ -165,6 +167,57 @@ def solve_inverse_measure(
             y_final = (1.0 - effective_strength) * y0 + effective_strength * y_mcbpro
         else:
             y_final = y_mcbpro
+
+        base_out.update({
+            "y": y_final,
+            "iterates": [y0, y_final],
+            "residual_fields": [],
+            "energy_trace": [],
+            "solver_strength": effective_strength,
+            "rn_multiplier": s_field,
+        })
+        return RMRModelOutput(**base_out)
+
+    if cfg.solver_mode == "perspective_mcbpro":
+        deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
+        valley_power = float(getattr(cfg, "mcbpro_valley_power", 1.0))
+        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.00025))
+        if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
+            reg_threshold = reg_threshold * 0.25
+        tau_peak = float(getattr(cfg, "tau_peak", 0.05))
+        tau_count_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.5))
+        feat_energy_weight = float(getattr(cfg, "mcbpro_feat_energy_weight", 0.5))
+        ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
+        peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
+        peak_kernel_size = (
+            int(peak_k) if peak_k is not None else (7 if getattr(cfg, "subpixel_stride2", False) else 5)
+        )
+        fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
+
+        y_pmcbpro, s_field = perspective_mcbpro_transport(
+            y0=y0_solver_input,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            feat_p4=p4,
+            eps=cfg.eps,
+            scale_weights=scale_weights,
+            fg_mask=fg_mask,
+            deficit_seeding=deficit_seeding,
+            valley_power=valley_power,
+            reg_threshold=reg_threshold,
+            tau_count_null=tau_count_null,
+            tau_peak=tau_peak,
+            feat_energy_weight=feat_energy_weight,
+            ratio_clamp_max=ratio_clamp_max,
+            peak_kernel_size=peak_kernel_size,
+            return_multiplier=True,
+        )
+
+        if effective_strength < 1.0:
+            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_pmcbpro
+        else:
+            y_final = y_pmcbpro
 
         base_out.update({
             "y": y_final,
