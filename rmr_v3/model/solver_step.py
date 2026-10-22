@@ -180,13 +180,14 @@ def solve_inverse_measure(
 
     if cfg.solver_mode == "perspective_mcbpro":
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
-        valley_power = float(getattr(cfg, "mcbpro_valley_power", 1.0))
-        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.00025))
+        valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
+        reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
         if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
             reg_threshold = reg_threshold * 0.25
         tau_peak = float(getattr(cfg, "tau_peak", 0.05))
-        tau_count_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.5))
-        feat_energy_weight = float(getattr(cfg, "mcbpro_feat_energy_weight", 0.5))
+        tau_count_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.0))
+        feat_energy_weight = float(getattr(cfg, "mcbpro_feat_energy_weight", 0.25))
+        contrast_kernel = int(getattr(cfg, "mcbpro_contrast_kernel", 15))
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
         peak_kernel_size = (
@@ -211,6 +212,7 @@ def solve_inverse_measure(
             feat_energy_weight=feat_energy_weight,
             ratio_clamp_max=ratio_clamp_max,
             peak_kernel_size=peak_kernel_size,
+            contrast_kernel=contrast_kernel,
             return_multiplier=True,
         )
 

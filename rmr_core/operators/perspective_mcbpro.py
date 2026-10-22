@@ -6,26 +6,27 @@ This operator solves the discrete-continuous inverse problem on Radon measures:
 via an exact, closed-form, parameter-free transport mapping:
     y* = T_{PA-MCBPRO}(y0, b_solver, weight_solver, P4_feat, regions)
 
-Key Theoretical Innovations (Novel Scientific Contributions):
-1. Feature-Energy Deficit Carrier (FED-Carrier):
-   Overcomes the Multiplicative Zero-Support Trap. When y0(u) = 0 in dense clusters
-   due to activation ceiling/bias suppression, the high-frequency spatial energy
-   E_feat(u) = ||P4(u) - AvgPool(P4(u))||_2 acts as an inductive spatial carrier.
-   Mass is routed strictly to high-frequency head coordinates instead of being
-   blurred uniformly across the box.
-2. Null-Measure Regional Gate (NMR-Gate):
-   Overcomes Background Leakage (+260 ghost heads on trees/balusters).
-   Applies a smooth quadratic zero-anchor when macroscopic box count b_R < tau_count,
-   forcing y*(u) -> 0 quadratically on foliage and empty masonry.
-3. Scale-Depth Adaptive Deficit Allocation:
-   Prioritizes fine 32px box deficits over coarse 128px box integrals in dense
-   perspective horizon zones, preventing macroscopic variance from washing out point Dirac masses.
+Key Theoretical Innovations (Mathematically Principled Formulation):
+1. Dimensionless Weber-Fechner Local Contrast FED-Carrier:
+   Overcomes the Multiplicative Zero-Support Trap in dense horizon clusters without
+   sample-level scale distortion or dimensional mismatch.
+   Computes local spatial high-frequency energy E_feat = ||P4 - AvgPool(P4)||_2,
+   then evaluates the dimensionless Weber-Fechner local contrast ratio:
+       E_rel(u) = E_feat(u) / (AvgPool_{15}(E_feat)(u) + eps)
+   Modulates valley capacity via convex blending:
+       capacity(u) = M_eff(u) * (1 - peak_dom(u))^p * [(1 - alpha) + alpha * E_rel(u)]
+   - On uniform textures (pavement, sky): E_rel ≈ 1.0 -> capacity identical to standard MC-BPRO.
+   - In dense micro-head clusters: E_rel > 1.0 -> mass concentrates at head contours.
+2. Consistent Observation-Space Null-Measure Shrinkage:
+   Smoothly anchors microscopic evidence noise in observation space before solver stages:
+       b_eff = b_s * clamp(b_s / tau_count_null, 0.0, 1.0)^2
+   Preserves exact Stage 3 Bregman-Poisson mass conservation without post-hoc multipliers.
 
 Properties:
 - 0 Trainable Parameters.
 - O(1) Computational Graph Complexity.
-- Non-negative measure guarantee: y*(u) >= 0 for all u.
-- Exact identity reduction: Identical to standard MC-BPRO when P4 is omitted and tau_count=0.
+- Strict non-negative Radon measure: y*(u) >= 0 for all u.
+- Exact identity reduction: Identical to standard MC-BPRO when feat_energy_weight=0 and tau_count_null=0.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ def compute_feature_high_pass_energy(
     pool_kernel: int = 5,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    """Compute normalized high-frequency spatial energy from intermediate neck features.
+    """Compute spatial high-frequency contrast energy from intermediate neck features.
 
     Args:
         feat: [B, C, H, W] spatial feature tensor (e.g. P4 from ASPP/FPN).
@@ -50,18 +51,39 @@ def compute_feature_high_pass_energy(
         eps: Small constant for numerical stability.
 
     Returns:
-        energy: [B, 1, H, W] normalized high-pass energy map in [0, 1].
+        energy: [B, 1, H, W] local spatial high-frequency contrast energy.
     """
     pad = pool_kernel // 2
     local_mean = F.avg_pool2d(feat, kernel_size=pool_kernel, stride=1, padding=pad)
     high_freq = feat - local_mean
     # L2 norm across channels captures spatial texture contrast (head contours)
     energy = torch.norm(high_freq, p=2, dim=1, keepdim=True)
-    # Spatial percentile-like normalization per sample
-    b, _, h, w = energy.shape
-    energy_flat = energy.view(b, -1)
-    max_val = energy_flat.amax(dim=-1, keepdim=True).view(b, 1, 1, 1).clamp_min(eps)
-    return energy / max_val
+    return energy
+
+
+def compute_local_contrast_ratio(
+    energy: torch.Tensor,
+    contrast_kernel: int = 15,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Compute dimensionless Weber-Fechner relative contrast ratio against local neighborhood.
+
+    E_rel(u) = E(u) / (AvgPool_k(E)(u) + eps)
+    - On uniform/blank regions: E(u) ≈ AvgPool(E)(u) => E_rel(u) ≈ 1.0.
+    - On sharp discrete head peaks: E(u) >> AvgPool(E)(u) => E_rel(u) > 1.0.
+
+    Args:
+        energy: [B, 1, H, W] spatial energy tensor.
+        contrast_kernel: Window size for neighborhood background energy averaging.
+        eps: Epsilon floor for division.
+
+    Returns:
+        rel_contrast: [B, 1, H, W] dimensionless contrast ratio clamped to [0.0, 3.0].
+    """
+    pad = contrast_kernel // 2
+    local_bg = F.avg_pool2d(energy, kernel_size=contrast_kernel, stride=1, padding=pad)
+    ratio = energy / (local_bg + float(eps))
+    return ratio.clamp(0.0, 3.0)
 
 
 def perspective_mcbpro_transport(
@@ -74,13 +96,14 @@ def perspective_mcbpro_transport(
     scale_weights: torch.Tensor | None = None,
     fg_mask: torch.Tensor | None = None,
     deficit_seeding: bool = True,
-    valley_power: float = 1.0,
-    reg_threshold: float = 0.00025,
-    tau_count_null: float = 0.5,
+    valley_power: float = 2.0,
+    reg_threshold: float = 0.001,
+    tau_count_null: float = 0.0,
     tau_peak: float = 0.05,
-    feat_energy_weight: float = 0.5,
+    feat_energy_weight: float = 0.25,
     ratio_clamp_max: float = 25.0,
     peak_kernel_size: int = 7,
+    contrast_kernel: int = 15,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the Perspective-Aware Multi-Scale Consistent Bregman-Poisson Recovery Operator.
@@ -95,13 +118,14 @@ def perspective_mcbpro_transport(
         scale_weights: [B, S, H, W] continuous scale routing weights.
         fg_mask: Optional [B, 1, H, W] foreground probability mask.
         deficit_seeding: Whether to inject regional deficits into carrier valleys.
-        valley_power: Exponent for inter-head valley attenuation (1.0 = linear).
+        valley_power: Exponent for inter-head valley attenuation (2.0 = smooth quadratic).
         reg_threshold: Spatial density threshold for presence field tanh.
-        tau_count_null: Regional count threshold below which boxes are zero-anchored.
+        tau_count_null: Regional count threshold below which evidence is smoothly anchored (0.0 = off).
         tau_peak: Sensitivity scale for local peak normalization.
-        feat_energy_weight: Weight of high-frequency feature energy in carrier seeding.
+        feat_energy_weight: Blending weight alpha for local contrast ratio in [0, 1].
         ratio_clamp_max: Safety ceiling on Bregman scaling multipliers.
         peak_kernel_size: Neighborhood kernel for local peak detection.
+        contrast_kernel: Neighborhood kernel for local contrast background pooling.
         return_multiplier: Whether to return (y_projected, s_field).
 
     Returns:
@@ -123,9 +147,16 @@ def perspective_mcbpro_transport(
 
     work_dtype = y0.dtype if y0.dtype in (torch.float32, torch.float64) else torch.float32
     y0_f = y0.to(dtype=work_dtype)
-    b_s_f = b_solver.to(dtype=work_dtype).clamp_min(0.0)
+    b_s_raw = b_solver.to(dtype=work_dtype).clamp_min(0.0)
     w_s_f = weight_solver.to(dtype=work_dtype).clamp_min(0.0)
     boxes_tensor = regions.boxes if hasattr(regions, "boxes") else regions
+
+    # Observation-space smooth null-measure shrinkage (anchors noise before projection)
+    if tau_count_null > 0.0:
+        null_factor = torch.clamp(b_s_raw / float(tau_count_null), 0.0, 1.0) ** 2
+        b_s_f = b_s_raw * null_factor
+    else:
+        b_s_f = b_s_raw
 
     # Scale routing partitions
     scale_partitions = None
@@ -155,7 +186,7 @@ def perspective_mcbpro_transport(
         out_dtype=work_dtype,
     ).clamp_min(float(eps))
 
-    # --- STAGE 1: Null-Measure Regional Gate & Presence Field ---
+    # --- STAGE 1: Continuous Regional Presence Field ---
     area = regions.area.to(dtype=work_dtype, device=y0.device).view(1, 1, -1).clamp_min(1.0)
     density_per_box = b_s_f / area
     b_density_field = regional_adjoint(
@@ -164,15 +195,6 @@ def perspective_mcbpro_transport(
 
     m_reg = torch.tanh(b_density_field / float(reg_threshold))
 
-    # Compute continuous regional count field for null-measure gating
-    null_gate = None
-    if tau_count_null > 0.0:
-        box_count_field = regional_adjoint(
-            b_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-        ) / cov_uniform
-        null_gate = torch.clamp(box_count_field / float(tau_count_null), 0.0, 1.0) ** 2
-        m_reg = m_reg * null_gate
-
     if fg_mask is not None:
         if fg_mask.shape[-2:] != (h, w):
             fg_mask = F.interpolate(fg_mask, size=(h, w), mode="bilinear", align_corners=False)
@@ -180,7 +202,7 @@ def perspective_mcbpro_transport(
     else:
         m_effective = m_reg
 
-    # --- STAGE 2: Feature-Energy Guided Deficit Carrier Seeding ---
+    # --- STAGE 2: Dimensionless Local-Contrast Deficit Carrier Seeding ---
     mu_0 = regional_sum(y0_f, boxes_tensor)
     delta_deficit = torch.relu(b_s_f - mu_0)
 
@@ -191,8 +213,8 @@ def perspective_mcbpro_transport(
         peak_dom = (y0_f / (y0_local_max + float(eps))) * torch.tanh(y0_local_max / float(tau_peak))
         valley_attenuation = (1.0 - peak_dom.clamp(0.0, 1.0)) ** float(valley_power)
 
-        # High-frequency feature energy guidance (FED-Carrier):
-        # Solves the Zero-Support Trap when y0 is 0 in dense clusters.
+        # Dimensionless Weber-Fechner Local Contrast Modulation:
+        # Avoids sample-relative max division and preserves physical amplitude
         if feat_p4 is not None and feat_energy_weight > 0.0:
             if feat_p4.shape[-2:] != (h, w):
                 feat_p4_res = F.interpolate(
@@ -200,10 +222,13 @@ def perspective_mcbpro_transport(
                 )
             else:
                 feat_p4_res = feat_p4
-            feat_energy = compute_feature_high_pass_energy(feat_p4_res, pool_kernel=5, eps=eps)
-            # Modulate valley capacity by local feature energy
-            guided_prior = y0_f + float(feat_energy_weight) * feat_energy.to(dtype=work_dtype)
-            gap_weight = m_effective * valley_attenuation * (guided_prior + float(eps))
+            raw_energy = compute_feature_high_pass_energy(feat_p4_res, pool_kernel=5, eps=eps)
+            contrast_ratio = compute_local_contrast_ratio(
+                raw_energy, contrast_kernel=contrast_kernel, eps=eps
+            )
+            alpha = float(feat_energy_weight)
+            contrast_mod = (1.0 - alpha) + alpha * contrast_ratio.to(dtype=work_dtype)
+            gap_weight = m_effective * valley_attenuation * contrast_mod
         else:
             gap_weight = m_effective * valley_attenuation
 
@@ -274,10 +299,7 @@ def perspective_mcbpro_transport(
         adj_s = regional_adjoint(weighted_s, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
         s_field = adj_s / cov_w
 
-    y_projected = torch.clamp_min(y_aug * s_field, 0.0)
-    if null_gate is not None:
-        y_projected = y_projected * null_gate
-    y_projected = y_projected.to(dtype=y0.dtype)
+    y_projected = torch.clamp_min(y_aug * s_field, 0.0).to(dtype=y0.dtype)
 
     if return_multiplier:
         return y_projected, s_field.to(dtype=y0.dtype)

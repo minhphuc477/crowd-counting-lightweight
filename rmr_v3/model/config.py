@@ -113,8 +113,9 @@ class RMRv3Config:
     mcbpro_deficit_seeding: bool = True
     mcbpro_valley_power: float = 2.0
     mcbpro_reg_threshold: float = 0.001
-    mcbpro_tau_count_null: float = 0.5
-    mcbpro_feat_energy_weight: float = 0.5
+    mcbpro_tau_count_null: float = 0.0
+    mcbpro_feat_energy_weight: float = 0.25
+    mcbpro_contrast_kernel: int = 15
     tau_peak: float = 0.05
     ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02

@@ -158,3 +158,46 @@ def test_perspective_mcbpro_parameter_count():
     # Energy is fully differentiable
     energy.sum().backward()
     assert p4.grad is not None, "Feature energy must be end-to-end differentiable"
+
+
+def test_perspective_mcbpro_exact_identity_reduction():
+    """Verify that PA-MCBPRO reduces bit-for-bit to MC-BPRO when feat_energy_weight=0 and tau_count_null=0."""
+    b, h, w = 2, 64, 64
+    regions = build_multiscale_regions(
+        h, w, output_stride=1, region_sizes_px=[16, 32], overlap=0.5, include_full_image=False
+    )
+    k_boxes = regions.boxes.shape[0]
+
+    y0 = torch.rand(b, 1, h, w) * 0.05
+    b_solver = torch.rand(b, 1, k_boxes) * 5.0
+    w_solver = torch.rand(b, 1, k_boxes) * 0.8 + 0.2
+    p4 = torch.randn(b, 32, h, w)
+
+    # 1. Standard MC-BPRO
+    y_mcbpro = closed_form_mcbpro_transport(
+        y0=y0,
+        b_solver=b_solver,
+        weight_solver=w_solver,
+        regions=regions,
+        valley_power=2.0,
+        reg_threshold=0.001,
+        deficit_seeding=True,
+    )
+
+    # 2. Perspective MC-BPRO with alpha=0 and tau_count_null=0
+    y_perspective = perspective_mcbpro_transport(
+        y0=y0,
+        b_solver=b_solver,
+        weight_solver=w_solver,
+        regions=regions,
+        feat_p4=p4,
+        feat_energy_weight=0.0,
+        tau_count_null=0.0,
+        valley_power=2.0,
+        reg_threshold=0.001,
+        deficit_seeding=True,
+    )
+
+    diff = torch.abs(y_mcbpro - y_perspective).max().item()
+    assert diff < 1e-6, f"PA-MCBPRO must be bit-for-bit identical to MC-BPRO at alpha=0, max diff={diff}"
+
