@@ -69,3 +69,13 @@
 - **TUYỆT ĐỐI KHÔNG TẠO SCRIPT DÙNG 1 LẦN BỪA BÃI**: Cấm để lại các script tạm bợ (`analyze_*.py`, `step*.py`, `inspect_*.py`) trong `tools/`, `scripts/` hay `scratch/`.
 - **THƯ MỤC `tools/` CHỈ CHỨA CLI TOOLS TÁI SỬ DỤNG**: Chỉ giữ lại các công cụ tổng quát có tham số CLI rõ ràng (`--config`, `--checkpoint`).
 - **DỌN DẸP NGAY LẬP TỨC**: Mọi file tạm sinh ra trong quá trình gỡ lỗi phải được xóa sạch trước khi commit.
+
+
+---
+
+## 9. Bốn Thủ Phạm Kỹ Thuật Bị Cấm Tuyệt Đối (STRICT BAN ON 4 REGRESSION CULPRITS)
+*Chi tiết cơ sở vật lý và toán học xem tại `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`.*
+1. **CẤM BẬT `use_diag: True`**: Mặc định bắt buộc `use_diag: False`. Global Average Pooling làm ô nhiễm định tuyến thang đo và phạt +4.96 MAE.
+2. **CẤM SCALE JITTER QUÁ ĐÀ**: Bắt buộc `scale_range: [0.6, 1.4]`. Tuyệt đối không dùng cận dưới $< 0.5$ (gây aliasing phá hủy micro-head trên Stride 4).
+3. **CẤM BỎ BAYESIAN POINT LOSS TRÊN TRACK A**: Track A (Stride 4) bắt buộc dùng `dual_bayesian_dm16` (`lambda_bayesian: 0.15`) để bảo toàn định vị điểm trong khối $64 \times 64$ px.
+4. **BẮT BUỘC DENSITY-GATING CHO FED-CARRIER**: FED-Carrier chỉ được kích hoạt khi $b_s > 2.0$, cấm bơm mass tự do vào cảnh thưa và trung bình ($b_s \le 2.0$).

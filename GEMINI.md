@@ -28,6 +28,9 @@
    - Pure Python / YAML configurations.
 
 ## 4. Key Artifacts & Narrative Reports
-- Current Analysis Artifact: `BAO_CAO_KHOA_HOC_PHAN_TICH_TOAN_DIEN_KET_QUA_V50_UBUNTU.md`
+- Anti-Regression Experimental Guidelines: `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`
+- Operational Rules: `RULES.md`
+- Latest V65 Full Ubuntu Analysis: `BAO_CAO_KHOA_HOC_PHAN_TICH_TOAN_DIEN_KET_QUA_V65_UBUNTU.md`
+- Latest V65 Regression Root Cause & Cleanup: `BAO_CAO_GIAI_PHAU_NGUYEN_NHAN_REGRESSION_V65_VA_CLEANUP_CODEBASE.md`
 - Active Research Branch: `RMR`
-- Configs: `configs/rmr_v50/`, `configs/rmr_v51/`
+- Active Configs: `configs/rmr_v64/`, `configs/rmr_v65/`
