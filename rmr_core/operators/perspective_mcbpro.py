@@ -78,12 +78,16 @@ def compute_local_contrast_ratio(
         eps: Epsilon floor for division.
 
     Returns:
-        rel_contrast: [B, 1, H, W] dimensionless contrast ratio clamped to [0.0, 3.0].
+        rel_contrast: [B, 1, H, W] dimensionless contrast ratio clamped to [0.0, 5.0].
     """
+    max_e = energy.amax(dim=(-2, -1), keepdim=True)
     pad = contrast_kernel // 2
     local_bg = F.avg_pool2d(energy, kernel_size=contrast_kernel, stride=1, padding=pad)
     ratio = energy / (local_bg + float(eps))
-    return ratio.clamp(0.0, 3.0)
+    # Neutral fallback only if the entire slice has vanishing energy (e.g. blank input)
+    is_dead = max_e < float(eps)
+    ratio = torch.where(is_dead, torch.ones_like(ratio), ratio)
+    return ratio.clamp(0.0, 5.0)
 
 
 def perspective_mcbpro_transport(
