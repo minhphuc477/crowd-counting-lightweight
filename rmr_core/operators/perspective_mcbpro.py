@@ -54,7 +54,8 @@ def compute_feature_high_pass_energy(
         energy: [B, 1, H, W] local spatial high-frequency contrast energy.
     """
     pad = pool_kernel // 2
-    local_mean = F.avg_pool2d(feat, kernel_size=pool_kernel, stride=1, padding=pad)
+    feat_pad = F.pad(feat, (pad, pad, pad, pad), mode="replicate")
+    local_mean = F.avg_pool2d(feat_pad, kernel_size=pool_kernel, stride=1, padding=0)
     high_freq = feat - local_mean
     # L2 norm across channels captures spatial texture contrast (head contours)
     energy = torch.norm(high_freq, p=2, dim=1, keepdim=True)
@@ -82,7 +83,8 @@ def compute_local_contrast_ratio(
     """
     max_e = energy.amax(dim=(-2, -1), keepdim=True)
     pad = contrast_kernel // 2
-    local_bg = F.avg_pool2d(energy, kernel_size=contrast_kernel, stride=1, padding=pad)
+    energy_pad = F.pad(energy, (pad, pad, pad, pad), mode="replicate")
+    local_bg = F.avg_pool2d(energy_pad, kernel_size=contrast_kernel, stride=1, padding=0)
     ratio = energy / (local_bg + float(eps))
     # Neutral fallback only if the entire slice has vanishing energy (e.g. blank input)
     is_dead = max_e < float(eps)

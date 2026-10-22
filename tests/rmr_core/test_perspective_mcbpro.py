@@ -201,3 +201,12 @@ def test_perspective_mcbpro_exact_identity_reduction():
     diff = torch.abs(y_mcbpro - y_perspective).max().item()
     assert diff < 1e-6, f"PA-MCBPRO must be bit-for-bit identical to MC-BPRO at alpha=0, max diff={diff}"
 
+
+def test_perspective_mcbpro_boundary_replicate_invariance():
+    """Verify that replicate padding prevents artificial boundary energy on uniform fields."""
+    feat_uniform = torch.ones(1, 32, 64, 64) * 3.5
+    energy = compute_feature_high_pass_energy(feat_uniform, pool_kernel=5)
+    # On a uniform field, high pass energy must be identically zero even at boundaries
+    assert energy.max().item() < 1e-5, f"Boundary zero-padding artifact detected: max energy = {energy.max().item()}"
+
+
