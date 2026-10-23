@@ -1,0 +1,163 @@
+# V66 Experiment 6: Ablation Study - Rep-ASPP-Lite Neck (Structural Re-parameterization)
+# Mathematical Invariant 1: Strictly <= 200,000 params (Actual: 112,438 params)
+# Mathematical Invariant 2: 100% Standalone (0.0% Knowledge Distillation, Zero Teachers)
+# Mathematical Invariant 3: WSD is Strictly BANNED -> High-Floor Cosine Annealing (min_lr_ratio: 0.20)
+#
+# Ablation Hypothesis:
+# Single-variable comparison against Exp 1: Replaces standard ASPPLiteFPNNeck with RepASPPLiteNeck.
+# Tests whether 7x7 structural reparameterization depthwise blocks (RepDWBlock7x7) preserve higher
+# spatial contrast for micro-heads (3-8 pixels) in extreme clusters, while fusing algebraically into a
+# single 7x7 DW conv during inference.
+seed: 42
+data:
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
+  crop_size: 512
+  pad_small_images: true
+  scale_range:
+  - 0.60
+  - 1.40
+  hflip_prob: 0.5
+  brightness_jitter: 0.2
+  contrast_jitter: 0.2
+  saturation_jitter: 0.3
+  grayscale_prob: 0.30
+  gamma_jitter:
+  - 0.6
+  - 1.5
+  random_invert_prob: 0.0
+  random_erasing_prob: 0.35
+  erasing_scale:
+  - 0.005
+  - 0.03
+  erasing_ratio:
+  - 0.5
+  - 2.0
+  erasing_max_patches: 3
+
+model:
+  output_stride: 2
+  subpixel_stride2: true
+  feature_width: 48
+  max_trainable_params: 200000
+  backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
+  pretrained: true
+  backbone_lr_scale: 0.1
+  init_m0: 0.015763
+
+  # Hybrid Rep-ASPP Structural Re-parameterization Neck
+  neck_type: rep_aspp_lite
+  aspp_dilations:
+  - 2
+  - 4
+  - 8
+  use_aspp_gap: true
+
+  # Multiscale Regional Evidence Dictionary
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  use_diag: false
+  native_scale_pooling: true
+  regional_feature_stats: mean_std
+  region_head_hidden: 96
+  dynamic_scale_routing: true
+  factorized_scale_routing: false
+  scale_router_temperature: 1.0
+  pre_solver_scale_gating: true
+  scale_gating_power: 1.0
+  foreground_gate: false
+  dynamic_trust_gate: false
+  use_top_down_semantic_gate: false
+  scale_conditioned_prior: false
+
+  # Fine Carrier Head with Quadratic Floor Suppression
+  head_blocks: 1
+  hurdle_head: false
+  density_curvature: false
+  temp_softplus: true
+  floor_tau: 0.003
+  use_coord_attn: false
+  ema_decay: 0.999
+
+  # Feature-guided Edge-Directed Bregman-Poisson Solver (FED-MCBPRO)
+  enable_solver: true
+  solver_mode: fed_mcbpro
+  mcbpro_deficit_seeding: true
+  mcbpro_dense_threshold: 2.0
+  mcbpro_feat_energy_weight: 0.25
+  mcbpro_tau_count_null: 0.5
+  mcbpro_contrast_kernel: 15
+  mcbpro_noise_floor: 0.2
+  mcbpro_valley_power: 2.0
+  mcbpro_reg_threshold: 0.00025
+  mcbpro_peak_kernel_size: 7
+  eps: 1.0e-06
+  reliability_mode: snr
+  reliability_rate_std_floor: 0.01
+  reliability_weight_min: 0.25
+  reliability_weight_max: 4.0
+  normalize_reliability_within_scale: true
+  detach_region_mean_in_solver: true
+  detach_reliability_in_solver: true
+  dispersion_init: 50.0
+  dispersion_min: 0.5
+  dispersion_max: 500.0
+
+loss:
+  output_stride: 2
+  allocation_loss_type: flat_dm16
+  dm_block_px: 32
+  kappa_flat16: 20.0
+  normalize_flat_dm16: true
+  dm_norm_mode: unnorm_ref
+  dm_ref_count: 100.0
+  dm_target: dual
+  count_loss_mode: nb
+  count_nb_dispersion: 50.0
+
+  # Purified Orthogonal 3-Loss Suite
+  lambda_flat_dm16: 1.0
+  lambda_region_nb: 0.5
+  faithful_regional_nb: true
+  regional_nb_beta: 1.0
+  normalize_beta_weights: true
+  lambda_count: 0.5
+
+  # All 7 Conflicting Auxiliary Losses Eliminated
+  lambda_cell: 0.0
+  lambda_hurdle: 0.0
+  lambda_trunc_nb: 0.0
+  lambda_scale_align: 0.0
+  lambda_curvature: 0.0
+  lambda_hard_bg: 0.0
+  lambda_fg_gate: 0.0
+
+train:
+  epochs: 1500
+  batch_size: 8
+  workers: 4
+  pin_memory: true
+  lr: 0.0001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.0001
+  warmup_epochs: 15
+  min_lr_ratio: 0.20
+  grad_clip: 1.0
+  amp: true
+  solver_warmup_epochs: 0
+  solver_ramp_epochs: 10
+  early_stopping: false
+  patience: 0
+  eval_every: 5
+  deterministic: false
+
+eval:
+  density_bins:
+  - 100.0
+  - 500.0
+
+output_dir: runs/sha_a/rmr_v66/v66_exp6_abl_rep_aspp_neck_1500ep

@@ -117,6 +117,8 @@ class RMRv3Config:
     mcbpro_feat_energy_weight: float = 0.25
     mcbpro_contrast_kernel: int = 15
     mcbpro_dense_threshold: float = 2.0
+    mcbpro_noise_floor: float = 0.2
+    mcbpro_peak_kernel_size: int = 7
     tau_peak: float = 0.05
     ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02
@@ -381,7 +383,6 @@ class RMRv3Config:
         _require_unit_interval("tdsg_floor", self.tdsg_floor)
         _require_unit_interval("fg_gate_floor", self.fg_gate_floor)
         _require_unit_interval("hybrid_recovery_alpha", self.hybrid_recovery_alpha)
-
 
     @classmethod
     def from_dict(cls, d: dict | None, **overrides) -> "RMRv3Config":
