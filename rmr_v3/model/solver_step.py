@@ -194,13 +194,14 @@ def solve_inverse_measure(
             int(peak_k) if peak_k is not None else (7 if getattr(cfg, "subpixel_stride2", False) else 5)
         )
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
+        p4_solver_input = p4.detach() if p4 is not None and getattr(cfg, "detach_p4_for_solver", True) else p4
 
         y_pmcbpro, s_field = perspective_mcbpro_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
             weight_solver=weight_solver,
             regions=regions,
-            feat_p4=p4,
+            feat_p4=p4_solver_input,
             eps=cfg.eps,
             scale_weights=scale_weights,
             fg_mask=fg_mask,
