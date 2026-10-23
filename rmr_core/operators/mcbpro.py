@@ -66,9 +66,9 @@ def closed_form_mcbpro_transport(
         weight_solver = weight_solver.unsqueeze(1)
 
     work_dtype = y0.dtype if y0.dtype in (torch.float32, torch.float64) else torch.float32
-    y0_f = y0.to(dtype=work_dtype)
-    b_s_f = b_solver.to(dtype=work_dtype).clamp_min(0.0)
-    w_s_f = weight_solver.to(dtype=work_dtype).clamp_min(0.0)
+    y0_f = torch.nan_to_num(y0.to(dtype=work_dtype), nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+    b_s_f = torch.nan_to_num(b_solver.to(dtype=work_dtype), nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+    w_s_f = torch.nan_to_num(weight_solver.to(dtype=work_dtype), nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
     boxes_tensor = regions.boxes if hasattr(regions, "boxes") else regions
 
     # Scale routing partitions
