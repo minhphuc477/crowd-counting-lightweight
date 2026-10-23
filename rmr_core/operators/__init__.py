@@ -13,12 +13,13 @@ from .carrier import (
     modulate_carrier_field,
 )
 from .diffusion import charbonnier_tv_step
-from .mcbpro import closed_form_mcbpro_transport
-from .perspective_mcbpro import (
+from .fed_mcbpro import (
     compute_feature_high_pass_energy,
     compute_local_contrast_ratio,
+    fed_mcbpro_transport,
     perspective_mcbpro_transport,
 )
+from .mcbpro import closed_form_mcbpro_transport
 from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
@@ -61,6 +62,7 @@ __all__ = [
     "compute_local_contrast_ratio",
     "compute_morozov_discrepancy",
     "continuous_prefix_eval",
+    "fed_mcbpro_transport",
     "fractional_box_sum",
     "fractional_region_average_features",
     "fractional_region_mean_std_features",

@@ -9,6 +9,7 @@ from rmr_core.operators import (
     RegionSet,
     closed_form_mcbpro_transport,
     closed_form_radon_nikodym_transport,
+    fed_mcbpro_transport,
     perspective_mcbpro_transport,
 )
 from rmr_core.types import RMRModelOutput
@@ -178,8 +179,9 @@ def solve_inverse_measure(
         })
         return RMRModelOutput(**base_out)
 
-    if cfg.solver_mode == "perspective_mcbpro":
+    if cfg.solver_mode in ("perspective_mcbpro", "fed_mcbpro"):
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
+        dense_threshold = float(getattr(cfg, "mcbpro_dense_threshold", 2.0))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
         reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
         if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
@@ -197,7 +199,7 @@ def solve_inverse_measure(
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
         p4_solver_input = p4.detach() if p4 is not None and getattr(cfg, "detach_p4_for_solver", True) else p4
 
-        y_pmcbpro, s_field = perspective_mcbpro_transport(
+        y_pmcbpro, s_field = fed_mcbpro_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
             weight_solver=weight_solver,
@@ -207,6 +209,7 @@ def solve_inverse_measure(
             scale_weights=scale_weights,
             fg_mask=fg_mask,
             deficit_seeding=deficit_seeding,
+            dense_threshold=dense_threshold,
             valley_power=valley_power,
             reg_threshold=reg_threshold,
             tau_count_null=tau_count_null,

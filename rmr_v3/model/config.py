@@ -116,6 +116,7 @@ class RMRv3Config:
     mcbpro_tau_count_null: float = 0.0
     mcbpro_feat_energy_weight: float = 0.25
     mcbpro_contrast_kernel: int = 15
+    mcbpro_dense_threshold: float = 2.0
     tau_peak: float = 0.05
     ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02
@@ -336,9 +337,9 @@ class RMRv3Config:
                 "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
                 "Keep hybrid_recovery_alpha=0.0."
             )
-        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "direct"):
+        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct"):
             raise ValueError(
-                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', or 'direct', got '{self.solver_mode}'"
+                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', 'fed_mcbpro', or 'direct', got '{self.solver_mode}'"
             )
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(
