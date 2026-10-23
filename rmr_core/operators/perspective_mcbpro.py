@@ -65,17 +65,20 @@ def compute_feature_high_pass_energy(
 def compute_local_contrast_ratio(
     energy: torch.Tensor,
     contrast_kernel: int = 15,
+    noise_floor: float = 0.2,
     eps: float = 1e-6,
 ) -> torch.Tensor:
     """Compute dimensionless Weber-Fechner relative contrast ratio against local neighborhood.
 
-    E_rel(u) = E(u) / (AvgPool_k(E)(u) + eps)
+    E_rel(u) = E(u) / (AvgPool_k(E)(u) + noise_floor)
     - On uniform/blank regions: E(u) ≈ AvgPool(E)(u) => E_rel(u) ≈ 1.0.
     - On sharp discrete head peaks: E(u) >> AvgPool(E)(u) => E_rel(u) > 1.0.
+    - On microscopic noise (E << noise_floor): E_rel(u) ≈ 0.0 (prevents noise amplification).
 
     Args:
         energy: [B, 1, H, W] spatial energy tensor.
         contrast_kernel: Window size for neighborhood background energy averaging.
+        noise_floor: Absolute threshold of visibility floor (prevents 0/0 noise explosion).
         eps: Epsilon floor for division.
 
     Returns:
@@ -85,7 +88,8 @@ def compute_local_contrast_ratio(
     pad = contrast_kernel // 2
     energy_pad = F.pad(energy, (pad, pad, pad, pad), mode="replicate")
     local_bg = F.avg_pool2d(energy_pad, kernel_size=contrast_kernel, stride=1, padding=0)
-    ratio = energy / (local_bg + float(eps))
+    denom = local_bg + max(float(noise_floor), float(eps))
+    ratio = energy / denom
     # Neutral fallback only if the entire slice has vanishing energy (e.g. blank input)
     is_dead = max_e < float(eps)
     ratio = torch.where(is_dead, torch.ones_like(ratio), ratio)
@@ -110,6 +114,7 @@ def perspective_mcbpro_transport(
     ratio_clamp_max: float = 25.0,
     peak_kernel_size: int = 7,
     contrast_kernel: int = 15,
+    noise_floor: float = 0.2,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the Perspective-Aware Multi-Scale Consistent Bregman-Poisson Recovery Operator.
@@ -230,7 +235,7 @@ def perspective_mcbpro_transport(
                 feat_p4_res = feat_p4
             raw_energy = compute_feature_high_pass_energy(feat_p4_res, pool_kernel=5, eps=eps)
             contrast_ratio = compute_local_contrast_ratio(
-                raw_energy, contrast_kernel=contrast_kernel, eps=eps
+                raw_energy, contrast_kernel=contrast_kernel, noise_floor=noise_floor, eps=eps
             )
             alpha = float(feat_energy_weight)
             contrast_mod = (1.0 - alpha) + alpha * contrast_ratio.to(dtype=work_dtype)

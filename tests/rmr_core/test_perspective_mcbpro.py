@@ -16,6 +16,7 @@ from rmr_core.operators import (
     build_multiscale_regions,
     closed_form_mcbpro_transport,
     compute_feature_high_pass_energy,
+    compute_local_contrast_ratio,
     perspective_mcbpro_transport,
     regional_sum,
 )
@@ -208,5 +209,17 @@ def test_perspective_mcbpro_boundary_replicate_invariance():
     energy = compute_feature_high_pass_energy(feat_uniform, pool_kernel=5)
     # On a uniform field, high pass energy must be identically zero even at boundaries
     assert energy.max().item() < 1e-5, f"Boundary zero-padding artifact detected: max energy = {energy.max().item()}"
+
+
+def test_perspective_mcbpro_noise_floor_suppression():
+    """Verify that microscopic background noise is suppressed by the physical noise floor."""
+    # Microscopic floating point noise: 1e-4 center vs 1e-5 background
+    energy_noise = torch.ones(1, 1, 32, 32) * 1e-5
+    energy_noise[:, :, 15:17, 15:17] = 1e-4
+
+    # With noise_floor = 0.2, the ratio must stay near 0 and NOT amplify to 5.0
+    ratio = compute_local_contrast_ratio(energy_noise, noise_floor=0.2)
+    assert ratio.max().item() < 0.01, f"Noise floor must suppress microscopic fluctuations, max={ratio.max().item()}"
+
 
 

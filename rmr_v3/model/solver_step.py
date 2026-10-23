@@ -188,6 +188,7 @@ def solve_inverse_measure(
         tau_count_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.0))
         feat_energy_weight = float(getattr(cfg, "mcbpro_feat_energy_weight", 0.25))
         contrast_kernel = int(getattr(cfg, "mcbpro_contrast_kernel", 15))
+        noise_floor = float(getattr(cfg, "mcbpro_noise_floor", 0.2))
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
         peak_kernel_size = (
@@ -214,6 +215,7 @@ def solve_inverse_measure(
             ratio_clamp_max=ratio_clamp_max,
             peak_kernel_size=peak_kernel_size,
             contrast_kernel=contrast_kernel,
+            noise_floor=noise_floor,
             return_multiplier=True,
         )
 
