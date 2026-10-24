@@ -153,6 +153,10 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
         scale_prior_boost=getattr(cfg, "scale_prior_boost", 0.0),
         head_activation=getattr(cfg, "head_activation", "softplus"),
         head_blocks=getattr(cfg, "head_blocks", 1),
+        head_type=getattr(cfg, "head_type", "standard"),
+        fine_head_dilations=getattr(cfg, "fine_head_dilations", (1, 2)),
+        subpixel_kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
+        use_film=getattr(cfg, "fine_head_use_film", True),
     )
 
 

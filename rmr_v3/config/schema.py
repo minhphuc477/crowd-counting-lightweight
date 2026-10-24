@@ -64,6 +64,9 @@ ALLOWED_MODEL_KEYS = {
     "temp_softplus",
     "head_activation",
     "head_blocks",
+    "head_type",
+    "fine_head_dilations",
+    "fine_head_use_film",
     # RMR-v8 Stage 2
     "solver_mode",
     "density_gate_rho",

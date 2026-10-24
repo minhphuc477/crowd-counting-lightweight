@@ -5,22 +5,18 @@ import math
 import warnings
 from typing import Any
 
-
 def _softplus_inverse(y: float) -> float:
     y = max(float(y), 1e-8)
     return math.log(math.expm1(y))
-
 
 def _deep_tuple(val: Any) -> Any:
     if isinstance(val, (list, tuple)):
         return tuple(_deep_tuple(x) for x in val)
     return val
 
-
 def _require_positive(name: str, val: float) -> None:
     if val <= 0.0:
         raise ValueError(f"{name} must be strictly positive, got {val}")
-
 
 def _require_non_negative(name: str, val: float) -> None:
     if val < 0.0:
@@ -28,7 +24,6 @@ def _require_non_negative(name: str, val: float) -> None:
 def _require_unit_interval(name: str, val: float) -> None:
     if not (0.0 <= val <= 1.0):
         raise ValueError(f"{name} must be in [0.0, 1.0], got {val}")
-
 
 @dataclass
 class RMRv3Config:
@@ -41,10 +36,11 @@ class RMRv3Config:
     init_m0: float = 0.015763
     max_trainable_params: int = 105000
 
-    # RMR-v29: Sub-pixel Stride-2 Reconstruction Head (+99 params)
     subpixel_stride2: bool = False
     head_blocks: int = 1
-    # Sub-60: Sub-pixel Dirichlet-Multinomial Mass-Preserving Allocation Head (DM-DL, +452 params)
+    head_type: str = "standard"
+    fine_head_dilations: tuple[int, ...] = (1, 2)
+    fine_head_use_film: bool = True
     subpixel_dm: bool = False
     subpixel_kernel_size: int = 3
 
@@ -296,6 +292,8 @@ class RMRv3Config:
             self.context_dilations = _deep_tuple(self.context_dilations)
         if self.morozov_gamma_scales is not None:
             self.morozov_gamma_scales = _deep_tuple(self.morozov_gamma_scales)
+        if self.fine_head_dilations is not None:
+            self.fine_head_dilations = _deep_tuple(self.fine_head_dilations)
         if self.use_park:
             raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
         if self.use_cpcm:
@@ -415,7 +413,6 @@ class RMRv3Config:
                 else:
                     kwargs[k] = v
         return cls(**kwargs)
-
 
 def validate_architecture_contract(cfg: RMRv3Config) -> None:
     """Validate architectural invariants and hyperparameter bounds."""

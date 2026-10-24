@@ -397,8 +397,26 @@ def build_fine_head(
     curvature_pade: bool = False,
     head_activation: str = "softplus",
     head_blocks: int = 1,
+    head_type: str = "standard",
+    fine_head_dilations: tuple[int, ...] = (1, 2),
+    subpixel_kernel_size: int = 3,
+    use_film: bool = True,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
+    if str(head_type).lower() in ("residual_dilated", "first_principles", "rd_finehead"):
+        from .fine_head import ResidualDilatedFineHead
+        return ResidualDilatedFineHead(
+            width=width,
+            num_scales=num_scales,
+            subpixel_stride2=subpixel_stride2,
+            subpixel_kernel_size=subpixel_kernel_size,
+            dilations=fine_head_dilations,
+            use_film=use_film,
+            init_bias=init_bias,
+            temp_softplus=temp_softplus,
+            floor_tau=floor_tau,
+            head_activation=head_activation,
+        )
     kw = {
         "width": width,
         "init_bias": init_bias,
