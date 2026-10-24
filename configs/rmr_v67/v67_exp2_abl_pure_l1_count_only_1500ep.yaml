@@ -13,8 +13,8 @@ data:
   crop_size: 512
   pad_small_images: true
   scale_range:
-  - 0.60
-  - 1.40
+  - 0.85
+  - 1.25
   hflip_prob: 0.5
   brightness_jitter: 0.2
   contrast_jitter: 0.2
