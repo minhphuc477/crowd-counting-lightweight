@@ -116,13 +116,13 @@ loss:
   dm_norm_mode: unnorm_ref
   dm_ref_count: 100.0
   dm_target: dual
-  count_loss_mode: nb
+  count_loss_mode: l1
   count_nb_dispersion: 50.0
 
-  # Bayesian Point Supervision + DM16 + NB Count
-  lambda_count: 0.5
+  # Ablation: Pure Bayesian Point Loss Only (No L1 Count Loss, No DM16 Partition Loss)
+  lambda_count: 0.0
   lambda_bayesian: 1.0
-  lambda_flat_dm16: 0.5
+  lambda_flat_dm16: 0.0
   lambda_region_nb: 0.5
   faithful_regional_nb: true
   regional_nb_beta: 1.0

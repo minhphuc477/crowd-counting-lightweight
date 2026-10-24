@@ -102,7 +102,14 @@ model:
 
 loss:
   output_stride: 2
-  allocation_loss_type: flat_dm16
+  allocation_loss_type: dual_bayesian_dm16
+  bayesian_sigma: 4.0
+  bayesian_adaptive_sigma: true
+  bayesian_sigma_min: 2.0
+  bayesian_sigma_max: 4.0
+  bayesian_background_ratio: 0.15
+  bayesian_canonical_bg: true
+  bayesian_norm_mode: canonical
   dm_block_px: 32
   kappa_flat16: 20.0
   normalize_flat_dm16: true
@@ -112,9 +119,10 @@ loss:
   count_loss_mode: l1
   count_nb_dispersion: 50.0
 
-  # Purified Orthogonal 3-Loss Suite with L1 Count
+  # Ablation: Pure L1 Crop Count Loss Only (No Bayesian Point Loss, No DM16 Partition Loss)
   lambda_count: 1.0
-  lambda_flat_dm16: 1.0
+  lambda_bayesian: 0.0
+  lambda_flat_dm16: 0.0
   lambda_region_nb: 0.5
   faithful_regional_nb: true
   regional_nb_beta: 1.0
