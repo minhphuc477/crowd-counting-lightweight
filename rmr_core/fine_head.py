@@ -6,9 +6,9 @@ Resolves the 4 core pathologies identified in architectural audits:
    inanimate distractors (fence knobs, rivets, stones).
 2. Subpixel Phase Discontinuity: Replaces 1x1 conv with 3x3 polyphase spatial convolution
    prior to PixelShuffle(2), restoring weakly differentiable Sobolev measure continuity.
-3. Gradient Attenuation: Employs strict identity residual shortcuts (x + F(x)) to provide
-   an unattenuated gradient highway for Dirac point losses (Bayesian Point Loss).
-4. Scale Decoupling: Modulates feature channels via zero-initialized FiLM affine scaling
+3. Gradient Attenuation: Employs strict unconditional linear residual shortcuts (x + F(x))
+   providing an unattenuated gradient highway for Dirac point losses (Bayesian Point Loss).
+4. Scale Decoupling: Modulates spatial features via zero-initialized 2D FiLM Conv2d
    with exact Step-0 Parity, preserving calibrated initial prior (m0 = 0.015763 count/cell).
 """
 from __future__ import annotations
@@ -26,9 +26,10 @@ _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(0.015763) - 1.0)  # ≈ -4.1422
 
 
 class DDRBlock(nn.Module):
-    """Dilated Depthwise-Separable Residual Block with GroupNorm and SiLU.
+    """Dilated Depthwise-Separable Linear Residual Block with GroupNorm and SiLU.
 
-    Guarantees strict identity gradient propagation (x + F(x)).
+    Guarantees an unconditional, uninhibited linear identity gradient highway:
+        d(y) / d(x) = I + d(F) / d(x)
     """
 
     def __init__(
@@ -50,18 +51,17 @@ class DDRBlock(nn.Module):
             bias=False,
         )
         self.gn1 = _gn(channels)
-        self.act = nn.SiLU(inplace=True)
+        self.act = nn.SiLU(inplace=False)
         self.pw = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
         self.gn2 = _gn(channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
         out = self.dw(x)
         out = self.gn1(out)
         out = self.act(out)
         out = self.pw(out)
         out = self.gn2(out)
-        return self.act(residual + out)
+        return x + out  # Unconditional linear residual addition
 
 
 class ResidualDilatedFineHead(nn.Module):
@@ -69,7 +69,7 @@ class ResidualDilatedFineHead(nn.Module):
 
     Combines:
     - Stacked Dilated Depthwise Residuals (default dilations: 1, 2) -> ERF = 28px
-    - Step-0 Parity FiLM Scale Simplex Modulator
+    - 2D Spatial FiLM Scale Modulator with Step-0 Parity
     - 3x3 Continuous Spatial Projection prior to PixelShuffle(2)
     - Temperature-Calibrated Softplus with exact initial rate m0
     """
@@ -102,13 +102,13 @@ class ResidualDilatedFineHead(nn.Module):
             blocks.append(DDRBlock(self.width, dilation=int(d)))
         self.refinement_blocks = nn.Sequential(*blocks)
 
-        # 2. Step-0 Parity FiLM Scale Modulator (Perez et al. AAAI 2018)
+        # 2. 2D Spatial FiLM Scale Modulator (Perez et al. AAAI 2018)
         if self.use_film and self.num_scales > 0:
-            self.film_proj = nn.Linear(self.num_scales, 2 * self.width)
-            nn.init.zeros_(self.film_proj.weight)
-            nn.init.zeros_(self.film_proj.bias)
+            self.film_conv = nn.Conv2d(self.num_scales, 2 * self.width, kernel_size=1, bias=True)
+            nn.init.zeros_(self.film_conv.weight)
+            nn.init.zeros_(self.film_conv.bias)
         else:
-            self.film_proj = None
+            self.film_conv = None
 
         # 3. 3x3 Polyphase Spatial Pre-Shuffle Convolution (Shi et al. CVPR 2016)
         out_channels = 4 if self.subpixel_stride2 else 1
@@ -151,24 +151,37 @@ class ResidualDilatedFineHead(nn.Module):
         f: tuple[torch.Tensor, ...] | torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute pre-activation logit field z0 with FiLM modulation and spatial conv."""
+        """Compute pre-activation logit field z0 with 2D spatial FiLM modulation."""
         if isinstance(f, tuple):
             f = f[0]
 
         h = self.refinement_blocks(f)
 
-        # FiLM scale modulation
-        if self.film_proj is not None and scale_weights is not None:
-            sw_vec = scale_weights.mean(dim=(-2, -1)) if scale_weights.dim() == 4 else scale_weights
-            k = min(sw_vec.shape[-1], self.num_scales)
-            sw_in = sw_vec[:, :k]
+        # 2D Spatial FiLM scale modulation
+        if self.film_conv is not None and scale_weights is not None:
+            if scale_weights.dim() == 2:
+                sw_in = scale_weights.view(scale_weights.shape[0], scale_weights.shape[1], 1, 1)
+            elif scale_weights.dim() == 4:
+                sw_in = scale_weights
+            else:
+                sw_in = scale_weights
+
+            k = min(sw_in.shape[1], self.num_scales)
             if k < self.num_scales:
-                pad_k = torch.zeros(sw_vec.shape[0], self.num_scales - k, device=sw_vec.device, dtype=sw_vec.dtype)
-                sw_in = torch.cat([sw_in, pad_k], dim=-1)
-            film_params = self.film_proj(sw_in)
+                pad_k = torch.zeros(
+                    sw_in.shape[0], self.num_scales - k, sw_in.shape[-2], sw_in.shape[-1],
+                    device=sw_in.device, dtype=sw_in.dtype
+                )
+                sw_in = torch.cat([sw_in[:, :k], pad_k], dim=1)
+            else:
+                sw_in = sw_in[:, :self.num_scales]
+
+            if sw_in.shape[-2:] != h.shape[-2:]:
+                sw_in = F.interpolate(sw_in, size=h.shape[-2:], mode="bilinear", align_corners=False)
+
+            film_params = self.film_conv(sw_in)
             gamma, beta = torch.chunk(film_params, 2, dim=1)
-            gamma = 1.0 + torch.tanh(gamma).view(-1, self.width, 1, 1)
-            beta = beta.view(-1, self.width, 1, 1)
+            gamma = 1.0 + torch.tanh(gamma)
             h = h * gamma + beta
 
         z = self.final_conv(h)

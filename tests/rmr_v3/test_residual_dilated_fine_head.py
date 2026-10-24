@@ -2,10 +2,10 @@
 
 Verifies:
 1. Step-0 Parity: Exact calibrated initial rate preservation (m0 = 0.015763 count/cell).
-2. Gradient Highway: Unattenuated gradient flow through identity shortcuts (x + F(x)).
+2. Linear Gradient Highway: Unconditional gradient flow through linear identity shortcuts (x + F(x)).
 3. Subpixel Spatial Continuity: 3x3 polyphase filter cross-cell receptive field overlap.
 4. Parameter Ceiling Invariants: Track A <= 104,441 params, Track B <= 200,000 params.
-5. FiLM Modulation: Bounded scale modulation with zero-initialization neutrality.
+5. 2D Spatial FiLM Modulation: Bounded spatial scale modulation with zero-initialization neutrality.
 """
 from __future__ import annotations
 
@@ -21,16 +21,15 @@ from rmr_v3.losses import compute_rmr_v3_losses
 from rmr_v3.losses.config import RMRv3LossConfig
 
 
-def test_ddr_block_identity_shortcut():
-    """Verify that DDRBlock implements a strict identity shortcut x + F(x)."""
+def test_ddr_block_linear_shortcut():
+    """Verify that DDRBlock implements a pure linear identity shortcut x + F(x)."""
     block = DDRBlock(channels=48, dilation=2)
     # Zero out pointwise conv to isolate identity shortcut
     nn.init.zeros_(block.pw.weight)
     x = torch.randn(2, 48, 32, 32)
     out = block(x)
-    # With pw = 0, F(x) = 0, out must equal SiLU(x)
-    expected = nn.functional.silu(x)
-    assert torch.allclose(out, expected, atol=1e-5), "Identity shortcut failed"
+    # With pw = 0, F(x) = 0, out must strictly equal x (pure linear shortcut without activation bending!)
+    assert torch.allclose(out, x, atol=1e-5), "Linear identity shortcut failed"
 
 
 def test_step_zero_parity():
@@ -78,8 +77,8 @@ def test_step_zero_parity():
     )
 
 
-def test_film_step_zero_neutrality():
-    """Verify that FiLM modulation is strictly neutral (gamma=1, beta=0) at initialization."""
+def test_film_step_zero_spatial_neutrality():
+    """Verify that 2D Spatial FiLM modulation is strictly neutral (gamma=1, beta=0) at initialization."""
     head = ResidualDilatedFineHead(
         width=48,
         num_scales=3,
@@ -89,11 +88,16 @@ def test_film_step_zero_neutrality():
     f = torch.randn(2, 48, 32, 32)
     # Case 1: scale_weights is None
     z_none = head.forward_logits(f, scale_weights=None)
-    # Case 2: scale_weights is arbitrary simplex vector
-    sw = torch.tensor([[0.7, 0.2, 0.1], [0.1, 0.1, 0.8]])
-    z_sw = head.forward_logits(f, scale_weights=sw)
-    # At Step 0, since film_proj is zero-initialized, z_none and z_sw must be identical!
-    assert torch.allclose(z_none, z_sw, atol=1e-5), "FiLM Step-0 neutrality violated"
+    # Case 2: scale_weights is a 4D spatial simplex map [B, 3, H, W]
+    sw_4d = torch.softmax(torch.randn(2, 3, 32, 32), dim=1)
+    z_sw_4d = head.forward_logits(f, scale_weights=sw_4d)
+    # Case 3: scale_weights is a 2D global vector [B, 3]
+    sw_2d = torch.tensor([[0.7, 0.2, 0.1], [0.1, 0.1, 0.8]])
+    z_sw_2d = head.forward_logits(f, scale_weights=sw_2d)
+
+    # At Step 0, since film_conv is zero-initialized, all outputs must be identical!
+    assert torch.allclose(z_none, z_sw_4d, atol=1e-5), "FiLM 4D Step-0 neutrality violated"
+    assert torch.allclose(z_none, z_sw_2d, atol=1e-5), "FiLM 2D Step-0 neutrality violated"
 
 
 def test_subpixel_spatial_receptive_field():
