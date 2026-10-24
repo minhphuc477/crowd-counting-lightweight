@@ -206,3 +206,32 @@ def test_full_forward_backward_gradient_flow():
     assert len(fine_grads) > 0, "No gradients on fine head"
     assert all(torch.isfinite(g).all() for g in fine_grads), "Non-finite gradients"
     assert all(g.abs().max() > 0 for g in fine_grads), "Zero gradients on fine head layer"
+
+
+def test_state_dict_cleanliness_and_serialization():
+    """Verify that state_dict has zero duplicate keys and supports strict roundtrip serialization."""
+    head1 = ResidualDilatedFineHead(width=48, num_scales=3, use_film=True)
+    sd = head1.state_dict()
+    # Exactly 17 clean parameter/buffer tensors, no duplicates from body
+    assert len(sd) == 17, f"Expected 17 unique keys, got {len(sd)}: {list(sd.keys())}"
+    assert "body.0.dw.weight" not in sd, "Duplicate module registered under body!"
+
+    # Roundtrip load test
+    head2 = ResidualDilatedFineHead(width=48, num_scales=3, use_film=True)
+    head2.load_state_dict(sd, strict=True)
+
+    f = torch.randn(2, 48, 32, 32)
+    sw = torch.softmax(torch.randn(2, 3, 32, 32), dim=1)
+    y1 = head1(f, scale_weights=sw)
+    y2 = head2(f, scale_weights=sw)
+    assert torch.allclose(y1, y2, atol=1e-6), "State dict roundtrip altered model output!"
+
+
+def test_amp_mixed_precision_dtype_safety():
+    """Verify that RD-FineHead handles half-precision FP16 inputs safely under AMP."""
+    head = ResidualDilatedFineHead(width=48, num_scales=3, use_film=True).half()
+    f = torch.randn(2, 48, 32, 32, dtype=torch.float16)
+    sw = torch.softmax(torch.randn(2, 3, 32, 32, dtype=torch.float16), dim=1)
+    out = head(f, scale_weights=sw)
+    assert out.dtype == torch.float16, f"Expected float16 output, got {out.dtype}"
+    assert torch.isfinite(out).all(), "Non-finite output under FP16"

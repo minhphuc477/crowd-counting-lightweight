@@ -143,8 +143,10 @@ class ResidualDilatedFineHead(nn.Module):
         if self.temp_softplus:
             self.tau = nn.Parameter(torch.ones(1))
 
-        # Backward compatibility interface: exposes body attribute
-        self.body = nn.Sequential(*blocks, self.final_conv)
+    @property
+    def body(self) -> nn.Sequential:
+        """Expose body as a sequence for test compatibility without duplicating state_dict keys."""
+        return nn.Sequential(*self.refinement_blocks, self.final_conv)
 
     def forward_logits(
         self,
@@ -166,6 +168,8 @@ class ResidualDilatedFineHead(nn.Module):
             else:
                 sw_in = scale_weights
 
+            sw_in = sw_in.to(device=h.device, dtype=h.dtype)
+
             k = min(sw_in.shape[1], self.num_scales)
             if k < self.num_scales:
                 pad_k = torch.zeros(
@@ -177,7 +181,10 @@ class ResidualDilatedFineHead(nn.Module):
                 sw_in = sw_in[:, :self.num_scales]
 
             if sw_in.shape[-2:] != h.shape[-2:]:
-                sw_in = F.interpolate(sw_in, size=h.shape[-2:], mode="bilinear", align_corners=False)
+                if sw_in.shape[-2:] == (1, 1):
+                    sw_in = sw_in.expand(-1, -1, h.shape[-2], h.shape[-1])
+                else:
+                    sw_in = F.interpolate(sw_in, size=h.shape[-2:], mode="bilinear", align_corners=False)
 
             film_params = self.film_conv(sw_in)
             gamma, beta = torch.chunk(film_params, 2, dim=1)
