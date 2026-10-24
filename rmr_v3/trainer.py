@@ -173,7 +173,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         prefetch_factor=2 if workers > 0 else None,
         collate_fn=collate_train,
         drop_last=True,
-        worker_init_fn=seed_worker if deterministic else None,
+        worker_init_fn=seed_worker,
         generator=gen,
     )
     val_loader = None if val_ds is None else DataLoader(
