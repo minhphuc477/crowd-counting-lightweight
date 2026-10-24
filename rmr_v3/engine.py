@@ -156,6 +156,7 @@ def train_one_epoch(
     ema_manager: EMAManager,
     freeze_bn: bool = False,
     grad_accum_steps: int = 1,
+    epoch: int = 0,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Execute one training epoch with mixed precision, gradient clipping, and EMA tracking."""
     model.train()

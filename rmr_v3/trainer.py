@@ -313,6 +313,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             ema_manager=ema_manager,
             freeze_bn=(freeze_bn_epoch >= 0 and epoch >= freeze_bn_epoch),
             grad_accum_steps=grad_accum,
+            epoch=epoch,
         )
         if hasattr(optimizer, "eval"):
             optimizer.eval()
