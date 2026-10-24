@@ -26,7 +26,7 @@ from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
 def get_v67_config_paths() -> list[str]:
     root = Path(__file__).resolve().parent.parent.parent
     paths = sorted(glob.glob(str(root / "configs" / "rmr_v67" / "*.yaml")))
-    assert len(paths) >= 6, f"Expected at least 6 configs in configs/rmr_v67, found {len(paths)}"
+    assert len(paths) == 12, f"Expected 12 configs in configs/rmr_v67, found {len(paths)}"
     return paths
 
 
