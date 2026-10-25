@@ -45,6 +45,8 @@ class CrowdManifestDataset(Dataset):
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
+        crowd_aware_crop: bool = True,
+        crowd_aware_prob: float = 0.85,
     ):
         manifest_path = Path(manifest)
         if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
@@ -77,6 +79,8 @@ class CrowdManifestDataset(Dataset):
         self.erasing_ratio = (float(erasing_ratio[0]), float(erasing_ratio[1]))
         self.erasing_max_patches = int(erasing_max_patches)
         self.cache_images = bool(cache_images)
+        self.crowd_aware_crop = bool(crowd_aware_crop)
+        self.crowd_aware_prob = float(crowd_aware_prob)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
@@ -165,6 +169,8 @@ class CrowdManifestDataset(Dataset):
                 erasing_scale=self.erasing_scale,
                 erasing_ratio=self.erasing_ratio,
                 erasing_max_patches=self.erasing_max_patches,
+                crowd_aware_crop=self.crowd_aware_crop,
+                crowd_aware_prob=self.crowd_aware_prob,
             )
         else:
             image, pts = cap_image_resolution(image, pts, max_size=self.max_size)

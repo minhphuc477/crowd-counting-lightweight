@@ -138,6 +138,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         erasing_scale=tuple(d_cfg.get("erasing_scale", [0.005, 0.03])),
         erasing_ratio=tuple(d_cfg.get("erasing_ratio", [0.5, 2.0])),
         erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
+        crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", True)),
+        crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.85)),
     )
     val_manifest = d_cfg.get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(

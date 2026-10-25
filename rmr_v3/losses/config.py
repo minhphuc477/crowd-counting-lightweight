@@ -28,7 +28,7 @@ class RMRv3LossConfig:
     bayesian_canonical_bg: bool = True
     bayesian_adaptive_sigma: bool = False
     bayesian_sigma_min: float = 2.0
-    bayesian_sigma_max: float = 8.0
+    bayesian_sigma_max: float = 16.0
     ot_reg: float = 10.0
     ot_num_iters: int = 20
     fidt_k: float = 6.0

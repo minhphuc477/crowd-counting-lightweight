@@ -97,7 +97,7 @@ def bayesian_loss(
     targets_list: list[torch.Tensor] | None = None,
     adaptive_sigma: bool = False,
     sigma_min: float = 2.0,
-    sigma_max: float = 8.0,
+    sigma_max: float = 16.0,
 ) -> torch.Tensor:
     """Canonical Bayesian Loss for point supervision (Ma et al. ICCV 2019).
     
@@ -144,11 +144,12 @@ def bayesian_loss(
 
         # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters)
         inv_sq_pts = None
-        if adaptive_sigma and n >= 4:
+        if adaptive_sigma and n >= 2:
             with torch.no_grad():
                 dist_mat = torch.cdist(pts, pts)
-                knn_d = torch.topk(dist_mat, k=4, largest=False).values[:, -1]
-                sig_pts = (knn_d * 0.5).clamp(float(sigma_min), float(sigma_max))
+                k_eff = min(4, n)
+                knn_d = torch.topk(dist_mat, k=k_eff, largest=False).values[:, -1]
+                sig_pts = (knn_d * 0.4).clamp(float(sigma_min), float(sigma_max))
                 inv_sq_pts = (1.0 / (2.0 * sig_pts.square())).unsqueeze(1)
 
         # Compute posterior probabilities under torch.no_grad()

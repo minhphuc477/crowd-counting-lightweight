@@ -132,8 +132,8 @@ def main() -> None:
         help="Force weighted reliability (W=diag(w_R))",
     )
     ap.add_argument(
-        "--tiling", dest="tiling", action="store_true", default=True,
-        help="Enable tiled prediction (default: True)",
+        "--tiling", dest="tiling", action="store_true", default=None,
+        help="Enable tiled prediction (default: read from config or True)",
     )
     ap.add_argument("--no-tiling", dest="tiling", action="store_false", help="Disable tiled prediction")
     ap.add_argument(
@@ -178,9 +178,10 @@ def main() -> None:
         manifest = cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
         manifest_path = Path(manifest)
 
+    use_tiling = bool(cfg.get("eval", {}).get("tiling", True)) if args.tiling is None else args.tiling
     use_tta = bool(args.tta or args.enable_tta)
     mode_tag = "uniform" if uniform_reliability else "weighted"
-    tiling_tag = "" if args.tiling else "_notiling"
+    tiling_tag = "" if use_tiling else "_notiling"
     tta_tag = "_tta" if use_tta else ""
     default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}{tta_tag}"
     ckpt_dir = ckpt_path if ckpt_path.is_dir() else ckpt_path.parent
@@ -247,7 +248,7 @@ def main() -> None:
         loader=loader,
         device=device,
         output_stride=stride,
-        run_tiling=args.tiling,
+        run_tiling=use_tiling,
         forward_kwargs={"uniform_reliability": uniform_reliability},
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,

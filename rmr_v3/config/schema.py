@@ -19,6 +19,7 @@ ALLOWED_DATA_KEYS = {
     "pad_small_images", "max_size", "boundary_margin",
     "saturation_jitter", "grayscale_prob", "random_grayscale",
     "random_erasing_prob", "erasing_scale", "erasing_ratio", "erasing_max_patches",
+    "crowd_aware_crop", "crowd_aware_prob",
 }
 
 ALLOWED_MODEL_KEYS = {
@@ -261,7 +262,7 @@ ALLOWED_TRAIN_KEYS = {
 }
 
 ALLOWED_EVAL_KEYS = {
-    "density_bins",
+    "density_bins", "tiling",
 }
 
 SECTION_ALLOWED_KEYS = {

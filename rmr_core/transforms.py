@@ -84,6 +84,8 @@ def train_transform(
     erasing_scale: tuple[float, float] = (0.005, 0.03),
     erasing_ratio: tuple[float, float] = (0.5, 2.0),
     erasing_max_patches: int = 2,
+    crowd_aware_crop: bool = True,
+    crowd_aware_prob: float = 0.85,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
@@ -135,8 +137,25 @@ def train_transform(
             pts[:, 1] += pad_t
         w1, h1 = image.size
 
-    top = random.randint(0, h1 - crop_size)
-    left = random.randint(0, w1 - crop_size)
+    max_left = max(0, w1 - crop_size)
+    max_top = max(0, h1 - crop_size)
+    if (
+        crowd_aware_crop
+        and pts.numel() > 0
+        and random.random() < float(crowd_aware_prob)
+        and (max_left > 0 or max_top > 0)
+    ):
+        # Anchor crop around a random valid head coordinate with spatial jitter
+        anchor_idx = random.randint(0, pts.shape[0] - 1)
+        anchor_x = float(pts[anchor_idx, 0].item())
+        anchor_y = float(pts[anchor_idx, 1].item())
+        jitter_x = random.randint(-crop_size // 4, crop_size // 4)
+        jitter_y = random.randint(-crop_size // 4, crop_size // 4)
+        left = int(max(0, min(max_left, round(anchor_x - crop_size / 2.0 + jitter_x))))
+        top = int(max(0, min(max_top, round(anchor_y - crop_size / 2.0 + jitter_y))))
+    else:
+        top = random.randint(0, max_top) if max_top > 0 else 0
+        left = random.randint(0, max_left) if max_left > 0 else 0
     image_crop = image.crop((left, top, left + crop_size, top + crop_size))
     image = image_crop
 
