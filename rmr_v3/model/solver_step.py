@@ -147,6 +147,8 @@ def solve_inverse_measure(
         )
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
 
+        conservative_scaling = bool(getattr(cfg, "mcbpro_conservative_scaling", False))
+
         y_mcbpro, s_field = closed_form_mcbpro_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
@@ -161,6 +163,7 @@ def solve_inverse_measure(
             tau_peak=tau_peak,
             ratio_clamp_max=ratio_clamp_max,
             peak_kernel_size=peak_kernel_size,
+            conservative_scaling=conservative_scaling,
             return_multiplier=True,
         )
 
@@ -199,6 +202,8 @@ def solve_inverse_measure(
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
         p4_solver_input = p4.detach() if p4 is not None and getattr(cfg, "detach_p4_for_solver", True) else p4
 
+        conservative_scaling = bool(getattr(cfg, "mcbpro_conservative_scaling", False))
+
         y_pmcbpro, s_field = fed_mcbpro_transport(
             y0=y0_solver_input,
             b_solver=b_solver,
@@ -219,6 +224,7 @@ def solve_inverse_measure(
             peak_kernel_size=peak_kernel_size,
             contrast_kernel=contrast_kernel,
             noise_floor=noise_floor,
+            conservative_scaling=conservative_scaling,
             return_multiplier=True,
         )
 

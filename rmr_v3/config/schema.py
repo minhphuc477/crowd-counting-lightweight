@@ -195,6 +195,7 @@ ALLOWED_MODEL_KEYS = {
     "tau_peak", "ratio_clamp_max", "mcbpro_peak_kernel_size",
     "mcbpro_tau_count_null", "mcbpro_feat_energy_weight",
     "mcbpro_dense_threshold", "mcbpro_contrast_kernel", "mcbpro_noise_floor",
+    "mcbpro_conservative_scaling",
 }
 
 ALLOWED_LOSS_KEYS = {

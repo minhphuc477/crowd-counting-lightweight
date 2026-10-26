@@ -31,6 +31,7 @@ def closed_form_mcbpro_transport(
     tau_peak: float = 0.05,
     ratio_clamp_max: float = 25.0,
     peak_kernel_size: int = 7,
+    conservative_scaling: bool = False,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the 3-stage MC-BPRO measure recovery operator.
@@ -170,32 +171,60 @@ def closed_form_mcbpro_transport(
     scaling_ratio = torch.where(both_zero, torch.ones_like(scaling_ratio), scaling_ratio)
     scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
-    weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
-
-    if scale_weights is not None and scale_partitions is not None:
-        s_field = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
-        for k, mask_k, boxes_k in scale_partitions:
-            if mask_k is None or boxes_k is None or boxes_k.shape[0] == 0:
-                continue
-            w_k = w_s_f[:, :, mask_k]
-            w_s_k = weighted_s[:, :, mask_k]
-            cov_k = regional_adjoint(
-                w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
+    if conservative_scaling:
+        boost_ratio = torch.relu(scaling_ratio - 1.0).clamp_max(float(ratio_clamp_max) - 1.0)
+        weighted_boost = (w_s_f * boost_ratio).to(dtype=work_dtype)
+        if scale_weights is not None and scale_partitions is not None:
+            boost_field = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
+            for k, mask_k, boxes_k in scale_partitions:
+                if mask_k is None or boxes_k is None or boxes_k.shape[0] == 0:
+                    continue
+                w_k = w_s_f[:, :, mask_k]
+                w_b_k = weighted_boost[:, :, mask_k]
+                cov_k = regional_adjoint(
+                    w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
+                ).clamp_min(float(eps))
+                adj_k = regional_adjoint(w_b_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
+                s_k = adj_k / cov_k
+                pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
+                if active_pi_sum is not None:
+                    pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
+                boost_field = boost_field + pi_k * s_k
+        else:
+            cov_w = regional_adjoint(
+                w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
             ).clamp_min(float(eps))
-            adj_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
-            s_k = adj_k / cov_k
-            pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
-            if active_pi_sum is not None:
-                pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
-            s_field = s_field + pi_k * s_k
-    else:
-        cov_w = regional_adjoint(
-            w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-        ).clamp_min(float(eps))
-        adj_s = regional_adjoint(weighted_s, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
-        s_field = adj_s / cov_w
+            adj_s = regional_adjoint(weighted_boost, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
+            boost_field = adj_s / cov_w
 
-    y_projected = torch.clamp_min(y_aug * s_field, 0.0).to(dtype=y0.dtype)
+        y_fg = y_aug * (1.0 + boost_field)
+        y_projected = torch.clamp_min(m_effective * y_fg, 0.0).to(dtype=y0.dtype)
+        s_field = (1.0 + boost_field) * m_effective
+    else:
+        weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
+        if scale_weights is not None and scale_partitions is not None:
+            s_field = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
+            for k, mask_k, boxes_k in scale_partitions:
+                if mask_k is None or boxes_k is None or boxes_k.shape[0] == 0:
+                    continue
+                w_k = w_s_f[:, :, mask_k]
+                w_s_k = weighted_s[:, :, mask_k]
+                cov_k = regional_adjoint(
+                    w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
+                ).clamp_min(float(eps))
+                adj_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
+                s_k = adj_k / cov_k
+                pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
+                if active_pi_sum is not None:
+                    pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
+                s_field = s_field + pi_k * s_k
+        else:
+            cov_w = regional_adjoint(
+                w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
+            ).clamp_min(float(eps))
+            adj_s = regional_adjoint(weighted_s, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
+            s_field = adj_s / cov_w
+        y_projected = torch.clamp_min(y_aug * s_field, 0.0).to(dtype=y0.dtype)
 
     if return_multiplier:
         return y_projected, s_field.to(dtype=y0.dtype)

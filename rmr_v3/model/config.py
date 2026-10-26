@@ -115,6 +115,7 @@ class RMRv3Config:
     mcbpro_dense_threshold: float = 2.0
     mcbpro_noise_floor: float = 0.2
     mcbpro_peak_kernel_size: int = 7
+    mcbpro_conservative_scaling: bool = False
     tau_peak: float = 0.05
     ratio_clamp_max: float = 25.0
     density_gate_rho: float = 0.02
