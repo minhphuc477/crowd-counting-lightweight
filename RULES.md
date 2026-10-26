@@ -79,3 +79,22 @@
 2. **CẤM SCALE JITTER QUÁ ĐÀ**: Bắt buộc `scale_range: [0.6, 1.4]`. Tuyệt đối không dùng cận dưới $< 0.5$ (gây aliasing phá hủy micro-head trên Stride 4).
 3. **CẤM BỎ BAYESIAN POINT LOSS TRÊN TRACK A**: Track A (Stride 4) bắt buộc dùng `dual_bayesian_dm16` (`lambda_bayesian: 0.15`) để bảo toàn định vị điểm trong khối $64 \times 64$ px.
 4. **BẮT BUỘC DENSITY-GATING CHO FED-CARRIER**: FED-Carrier chỉ được kích hoạt khi $b_s > 2.0$, cấm bơm mass tự do vào cảnh thưa và trung bình ($b_s \le 2.0$).
+
+---
+
+## 10. Tuyệt Đối Cấm Tự Ý Lắp Ráp Vô Nghĩa (STRICT BAN ON MEANINGLESS PATCHWORK & FRANKENCODE)
+- **CẤM TỰ Ý NHỒI NHÉT / LẮP GHÉP CÁC MODULE VÔ NGHĨA**:
+  - Tuyệt đối không được tự ý chắp vá, lắp ghép thêm các khối kiến trúc tạm bợ (ví dụ: các tầng dilated convolution chồng chất, gating modules, residual wrappers, FiLM layers, random erasing, color invert...) khi chưa chứng minh được căn cứ toán học và cơ sở vật lý rõ ràng.
+  - Không sao chép máy móc các thủ thuật từ bài toán khác (như ImageNet classification) sang bài toán Radon Measure Recovery nếu vi phạm tính trơn Sobolev hoặc làm mâu thuẫn gradient của bài toán độ đo.
+  - Mọi thành phần trong mô hình phải tuân thủ triệt để nguyên lý tối giản (Occam's Razor), giữ cho mã nguồn thuần khiết, trong sáng, minh bạch và có thể giải thích được bằng toán học.
+
+---
+
+## 11. Quy Chuẩn Thiết Lập Thí Nghiệm & Kiểm Tra Đối Chứng (RIGOROUS EXPERIMENTAL DESIGN & SCIENTIFIC CONTROL INVARIANT)
+- **CẤM TỰ Ý TẠO THÍ NGHIỆM TRÀN LAN THEO CẢM TÍNH ("MUỐN LÀ TẠO")**:
+  - Không được tự ý tạo một loạt file cấu hình YAML hay hàng chục nhánh thử nghiệm bừa bãi khi chưa hiểu rõ bản chất vấn đề.
+  - Nghiêm cấm việc thay đổi nhiều biến số cùng một lúc (confounding variables) gây mất dấu nguyên nhân thoái hóa.
+- **BẮT BUỘC ĐỐI CHỨNG KIỂM TRA ĐẦY ĐỦ (CONTROLLED EXPERIMENTATION PROTOCOL)**:
+  - Khi thiết lập bất kỳ một thí nghiệm mới nào, bắt buộc phải có **bài toán đối chứng đơn biến (single-variable ablation control)** rõ ràng với mỏ neo tốt nhất (V64 Champion, 69.03 MAE).
+  - Phải có giả thuyết khoa học định lượng (hypothesis), cơ chế vật lý dự kiến (mechanism), và tiêu chí đo lường chính xác trước khi khởi tạo cấu hình.
+  - Mọi thí nghiệm đề xuất phải nhận được sự đồng thuận hoặc yêu cầu từ người dùng trước khi triển khai.

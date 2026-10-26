@@ -26,6 +26,10 @@
 4. **Code Quality**:
    - Strictly $\le 450$ lines per file.
    - Pure Python / YAML configurations.
+5. **Zero Frankencode & Zero Meaningless Patchwork**:
+   - Strictly forbidden to arbitrarily cobble together heuristics, dilated layers, or meaningless patches. Everything must have rigorous mathematical/physical justification.
+6. **Controlled Experimentation Protocol**:
+   - Never create random experiments on a whim ("không phải muốn là tạo"). Every proposed experiment must have a clear single-variable control against the champion baseline (V64, 69.03 MAE) and require explicit user consent.
 
 ## 4. Key Artifacts & Narrative Reports
 - Anti-Regression Experimental Guidelines: `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`

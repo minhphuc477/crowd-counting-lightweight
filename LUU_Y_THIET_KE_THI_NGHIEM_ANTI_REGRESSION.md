@@ -134,3 +134,11 @@ Trước khi gửi lệnh huấn luyện lên server GPU, bắt buộc phải ch
   git push origin RMR
   ```
 * Không để tích tụ thay đổi chưa commit qua các lượt tương tác.
+
+### 6. Cấm Tự Ý Lắp Ghép Vô Nghĩa & Không Được "Muốn Là Tạo" Thí Nghiệm
+* **Tuyệt đối không tự ý lắp ráp vô nghĩa (No Arbitrary Frankencode)**:
+  - Nghiêm cấm việc ghép các module chắp vá (dilated convs, gating layers, random erasing, color jittering...) khi chưa có kiểm chứng toán học và cơ sở vật lý rõ ràng.
+  - Phải ưu tiên giữ code sạch, đúng, đủ, tôn trọng tính trơn Sobolev và bản chất độ đo Radon.
+* **Không được "muốn là tạo" thí nghiệm (No Whim-Driven Experiments)**:
+  - Cấm sinh ra hàng loạt file cấu hình hay thử nghiệm bừa bãi khi chưa hiểu rõ vấn đề gốc rễ.
+  - Khi thiết lập thí nghiệm, bắt buộc phải có đối chứng kiểm tra đầy đủ (đối chứng đơn biến với mỏ neo V64 Champion 69.03 MAE), có giả thuyết khoa học minh bạch và phải có sự đồng thuận từ người dùng trước khi triển khai.
