@@ -126,13 +126,16 @@ def train_transform(
         w1 = max(crop_size, int(round(w0 * scale)))
         h1 = max(crop_size, int(round(h0 * scale)))
 
-    if (w1, h1) != (w0, h0):
-        image = image.resize((w1, h1), Image.Resampling.BILINEAR)
-        if pts.numel():
-            pts[:, 0] = ((pts[:, 0] + 0.5) * (w1 / w0) - 0.5).clamp(0.0, float(w1) - 1e-4)
-            pts[:, 1] = ((pts[:, 1] + 0.5) * (h1 / h0) - 0.5).clamp(0.0, float(h1) - 1e-4)
+    scale_x = float(w1) / float(w0)
+    scale_y = float(h1) / float(h0)
+    if pts.numel():
+        pts[:, 0] = ((pts[:, 0] + 0.5) * scale_x - 0.5).clamp(0.0, float(w1) - 1e-4)
+        pts[:, 1] = ((pts[:, 1] + 0.5) * scale_y - 0.5).clamp(0.0, float(h1) - 1e-4)
 
+    is_padded = False
     if pad_small_images and (w1 < crop_size or h1 < crop_size):
+        if (w1, h1) != (w0, h0):
+            image = image.resize((w1, h1), Image.Resampling.BILINEAR)
         pad_w = max(0, crop_size - w1)
         pad_h = max(0, crop_size - h1)
         padded = Image.new("RGB", (w1 + pad_w, h1 + pad_h), color=(128, 128, 128))
@@ -143,6 +146,7 @@ def train_transform(
             pts[:, 0] += pad_l
             pts[:, 1] += pad_t
         w1, h1 = image.size
+        is_padded = True
 
     max_left = max(0, w1 - crop_size)
     max_top = max(0, h1 - crop_size)
@@ -163,8 +167,15 @@ def train_transform(
     else:
         top = random.randint(0, max_top) if max_top > 0 else 0
         left = random.randint(0, max_left) if max_left > 0 else 0
-    image_crop = image.crop((left, top, left + crop_size, top + crop_size))
-    image = image_crop
+
+    if is_padded:
+        image = image.crop((left, top, left + crop_size, top + crop_size))
+    else:
+        src_l = max(0.0, float(left) / scale_x)
+        src_t = max(0.0, float(top) / scale_y)
+        src_r = min(float(w0), float(left + crop_size) / scale_x)
+        src_b = min(float(h0), float(top + crop_size) / scale_y)
+        image = image.resize((crop_size, crop_size), Image.Resampling.BILINEAR, box=(src_l, src_t, src_r, src_b))
 
     if pts.numel():
         pts[:, 0] -= left
