@@ -149,6 +149,15 @@ class CrowdManifestDataset(Dataset):
         else:
             pts = torch.tensor(item.get("points", []), dtype=torch.float32).reshape(-1, 2)
 
+        # Invariant: Discard invalid out-of-bounds annotations from raw dataset releases
+        w_img, h_img = image.size
+        if pts.numel() > 0:
+            in_bounds = (
+                (pts[:, 0] >= 0.0) & (pts[:, 0] < float(w_img)) &
+                (pts[:, 1] >= 0.0) & (pts[:, 1] < float(h_img))
+            )
+            pts = pts[in_bounds]
+
         if self.train:
             image_t, pts = train_transform(
                 image,
