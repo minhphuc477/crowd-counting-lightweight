@@ -338,9 +338,8 @@ def fed_mcbpro_transport(
             adj_s = regional_adjoint(weighted_boost, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
             boost_field = adj_s / cov_w
 
-        y_fg = y_aug * (1.0 + boost_field)
-        y_projected = torch.clamp_min(m_effective * y_fg, 0.0).to(dtype=y0.dtype)
-        s_field = (1.0 + boost_field) * m_effective
+        s_field = 1.0 + boost_field
+        y_projected = torch.clamp_min(y_aug * s_field, 0.0).to(dtype=y0.dtype)
     else:
         weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
         if scale_weights is not None and scale_partitions is not None:

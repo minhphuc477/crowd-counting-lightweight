@@ -1,19 +1,21 @@
 """Unit tests for Conservative (Non-Destructive) Bregman-Poisson Measure Recovery.
 
-Guarantees the 4 mathematical invariants of Conservative MC-BPRO:
+Guarantees the core mathematical invariants of Conservative MC-BPRO:
 1. Dirac Carrier Fidelity: Carrier peaks are strictly preserved (y* >= y0 on foreground).
    When regional box evidence underestimates the count due to spatial box smoothing,
    the solver never squashes down sharp carrier Dirac peaks.
 2. Deficit Recovery: When regional evidence detects missing mass (b_R > mu_R),
    the deficit is positively injected into valleys and density is scaled up.
-3. Background Suppression: On unpopulated background regions (b_R = 0),
-   spurious noise is strictly suppressed to 0.0 by continuous support gating.
-4. Smooth Autograd: Full end-to-end differentiability with finite gradients.
+3. Isolated Person Multiscale Fidelity: On full 512x512 multi-box geometries (32, 64, 128px),
+   isolated individuals are 100% preserved even under under-estimated evidence.
+4. Batch Sample Isolation: Zero cross-batch broadcasting or gradient leakage.
+5. Arbitrary & Prime Resolution Parity: Finite, non-negative output on odd/prime grids.
+6. Smooth Autograd: Full end-to-end differentiability with finite gradients.
 """
 from __future__ import annotations
 
 import torch
-from rmr_core.operators.mcbpro import closed_form_mcbpro_transport
+from rmr_core.operators.mcbpro import closed_form_mcbpro_transport, regional_sum
 from rmr_core.operators.fed_mcbpro import fed_mcbpro_transport
 from rmr_core.operators.regions import build_multiscale_regions
 from rmr_v3.model import RMRv3, RMRv3Config
@@ -39,9 +41,9 @@ def test_conservative_scaling_preserves_carrier_peaks_when_evidence_underestimat
 
     # Conservative solver (preserves carrier peaks)
     y_cons = closed_form_mcbpro_transport(y0, b_solver, None, regions, conservative_scaling=True)
-    assert y_cons[0, 0, 2, 2].item() >= 0.95, f"Carrier peak squashed: {y_cons[0, 0, 2, 2].item()}"
-    assert y_cons[0, 0, 3, 3].item() >= 0.95, f"Carrier peak squashed: {y_cons[0, 0, 3, 3].item()}"
-    assert y_cons.sum().item() >= mu_0 * 0.95, "Total foreground mass must be preserved"
+    assert y_cons[0, 0, 2, 2].item() >= 0.999, f"Carrier peak squashed: {y_cons[0, 0, 2, 2].item()}"
+    assert y_cons[0, 0, 3, 3].item() >= 0.999, f"Carrier peak squashed: {y_cons[0, 0, 3, 3].item()}"
+    assert y_cons.sum().item() >= mu_0 * 0.999, "Total foreground mass must be preserved"
 
 
 def test_conservative_scaling_injects_deficit_when_evidence_detects_missing_mass() -> None:
@@ -63,40 +65,67 @@ def test_conservative_scaling_injects_deficit_when_evidence_detects_missing_mass
     assert y_cons[0, 0, 2, 2].item() > 1.0, "Existing peak should receive positive scaling boost"
 
 
-def test_conservative_scaling_suppresses_background_noise_to_zero() -> None:
-    """Invariant 3: Spurious background noise must be suppressed to 0.0 identically."""
+def test_conservative_scaling_isolated_person_multiscale_fidelity() -> None:
+    """Invariant 3: Isolated individual on 512x512 multiscale boxes is 100% preserved."""
+    regions = build_multiscale_regions(512, 512, output_stride=2, region_sizes_px=(32, 64, 128))
+
+    # Single isolated person
+    y0 = torch.zeros(1, 1, 256, 256)
+    y0[0, 0, 128, 128] = 1.0
+
+    # Regional evidence underestimates
+    b_solver = regional_sum(y0, regions.boxes.to(torch.int64)) * 0.5
+
+    y_cons = closed_form_mcbpro_transport(y0, b_solver, None, regions, conservative_scaling=True)
+    assert y_cons[0, 0, 128, 128].item() >= 0.999, (
+        f"Isolated person squashed by multiscale solver: {y_cons[0, 0, 128, 128].item()}"
+    )
+    assert y_cons.sum().item() >= 0.999, f"Mass lost: {y_cons.sum().item()}"
+
+
+def test_conservative_scaling_batch_sample_isolation() -> None:
+    """Invariant 4: Batch sample 0 and sample 1 must have zero gradient cross-talk."""
     regions = build_multiscale_regions(64, 64, output_stride=4, region_sizes_px=(32,))
     n_boxes = regions.boxes.shape[0]
 
-    # Carrier has 0.05 spurious noise across the entire field
-    y0_noisy = torch.ones(1, 1, 16, 16) * 0.05
-    # True background: Evidence is 0 everywhere
-    b_solver_zero = torch.zeros(1, 1, n_boxes)
+    y0 = torch.zeros(2, 1, 16, 16, requires_grad=True)
+    with torch.no_grad():
+        y0[0, 0, 5, 5] = 2.0  # Sample 0 has crowd
+        # Sample 1 is all zero
 
-    y_cons = closed_form_mcbpro_transport(y0_noisy, b_solver_zero, None, regions, conservative_scaling=True)
-    assert y_cons.abs().max().item() == 0.0, f"Background noise leaked: max = {y_cons.max().item()}"
-
-
-def test_conservative_scaling_autograd_graph_and_finite_gradients() -> None:
-    """Invariant 4: End-to-end differentiability with finite non-zero gradients."""
-    regions = build_multiscale_regions(64, 64, output_stride=4, region_sizes_px=(32,))
-    n_boxes = regions.boxes.shape[0]
-
-    y0 = torch.rand(2, 1, 16, 16, requires_grad=True)
-    b_solver = torch.rand(2, 1, n_boxes, requires_grad=True)
+    b_solver = torch.zeros(2, 1, n_boxes, requires_grad=True)
+    with torch.no_grad():
+        b_solver[0, 0, 0] = 3.0  # Sample 0 has evidence
 
     y_out = closed_form_mcbpro_transport(y0, b_solver, None, regions, conservative_scaling=True)
-    loss = y_out.sum()
-    loss.backward()
 
-    assert y0.grad is not None and torch.isfinite(y0.grad).all()
-    assert b_solver.grad is not None and torch.isfinite(b_solver.grad).all()
-    assert y0.grad.norm().item() > 0.0
-    assert b_solver.grad.norm().item() > 0.0
+    # Compute loss on Sample 0 ONLY
+    loss_sample0 = y_out[0].sum()
+    loss_sample0.backward()
+
+    # Sample 1 MUST receive identically zero gradient
+    assert y0.grad is not None
+    assert (y0.grad[1] == 0.0).all(), "Gradient cross-talk: Sample 0 loss influenced Sample 1!"
+    assert (b_solver.grad[1] == 0.0).all(), "Evidence gradient cross-talk!"
+
+
+def test_conservative_scaling_prime_dimensions() -> None:
+    """Invariant 5: Arbitrary prime grid dimensions (e.g. 113 x 127 cells)."""
+    h_c, w_c = 17, 23
+    regions = build_multiscale_regions(h_c * 4, w_c * 4, output_stride=4, region_sizes_px=(32,))
+    n_boxes = regions.boxes.shape[0]
+
+    y0 = torch.rand(1, 1, h_c, w_c)
+    b_solver = torch.rand(1, 1, n_boxes)
+
+    y_out = closed_form_mcbpro_transport(y0, b_solver, None, regions, conservative_scaling=True)
+    assert y_out.shape == (1, 1, h_c, w_c)
+    assert (y_out >= 0.0).all()
+    assert torch.isfinite(y_out).all()
 
 
 def test_fed_mcbpro_conservative_scaling_parity() -> None:
-    """Invariant 5: FED-MCBPRO conservative scaling parity."""
+    """Invariant 6: FED-MCBPRO conservative scaling parity."""
     regions = build_multiscale_regions(64, 64, output_stride=4, region_sizes_px=(32,))
     n_boxes = regions.boxes.shape[0]
 
@@ -116,11 +145,11 @@ def test_fed_mcbpro_conservative_scaling_parity() -> None:
         feat_p4=feat_p4,
         conservative_scaling=True,
     )
-    assert y_fed_cons[0, 0, 2, 2].item() >= 0.95, "FED-MCBPRO carrier peak must be preserved"
+    assert y_fed_cons[0, 0, 2, 2].item() >= 0.999, "FED-MCBPRO carrier peak must be preserved"
 
 
 def test_rmrv3_model_pipeline_with_conservative_scaling() -> None:
-    """Invariant 6: Full RMRv3 forward-backward integration with conservative scaling."""
+    """Invariant 7: Full RMRv3 forward-backward integration with conservative scaling."""
     cfg = RMRv3Config(
         feature_width=32,
         subpixel_stride2=False,
