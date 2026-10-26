@@ -245,6 +245,8 @@ def point_preserving_random_erasing(
     if prob <= 0.0 or random.random() >= prob:
         return image_t, pts
     c, h, w = image_t.shape
+    image_t = image_t.clone()
+    c_mean = image_t.mean(dim=(-2, -1), keepdim=True)
     num_patches = random.randint(1, max(1, max_patches))
     for _ in range(num_patches):
         target_area = float(h * w) * random.uniform(float(scale[0]), float(scale[1]))
@@ -254,8 +256,6 @@ def point_preserving_random_erasing(
         if 0 < h_e < h and 0 < w_e < w:
             top_e = random.randint(0, h - h_e)
             left_e = random.randint(0, w - w_e)
-            c_mean = image_t.mean(dim=(-2, -1), keepdim=True)
-            image_t = image_t.clone()
             image_t[:, top_e : top_e + h_e, left_e : left_e + w_e] = c_mean
     return image_t, pts
 

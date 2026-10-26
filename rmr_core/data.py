@@ -85,6 +85,10 @@ class CrowdManifestDataset(Dataset):
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
+        # Safeguard: Prevent multi-worker RAM explosion on large datasets (> 500 images, e.g. QNRF, NWPU)
+        if self.cache_images and len(self.items) > 500 and not preload:
+            self.cache_images = False
+
         seen_ids, seen_images = set(), set()
         for idx, it in enumerate(self.items):
             sid = str(it.get("id", idx))
