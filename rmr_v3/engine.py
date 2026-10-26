@@ -102,13 +102,14 @@ def evaluate_v3(
             traj_rows.append(t_diag)
         return {}
 
+    eval_solv_str = 0.0 if not getattr(model.cfg, "enable_solver", True) else 1.0
     rows, summary = evaluate_dataset(
         model=model,
         loader=loader,
         device=device,
         output_stride=int(model.cfg.output_stride),
         run_tiling=run_tiling,
-        forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": 1.0},
+        forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": eval_solv_str},
         extra_sample_callback=sample_callback,
         enforce_gt_consistency=True,
         density_bins=density_bins,

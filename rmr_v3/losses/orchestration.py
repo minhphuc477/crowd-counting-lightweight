@@ -165,6 +165,23 @@ def _compute_auxiliary_losses(
     points: list[torch.Tensor] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compute auxiliary geometric, prior, and dual-lattice regularizers."""
+    has_aux = (
+        cfg.lambda_curvature > 0.0 or cfg.lambda_hard_bg > 0.0 or cfg.lambda_fg_gate > 0.0
+        or getattr(cfg, "lambda_strauss", 0.0) > 0.0 or cfg.lambda_hurdle > 0.0 or cfg.lambda_trunc_nb > 0.0
+        or cfg.lambda_scale_align > 0.0 or getattr(cfg, "lambda_rn_transport", 0.0) > 0.0
+        or cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0
+        or (cfg.use_spectral_loss and cfg.lambda_spectral > 0.0)
+        or (getattr(cfg, "use_chfl", False) and getattr(cfg, "lambda_chfl", 0.0) > 0.0)
+    )
+    if not has_aux:
+        for k in (
+            "curvature", "hard_bg", "fg_bce", "strauss", "hurdle_bce", "trunc_nb",
+            "scale_align", "rn_transport", "cell_carrier", "cell_fine",
+            "spectral", "spectral_dc", "spectral_ac", "chfl",
+        ):
+            losses[k] = zero_val
+        return losses
+
     stride = int(getattr(cfg, "output_stride", 4))
 
     # Curvature Power Loss (high-density variance stabilization)

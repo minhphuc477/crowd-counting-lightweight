@@ -52,21 +52,22 @@ def format_epoch_row(
     train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
 
     alloc_type = getattr(loss_cfg, "allocation_loss_type", "flat_dm16")
+    lam_dm16 = float(getattr(loss_cfg, "lambda_flat_dm16", 0.0))
     if loss_cfg.use_multiscale_dm or loss_cfg.use_hierarchical_dm:
         alloc_repr = (
             f"alloc: {train_allocation:.3f} (16:{train_dm16:.3f}, "
             f"32:{row_log['train_dm32']:.3f}, 64:{row_log['train_dm64']:.3f})"
         )
     elif alloc_type == "dual_bayesian_dm16":
-        alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
+        alloc_repr = f"bay: {train_allocation:.2f}" if lam_dm16 == 0.0 else f"alloc(bay+dm): {train_allocation:.3f}"
     elif alloc_type == "bayesian":
-        alloc_repr = f"alloc(bay): {train_allocation:.3f}"
+        alloc_repr = f"bay: {train_allocation:.2f}"
     elif alloc_type == "fidt":
-        alloc_repr = f"alloc(fidt): {train_allocation:.3f}"
+        alloc_repr = f"fidt: {train_allocation:.3f}"
     elif alloc_type == "ot_sinkhorn":
-        alloc_repr = f"alloc(ot): {train_allocation:.3f}"
+        alloc_repr = f"ot: {train_allocation:.3f}"
     else:
-        alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
+        alloc_repr = f"dm16: {train_allocation:.3f}"
 
     hurdle_str = f" | h_bce: {loss_avgs.get('hurdle_bce', 0.0):.4f}" if loss_avgs.get("hurdle_bce", 0.0) > 0 else ""
     v11_str = ""
@@ -89,10 +90,13 @@ def format_epoch_row(
     if float(row_log.get("train_count_l1", 0.0)) > 0:
         cnt_repr += f", cnt_l1: {float(row_log['train_count_l1']):.2f}"
 
-    loss_detail = (
-        f"Loss: {row_log['train_total']:.4f} [{cnt_repr}, {alloc_repr}, "
-        f"cell: {row_log['train_cell']:.3f}, reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]"
-    )
+    active_terms = [cnt_repr, alloc_repr]
+    if row_log.get("train_cell", 0.0) > 0.0001:
+        active_terms.append(f"cell: {row_log['train_cell']:.3f}")
+    if row_log.get("train_region_nb", 0.0) > 0.0001:
+        active_terms.append(f"reg_nb: {row_log['train_region_nb']:.3f}")
+
+    loss_detail = f"Loss: {row_log['train_total']:.4f} [{', '.join(active_terms)}{hurdle_str}{v11_str}]"
     return (
         f"[{epoch+1:04d}/{epochs:04d}] {loss_detail} | "
         f"SolvStr: {solver_strength:.2f} | "
