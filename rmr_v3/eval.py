@@ -109,7 +109,9 @@ def load_model_from_ckpt(
             print("Loaded live weights from checkpoint (--use-live-weights specified).")
 
     model.switch_to_deploy()
-    model.set_solver_strength(1.0)
+    enable_solver = bool(m_cfg.get("enable_solver", True))
+    solver_strength = 1.0 if enable_solver else 0.0
+    model.set_solver_strength(solver_strength)
     model.to(device).eval()
     return model, uniform_reliability, cfg, ckpt
 

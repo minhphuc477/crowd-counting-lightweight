@@ -9,27 +9,29 @@ data:
   train_manifest: data/shb_train_all.jsonl
   val_manifest: data/shb_test.jsonl
   crop_size: 512
-  pad_small_images: true
+  pad_small_images: false
+  crowd_aware_crop: true
+  crowd_aware_prob: 0.50
   scale_range:
   - 0.85
   - 1.25
   hflip_prob: 0.5
-  brightness_jitter: 0.2
-  contrast_jitter: 0.2
-  saturation_jitter: 0.3
-  grayscale_prob: 0.30
+  brightness_jitter: 0.0
+  contrast_jitter: 0.0
+  saturation_jitter: 0.0
+  grayscale_prob: 0.0
   gamma_jitter:
-  - 0.6
-  - 1.5
+  - 1.0
+  - 1.0
   random_invert_prob: 0.0
-  random_erasing_prob: 0.35
+  random_erasing_prob: 0.0
   erasing_scale:
   - 0.005
   - 0.03
   erasing_ratio:
   - 0.5
   - 2.0
-  erasing_max_patches: 3
+  erasing_max_patches: 0
 
 model:
   output_stride: 4
@@ -39,7 +41,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.015763
+  init_m0: 0.002500
 
   # ASPP-Lite Neck with Dilations [2, 4, 8]
   neck_type: aspp_lite

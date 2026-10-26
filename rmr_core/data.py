@@ -46,7 +46,7 @@ class CrowdManifestDataset(Dataset):
         cache_images: bool = True,
         preload: bool = False,
         crowd_aware_crop: bool = True,
-        crowd_aware_prob: float = 0.85,
+        crowd_aware_prob: float = 0.50,
     ):
         manifest_path = Path(manifest)
         if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):

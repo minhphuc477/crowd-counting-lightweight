@@ -139,7 +139,7 @@ def route_allocation_loss(
     """Compute and route allocation loss (Bayesian, DM16, FIDT, OT) across y, y0, or dual."""
     comps: dict[int, torch.Tensor] = {}
     losses: dict[str, torch.Tensor] = {}
-    if cfg.dm_target == "dual":
+    if cfg.dm_target == "dual" and y is not y0:
         loss_alloc_y, dm_comps_y = compute_single_allocation(y, target_float, points, cfg)
         loss_alloc_y0, dm_comps_y0 = compute_single_allocation(y0, target_float, points, cfg)
         loss_allocation = 0.5 * loss_alloc_y + 0.5 * loss_alloc_y0
@@ -149,6 +149,8 @@ def route_allocation_loss(
         loss_allocation, comps = compute_single_allocation(
             y if cfg.dm_target == "y" else y0, target_float, points, cfg
         )
+        if cfg.dm_target == "dual":
+            losses["allocation_y"], losses["allocation_y0"] = loss_allocation, loss_allocation
 
     losses["allocation"] = loss_allocation
     if cfg.allocation_loss_type == "bayesian":

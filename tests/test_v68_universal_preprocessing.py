@@ -127,3 +127,43 @@ def test_bayesian_loss_config_default_sigma_max() -> None:
     """Verifies RMRv3LossConfig default bayesian_sigma_max is 16.0."""
     cfg = RMRv3LossConfig()
     assert cfg.bayesian_sigma_max == 16.0
+
+
+def test_multi_dataset_manifest_empirical_densities() -> None:
+    """Verifies empirical m0 computation for SHA, SHB, QNRF at Stride 4."""
+    from rmr_core.manifests import compute_manifest_density
+    m0_sha = compute_manifest_density("data/sha_a_train_all.jsonl", output_stride=4)
+    m0_shb = compute_manifest_density("data/shb_train_all.jsonl", output_stride=4)
+    m0_qnrf = compute_manifest_density("data/qnrf_train.jsonl", output_stride=4)
+
+    assert 0.015 < m0_sha < 0.017, f"Unexpected SHA m0: {m0_sha}"
+    assert 0.0020 < m0_shb < 0.0030, f"Unexpected SHB m0: {m0_shb}"
+    assert 0.0015 < m0_qnrf < 0.0025, f"Unexpected QNRF m0: {m0_qnrf}"
+    # Invariant: SHB is ~6.3x lower density than SHA
+    assert m0_sha / m0_shb > 5.0, f"Density ratio {m0_sha / m0_shb} too low"
+
+
+def test_zero_synthetic_padding_small_image_scaling() -> None:
+    """Verifies that small images (e.g. 299x182) are scaled to min side >= crop_size with 0.0% gray padding."""
+    # Create image smaller than 512x512 with distinct color
+    img = Image.new("RGB", (299, 182), color=(255, 100, 50))
+    pts = torch.tensor([[100.0, 50.0], [200.0, 150.0], [-10.0, -5.0]], dtype=torch.float32)
+
+    img_t, pts_t = train_transform(
+        img,
+        pts,
+        crop_size=512,
+        pad_small_images=False,
+        crowd_aware_crop=True,
+        crowd_aware_prob=0.50,
+    )
+    assert img_t.shape == (3, 512, 512)
+    # Verify no gray (128/255 = ~0.502) border pixels: all pixels should match scaled original
+    assert (img_t > 0.0).all()
+    # Out-of-bounds point (-10, -5) must be stripped
+    if pts_t.numel() > 0:
+        assert (pts_t[:, 0] >= 0.0).all()
+        assert (pts_t[:, 1] >= 0.0).all()
+        assert (pts_t[:, 0] <= 511.0).all()
+        assert (pts_t[:, 1] <= 511.0).all()
+

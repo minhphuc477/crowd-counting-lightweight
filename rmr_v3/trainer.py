@@ -59,13 +59,12 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     m_cfg = cfg.setdefault("model", {})
     subpix = bool(m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False))
     eff_stride = 2 if subpix else int(m_cfg.get("output_stride", 4))
-    init_m0_stride = 4 if m_cfg.get("subpixel_dm", False) else eff_stride
-    if "init_m0" not in m_cfg and "train_manifest" in cfg.get("data", {}):
-        m_cfg["init_m0"] = compute_manifest_density(
-            cfg["data"]["train_manifest"],
-            output_stride=init_m0_stride,
-            data_root=cfg["data"].get("data_root"),
-        )
+    if "train_manifest" in cfg.get("data", {}):
+        manifest_p = cfg["data"]["train_manifest"]
+        if "init_m0" not in m_cfg or m_cfg.get("init_m0") in (None, "auto"):
+            m_cfg["init_m0"] = compute_manifest_density(
+                manifest_p, output_stride=4, data_root=cfg["data"].get("data_root")
+            )
 
     run_config_hash = compute_config_hash(cfg)
 
@@ -129,7 +128,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=d_cfg.get("data_root"),
         cache_images=bool(d_cfg.get("cache_images", True)),
         preload=bool(d_cfg.get("preload", False)),
-        pad_small_images=bool(d_cfg.get("pad_small_images", True)),
+        pad_small_images=bool(d_cfg.get("pad_small_images", False)),
         boundary_margin=float(d_cfg.get("boundary_margin", 0.0)),
         max_size=int(d_cfg.get("max_size", 2048)),
         saturation_jitter=float(d_cfg.get("saturation_jitter", 0.0)),
@@ -139,7 +138,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         erasing_ratio=tuple(d_cfg.get("erasing_ratio", [0.5, 2.0])),
         erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
         crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", True)),
-        crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.85)),
+        crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.50)),
     )
     val_manifest = d_cfg.get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(

@@ -85,7 +85,7 @@ def train_transform(
     erasing_ratio: tuple[float, float] = (0.5, 2.0),
     erasing_max_patches: int = 2,
     crowd_aware_crop: bool = True,
-    crowd_aware_prob: float = 0.85,
+    crowd_aware_prob: float = 0.50,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
@@ -99,6 +99,13 @@ def train_transform(
         x' = (x + 0.5) * (w1 / w0) - 0.5, y' = (y + 0.5) * (h1 / h0) - 0.5.
     """
     pts = points_xy.clone().float().reshape(-1, 2)
+    w_init, h_init = image.size
+    if pts.numel() > 0:
+        in_bounds = (
+            (pts[:, 0] >= 0.0) & (pts[:, 0] < float(w_init)) &
+            (pts[:, 1] >= 0.0) & (pts[:, 1] < float(h_init))
+        )
+        pts = pts[in_bounds]
     image, pts = cap_image_resolution(image, pts, max_size=max_size)
     w0, h0 = image.size
     max_dim, min_dim = max(w0, h0), min(w0, h0)
