@@ -14,6 +14,8 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import KDTree
 
+from rmr_core.manifests import resolve_image_path
+
 
 def analyze_manifest(manifest_path: Path, data_root: Path) -> dict:
     if not manifest_path.exists():
@@ -39,10 +41,8 @@ def analyze_manifest(manifest_path: Path, data_root: Path) -> dict:
         n_pts = len(pts)
         head_counts.append(n_pts)
 
-        # Image resolution
-        img_p = Path(it["image"])
-        if not img_p.is_absolute():
-            img_p = data_root / img_p
+        # Image resolution via unified manifest path resolution
+        img_p = resolve_image_path(it["image"], data_root=data_root)
         
         # Fast PIL header read without loading full image pixels
         with Image.open(img_p) as img:

@@ -63,6 +63,7 @@ def resolve_image_path(image_val: str | Path, data_root: str | Path | None = Non
         cand_parent = root.parent / p
         if cand_parent.is_file():
             return cand_parent
+        return cand_stripped
     if p.is_file():
         return p
     return cand1

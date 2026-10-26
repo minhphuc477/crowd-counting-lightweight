@@ -213,4 +213,14 @@ def test_virtual_capping_direct_box_resizing_invariants():
         assert (cpts[:, 1] >= 0.0).all() and (cpts[:, 1] <= 511.0).all()
 
 
+def test_resolve_image_path_redundant_root_nonexistent_fallback():
+    """Verify resolve_image_path with redundant root prefix strips it even when file does not exist."""
+    from rmr_core.manifests import resolve_image_path
+    data_root = Path("data")
+    resolved = resolve_image_path("data/nwpu/images/9999.jpg", data_root=data_root)
+    assert resolved == Path("data/nwpu/images/9999.jpg")
+    assert "data/data" not in resolved.as_posix()
+
+
+
 
