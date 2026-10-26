@@ -118,23 +118,28 @@ def compute_manifest_density(
                     f"Image '{img_path}' referenced at line {line_num} in manifest '{manifest_path}' does not exist."
                 )
             with Image.open(img_path) as img:
-                w, h = img.size
-            if max_size is not None and max(w, h) > max_size:
-                cap_scale = float(max_size) / float(max(w, h))
-                w = int(round(w * cap_scale))
-                h = int(round(h * cap_scale))
-            cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
+                w_raw, h_raw = img.size
+
             if pts_list:
                 pts_arr = torch.tensor(pts_list, dtype=torch.float32).reshape(-1, 2)
                 valid = (
                     (pts_arr[:, 0] >= 0)
-                    & (pts_arr[:, 0] < w)
+                    & (pts_arr[:, 0] < w_raw)
                     & (pts_arr[:, 1] >= 0)
-                    & (pts_arr[:, 1] < h)
+                    & (pts_arr[:, 1] < h_raw)
                 )
                 n_pts = int(valid.sum().item())
             else:
                 n_pts = 0
+
+            if max_size is not None and max(w_raw, h_raw) > max_size:
+                cap_scale = float(max_size) / float(max(w_raw, h_raw))
+                w_eff = int(round(w_raw * cap_scale))
+                h_eff = int(round(h_raw * cap_scale))
+            else:
+                w_eff, h_eff = w_raw, h_raw
+
+            cells = math.ceil(h_eff / output_stride) * math.ceil(w_eff / output_stride)
             total_pts += n_pts
             total_cells += cells
 

@@ -113,6 +113,10 @@ class CrowdManifestDataset(Dataset):
             "nwpu_train.jsonl": 3109,
             "nwpu_val.jsonl": 500,
             "nwpu_test.jsonl": 1500,
+            "mall_train.jsonl": 800,
+            "mall_test.jsonl": 1200,
+            "mall_all.jsonl": 2000,
+            "ucsd_all.jsonl": 2000,
         }
         if self.manifest.name in canonical_counts and len(self.items) != canonical_counts[self.manifest.name]:
             expected_n = canonical_counts[self.manifest.name]

@@ -135,3 +135,53 @@ def test_cap_image_resolution_boundary_points():
     assert capped_pts[:, 1].min().item() >= 0.0
     assert capped_pts[:, 0].max().item() < float(capped_img.size[0])
     assert capped_pts[:, 1].max().item() < float(capped_img.size[1])
+
+
+def test_compute_manifest_density_capped_preserves_all_points(tmp_path: Path):
+    """Verify compute_manifest_density with max_size does not drop points in bottom-right quadrants."""
+    from rmr_core.manifests import compute_manifest_density
+    img_p = tmp_path / "huge_sample.jpg"
+    # Create large image 4000 x 3000
+    Image.new("RGB", (4000, 3000)).save(img_p)
+
+    # 4 points across 4 quadrants:
+    # (100, 100): top-left
+    # (3500, 100): top-right (x > 2048)
+    # (100, 2500): bottom-left (y > 2048)
+    # (3500, 2500): bottom-right (x > 2048 and y > 2048)
+    pts = [
+        [100.0, 100.0],
+        [3500.0, 100.0],
+        [100.0, 2500.0],
+        [3500.0, 2500.0],
+    ]
+    manifest_p = tmp_path / "manifest.jsonl"
+    manifest_p.write_text(json.dumps({"image": str(img_p.name), "points": pts}) + "\n", encoding="utf-8")
+
+    # With max_size=2048:
+    # cap_scale = 2048 / 4000 = 0.512
+    # w_eff = 2048, h_eff = 1536
+    # cells = ceil(1536 / 4) * ceil(2048 / 4) = 384 * 512 = 196608
+    # All 4 points must be counted!
+    d = compute_manifest_density(manifest_p, output_stride=4, data_root=tmp_path, max_size=2048)
+    expected_density = 4.0 / (384 * 512)
+    assert pytest.approx(d, rel=1e-5) == expected_density
+
+
+def test_random_erasing_boundary_robustness():
+    """Verify point_preserving_random_erasing is resilient against reversed/boundary inputs."""
+    from rmr_core.transforms import point_preserving_random_erasing
+    img_t = torch.rand(3, 512, 512)
+    pts = torch.rand(20, 2) * 512
+
+    # Reversed scale tuple and extreme ratio
+    out_img, out_pts = point_preserving_random_erasing(
+        img_t, pts, prob=1.0, scale=(0.05, 0.01), ratio=(0.1, 3.0), max_patches=4
+    )
+    assert out_img.shape == (3, 512, 512)
+    assert out_pts.shape == pts.shape
+    assert torch.equal(out_pts, pts)
+    assert not torch.isnan(out_img).any()
+    assert not torch.isinf(out_img).any()
+
+
