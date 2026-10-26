@@ -10,7 +10,7 @@
 #    floor_tau: 0.003
 #    C1-continuous quadratic floor eliminating ~180 false positive people from 175k background cells.
 # 3. Pure Orthogonal 2-Loss Hierarchy:
-#    Macro Level: Homoscedastic L1 Count (lambda_count: 0.5)
+#    Macro Level: Homoscedastic L1 Count (lambda_count: 1.0)
 #    Micro Level: Canonical Bayesian Point Loss (bayesian_weight: 1.0, knn sigma in [2.0, 8.0] px)
 #    Zero conflicting auxiliaries: lambda_flat_dm16: 0.0, lambda_cell: 0.0
 # 4. Long-Horizon Training Stability:
@@ -98,7 +98,7 @@ model:
   solver_mode: mcbpro
   mcbpro_conservative_scaling: true
   mcbpro_deficit_seeding: true
-  mcbpro_valley_power: 1.0
+  mcbpro_valley_power: 2.0
   mcbpro_reg_threshold: 0.00025
   mcbpro_peak_kernel_size: 7
   eps: 1.0e-06
