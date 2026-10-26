@@ -5,9 +5,12 @@ import json
 from pathlib import Path
 
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
+
+# Prevent crashes on truncated images in wild crowd counting datasets
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from .manifests import compute_manifest_density, resolve_image_path, resolve_manifest_path
 from .transforms import (
