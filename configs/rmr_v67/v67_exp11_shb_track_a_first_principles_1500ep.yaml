@@ -13,8 +13,8 @@ data:
   crowd_aware_crop: true
   crowd_aware_prob: 0.50
   scale_range:
-  - 0.85
-  - 1.25
+  - 0.70
+  - 1.30
   hflip_prob: 0.5
   brightness_jitter: 0.0
   contrast_jitter: 0.0
@@ -116,12 +116,12 @@ loss:
   dm_norm_mode: unnorm_ref
   dm_ref_count: 100.0
   dm_target: dual
-  count_loss_mode: l1
+  count_loss_mode: nb
   count_nb_dispersion: 50.0
 
-  # First-Principles Purified 3-Loss Suite
-  lambda_count: 1.0
-  lambda_bayesian: 1.0
+  # First-Principles Heteroscedastic 3-Loss Suite (V64 Champion Anchor)
+  lambda_count: 0.5
+  lambda_bayesian: 0.15
   lambda_flat_dm16: 0.5
   lambda_region_nb: 0.5
   faithful_regional_nb: true

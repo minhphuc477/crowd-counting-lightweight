@@ -12,27 +12,29 @@ data:
   train_manifest: data/sha_a_train_all.jsonl
   val_manifest: data/sha_a_test.jsonl
   crop_size: 512
-  pad_small_images: true
+  pad_small_images: false
+  crowd_aware_crop: true
+  crowd_aware_prob: 0.50
   scale_range:
-  - 0.85
-  - 1.25
+  - 0.70
+  - 1.30
   hflip_prob: 0.5
-  brightness_jitter: 0.2
-  contrast_jitter: 0.2
-  saturation_jitter: 0.3
-  grayscale_prob: 0.30
+  brightness_jitter: 0.0
+  contrast_jitter: 0.0
+  saturation_jitter: 0.0
+  grayscale_prob: 0.0
   gamma_jitter:
-  - 0.6
-  - 1.5
+  - 1.0
+  - 1.0
   random_invert_prob: 0.0
-  random_erasing_prob: 0.35
+  random_erasing_prob: 0.0
   erasing_scale:
   - 0.005
   - 0.03
   erasing_ratio:
   - 0.5
   - 2.0
-  erasing_max_patches: 3
+  erasing_max_patches: 0
 
 model:
   output_stride: 2
@@ -117,12 +119,12 @@ loss:
   dm_norm_mode: unnorm_ref
   dm_ref_count: 100.0
   dm_target: dual
-  count_loss_mode: l1
+  count_loss_mode: nb
   count_nb_dispersion: 50.0
 
-  # First-Principles Purified 3-Loss Suite
-  lambda_count: 1.0
-  lambda_bayesian: 1.0
+  # First-Principles Heteroscedastic 3-Loss Suite (V64 Champion Anchor)
+  lambda_count: 0.5
+  lambda_bayesian: 0.15
   lambda_flat_dm16: 0.5
   lambda_region_nb: 0.5
   faithful_regional_nb: true
