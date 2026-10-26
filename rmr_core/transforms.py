@@ -60,8 +60,8 @@ def cap_image_resolution(
     image_capped = image.resize((w_cap, h_cap), Image.Resampling.BILINEAR)
     if pts.numel():
         pts = pts.clone()
-        pts[:, 0] = (pts[:, 0] + 0.5) * (w_cap / w0) - 0.5
-        pts[:, 1] = (pts[:, 1] + 0.5) * (h_cap / h0) - 0.5
+        pts[:, 0] = ((pts[:, 0] + 0.5) * (w_cap / w0) - 0.5).clamp(0.0, float(w_cap) - 1e-4)
+        pts[:, 1] = ((pts[:, 1] + 0.5) * (h_cap / h0) - 0.5).clamp(0.0, float(h_cap) - 1e-4)
     return image_capped, pts
 
 
@@ -129,8 +129,8 @@ def train_transform(
     if (w1, h1) != (w0, h0):
         image = image.resize((w1, h1), Image.Resampling.BILINEAR)
         if pts.numel():
-            pts[:, 0] = (pts[:, 0] + 0.5) * (w1 / w0) - 0.5
-            pts[:, 1] = (pts[:, 1] + 0.5) * (h1 / h0) - 0.5
+            pts[:, 0] = ((pts[:, 0] + 0.5) * (w1 / w0) - 0.5).clamp(0.0, float(w1) - 1e-4)
+            pts[:, 1] = ((pts[:, 1] + 0.5) * (h1 / h0) - 0.5).clamp(0.0, float(h1) - 1e-4)
 
     if pad_small_images and (w1 < crop_size or h1 < crop_size):
         pad_w = max(0, crop_size - w1)
