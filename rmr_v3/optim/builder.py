@@ -1,4 +1,4 @@
-﻿"""Unified optimizer and scheduler factory with autonomous LR probing for RMR."""
+"""Unified optimizer and scheduler factory with autonomous LR probing for RMR."""
 
 from __future__ import annotations
 
