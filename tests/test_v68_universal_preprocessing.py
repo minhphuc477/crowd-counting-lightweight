@@ -167,3 +167,16 @@ def test_zero_synthetic_padding_small_image_scaling() -> None:
         assert (pts_t[:, 0] <= 511.0).all()
         assert (pts_t[:, 1] <= 511.0).all()
 
+
+def test_shanghaitech_manifest_generator() -> None:
+    """Verifies that ShanghaiTech manifest generator extracts valid annotations from official MAT."""
+    from scripts.create_shanghaitech_manifests import extract_points_from_mat
+    from pathlib import Path
+    mat_p = Path("data/part_A_final/train_data/ground_truth/GT_IMG_1.mat")
+    if not mat_p.exists():
+        pytest.skip("MAT file not found")
+    pts = extract_points_from_mat(mat_p)
+    assert len(pts) == 1546
+    assert len(pts[0]) == 2
+
+
