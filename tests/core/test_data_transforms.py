@@ -578,4 +578,27 @@ def test_dataset_duplicate_id_and_image_guard(tmp_path: Path):
         CrowdManifestDataset(dup_img_manifest, train=False)
 
 
+def test_resolve_image_path_cross_benchmark(tmp_path: Path):
+    """resolve_image_path must correctly handle redundant 'data/' prefix and relative paths."""
+    from rmr_core.manifests import resolve_image_path
+    data_dir = tmp_path / "data"
+    sub_dir = data_dir / "bench"
+    sub_dir.mkdir(parents=True)
+    img_file = sub_dir / "sample.jpg"
+    Image.new("RGB", (10, 10)).save(img_file)
+
+    # 1. Standard relative: 'bench/sample.jpg' with root='data'
+    p1 = resolve_image_path("bench/sample.jpg", data_root=data_dir)
+    assert p1.resolve() == img_file.resolve()
+
+    # 2. Redundant prefix: 'data/bench/sample.jpg' with root='data'
+    p2 = resolve_image_path("data/bench/sample.jpg", data_root=data_dir)
+    assert p2.resolve() == img_file.resolve()
+
+    # 3. Absolute path
+    p3 = resolve_image_path(str(img_file), data_root=data_dir)
+    assert p3.resolve() == img_file.resolve()
+
+
+
 

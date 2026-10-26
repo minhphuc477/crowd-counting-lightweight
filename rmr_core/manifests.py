@@ -40,6 +40,34 @@ def resolve_manifest_path(
     return None
 
 
+def resolve_image_path(image_val: str | Path, data_root: str | Path | None = None) -> Path:
+    """Resolve image file path handling relative prefix variations across benchmarks.
+
+    Resolves:
+    1. Absolute path
+    2. data_root / image_val
+    3. Redundant root directory prefix (e.g. data_root='data' and image_val='data/nwpu/...')
+    4. Relative to repo root
+    """
+    p = Path(image_val)
+    if p.is_absolute():
+        return p
+    root = Path(data_root) if data_root is not None else Path("data")
+    cand1 = root / p
+    if cand1.is_file():
+        return cand1
+    if p.parts and p.parts[0] == root.name:
+        cand_stripped = root.joinpath(*p.parts[1:])
+        if cand_stripped.is_file():
+            return cand_stripped
+        cand_parent = root.parent / p
+        if cand_parent.is_file():
+            return cand_parent
+    if p.is_file():
+        return p
+    return cand1
+
+
 def compute_manifest_density(
     manifest: str | Path | None,
     output_stride: int = 4,
@@ -84,9 +112,7 @@ def compute_manifest_density(
                 continue
             item = json.loads(line)
             pts_list = item.get("points", [])
-            img_path = Path(item["image"])
-            if not img_path.is_absolute():
-                img_path = root / img_path
+            img_path = resolve_image_path(item["image"], data_root=root)
             if not img_path.exists():
                 raise FileNotFoundError(
                     f"Image '{img_path}' referenced at line {line_num} in manifest '{manifest_path}' does not exist."
@@ -116,3 +142,10 @@ def compute_manifest_density(
         raise ValueError(f"Manifest '{manifest_path}' contains no valid images or cells.")
 
     return float(total_pts / total_cells)
+
+
+__all__ = [
+    "compute_manifest_density",
+    "resolve_image_path",
+    "resolve_manifest_path",
+]

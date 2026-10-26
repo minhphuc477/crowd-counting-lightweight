@@ -9,7 +9,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
-from .manifests import compute_manifest_density, resolve_manifest_path
+from .manifests import compute_manifest_density, resolve_image_path, resolve_manifest_path
 from .transforms import (
     cap_image_resolution,
     normalize_image,
@@ -122,9 +122,7 @@ class CrowdManifestDataset(Dataset):
 
         if self.cache_images and preload:
             for i, it in enumerate(self.items):
-                p = Path(it["image"])
-                if not p.is_absolute():
-                    p = self.root / p
+                p = resolve_image_path(it["image"], data_root=self.root)
                 self._raw_bytes_cache[i] = p.read_bytes()
 
     def __len__(self) -> int:
@@ -132,9 +130,7 @@ class CrowdManifestDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         item = self.items[idx]
-        path = Path(item["image"])
-        if not path.is_absolute():
-            path = self.root / path
+        path = resolve_image_path(item["image"], data_root=self.root)
         if self.cache_images:
             if idx not in self._raw_bytes_cache:
                 self._raw_bytes_cache[idx] = path.read_bytes()
@@ -221,6 +217,7 @@ __all__ = [
     "compute_manifest_density",
     "normalize_image",
     "rasterize_points",
+    "resolve_image_path",
     "resolve_manifest_path",
     "train_transform",
 ]
