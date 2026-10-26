@@ -206,7 +206,10 @@ def evaluate_dataset(
     aes = [r["abs_err"] for r in rows]
     sqs = [r["sq_err"] for r in rows]
     mae_lo, mae_hi = bootstrap_ci(aes, statistic=np.mean)
-    rmse_lo, rmse_hi = bootstrap_ci(sqs, statistic=lambda v: float(np.sqrt(np.mean(v))))
+    rmse_lo, rmse_hi = bootstrap_ci(
+        sqs,
+        statistic=lambda v, axis=None: np.sqrt(np.mean(v, axis=axis)) if axis is not None else float(np.sqrt(np.mean(v))),
+    )
     summary["mae_ci95"] = [mae_lo, mae_hi]
     summary["rmse_ci95"] = [rmse_lo, rmse_hi]
 
