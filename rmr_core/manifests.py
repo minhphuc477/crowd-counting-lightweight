@@ -45,11 +45,13 @@ def compute_manifest_density(
     output_stride: int = 4,
     default_m0: float = 0.015763,
     data_root: str | Path | None = None,
+    max_size: int | None = None,
 ) -> float:
     """Empirically compute the mean cell density m0 across training images in a manifest.
 
     m0 = total_valid_points / total_stride4_cells.
     Points outside [0, w) x [0, h) are filtered identically to rasterize_points.
+    Images exceeding max_size are capped identically to cap_image_resolution.
     """
     manifest_path_obj = Path(manifest) if manifest is not None else None
     if manifest_path_obj is not None and manifest_path_obj.name in (
@@ -91,6 +93,10 @@ def compute_manifest_density(
                 )
             with Image.open(img_path) as img:
                 w, h = img.size
+            if max_size is not None and max(w, h) > max_size:
+                cap_scale = float(max_size) / float(max(w, h))
+                w = int(round(w * cap_scale))
+                h = int(round(h * cap_scale))
             cells = math.ceil(h / output_stride) * math.ceil(w / output_stride)
             if pts_list:
                 pts_arr = torch.tensor(pts_list, dtype=torch.float32).reshape(-1, 2)

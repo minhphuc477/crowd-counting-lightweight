@@ -63,7 +63,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         manifest_p = cfg["data"]["train_manifest"]
         if "init_m0" not in m_cfg or m_cfg.get("init_m0") in (None, "auto"):
             m_cfg["init_m0"] = compute_manifest_density(
-                manifest_p, output_stride=4, data_root=cfg["data"].get("data_root")
+                manifest_p, output_stride=4, data_root=cfg["data"].get("data_root"),
+                max_size=cfg["data"].get("max_size", 2048),
             )
 
     run_config_hash = compute_config_hash(cfg)
