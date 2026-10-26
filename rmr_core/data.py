@@ -185,6 +185,7 @@ class CrowdManifestDataset(Dataset):
                 crowd_aware_crop=self.crowd_aware_crop,
                 crowd_aware_prob=self.crowd_aware_prob,
             )
+            image.close()
         else:
             image, pts = cap_image_resolution(image, pts, max_size=self.max_size)
             image_t = TF.to_tensor(image)

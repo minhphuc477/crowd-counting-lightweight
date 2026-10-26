@@ -99,32 +99,40 @@ def train_transform(
         x' = (x + 0.5) * (w1 / w0) - 0.5, y' = (y + 0.5) * (h1 / h0) - 0.5.
     """
     pts = points_xy.clone().float().reshape(-1, 2)
-    w_init, h_init = image.size
+    w0, h0 = image.size
     if pts.numel() > 0:
         in_bounds = (
-            (pts[:, 0] >= 0.0) & (pts[:, 0] < float(w_init)) &
-            (pts[:, 1] >= 0.0) & (pts[:, 1] < float(h_init))
+            (pts[:, 0] >= 0.0) & (pts[:, 0] < float(w0)) &
+            (pts[:, 1] >= 0.0) & (pts[:, 1] < float(h0))
         )
         pts = pts[in_bounds]
-    image, pts = cap_image_resolution(image, pts, max_size=max_size)
-    w0, h0 = image.size
-    max_dim, min_dim = max(w0, h0), min(w0, h0)
+
+    # Virtual resolution capping: compute effective scale on capped dimension space
+    # without allocating redundant multi-megapixel intermediate PIL buffers.
+    max_dim = max(w0, h0)
+    if max_dim > max_size:
+        cap_scale = float(max_size) / float(max_dim)
+        w_cap, h_cap = int(round(w0 * cap_scale)), int(round(h0 * cap_scale))
+    else:
+        w_cap, h_cap = w0, h0
+    max_dim_cap, min_dim_cap = max(w_cap, h_cap), min(w_cap, h_cap)
+
     if pad_small_images:
         scale_lo = float(scale_range[0])
         scale_hi = max(scale_lo, float(scale_range[1]))
         scale = random.uniform(scale_lo, scale_hi)
-        w1 = int(round(w0 * scale))
-        h1 = int(round(h0 * scale))
+        w1 = int(round(w_cap * scale))
+        h1 = int(round(h_cap * scale))
     else:
         # 0.0% synthetic padding: scale shorter side so min(w1, h1) >= crop_size, preserving scale variance
-        min_scale = max(float(scale_range[0]), float(crop_size) / float(max(min_dim, 1)))
-        max_allowed = max(min_scale * 1.25, float(max_size) / float(max(max_dim, 1)))
+        min_scale = max(float(scale_range[0]), float(crop_size) / float(max(min_dim_cap, 1)))
+        max_allowed = max(min_scale * 1.25, float(max_size) / float(max(max_dim_cap, 1)))
         bandwidth_ratio = float(scale_range[1]) / max(float(scale_range[0]), 1e-4)
         target_hi = max(float(scale_range[1]), min_scale * min(bandwidth_ratio, 1.35))
         scale_hi = max(min_scale, min(target_hi, max_allowed))
         scale = random.uniform(min_scale, scale_hi)
-        w1 = max(crop_size, int(round(w0 * scale)))
-        h1 = max(crop_size, int(round(h0 * scale)))
+        w1 = max(crop_size, int(round(w_cap * scale)))
+        h1 = max(crop_size, int(round(h_cap * scale)))
 
     scale_x = float(w1) / float(w0)
     scale_y = float(h1) / float(h0)
@@ -134,18 +142,19 @@ def train_transform(
 
     is_padded = False
     if pad_small_images and (w1 < crop_size or h1 < crop_size):
-        if (w1, h1) != (w0, h0):
-            image = image.resize((w1, h1), Image.Resampling.BILINEAR)
+        work_img = image.resize((w1, h1), Image.Resampling.BILINEAR) if (w1, h1) != (w0, h0) else image
         pad_w = max(0, crop_size - w1)
         pad_h = max(0, crop_size - h1)
         padded = Image.new("RGB", (w1 + pad_w, h1 + pad_h), color=(128, 128, 128))
         pad_l, pad_t = pad_w // 2, pad_h // 2
-        padded.paste(image, (pad_l, pad_t))
-        image = padded
+        padded.paste(work_img, (pad_l, pad_t))
+        if work_img is not image:
+            work_img.close()
+        padded_img = padded
         if pts.numel():
             pts[:, 0] += pad_l
             pts[:, 1] += pad_t
-        w1, h1 = image.size
+        w1, h1 = padded_img.size
         is_padded = True
 
     max_left = max(0, w1 - crop_size)
@@ -169,13 +178,14 @@ def train_transform(
         left = random.randint(0, max_left) if max_left > 0 else 0
 
     if is_padded:
-        image = image.crop((left, top, left + crop_size, top + crop_size))
+        cropped = padded_img.crop((left, top, left + crop_size, top + crop_size))
+        padded_img.close()
     else:
         src_l = max(0.0, float(left) / scale_x)
         src_t = max(0.0, float(top) / scale_y)
         src_r = min(float(w0), float(left + crop_size) / scale_x)
         src_b = min(float(h0), float(top + crop_size) / scale_y)
-        image = image.resize((crop_size, crop_size), Image.Resampling.BILINEAR, box=(src_l, src_t, src_r, src_b))
+        cropped = image.resize((crop_size, crop_size), Image.Resampling.BILINEAR, box=(src_l, src_t, src_r, src_b))
 
     if pts.numel():
         pts[:, 0] -= left
@@ -190,13 +200,15 @@ def train_transform(
             pts[:, 1] = pts[:, 1].clamp(0.0, float(crop_size - 1))
 
     if hflip_prob > 0.0 and random.random() < hflip_prob:
-        flipped = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        image = flipped
+        flipped = cropped.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        cropped.close()
+        cropped = flipped
         if pts.numel():
             pts[:, 0] = (float(crop_size) - 1.0) - pts[:, 0]
             pts[:, 0] = pts[:, 0].clamp(0.0, float(crop_size - 1))
 
-    image_t = TF.to_tensor(image)
+    image_t = TF.to_tensor(cropped)
+    cropped.close()
 
     # Photometric augmentation (opt-in via config; default disabled)
     if brightness_jitter > 0.0 and random.random() < 0.5:

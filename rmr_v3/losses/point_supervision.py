@@ -139,7 +139,7 @@ def bayesian_loss(
             losses.append(total_pred)
             continue
 
-        pts = pts.to(device=device, dtype=torch.float32)
+        pts = pts.to(device=device, dtype=torch.float32, non_blocking=True)
         n = pts.shape[0]
 
         # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters)
@@ -256,7 +256,7 @@ def sinkhorn_ot_loss(
             losses.append(total_pred)
             continue
 
-        pts = pts.to(device=device, dtype=torch.float32)
+        pts = pts.to(device=device, dtype=torch.float32, non_blocking=True)
         n = pts.shape[0]
 
         with torch.no_grad():
@@ -338,7 +338,7 @@ def fidt_loss(
             losses.append(l_val)
             continue
 
-        pts = pts.to(device=device, dtype=torch.float32)
+        pts = pts.to(device=device, dtype=torch.float32, non_blocking=True)
         # Convert points from pixel coordinates to feature grid coordinates
         pts_grid = pts / float(stride)
         n = pts_grid.shape[0]

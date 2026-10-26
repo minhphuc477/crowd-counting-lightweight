@@ -178,6 +178,8 @@ def train_one_epoch(
     for batch_idx, batch in enumerate(train_loader):
         images = batch["image"].to(device, non_blocking=True)
         targets = batch["target_y"].to(device, non_blocking=True)
+        raw_pts = batch.get("points")
+        points = [p.to(device, non_blocking=True) for p in raw_pts] if (raw_pts is not None and device.type == "cuda") else raw_pts
 
         with torch.amp.autocast("cuda" if device.type == "cuda" else "cpu", enabled=amp):
             compute_energy = (n_batches <= 0 or batch_idx == n_batches - 1)
@@ -187,7 +189,7 @@ def train_one_epoch(
                 solver_strength=solver_strength,
                 compute_energy=compute_energy,
             )
-            losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=batch.get("points"))
+            losses = compute_rmr_v3_losses(outputs, targets, loss_cfg, points=points)
             loss = losses["total"] / accum_steps
 
         # Strict mathematical invariant: training loss must be finite by construction

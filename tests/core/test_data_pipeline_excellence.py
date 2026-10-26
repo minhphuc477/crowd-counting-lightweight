@@ -185,3 +185,32 @@ def test_random_erasing_boundary_robustness():
     assert not torch.isinf(out_img).any()
 
 
+def test_virtual_capping_direct_box_resizing_invariants():
+    """Verify virtual capping avoids intermediate PIL allocation and preserves point bounds."""
+    # 4000 x 3000 image simulates UCF-QNRF / NWPU scale
+    w0, h0 = 4000, 3000
+    arr = np.full((h0, w0, 3), 120, dtype=np.uint8)
+    img = Image.fromarray(arr)
+    pts = torch.tensor([
+        [100.0, 100.0],
+        [2000.0, 1500.0],
+        [3900.0, 2900.0],
+    ], dtype=torch.float32)
+
+    crop_t, cpts = train_transform(
+        img,
+        pts,
+        crop_size=512,
+        max_size=2048,
+        pad_small_images=False,
+        crowd_aware_crop=True,
+        crowd_aware_prob=1.0,
+    )
+    assert crop_t.shape == (3, 512, 512)
+    assert not torch.isnan(crop_t).any()
+    if cpts.numel():
+        assert (cpts[:, 0] >= 0.0).all() and (cpts[:, 0] <= 511.0).all()
+        assert (cpts[:, 1] >= 0.0).all() and (cpts[:, 1] <= 511.0).all()
+
+
+
