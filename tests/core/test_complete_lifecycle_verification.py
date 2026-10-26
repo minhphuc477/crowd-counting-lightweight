@@ -35,7 +35,7 @@ def test_stage2_parameter_ceilings_track_a_and_track_b() -> None:
     params_a = sum(p.numel() for p in model_a.parameters() if p.requires_grad)
     assert params_a <= 104441, f"Track A ceiling violated: {params_a} > 104,441"
 
-    cfg_b = RMRv3Config(feature_width=48, subpixel_stride2=True, max_trainable_params=200000, pretrained=False)
+    cfg_b = RMRv3Config(feature_width=48, subpixel_stride2=True, output_stride=2, max_trainable_params=200000, pretrained=False)
     model_b = RMRv3(cfg_b)
     params_b = sum(p.numel() for p in model_b.parameters() if p.requires_grad)
     assert params_b <= 200000, f"Track B ceiling violated: {params_b} > 200,000"
