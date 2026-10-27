@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from rmr_core.data import compute_manifest_density, resolve_manifest_path
 from rmr_core.evaluation import evaluate_dataset
 from rmr_v3.diagnostics import (
     compute_dispersion_saturation,
@@ -21,7 +22,21 @@ from rmr_v3.checkpoint import EMAManager
 
 
 def make_model(cfg: dict) -> tuple[RMRv3, bool]:
-    m_cfg = cfg.get("model", {})
+    m_cfg = dict(cfg.get("model", {}))
+    d_cfg = cfg.get("data", {})
+    if isinstance(d_cfg, dict) and d_cfg.get("train_manifest"):
+        if m_cfg.get("init_m0") in (None, "auto"):
+            resolved = resolve_manifest_path(d_cfg["train_manifest"], data_root=d_cfg.get("data_root"))
+            if resolved is not None:
+                try:
+                    m_cfg["init_m0"] = compute_manifest_density(
+                        resolved,
+                        output_stride=4,
+                        data_root=d_cfg.get("data_root"),
+                        max_size=d_cfg.get("max_size", 2048),
+                    )
+                except FileNotFoundError:
+                    pass
     t_cfg = cfg.get("train", {})
     bb_lr = float(m_cfg.get("backbone_lr_scale", t_cfg.get("backbone_lr_scale", 0.1)))
     config = RMRv3Config.from_dict(m_cfg, backbone_lr_scale=bb_lr)

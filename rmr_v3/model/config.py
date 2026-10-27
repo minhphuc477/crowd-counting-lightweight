@@ -350,7 +350,7 @@ class RMRv3Config:
             "pm_kappa", "anscombe_tau_dense", "scale_router_temperature",
             "trust_region_floor", "anscombe_c", "adaptive_tau_rho0",
             "shifted_carrier_eps", "trust_dense_tau", "trust_dense_kappa",
-            "density_scale_tau", "deficit_seed_eps", "morozov_density_beta", "rn_iterations",
+            "density_scale_tau", "deficit_seed_eps", "morozov_density_beta", "rn_iterations", "init_m0",
         ):
             _require_positive(k, getattr(self, k))
         for k in (
@@ -399,7 +399,7 @@ class RMRv3Config:
             k = f.name
             if k in merged:
                 v = merged[k]
-                if v is None:
+                if v is None or (k == "init_m0" and isinstance(v, str) and v.strip().lower() == "auto"):
                     continue
                 if "tuple" in str(f.type) and isinstance(v, (list, tuple)):
                     kwargs[k] = tuple(tuple(x) if isinstance(x, (list, tuple)) else x for x in v)

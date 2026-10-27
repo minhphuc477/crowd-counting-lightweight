@@ -41,6 +41,7 @@ import torch
 import torch.nn.functional as F
 
 from .adjoint import regional_adjoint
+from .mcbpro import _backproject_routed
 from .prefix_sums import regional_sum
 from .regions import RegionSet, partition_regions_by_scale
 
@@ -114,6 +115,7 @@ def fed_mcbpro_transport(
     scale_weights: torch.Tensor | None = None,
     fg_mask: torch.Tensor | None = None,
     deficit_seeding: bool = True,
+    deficit_deadband: float = 0.20,
     dense_threshold: float = 2.0,
     valley_power: float = 2.0,
     reg_threshold: float = 0.001,
@@ -127,34 +129,7 @@ def fed_mcbpro_transport(
     conservative_scaling: bool = False,
     return_multiplier: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """Execute the Feature-guided Edge-Directed Multi-Scale Consistent Bregman-Poisson Recovery Operator.
-
-    Args:
-        y0: [B, 1, H, W] carrier density map from fine head.
-        b_solver: [B, 1, K] regional count evidence from evidence head.
-        weight_solver: [B, 1, K] optional regional reliability weights.
-        regions: RegionSet containing multiscale box definitions.
-        feat_p4: Optional [B, C, H_feat, W_feat] neck feature map for feature-energy carrier seeding.
-        eps: Epsilon floor for division.
-        scale_weights: [B, S, H, W] continuous scale routing weights.
-        fg_mask: Optional [B, 1, H, W] foreground probability mask.
-        deficit_seeding: Whether to inject regional deficits into carrier valleys.
-        dense_threshold: Count threshold above which FED contrast is active (<= 0 disables gating).
-        valley_power: Exponent for inter-head valley attenuation (2.0 = smooth quadratic).
-        reg_threshold: Spatial density threshold for presence field tanh.
-        tau_count_null: Regional count threshold below which evidence is smoothly anchored (0.0 = off).
-        tau_peak: Sensitivity scale for local peak normalization.
-        feat_energy_weight: Blending weight alpha for local contrast ratio in [0, 1].
-        ratio_clamp_max: Safety ceiling on Bregman scaling multipliers.
-        peak_kernel_size: Neighborhood kernel for local peak detection.
-        contrast_kernel: Neighborhood kernel for local contrast background pooling.
-        noise_floor: Absolute threshold of visibility floor in Weber-Fechner denominator.
-        return_multiplier: Whether to return (y_projected, s_field).
-
-    Returns:
-        y_projected: [B, 1, H, W] recovered Radon measure.
-        s_field: Optional [B, 1, H, W] spatial scaling field.
-    """
+    """Execute the Feature-guided Edge-Directed Multi-Scale Consistent Bregman-Poisson Recovery Operator."""
     if y0.ndim == 2:
         y0 = y0.unsqueeze(0).unsqueeze(0)
     elif y0.ndim == 3:
@@ -181,9 +156,8 @@ def fed_mcbpro_transport(
     else:
         b_s_f = b_s_raw
 
-    # Scale routing partitions
-    scale_partitions = None
-    active_pi_sum = None
+    # Precompute scale routing partitions and normalized per-scale coverage once
+    routed_scales: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] | None = None
     if scale_weights is not None:
         _, k_scales = scale_weights.shape[:2]
         if scale_weights.shape[-2:] != (h, w):
@@ -191,14 +165,23 @@ def fed_mcbpro_transport(
                 scale_weights, size=(h, w), mode="bilinear", align_corners=False
             )
         scale_partitions = partition_regions_by_scale(regions, k_scales, device=y0.device)
-        active_scales = [
-            k for (k, mask_k, boxes_k) in scale_partitions
+        active = [
+            (k, mask_k, boxes_k)
+            for (k, mask_k, boxes_k) in scale_partitions
             if mask_k is not None and boxes_k is not None and boxes_k.shape[0] > 0
         ]
-        if active_scales:
+        if active:
             active_pi_sum = sum(
-                scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype) for k in active_scales
-            )
+                scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype) for (k, _, _) in active
+            ).clamp_min(float(eps))
+            routed_scales = []
+            for k, mask_k, boxes_k in active:
+                ones_k = torch.ones((1, 1, boxes_k.shape[0]), device=y0.device, dtype=work_dtype)
+                cov_k = regional_adjoint(
+                    ones_k, boxes_k, height=h, width=w, out_dtype=work_dtype
+                ).clamp_min(float(eps))
+                pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype) / active_pi_sum
+                routed_scales.append((mask_k, boxes_k, cov_k, pi_k))
 
     # Base uniform coverage for adjoint normalization
     cov_uniform = regional_adjoint(
@@ -209,12 +192,12 @@ def fed_mcbpro_transport(
         out_dtype=work_dtype,
     ).clamp_min(float(eps))
 
-    # --- STAGE 1: Continuous Regional Presence Field ---
+    # --- STAGE 1: Continuous Scale-Routed Regional Presence Field ---
     area = regions.area.to(dtype=work_dtype, device=y0.device).view(1, 1, -1).clamp_min(1.0)
     density_per_box = b_s_f / area
-    b_density_field = regional_adjoint(
-        density_per_box, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-    ) / cov_uniform
+    b_density_field = _backproject_routed(
+        density_per_box, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
+    )
 
     m_reg = torch.tanh(b_density_field / float(reg_threshold))
 
@@ -227,7 +210,7 @@ def fed_mcbpro_transport(
 
     # --- STAGE 2: Dimensionless Local-Contrast Deficit Carrier Seeding ---
     mu_0 = regional_sum(y0_f, boxes_tensor)
-    delta_deficit = torch.relu(b_s_f - mu_0)
+    delta_deficit = torch.relu(b_s_f - mu_0 - float(deficit_deadband))
 
     if deficit_seeding and (delta_deficit > float(eps)).any():
         k_peak = max(3, int(peak_kernel_size))
@@ -236,10 +219,7 @@ def fed_mcbpro_transport(
         peak_dom = (y0_f / (y0_local_max + float(eps))) * torch.tanh(y0_local_max / float(tau_peak))
         valley_attenuation = (1.0 - peak_dom.clamp(0.0, 1.0)) ** float(valley_power)
 
-        # Dimensionless Weber-Fechner Local Contrast Modulation:
-        # Native-resolution energy extraction + density-aware spatial gating
         if feat_p4 is not None and feat_energy_weight > 0.0:
-            # 1. Compute high-pass energy at native resolution to preserve inter-cell gradients
             raw_energy_native = compute_feature_high_pass_energy(feat_p4, pool_kernel=5, eps=eps)
             if raw_energy_native.shape[-2:] != (h, w):
                 raw_energy = F.interpolate(
@@ -253,14 +233,13 @@ def fed_mcbpro_transport(
             )
             alpha_base = float(feat_energy_weight)
 
-            # 2. Density-gated spatial modulation: active in dense crowds, neutral on moderate/sparse
             if dense_threshold > 0.0:
                 t_null = float(tau_count_null)
                 t_dense = float(dense_threshold)
                 gate_boxes = torch.clamp((b_s_f - t_null) / max(t_dense - t_null, float(eps)), 0.0, 1.0)
-                dense_gate_field = regional_adjoint(
-                    gate_boxes, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-                ) / cov_uniform
+                dense_gate_field = _backproject_routed(
+                    gate_boxes, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
+                )
                 alpha_spatial = alpha_base * dense_gate_field.clamp(0.0, 1.0)
             else:
                 alpha_spatial = alpha_base
@@ -270,7 +249,6 @@ def fed_mcbpro_transport(
         else:
             gap_weight = m_effective * valley_attenuation
 
-        # Integrate capacity over regions
         gap_capacity = regional_sum(gap_weight, boxes_tensor)
         eff_capacity = gap_capacity.clamp_min(1.0)
         rho_deficit = torch.where(
@@ -279,26 +257,9 @@ def fed_mcbpro_transport(
             torch.zeros_like(delta_deficit),
         )
 
-        if scale_weights is not None and scale_partitions is not None:
-            deficit_field = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
-            for k, mask_k, boxes_k in scale_partitions:
-                if mask_k is None or boxes_k is None or boxes_k.shape[0] == 0:
-                    continue
-                rho_k = rho_deficit[:, :, mask_k]
-                ones_k = torch.ones((1, 1, boxes_k.shape[0]), device=y0.device, dtype=work_dtype)
-                cov_k = regional_adjoint(
-                    ones_k, boxes_k, height=h, width=w, out_dtype=work_dtype
-                ).clamp_min(float(eps))
-                adj_k = regional_adjoint(rho_k, boxes_k, height=h, width=w, out_dtype=work_dtype) / cov_k
-                pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
-                if active_pi_sum is not None:
-                    pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
-                deficit_field = deficit_field + pi_k * adj_k
-        else:
-            deficit_field = regional_adjoint(
-                rho_deficit, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-            ) / cov_uniform
-
+        deficit_field = _backproject_routed(
+            rho_deficit, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
+        )
         epsilon_seed = gap_weight * deficit_field
         y_aug = y0_f + epsilon_seed
     else:
@@ -313,22 +274,16 @@ def fed_mcbpro_transport(
     scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
     weighted_s = (w_s_f * scaling_ratio).to(dtype=work_dtype)
-    if scale_weights is not None and scale_partitions is not None:
+    if routed_scales is not None:
         s_raw = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
-        for k, mask_k, boxes_k in scale_partitions:
-            if mask_k is None or boxes_k is None or boxes_k.shape[0] == 0:
-                continue
+        for mask_k, boxes_k, _, pi_k in routed_scales:
             w_k = w_s_f[:, :, mask_k]
             w_s_k = weighted_s[:, :, mask_k]
-            cov_k = regional_adjoint(
+            cov_w_k = regional_adjoint(
                 w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
             ).clamp_min(float(eps))
-            adj_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
-            s_k = adj_k / cov_k
-            pi_k = scale_weights[:, k : k + 1, :, :].to(dtype=work_dtype)
-            if active_pi_sum is not None:
-                pi_k = pi_k / active_pi_sum.clamp_min(float(eps))
-            s_raw = s_raw + pi_k * s_k
+            adj_s_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
+            s_raw = s_raw + pi_k * (adj_s_k / cov_w_k)
     else:
         cov_w = regional_adjoint(
             w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
@@ -339,15 +294,18 @@ def fed_mcbpro_transport(
     if conservative_scaling:
         k_peak = max(3, int(peak_kernel_size))
         pad_peak = k_peak // 2
+        k_base = 2 * k_peak - 1
+        pad_base = k_base // 2
         y0_local_max = F.max_pool2d(y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
-        y0_local_min = -F.max_pool2d(-y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
+        y0_base_min = -F.max_pool2d(-y0_f, kernel_size=k_base, stride=1, padding=pad_base)
         apex_ratio = (y0_f / (y0_local_max + float(eps))).clamp(0.0, 1.0).square()
-        prominence = torch.relu(y0_f - y0_local_min)
-        prom_gate = torch.tanh(prominence / float(max(tau_peak, eps)))
+        rel_prom = torch.relu(y0_f - y0_base_min) / (y0_local_max + float(eps))
+        amp_floor = max(0.20 * float(tau_peak), float(eps))
+        prom_gate = torch.tanh(rel_prom / 0.25) * torch.tanh(y0_local_max / amp_floor)
 
-        b_count_field = regional_adjoint(
-            b_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-        ) / cov_uniform
+        b_count_field = _backproject_routed(
+            b_s_f, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
+        )
         m_count = torch.tanh(b_count_field / 0.25)
         if fg_mask is not None:
             m_count = (fg_mask.to(dtype=work_dtype).clamp(0.0, 1.0) * m_count).clamp(0.0, 1.0)

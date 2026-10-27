@@ -8,10 +8,11 @@
 # Core Single-Variable Innovation over V64 Champion:
 #   mcbpro_conservative_scaling: true (Post-Adjoint Morphological Peak-Protected Transport)
 #   1) Computes linear multiscale adjoint s_raw(u) FIRST (zero per-box Jensen positive bias).
-#   2) Protects verified local Dirac head peaks via morphological prominence gating
-#      p_peak(u) = m_presence(u) * [1 - exp(-prominence / tau_p)] * (y0 / y0_max)^2
+#   2) Protects verified local Dirac & foreground head peaks via scale-invariant
+#      dimensionless relative morphological prominence gating
+#      p_peak(u) = m_presence(u) * g_prom(u) * (y0 / y0_max)^2
 #      so coarse regional saturation in ultra-dense clusters (IMG_90, IMG_8, IMG_127, IMG_122)
-#      never erases resolved carrier peaks.
+#      and broad foreground heads (SHB/QNRF/NWPU) never erases resolved carrier peaks.
 #   3) Preserves 100% background false-positive suppression when regional evidence b_R -> 0
 #      and vanishes identically (p_peak = 0) on flat plateaus/Gaussian skirts.
 # ==============================================================================

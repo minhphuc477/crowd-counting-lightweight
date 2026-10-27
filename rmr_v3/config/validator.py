@@ -49,6 +49,13 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
     # Validate logical bounds and alias collisions
     m_cfg = cfg.get("model", {})
     if isinstance(m_cfg, dict):
+        if "init_m0" in m_cfg and m_cfg["init_m0"] is not None:
+            m0_val = m_cfg["init_m0"]
+            if isinstance(m0_val, str):
+                if m0_val.strip().lower() != "auto":
+                    raise ValueError(f"init_m0 must be a positive float or 'auto', got {m0_val!r}")
+            elif isinstance(m0_val, bool) or float(m0_val) <= 0.0:
+                raise ValueError(f"init_m0 must be strictly positive, got {m0_val!r}")
         if "hybrid_recovery_alpha" in m_cfg:
             hra = float(m_cfg["hybrid_recovery_alpha"])
             if not (0.0 <= hra <= 1.0):

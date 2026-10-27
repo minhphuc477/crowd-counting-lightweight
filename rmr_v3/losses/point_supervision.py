@@ -26,6 +26,7 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
         inv_k: Union[torch.Tensor, float],
         target_person: torch.Tensor,
         chunk_size: int,
+        max_score_row: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         dev_type = u.device.type if u.device.type in ("cuda", "cpu") else "cuda"
         with torch.amp.autocast(dev_type, enabled=False):
@@ -33,6 +34,7 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
             gx_f = gx.float()
             gy_f = gy.float()
             pts_f = pts.float()
+            ms_f = max_score_row.float() if max_score_row is not None else None
             n = pts.shape[0]
             c_hat = torch.empty(n, device=u.device, dtype=torch.float32)
             for c in range(0, n, chunk_size):
@@ -41,7 +43,11 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
                 dy = p[:, 1:2] - gy_f
                 d2 = dx.square_().add_(dy.square_())
                 ik = inv_k[c : c + chunk_size] if isinstance(inv_k, torch.Tensor) else inv_k
+                if isinstance(ik, torch.Tensor) and ik.ndim == 1:
+                    ik = ik.unsqueeze(1)
                 d2.mul_(-ik)
+                if ms_f is not None:
+                    d2.sub_(ms_f)
                 k_chunk = torch.exp(d2)
                 c_hat[c : c + chunk_size] = torch.matmul(k_chunk, u_f)
 
@@ -49,13 +55,21 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
             err = diff.abs().sum()
             sign = torch.sign(diff)
             inv_k_saved = inv_k if isinstance(inv_k, torch.Tensor) else torch.tensor(inv_k, device=u.device)
-            ctx.save_for_backward(pts, gx, gy, inv_k_saved, sign)
+            ctx.has_max_score = ms_f is not None
+            if ms_f is not None:
+                ctx.save_for_backward(pts, gx, gy, inv_k_saved, ms_f, sign)
+            else:
+                ctx.save_for_backward(pts, gx, gy, inv_k_saved, sign)
             ctx.chunk_size = chunk_size
             return err
 
     @staticmethod
     def backward(ctx: Any, grad_err: torch.Tensor) -> tuple[Optional[torch.Tensor], ...]:
-        pts, gx, gy, inv_k_saved, sign = ctx.saved_tensors
+        if ctx.has_max_score:
+            pts, gx, gy, inv_k_saved, ms_f, sign = ctx.saved_tensors
+        else:
+            pts, gx, gy, inv_k_saved, sign = ctx.saved_tensors
+            ms_f = None
         chunk_size = ctx.chunk_size
         dev_type = pts.device.type if pts.device.type in ("cuda", "cpu") else "cuda"
         with torch.amp.autocast(dev_type, enabled=False):
@@ -73,12 +87,18 @@ class _BayesianPersonErrorFunction(torch.autograd.Function):
                 dy = p[:, 1:2] - gy_f
                 d2 = dx.square_().add_(dy.square_())
                 ik = inv_k[c : c + chunk_size] if inv_k.ndim > 0 else inv_k
+                if isinstance(ik, torch.Tensor) and ik.ndim == 1:
+                    ik = ik.unsqueeze(1)
                 d2.mul_(-ik)
+                if ms_f is not None:
+                    d2.sub_(ms_f)
                 k_chunk = torch.exp(d2)
                 s_chunk = sign[c : c + chunk_size]
                 grad_u.addmv_(k_chunk.t(), s_chunk)
 
             grad_u.mul_(grad_err.float())
+            if ctx.has_max_score:
+                return grad_u, None, None, None, None, None, None, None
             return grad_u, None, None, None, None, None, None
 
 
@@ -142,53 +162,90 @@ def bayesian_loss(
         pts = pts.to(device=device, dtype=torch.float32, non_blocking=True)
         n = pts.shape[0]
 
-        # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters)
+        # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters
+        # while expanding smoothly to sigma_max on sparse / single-person foreground scenes)
+        sig_pts = None
         inv_sq_pts = None
-        if adaptive_sigma and n >= 2:
+        if adaptive_sigma:
             with torch.no_grad():
-                dist_mat = torch.cdist(pts, pts)
-                k_eff = min(4, n)
-                knn_d = torch.topk(dist_mat, k=k_eff, largest=False).values[:, -1]
-                sig_pts = (knn_d * 0.5).clamp(float(sigma_min), float(sigma_max))
+                if n >= 2:
+                    dist_mat = torch.cdist(pts, pts)
+                    k_eff = min(4, n)
+                    knn_d = torch.topk(dist_mat, k=k_eff, largest=False).values[:, -1]
+                    sig_pts = (knn_d * 0.5).clamp(float(sigma_min), float(sigma_max))
+                else:
+                    sig_pts = torch.full((1,), float(sigma_max), device=device, dtype=torch.float32)
                 inv_sq_pts = (1.0 / (2.0 * sig_pts.square())).unsqueeze(1)
 
-        # Compute posterior probabilities under torch.no_grad()
+        # Compute exact log-domain max-shifted posterior probabilities under torch.no_grad()
         with torch.no_grad():
-            points_sum = torch.zeros((m_total,), device=device, dtype=torch.float32)
-            if canonical_background:
+            m_fg = torch.full((m_total,), float("-inf"), device=device, dtype=torch.float32)
+            l_fg = torch.zeros((m_total,), device=device, dtype=torch.float32)
+            min_dist_sq = (
+                torch.full((m_total,), float("inf"), device=device, dtype=torch.float32)
+                if canonical_background
+                else None
+            )
+            nearest_idx = (
+                torch.zeros((m_total,), device=device, dtype=torch.long)
+                if (canonical_background and sig_pts is not None)
+                else None
+            )
+            for c_idx in range(0, n, chunk_size):
+                p_chunk = pts[c_idx : c_idx + chunk_size]
+                dx = p_chunk[:, 0:1] - gx
+                dy = p_chunk[:, 1:2] - gy
+                d2 = dx.square_().add_(dy.square_())
+                if min_dist_sq is not None:
+                    if nearest_idx is not None:
+                        c_min, c_arg = d2.min(dim=0)
+                        closer = c_min < min_dist_sq
+                        min_dist_sq = torch.where(closer, c_min, min_dist_sq)
+                        nearest_idx = torch.where(closer, c_arg + c_idx, nearest_idx)
+                    else:
+                        min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
+                inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
+                scores = d2.mul_(-inv_k)
+                chunk_max = scores.max(dim=0).values
+                if c_idx == 0:
+                    m_fg = chunk_max
+                    l_fg = torch.exp(scores - m_fg.unsqueeze(0)).sum(dim=0)
+                else:
+                    new_max = torch.maximum(m_fg, chunk_max)
+                    l_fg = (
+                        l_fg * torch.exp(m_fg - new_max)
+                        + torch.exp(scores - new_max.unsqueeze(0)).sum(dim=0)
+                    )
+                    m_fg = new_max
+
+            if canonical_background and min_dist_sq is not None:
                 st_size = float(min(h, w) * stride)
-                min_dist_sq = torch.full((m_total,), float("inf"), device=device, dtype=torch.float32)
-                for c_idx in range(0, n, chunk_size):
-                    p_chunk = pts[c_idx : c_idx + chunk_size]
-                    dx = p_chunk[:, 0:1] - gx
-                    dy = p_chunk[:, 1:2] - gy
-                    d2 = dx.square_().add_(dy.square_())
-                    min_dist_sq = torch.minimum(min_dist_sq, d2.min(dim=0).values)
-                    inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
-                    d2.mul_(-inv_k)
-                    points_sum.add_(torch.exp(d2).sum(dim=0))
                 bg_ratio_eff = max(float(background_ratio), 0.01)
-                bg_dis_sq = ((st_size * bg_ratio_eff) ** 2) / (min_dist_sq + 1e-5)
-                s_bg = -bg_dis_sq * inv_two_sigma_sq
-                exp_bg = torch.exp(s_bg).clamp_min(1e-4)
+                d_min = torch.sqrt(min_dist_sq.clamp_min(0.0))
+                base_bg_dist = st_size * bg_ratio_eff
+                if sig_pts is not None and nearest_idx is not None and inv_sq_pts is not None:
+                    sig_near = sig_pts[nearest_idx]
+                    inv_k_near = inv_sq_pts.squeeze(1)[nearest_idx]
+                    d_bg_margin = torch.clamp_min(sig_near * 4.0, base_bg_dist)
+                    d_bg = torch.relu(d_bg_margin - d_min)
+                    s_bg = -d_bg.square() * inv_k_near
+                else:
+                    d_bg = torch.relu(base_bg_dist - d_min)
+                    s_bg = -d_bg.square() * inv_two_sigma_sq
             else:
                 tau = max(float(background_ratio), 1e-4)
-                exp_bg = torch.full((m_total,), tau, device=device, dtype=torch.float32)
-                for c_idx in range(0, n, chunk_size):
-                    p_chunk = pts[c_idx : c_idx + chunk_size]
-                    dx = p_chunk[:, 0:1] - gx
-                    dy = p_chunk[:, 1:2] - gy
-                    d2 = dx.square_().add_(dy.square_())
-                    inv_k = inv_sq_pts[c_idx : c_idx + chunk_size] if inv_sq_pts is not None else inv_two_sigma_sq
-                    d2.mul_(-inv_k)
-                    points_sum.add_(torch.exp(d2).sum(dim=0))
+                s_bg = torch.full((m_total,), math.log(tau), device=device, dtype=torch.float32)
 
-            denom = (exp_bg + points_sum).clamp_min(1e-4)
-            post_bg = exp_bg / denom
+            max_score = torch.maximum(m_fg, s_bg)
+            exp_bg_shifted = torch.exp(s_bg - max_score)
+            fg_sum_shifted = l_fg * torch.exp(m_fg - max_score)
+            denom_shifted = exp_bg_shifted + fg_sum_shifted  # Guaranteed >= 1.0 algebraically
+            post_bg = exp_bg_shifted / denom_shifted
+            max_score_row = max_score.unsqueeze(0)
 
         c_hat_bg = torch.dot(post_bg, y_flat)
 
-        u = (y_flat / denom).clamp(min=-1e4, max=1e4)
+        u = (y_flat / denom_shifted).clamp(min=-1e4, max=1e4)
         has_custom_target = (
             targets_list is not None
             and i < len(targets_list)
@@ -202,7 +259,7 @@ def bayesian_loss(
 
         inv_k_arg = inv_sq_pts if inv_sq_pts is not None else inv_two_sigma_sq
         person_err = _BayesianPersonErrorFunction.apply(
-            u, pts, gx, gy, inv_k_arg, target_person, chunk_size
+            u, pts, gx, gy, inv_k_arg, target_person, chunk_size, max_score_row
         )
 
         bg_err = c_hat_bg

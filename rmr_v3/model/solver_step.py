@@ -134,16 +134,23 @@ def solve_inverse_measure(
         return RMRModelOutput(**base_out)
 
     if cfg.solver_mode == "mcbpro":
+        is_stride2 = bool(
+            getattr(cfg, "subpixel_stride2", False)
+            or getattr(cfg, "subpixel_dm", False)
+            or int(getattr(cfg, "output_stride", 4)) == 2
+        )
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
         reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
-        if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
+        if is_stride2 and reg_threshold >= 0.001:
             reg_threshold = reg_threshold * 0.25
         tau_peak = float(getattr(cfg, "tau_peak", 0.05))
+        if is_stride2 and tau_peak >= 0.04:
+            tau_peak = tau_peak * 0.25
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
         peak_kernel_size = (
-            int(peak_k) if peak_k is not None else (7 if getattr(cfg, "subpixel_stride2", False) else 5)
+            int(peak_k) if peak_k is not None else (7 if is_stride2 else 5)
         )
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
 
@@ -183,13 +190,20 @@ def solve_inverse_measure(
         return RMRModelOutput(**base_out)
 
     if cfg.solver_mode in ("perspective_mcbpro", "fed_mcbpro"):
+        is_stride2 = bool(
+            getattr(cfg, "subpixel_stride2", False)
+            or getattr(cfg, "subpixel_dm", False)
+            or int(getattr(cfg, "output_stride", 4)) == 2
+        )
         deficit_seeding = bool(getattr(cfg, "mcbpro_deficit_seeding", True))
         dense_threshold = float(getattr(cfg, "mcbpro_dense_threshold", 2.0))
         valley_power = float(getattr(cfg, "mcbpro_valley_power", 2.0))
         reg_threshold = float(getattr(cfg, "mcbpro_reg_threshold", 0.001))
-        if getattr(cfg, "subpixel_stride2", False) and reg_threshold >= 0.001:
+        if is_stride2 and reg_threshold >= 0.001:
             reg_threshold = reg_threshold * 0.25
         tau_peak = float(getattr(cfg, "tau_peak", 0.05))
+        if is_stride2 and tau_peak >= 0.04:
+            tau_peak = tau_peak * 0.25
         tau_count_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.0))
         feat_energy_weight = float(getattr(cfg, "mcbpro_feat_energy_weight", 0.25))
         contrast_kernel = int(getattr(cfg, "mcbpro_contrast_kernel", 15))
@@ -197,7 +211,7 @@ def solve_inverse_measure(
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
         peak_kernel_size = (
-            int(peak_k) if peak_k is not None else (7 if getattr(cfg, "subpixel_stride2", False) else 5)
+            int(peak_k) if peak_k is not None else (7 if is_stride2 else 5)
         )
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
         p4_solver_input = p4.detach() if p4 is not None and getattr(cfg, "detach_p4_for_solver", True) else p4
