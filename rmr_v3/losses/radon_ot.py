@@ -80,12 +80,13 @@ def radon_sliced_wasserstein_loss(
         n = pts.shape[0] if pts is not None and pts.numel() > 0 else 0
 
         if n == 0:
-            # When image has 0 people, penalize any false positive mass directly
-            losses.append(y_i.sum() / max(float(norm_ref), 1.0))
+            # Optimal Transport is undefined when target distribution has zero support.
+            # Background suppression on empty patches is handled by orthogonal Count & Regional NB losses.
             continue
 
-        # Measure Normalization: decouple spatial transport from global mass count
-        mass_i = y_i.sum() + eps
+        # Measure Normalization: normalize to unit probability distribution.
+        # Clamp denominator to min 1.0 to guarantee gradient stability and prevent AMP FP16 overflow.
+        mass_i = y_i.sum().clamp_min(1.0)
         prob_i = y_i / mass_i
 
         swd_i = torch.zeros((), device=device, dtype=torch.float32)
@@ -133,5 +134,5 @@ def radon_sliced_wasserstein_loss(
         losses.append(swd_i)
 
     if not losses:
-        return torch.zeros((), device=device, dtype=torch.float32)
+        return pred.sum() * 0.0
     return torch.stack(losses).mean().float()

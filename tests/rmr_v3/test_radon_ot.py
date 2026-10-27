@@ -67,18 +67,30 @@ def test_radon_ot_gradient_dipole():
     assert grad_background > 0.0, f"Expected repulsive positive gradient at background, got {grad_background}"
 
 
-def test_radon_ot_zero_points_foreground_penalty():
-    """When image contains 0 people, foreground predictions must be penalized."""
+def test_radon_ot_empty_images_handling():
+    """When images contain 0 points, transport is safely bypassed without gradient explosion."""
     h, w, stride = 32, 32, 4
-    pred_clean = torch.zeros(1, 1, h, w, dtype=torch.float32)
-    pred_noisy = torch.full((1, 1, h, w), 0.1, dtype=torch.float32)
-    pts_empty = [torch.empty((0, 2), dtype=torch.float32)]
+    pred_empty = torch.rand(2, 1, h, w, dtype=torch.float32, requires_grad=True)
+    pts_empty = [torch.empty((0, 2), dtype=torch.float32), torch.empty((0, 2), dtype=torch.float32)]
 
-    loss_clean = radon_sliced_wasserstein_loss(pred_clean, pts_empty, stride=stride)
-    loss_noisy = radon_sliced_wasserstein_loss(pred_noisy, pts_empty, stride=stride)
+    loss_empty = radon_sliced_wasserstein_loss(pred_empty, pts_empty, stride=stride)
+    assert loss_empty.item() == 0.0
+    loss_empty.backward()
+    assert pred_empty.grad is not None
+    assert pred_empty.grad.abs().sum() == 0.0
 
-    assert loss_clean.item() == 0.0
-    assert loss_noisy.item() > 0.5
+    # Mixed batch: empty image should not explode or corrupt valid image gradient
+    pred_mixed = torch.rand(2, 1, h, w, dtype=torch.float32, requires_grad=True)
+    pts_mixed = [
+        torch.tensor([[10.0 * stride, 10.0 * stride]], dtype=torch.float32),
+        torch.empty((0, 2), dtype=torch.float32),
+    ]
+    loss_mixed = radon_sliced_wasserstein_loss(pred_mixed, pts_mixed, stride=stride)
+    loss_mixed.backward()
+    assert not torch.isnan(loss_mixed)
+    assert loss_mixed.item() > 0.0
+    assert pred_mixed.grad[0].abs().sum() > 0.0
+    assert pred_mixed.grad[1].abs().sum() == 0.0
 
 
 def test_radon_ot_backward_gradients():
@@ -133,4 +145,22 @@ def test_radon_ot_integration_in_allocation_loss():
     assert "radon_ot" in losses_dual
     assert "bayesian" in losses_dual
     assert "allocation" in losses_dual
+    assert "flat_dm16" in losses_dual
+    assert losses_dual["flat_dm16"].item() == 0.0  # Must be 0, not fake allocation loss
     assert loss_dual.item() > 0.0
+
+
+def test_radon_ot_gradient_stability_near_zero():
+    """Near-zero pred must not cause gradient explosion (bounded <= 1.0, safe for AMP FP16)."""
+    h, w, stride = 32, 32, 4
+    pred = torch.full((1, 1, h, w), 1e-9, dtype=torch.float32, requires_grad=True)
+    pts = [torch.tensor([[10.0 * stride, 10.0 * stride]], dtype=torch.float32)]
+
+    loss = radon_sliced_wasserstein_loss(pred, pts, stride=stride)
+    loss.backward()
+
+    assert not torch.isnan(pred.grad).any()
+    assert not torch.isinf(pred.grad).any()
+    max_grad = pred.grad.abs().max().item()
+    assert max_grad <= 1.0, f"Gradient exploded to {max_grad}, unsafe for AMP FP16"
+

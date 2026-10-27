@@ -190,9 +190,15 @@ def route_allocation_loss(
     if cfg.allocation_loss_type == "bayesian":
         losses["bayesian"] = loss_allocation
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+        losses["radon_ot"] = torch.zeros_like(loss_allocation)
     elif cfg.allocation_loss_type == "radon_ot":
         losses["radon_ot"] = loss_allocation
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+        losses["bayesian"] = torch.zeros_like(loss_allocation)
+    elif cfg.allocation_loss_type == "dual_bayesian_radon_ot":
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+        losses["bayesian"] = comps.get(-999, torch.zeros_like(loss_allocation))
+        losses["radon_ot"] = comps.get(-888, torch.zeros_like(loss_allocation))
     else:
         b_px = int(getattr(cfg, "dm_block_px", 16))
         losses["flat_dm16"] = comps.get(b_px, loss_allocation)
