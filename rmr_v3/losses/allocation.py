@@ -12,6 +12,7 @@ from rmr_core.losses import flat_dm_block_loss, multiscale_dm_loss
 from .config import RMRv3LossConfig
 from .fidt import canonical_fidt_loss
 from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
+from .radon_ot import radon_sliced_wasserstein_loss
 
 
 def compute_single_allocation(
@@ -24,7 +25,7 @@ def compute_single_allocation(
     comps: dict[int, torch.Tensor] = {}
     stride = int(getattr(cfg, "output_stride", 4))
 
-    if cfg.allocation_loss_type in ("dual_bayesian_dm16", "bayesian"):
+    if cfg.allocation_loss_type in ("dual_bayesian_dm16", "bayesian", "dual_bayesian_radon_ot", "radon_ot"):
         if cfg.allocation_loss_type == "dual_bayesian_dm16":
             b_px = int(getattr(cfg, "dm_block_px", 16))
             if float(cfg.lambda_bayesian) > 0.0:
@@ -62,6 +63,39 @@ def compute_single_allocation(
 
             comps[b_px], comps[-999] = l_dm, l_bay
             loss_val = float(cfg.lambda_bayesian) * l_bay + float(cfg.lambda_flat_dm16) * l_dm
+        elif cfg.allocation_loss_type == "dual_bayesian_radon_ot":
+            if float(cfg.lambda_bayesian) > 0.0:
+                s_max = float(getattr(cfg, "bayesian_sigma_max", 4.0))
+                l_bay = bayesian_loss(
+                    inp,
+                    points,
+                    sigma=cfg.bayesian_sigma,
+                    background_ratio=cfg.bayesian_background_ratio,
+                    stride=stride,
+                    norm_mode=getattr(cfg, "bayesian_norm_mode", "canonical"),
+                    canonical_background=getattr(cfg, "bayesian_canonical_bg", True),
+                    adaptive_sigma=getattr(cfg, "bayesian_adaptive_sigma", False),
+                    sigma_min=getattr(cfg, "bayesian_sigma_min", 2.0),
+                    sigma_max=s_max,
+                )
+            else:
+                l_bay = torch.zeros((), device=inp.device, dtype=inp.dtype)
+
+            rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
+            rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
+            l_rot = radon_sliced_wasserstein_loss(
+                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref
+            )
+            lam_rot = float(getattr(cfg, "lambda_radon_ot", 1.0))
+            comps[-888], comps[-999] = l_rot, l_bay
+            loss_val = float(cfg.lambda_bayesian) * l_bay + lam_rot * l_rot
+        elif cfg.allocation_loss_type == "radon_ot":
+            rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
+            rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
+            loss_val = radon_sliced_wasserstein_loss(
+                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref
+            )
+            comps[-888] = loss_val
         else:
             s_max = float(getattr(cfg, "bayesian_sigma_max", 8.0))
             loss_val = bayesian_loss(
@@ -156,13 +190,18 @@ def route_allocation_loss(
     if cfg.allocation_loss_type == "bayesian":
         losses["bayesian"] = loss_allocation
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+    elif cfg.allocation_loss_type == "radon_ot":
+        losses["radon_ot"] = loss_allocation
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
     else:
         b_px = int(getattr(cfg, "dm_block_px", 16))
         losses["flat_dm16"] = comps.get(b_px, loss_allocation)
         if -999 in comps:
             losses["bayesian"] = comps[-999]
+        if -888 in comps:
+            losses["radon_ot"] = comps[-888]
     for bs, val in comps.items():
-        if bs != -999:
+        if bs not in (-999, -888):
             losses[f"dm_{bs}"] = val
     return loss_allocation, losses
 

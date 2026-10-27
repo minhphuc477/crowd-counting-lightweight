@@ -235,7 +235,7 @@ ALLOWED_LOSS_KEYS = {
     # FIDT (H1) & ChfL (H2) additions
     "fidt_k", "fidt_loss_type", "fidt_loss_mode", "fidt_normalize_by_count",
     "use_chfl", "use_chfl_loss", "lambda_chfl", "chfl_canonical", "chfl_step", "chfl_tik", "chfl_bandwidth",
-    "chfl_num_frequencies", "chfl_omega_max",
+    "chfl_num_frequencies", "chfl_omega_max", "lambda_radon_ot", "radon_ot_projections", "radon_ot_norm_ref",
     # DM block resolution and concentration scaling
     "dm_block_px", "auto_scale_kappa",
     "dm_norm_mode", "dm_ref_count",

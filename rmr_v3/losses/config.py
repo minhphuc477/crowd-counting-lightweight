@@ -21,7 +21,7 @@ class RMRv3LossConfig:
     lambda_rn_transport: float = 0.0
 
     # Loss mode selection
-    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt" | "dual_bayesian_dm16"
+    allocation_loss_type: str = "flat_dm16"  # "flat_dm16" | "bayesian" | "ot_sinkhorn" | "fidt" | "dual_bayesian_dm16" | "radon_ot" | "dual_bayesian_radon_ot"
     bayesian_sigma: float = 8.0
     bayesian_background_ratio: float = 0.10
     bayesian_norm_mode: str = "canonical"  # "canonical" | "count" | "square_root"
@@ -34,6 +34,9 @@ class RMRv3LossConfig:
     fidt_k: float = 6.0
     fidt_loss_type: str = "smooth_l1"
     fidt_normalize_by_count: bool = True
+    lambda_radon_ot: float = 1.0
+    radon_ot_projections: int = 4
+    radon_ot_norm_ref: float = 100.0
 
     # Count loss configuration
     count_loss_mode: str = "nb"  # "nb" | "log1p" | "l1"
@@ -167,10 +170,13 @@ class RMRv3LossConfig:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")
         if self.cell_alpha < 0.0:
             raise ValueError(f"cell_alpha must be non-negative, got {self.cell_alpha}")
-        if self.allocation_loss_type not in ("flat_dm16", "bayesian", "ot_sinkhorn", "fidt", "dual_bayesian_dm16"):
+        if self.allocation_loss_type not in (
+            "flat_dm16", "bayesian", "ot_sinkhorn", "fidt",
+            "dual_bayesian_dm16", "radon_ot", "dual_bayesian_radon_ot"
+        ):
             raise ValueError(
                 f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', "
-                f"or 'dual_bayesian_dm16', got '{self.allocation_loss_type}'"
+                f"'dual_bayesian_dm16', 'radon_ot', or 'dual_bayesian_radon_ot', got '{self.allocation_loss_type}'"
             )
         if self.fidt_k <= 0.0:
             raise ValueError(f"fidt_k must be strictly positive, got {self.fidt_k}")
