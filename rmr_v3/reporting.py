@@ -60,6 +60,10 @@ def format_epoch_row(
         )
     elif alloc_type == "dual_bayesian_dm16":
         alloc_repr = f"bay: {train_allocation:.2f}" if lam_dm16 == 0.0 else f"alloc(bay+dm): {train_allocation:.3f}"
+    elif alloc_type == "dual_bayesian_radon_ot":
+        alloc_repr = f"alloc(bay+rot): {train_allocation:.3f}"
+    elif alloc_type == "radon_ot":
+        alloc_repr = f"rot: {train_allocation:.3f}"
     elif alloc_type == "bayesian":
         alloc_repr = f"bay: {train_allocation:.2f}"
     elif alloc_type == "fidt":
@@ -129,6 +133,10 @@ def format_eval_block(
         )
     elif alloc_type == "dual_bayesian_dm16":
         alloc_repr = f"alloc(bay+dm): {train_allocation:.3f}"
+    elif alloc_type == "dual_bayesian_radon_ot":
+        alloc_repr = f"alloc(bay+rot): {train_allocation:.3f}"
+    elif alloc_type == "radon_ot":
+        alloc_repr = f"alloc(rot): {train_allocation:.3f}"
     elif alloc_type == "bayesian":
         alloc_repr = f"alloc(bay): {train_allocation:.3f}"
     elif alloc_type == "fidt":
