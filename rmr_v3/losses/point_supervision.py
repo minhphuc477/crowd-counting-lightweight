@@ -286,26 +286,32 @@ def sinkhorn_ot_loss(
     reg: float = 10.0,
     num_iters: int = 20,
     stride: int = 4,
+    ot_max_dim: int = 128,
 ) -> torch.Tensor:
-    """Pure-PyTorch Log-Domain Sinkhorn Optimal Transport Loss.
-    
-    Measures Wasserstein transportation distance from normalized Y0 to ground truth points.
-    Numerically stabilized with bounded dual variables and clamped log-domain scaling.
-    Always returns float32.
-    """
+    """Log-domain Sinkhorn Optimal Transport Loss with area-preserving pooling when > ot_max_dim."""
     b, _, h, w = prob_y0.shape
     device = prob_y0.device
 
-    y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
-    x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
+    scale_f, work_stride, work_y0 = 1, stride, prob_y0
+    if h > ot_max_dim or w > ot_max_dim:
+        scale_f = max(h // ot_max_dim, w // ot_max_dim)
+        work_y0 = F.avg_pool2d(prob_y0, kernel_size=scale_f, stride=scale_f) * float(scale_f ** 2)
+        work_stride = stride * scale_f
+
+    _, _, eff_h, eff_w = work_y0.shape
+    y_coords = (torch.arange(eff_h, device=device, dtype=torch.float32) + 0.5) * float(work_stride)
+    x_coords = (torch.arange(eff_w, device=device, dtype=torch.float32) + 0.5) * float(work_stride)
     grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
-    grid_xy = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)  # [M, 2]
+    grid_xy = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)
+    m_cells = grid_xy.shape[0]
 
     losses: list[torch.Tensor] = []
     eps = 1e-8
+    inv_reg = 1.0 / max(float(reg), 1e-4)
+    diag = math.sqrt(float(h * stride) ** 2 + float(w * stride) ** 2)
 
     for i in range(b):
-        y_flat = prob_y0[i, 0].flatten().float()  # [M]
+        y_flat = work_y0[i, 0].flatten().float()
         total_pred = y_flat.sum()
 
         pts = points_list[i] if points_list is not None and i < len(points_list) else None
@@ -319,36 +325,36 @@ def sinkhorn_ot_loss(
         with torch.no_grad():
             dx = pts[:, 0:1] - grid_xy[:, 0].unsqueeze(0)
             dy = pts[:, 1:2] - grid_xy[:, 1].unsqueeze(0)
-            diag = math.sqrt(float(h * stride) ** 2 + float(w * stride) ** 2)
-            c_mat = torch.sqrt(dx.square().add_(dy.square())) / max(diag, 1.0)  # [N, M]
+            c_mat = torch.sqrt(dx.square().add_(dy.square())) / max(diag, 1.0)
+            del dx, dy
+            c_scaled = c_mat.mul_(-inv_reg)
 
-            mu = torch.ones(n, device=device, dtype=torch.float32) / float(n)  # [N]
-            nu = (y_flat.detach() / total_pred.detach().clamp_min(eps)).clamp_min(eps)  # [M]
+            mu = torch.full((n,), 1.0 / float(n), device=device, dtype=torch.float32)
+            nu = (y_flat.detach() / total_pred.detach().clamp_min(eps)).clamp_min(eps)
             nu = nu / nu.sum().clamp_min(eps)
 
+            log_mu = torch.log(mu)
+            log_nu = torch.log(nu)
             u = torch.zeros(n, device=device, dtype=torch.float32)
-            v = torch.zeros(grid_xy.shape[0], device=device, dtype=torch.float32)
-            inv_reg = 1.0 / max(float(reg), 1e-4)
+            v = torch.zeros(m_cells, device=device, dtype=torch.float32)
 
             for _ in range(num_iters):
                 u_prev, v_prev = u.clone(), v.clone()
-                u = torch.log(mu) - torch.logsumexp((-c_mat * inv_reg) + v.unsqueeze(0), dim=1)
+                u = log_mu - torch.logsumexp(c_scaled + v.unsqueeze(0), dim=1)
                 u = torch.nan_to_num(u, nan=0.0, posinf=100.0, neginf=-100.0).clamp(-100.0, 100.0)
-                v = torch.log(nu) - torch.logsumexp((-c_mat * inv_reg) + u.unsqueeze(1), dim=0)
+                v = log_nu - torch.logsumexp(c_scaled + u.unsqueeze(1), dim=0)
                 v = torch.nan_to_num(v, nan=0.0, posinf=100.0, neginf=-100.0).clamp(-100.0, 100.0)
                 if torch.max(torch.abs(u - u_prev)) < 1e-4 and torch.max(torch.abs(v - v_prev)) < 1e-4:
                     break
 
-            log_p = (-c_mat * inv_reg) + u.unsqueeze(1) + v.unsqueeze(0)
-            p_mat = torch.exp(torch.clamp(log_p, max=50.0))  # [N, M]
+            log_p = c_scaled + u.unsqueeze(1) + v.unsqueeze(0)
+            p_mat = torch.exp(torch.clamp(log_p, max=50.0))
+            p_weights = p_mat.sum(dim=0)
+            del c_scaled, log_p, p_mat
 
-        # Monge-Kantorovich transport cost against continuous prediction
-        p_weights = p_mat.sum(dim=0)  # [M]
         ot_cost = torch.dot(p_weights, y_flat)
         mass_penalty = torch.abs(total_pred - float(n)) / float(max(n, 1))
-
-        sample_loss = ot_cost + 0.1 * mass_penalty
-        losses.append(sample_loss)
+        losses.append(ot_cost + 0.1 * mass_penalty)
 
     if not losses:
         return torch.zeros((), device=device, dtype=torch.float32)
