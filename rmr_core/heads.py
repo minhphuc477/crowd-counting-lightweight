@@ -16,15 +16,10 @@ _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.1422
 
 
 from .density_activation import (
-    _apply_curvature,
-    _density_activate,
-    _pool_local_density,
-    _smooth_floor,
-    _softplus_inverse,
+    _apply_curvature, _density_activate, _pool_local_density, _smooth_floor, _softplus_inverse,
 )
 
 _CURVATURE_ALPHA_INIT: float = -8.0
-
 
 
 class FineMeasureHead(nn.Module):
@@ -64,6 +59,7 @@ class FineMeasureHead(nn.Module):
         curvature_pade: bool = False,
         head_activation: str = "softplus",
         head_blocks: int = 1,
+        icnr_init: bool = False,
     ):
         super().__init__()
         self.head_activation = str(head_activation).lower()
@@ -82,6 +78,11 @@ class FineMeasureHead(nn.Module):
         m0 = math.log1p(math.exp(float(init_bias)))
 
         if self.subpixel_stride2:
+            if icnr_init:
+                with torch.no_grad():
+                    gen = torch.Generator(device="cpu").manual_seed(1337)
+                    eps = torch.empty(final_conv.weight.shape, dtype=torch.float32).normal_(0.0, 1e-4, generator=gen)
+                    final_conv.weight.copy_(final_conv.weight[:1].repeat(4, 1, 1, 1) + eps.to(final_conv.weight))
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0 / 4.0)

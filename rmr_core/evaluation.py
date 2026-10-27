@@ -19,6 +19,8 @@ from torch.utils.data import DataLoader
 
 from .metrics import (
     bootstrap_ci,
+    evaluate_point_localization,
+    extract_subpixel_peaks,
     game_physical_image,
     game_single,
     summarize_predictions,
@@ -42,12 +44,13 @@ def evaluate_dataset(
     output_stride: int = 4,
     run_tiling: bool = True,
     tile_size: int = 512,
-    practical_halo: int = 64,
+    practical_halo: int = 128,
     forward_kwargs: dict[str, Any] | None = None,
     extra_sample_callback: Callable[[dict, dict, torch.Tensor, dict], dict] | None = None,
     enforce_gt_consistency: bool = False,
     density_bins: tuple[float, float] = (100.0, 500.0),
     use_tta: bool = False,
+    eval_localization: bool = False,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Canonical unified evaluation loop over a dataset loader.
 
@@ -185,6 +188,24 @@ def evaluate_dataset(
                 for level in range(4):
                     row[f"GAME{level}"] = game_single(y, target, level)
 
+            if eval_localization and "points" in sample:
+                loc_stride = eff_output_stride
+                loc_thresh = 0.0125 if loc_stride == 2 else 0.05
+                loc_nms = 5 if loc_stride == 2 else 3
+                pred_pts, _ = extract_subpixel_peaks(
+                    y,
+                    threshold=loc_thresh,
+                    nms_kernel=loc_nms,
+                    stride=loc_stride,
+                    integrate_window=True,
+                )
+                loc_res = evaluate_point_localization(pred_pts, sample["points"], distance_thresholds=(4.0, 8.0))
+                for d_loc in (4, 8):
+                    row[f"loc_TP@{d_loc}"] = loc_res[f"TP@{d_loc}"]
+                    row[f"loc_FP@{d_loc}"] = loc_res[f"FP@{d_loc}"]
+                    row[f"loc_FN@{d_loc}"] = loc_res[f"FN@{d_loc}"]
+                    row[f"loc_F1@{d_loc}"] = loc_res[f"F1@{d_loc}"]
+
             if extra_sample_callback is not None:
                 extra = extra_sample_callback(sample, out, y, row)
                 if extra:
@@ -213,9 +234,13 @@ def evaluate_dataset(
     summary["mae_ci95"] = [mae_lo, mae_hi]
     summary["rmse_ci95"] = [rmse_lo, rmse_hi]
 
-    # Density stratification with parameterized bins
+    # Density stratification with parameterized bins + negative-scene tracking (gt == 0)
     gts = np.array([r["gt"] for r in rows])
     aes_arr = np.array(aes)
+
+    zero_mask = gts == 0
+    summary["n_zero"] = int(np.sum(zero_mask))
+    summary["mae_zero"] = float(np.mean(aes_arr[zero_mask])) if np.any(zero_mask) else 0.0
 
     lo, hi = density_bins
     sparse_mask = gts <= lo
@@ -229,6 +254,18 @@ def evaluate_dataset(
     summary["n_sparse"] = int(np.sum(sparse_mask))
     summary["n_moderate"] = int(np.sum(mod_mask))
     summary["n_dense"] = int(np.sum(dense_mask))
+
+    if eval_localization and rows and "loc_TP@4" in rows[0]:
+        for d_loc in (4, 8):
+            tp_sum = float(sum(r[f"loc_TP@{d_loc}"] for r in rows))
+            fp_sum = float(sum(r[f"loc_FP@{d_loc}"] for r in rows))
+            fn_sum = float(sum(r[f"loc_FN@{d_loc}"] for r in rows))
+            prec = tp_sum / (tp_sum + fp_sum) if (tp_sum + fp_sum) > 0.0 else (1.0 if fn_sum == 0.0 else 0.0)
+            rec = tp_sum / (tp_sum + fn_sum) if (tp_sum + fn_sum) > 0.0 else 1.0
+            f1 = (2.0 * prec * rec) / (prec + rec) if (prec + rec) > 0.0 else 0.0
+            summary[f"loc_Precision@{d_loc}"] = float(prec)
+            summary[f"loc_Recall@{d_loc}"] = float(rec)
+            summary[f"loc_F1@{d_loc}"] = float(f1)
 
     if run_tiling and rows and "direct_tiled_practical_abs" in rows[0]:
         tiled_diffs = [r["direct_tiled_practical_abs"] for r in rows]

@@ -293,9 +293,26 @@ def point_preserving_random_erasing(
     return image_t, pts
 
 
-def normalize_image(image_t: torch.Tensor) -> torch.Tensor:
-    mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
-    std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+def resolve_backbone_norm_mode(backbone_name: str | None = None, norm_mode: str = "auto") -> str:
+    """Resolve canonical input normalization mode ('inception' vs 'imagenet') from backbone family."""
+    mode = str(norm_mode or "auto").strip().lower()
+    if mode in ("inception", "default", "0.5"):
+        return "inception"
+    if mode in ("imagenet", "in1k"):
+        return "imagenet"
+    bname = str(backbone_name or "").strip().lower()
+    if not bname or "mobilenetv4" in bname or "inception" in bname:
+        return "inception"
+    return "imagenet"
+
+
+def normalize_image(image_t: torch.Tensor, mode: str = "inception") -> torch.Tensor:
+    if str(mode).lower() == "imagenet":
+        mean = torch.tensor([0.485, 0.456, 0.406], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+    else:
+        mean = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
+        std = torch.tensor([0.5, 0.5, 0.5], dtype=image_t.dtype, device=image_t.device).view(3, 1, 1)
     return (image_t - mean) / std
 
 
@@ -303,6 +320,7 @@ __all__ = [
     "rasterize_points",
     "cap_image_resolution",
     "train_transform",
+    "resolve_backbone_norm_mode",
     "normalize_image",
     "point_preserving_random_erasing",
 ]

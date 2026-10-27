@@ -115,6 +115,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
     d_cfg = cfg.get("data", {})
+    norm_mode = CrowdManifestDataset.resolve_norm(m_cfg.get("backbone_name"), d_cfg.get("norm_mode", "auto"))
     train_ds = CrowdManifestDataset(
         d_cfg["train_manifest"],
         train=True,
@@ -129,7 +130,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=d_cfg.get("data_root"),
         cache_images=bool(d_cfg.get("cache_images", True)),
         preload=bool(d_cfg.get("preload", False)),
-        pad_small_images=bool(d_cfg.get("pad_small_images", True)),
+        pad_small_images=bool(d_cfg.get("pad_small_images", False)),
         boundary_margin=float(d_cfg.get("boundary_margin", 0.0)),
         max_size=int(d_cfg.get("max_size", 2048)),
         saturation_jitter=float(d_cfg.get("saturation_jitter", 0.0)),
@@ -138,8 +139,9 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         erasing_scale=tuple(d_cfg.get("erasing_scale", [0.005, 0.03])),
         erasing_ratio=tuple(d_cfg.get("erasing_ratio", [0.5, 2.0])),
         erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
-        crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", False)),
+        crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", True)),
         crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.50)),
+        norm_mode=norm_mode,
     )
     val_manifest = d_cfg.get("val_manifest")
     val_ds = None if not val_manifest else CrowdManifestDataset(
@@ -150,6 +152,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         cache_images=bool(d_cfg.get("cache_images", True)),
         preload=bool(d_cfg.get("preload", False)),
         max_size=int(d_cfg.get("max_size", 2048)),
+        norm_mode=norm_mode,
     )
 
     dev_req = cfg.get("train", {}).get("device")
@@ -234,7 +237,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     solver_warmup_epochs = int(cfg.get("train", {}).get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 5))
     freeze_bn_epoch = int(cfg.get("train", {}).get("freeze_bn_after_epoch", -1))
-    eval_run_tiling = bool(cfg.get("eval", {}).get("run_tiling", False))
+    eval_cfg = cfg.get("eval", {})
+    eval_run_tiling = bool(eval_cfg.get("run_tiling", eval_cfg.get("tiling", False)))
 
     start_epoch = 0
     best_mae = float("inf")

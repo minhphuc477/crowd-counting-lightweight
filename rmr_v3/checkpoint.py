@@ -17,38 +17,51 @@ from .model import RMRv3
 
 
 class EMAManager:
-    """Maintains on-device float32 shadow parameters with swap context management."""
+    """Maintains on-device float32 shadow parameters with warmup decay and BN statistics EMA."""
 
     def __init__(self, model: RMRv3, decay: float = 0.999) -> None:
         self.decay = float(decay)
+        self.num_updates: int = 0
         self.state: dict[str, torch.Tensor] = {}
+        self._float_buffers: set[str] = set()
         if self.decay > 0.0:
             for name, p in model.named_parameters():
                 self.state[name] = p.detach().clone().float()
             persistent_keys = set(model.state_dict().keys())
             for name, b in model.named_buffers():
                 if name in persistent_keys:
-                    self.state[name] = b.detach().clone().float()
+                    if b.is_floating_point():
+                        self.state[name] = b.detach().clone().float()
+                        self._float_buffers.add(name)
+                    else:
+                        self.state[name] = b.detach().clone()
 
     @torch.no_grad()
     def update(self, model: RMRv3) -> None:
         if not self.state or self.decay <= 0.0:
             return
-        d = self.decay
+        self.num_updates += 1
+        d = min(self.decay, (1.0 + float(self.num_updates)) / (10.0 + float(self.num_updates)))
         for name, param in model.named_parameters():
             if name in self.state:
                 self.state[name].mul_(d).add_(param.detach().float(), alpha=1.0 - d)
         for name, buf in model.named_buffers():
             if name in self.state:
-                self.state[name].copy_(buf.float())
+                if name in self._float_buffers:
+                    self.state[name].mul_(d).add_(buf.detach().float(), alpha=1.0 - d)
+                else:
+                    self.state[name].copy_(buf.detach())
 
     def restore(self, ckpt: dict[str, Any]) -> bool:
         if not self.state or "ema_model" not in ckpt:
             return False
         ema_sd = ckpt["ema_model"]
-        for k in self.state:
+        for k, dst in self.state.items():
             if k in ema_sd:
-                self.state[k].copy_(ema_sd[k].to(device=self.state[k].device).float())
+                src = ema_sd[k].to(device=dst.device)
+                dst.copy_(src.float() if dst.is_floating_point() else src.to(dtype=dst.dtype))
+        fallback_updates = max(1, int(ckpt.get("epoch", 0)) * 37)
+        self.num_updates = int(ckpt.get("ema_updates", fallback_updates))
         return True
 
     @contextmanager
@@ -114,6 +127,7 @@ class CheckpointManager:
             epochs_without_improvement=self.epochs_without_improvement if self.patience > 0 else 0,
             solver_strength=solver_strength,
             ema_state=ema_manager.state if ema_manager.state else None,
+            extra_fields={"ema_updates": ema_manager.num_updates} if ema_manager.state else None,
         )
         safe_torch_save(ckpt, self.out_dir / "last.pt")
 
@@ -152,6 +166,7 @@ class CheckpointManager:
                 epochs_without_improvement=self.epochs_without_improvement,
                 solver_strength=solver_strength,
                 ema_state=ema_manager.state if ema_manager.state else None,
+                extra_fields={"ema_updates": ema_manager.num_updates} if ema_manager.state else None,
             )
             safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
             safe_torch_save(ckpt, self.out_dir / "best_model.pt")

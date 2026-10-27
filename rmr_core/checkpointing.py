@@ -164,7 +164,8 @@ def build_checkpoint(
     }
     if ema_state is not None:
         ckpt["ema_model"] = {
-            k: v.detach().float().cpu() for k, v in ema_state.items()
+            k: (v.detach().float().cpu() if v.is_floating_point() else v.detach().cpu())
+            for k, v in ema_state.items()
         }
     if extra_fields:
         ckpt.update(extra_fields)

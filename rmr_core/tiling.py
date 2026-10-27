@@ -26,6 +26,20 @@ def _aligned_ceil(val: int, s: int) -> int:
     return math.ceil(val / s) * s
 
 
+def _hann_ramp_1d(length: int, left_taper: int, right_taper: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Construct 1D raised-cosine taper window in (0, 1] for Partition-of-Unity tile blending."""
+    w = torch.ones(length, device=device, dtype=dtype)
+    if left_taper > 0 and length > 1:
+        lt = min(left_taper, length)
+        t = torch.arange(1, lt + 1, device=device, dtype=dtype) / float(lt + 1)
+        w[:lt] = 0.5 * (1.0 - torch.cos(math.pi * t))
+    if right_taper > 0 and length > 1:
+        rt = min(right_taper, length)
+        t = torch.arange(rt, 0, -1, device=device, dtype=dtype) / float(rt + 1)
+        w[-rt:] = torch.minimum(w[-rt:], 0.5 * (1.0 - torch.cos(math.pi * t)))
+    return w.clamp_min(1e-4)
+
+
 @torch.no_grad()
 def predict_tiled(
     model: torch.nn.Module,
@@ -34,22 +48,16 @@ def predict_tiled(
     tile_size: int = 512,
     halo: int = 0,
     forward_kwargs: dict[str, Any] | None = None,
+    blend_mode: str = "core",
 ) -> torch.Tensor:
-    """Core/halo tiled prediction assembled without double-counting.
+    """Core/halo or Hann-blended tiled prediction assembled with exact Partition-of-Unity.
 
-    Core boundaries are aligned to output stride except the final image boundary.
-    Halo affects context only; only the core prediction is written to the output.
-
-    Args:
-        model: Evaluated PyTorch model.
-        image: Input tensor [C, H, W].
-        output_stride: Stride of the predicted density grid (e.g. 4 or 2).
-        tile_size: Size of the square core tile in image pixels.
-        halo: Overlapping halo context size in image pixels.
-        forward_kwargs: Optional kwargs for model forward pass.
-
-    Returns:
-        canvas: Reconstructed continuous Radon density tensor [1, gh, gw].
+    When blend_mode == 'core' (default):
+        Core boundaries are aligned to output stride except the final image boundary.
+        Halo affects context only; only the core prediction is written to the output.
+    When blend_mode == 'hann' and halo > 0:
+        Overlapping halo regions are smoothly blended with a 2D raised-cosine window
+        normalized by exact Partition-of-Unity weights, eliminating tile seam steps on 4K/8K images.
     """
     forward_kwargs = forward_kwargs or {}
     was_training = model.training
@@ -66,7 +74,9 @@ def predict_tiled(
         tile_size = max(s, _aligned_floor(tile_size, s))
         halo = max(0, _aligned_floor(halo, s))
         gh, gw = math.ceil(h / s), math.ceil(w / s)
-        canvas = image.new_zeros((1, gh, gw))
+        use_hann = (str(blend_mode).lower() == "hann") and (halo > 0)
+        canvas = image.new_zeros((1, gh, gw), dtype=torch.float32)
+        weight_canvas = image.new_zeros((1, gh, gw), dtype=torch.float32) if use_hann else None
 
         ys = list(range(0, h, tile_size))
         xs = list(range(0, w, tile_size))
@@ -80,18 +90,32 @@ def predict_tiled(
                 sy1 = min(h, _aligned_ceil(y1 + halo, s))
                 sx1 = min(w, _aligned_ceil(x1 + halo, s))
                 patch = image[:, sy0:sy1, sx0:sx1].unsqueeze(0)
-                y_patch = model(patch, **forward_kwargs)["y"][0]
+                y_patch = model(patch, **forward_kwargs)["y"][0].float()
 
-                gy0 = y0 // s
-                gx0 = x0 // s
-                gy1 = math.ceil(y1 / s)
-                gx1 = math.ceil(x1 / s)
-                ly0 = (y0 - sy0) // s
-                lx0 = (x0 - sx0) // s
-                hh = gy1 - gy0
-                ww = gx1 - gx0
-                canvas[:, gy0:gy1, gx0:gx1] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
-        return canvas
+                if use_hann and weight_canvas is not None:
+                    gsy0, gsx0 = sy0 // s, sx0 // s
+                    ph, pw = y_patch.shape[-2], y_patch.shape[-1]
+                    gsy1, gsx1 = min(gh, gsy0 + ph), min(gw, gsx0 + pw)
+                    ph_eff, pw_eff = gsy1 - gsy0, gsx1 - gsx0
+                    wy = _hann_ramp_1d(ph_eff, (y0 - sy0) // s, (sy1 - y1) // s, y_patch.device, torch.float32)
+                    wx = _hann_ramp_1d(pw_eff, (x0 - sx0) // s, (sx1 - x1) // s, y_patch.device, torch.float32)
+                    win2d = (wy[:, None] * wx[None, :]).unsqueeze(0)
+                    canvas[:, gsy0:gsy1, gsx0:gsx1] += win2d * y_patch[:, :ph_eff, :pw_eff]
+                    weight_canvas[:, gsy0:gsy1, gsx0:gsx1] += win2d
+                else:
+                    gy0 = y0 // s
+                    gx0 = x0 // s
+                    gy1 = math.ceil(y1 / s)
+                    gx1 = math.ceil(x1 / s)
+                    ly0 = (y0 - sy0) // s
+                    lx0 = (x0 - sx0) // s
+                    hh = gy1 - gy0
+                    ww = gx1 - gx0
+                    canvas[:, gy0:gy1, gx0:gx1] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
+
+        if use_hann and weight_canvas is not None:
+            canvas = canvas / weight_canvas.clamp_min(1e-6)
+        return canvas.to(dtype=image.dtype)
     finally:
         if was_training:
             model.train()
@@ -103,7 +127,7 @@ def predict_multiscale_tta(
     image: torch.Tensor,
     output_stride: int = 4,
     tile_size: int = 512,
-    halo: int = 64,
+    halo: int = 128,
     scales: tuple[float, ...] = (1.0,),
     use_hflip: bool = True,
     forward_kwargs: dict[str, Any] | None = None,

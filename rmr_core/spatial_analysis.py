@@ -11,23 +11,22 @@ def extract_subpixel_peaks(
     threshold: float = 0.05,
     nms_kernel: int = 3,
     stride: int = 2,
+    integrate_window: bool = False,
+    local_mass_threshold: float = 0.25,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Detect discrete crowd head peaks and refine locations to subpixel physical coordinates.
 
     Steps:
-      1. Local 2D maximum suppression via MaxPool2D(nms_kernel, stride=1, padding=nms_kernel//2).
-      2. Threshold filtering: keep peaks with intensity > threshold.
-      3. Subpixel parabolic centroid refinement on 3x3 local neighborhood:
-           dx = (f(y0, x0+1) - f(y0, x0-1)) / (2 * (2*f(y0, x0) - f(y0, x0+1) - f(y0, x0-1) + eps))
-           dy = (f(y0+1, x0) - f(y0-1, x0)) / (2 * (2*f(y0, x0) - f(y0+1, x0) - f(y0-1, x0) + eps))
-         bounded to [-0.5, 0.5] to prevent divergent extrapolation.
-      4. Physical image coordinates:
-           x_phys = (x0 + dx + 0.5) * stride
-           y_phys = (y0 + dy + 0.5) * stride
+      1. Local 2D maximum suppression via MaxPool2D(nms_kernel, stride=1, padding=nms_kernel//2),
+         optionally evaluated on locally integrated head mass so broad foreground heads (sigma=8px)
+         and sharp Dirac horizon peaks (sigma=2px) are detected on an invariant person-mass scale.
+      2. Threshold filtering: keep peaks exceeding threshold (or local_mass_threshold when integrated).
+      3. Subpixel parabolic centroid refinement on 3x3 local neighborhood bounded to [-0.5, 0.5].
+      4. Physical image coordinates: x_phys = (x0 + dx + 0.5) * stride, y_phys = (y0 + dy + 0.5) * stride.
 
     Returns:
       points_xy: np.ndarray of shape (N, 2) in physical pixel coordinates.
-      scores: np.ndarray of shape (N,) peak intensity values.
+      scores: np.ndarray of shape (N,) peak intensity or local mass values.
     """
     if isinstance(density_map, np.ndarray):
         density_t = torch.from_numpy(density_map).float()
@@ -37,10 +36,21 @@ def extract_subpixel_peaks(
     while density_t.ndim < 4:
         density_t = density_t.unsqueeze(0)
 
-    # 1. 2D Local Maximum Suppression
-    pad = nms_kernel // 2
-    max_pool = F.max_pool2d(density_t, kernel_size=nms_kernel, stride=1, padding=pad)
-    peak_mask = (density_t == max_pool) & (density_t > float(threshold))
+    k = max(3, int(nms_kernel) | 1)
+    pad = k // 2
+    if integrate_window:
+        # Local box-integrated mass within k x k window (scale-invariant person mass)
+        response_t = F.avg_pool2d(density_t, kernel_size=k, stride=1, padding=pad) * float(k * k)
+        max_pool = F.max_pool2d(response_t, kernel_size=k, stride=1, padding=pad)
+        peak_mask = (response_t == max_pool) & (
+            (response_t >= float(local_mass_threshold)) | (density_t > float(threshold))
+        )
+        score_map = response_t[0, 0]
+    else:
+        max_pool = F.max_pool2d(density_t, kernel_size=k, stride=1, padding=pad)
+        peak_mask = (density_t == max_pool) & (density_t > float(threshold))
+        score_map = density_t[0, 0]
+
     peak_mask = peak_mask[0, 0]
     dens_2d = density_t[0, 0]
     h, w = dens_2d.shape
@@ -49,22 +59,25 @@ def extract_subpixel_peaks(
     if y_indices.numel() == 0:
         return np.zeros((0, 2), dtype=np.float32), np.zeros(0, dtype=np.float32)
 
-    # 2. Subpixel parabolic interpolation
+    # 2. Subpixel parabolic interpolation (with exact tie suppression within NMS radius pad)
+    ref_2d = score_map if integrate_window else dens_2d
     eps = 1e-6
     points = []
     scores = []
+    kept_yx: list[tuple[int, int]] = []
     for y0, x0 in zip(y_indices.tolist(), x_indices.tolist(), strict=False):
-        c = float(dens_2d[y0, x0])
-        # x-axis refinement
-        x_left = float(dens_2d[y0, x0 - 1]) if x0 > 0 else c
-        x_right = float(dens_2d[y0, x0 + 1]) if x0 < w - 1 else c
+        if any(abs(y0 - ky) <= pad and abs(x0 - kx) <= pad for ky, kx in kept_yx):
+            continue
+        kept_yx.append((y0, x0))
+        c = float(ref_2d[y0, x0])
+        x_left = float(ref_2d[y0, x0 - 1]) if x0 > 0 else c
+        x_right = float(ref_2d[y0, x0 + 1]) if x0 < w - 1 else c
         denom_x = 2.0 * (2.0 * c - x_left - x_right)
         dx = (x_right - x_left) / (denom_x + eps) if abs(denom_x) > eps else 0.0
         dx = max(-0.5, min(0.5, dx))
 
-        # y-axis refinement
-        y_top = float(dens_2d[y0 - 1, x0]) if y0 > 0 else c
-        y_bottom = float(dens_2d[y0 + 1, x0]) if y0 < h - 1 else c
+        y_top = float(ref_2d[y0 - 1, x0]) if y0 > 0 else c
+        y_bottom = float(ref_2d[y0 + 1, x0]) if y0 < h - 1 else c
         denom_y = 2.0 * (2.0 * c - y_top - y_bottom)
         dy = (y_bottom - y_top) / (denom_y + eps) if abs(denom_y) > eps else 0.0
         dy = max(-0.5, min(0.5, dy))
@@ -72,7 +85,7 @@ def extract_subpixel_peaks(
         phys_x = (float(x0) + dx + 0.5) * float(stride)
         phys_y = (float(y0) + dy + 0.5) * float(stride)
         points.append((phys_x, phys_y))
-        scores.append(c)
+        scores.append(float(score_map[y0, x0]))
 
     return np.asarray(points, dtype=np.float32), np.asarray(scores, dtype=np.float32)
 
@@ -84,12 +97,10 @@ def evaluate_point_localization(
 ) -> dict[str, float]:
     """Evaluate point-level crowd detection and localization performance.
 
-    Standard benchmark matching (P2PNet, STEERER, FIDTM):
+    Standard benchmark matching (P2PNet, STEERER, FIDTM, NWPU-Crowd):
       At each tolerance distance sigma in distance_thresholds:
-        - Match each prediction to the nearest unmatched GT point within distance <= sigma.
-        - Precision = TP / (TP + FP + eps)
-        - Recall = TP / (TP + FN + eps)
-        - F1 = 2 * P * R / (P + R + eps)
+        - Greedy 1-to-1 Euclidean bipartite matching sorted by ascending distance <= sigma.
+        - Precision = TP / (TP + FP), Recall = TP / (TP + FN), F1 = 2*P*R / (P + R).
     """
     if isinstance(pred_points, torch.Tensor):
         preds = pred_points.detach().cpu().numpy().reshape(-1, 2)
@@ -110,48 +121,57 @@ def evaluate_point_localization(
 
     if n_pred == 0 and n_gt == 0:
         for d in distance_thresholds:
-            results[f"Precision@{int(d)}"] = 1.0
-            results[f"Recall@{int(d)}"] = 1.0
-            results[f"F1@{int(d)}"] = 1.0
+            key = int(d)
+            results[f"TP@{key}"] = 0.0
+            results[f"FP@{key}"] = 0.0
+            results[f"FN@{key}"] = 0.0
+            results[f"Precision@{key}"] = 1.0
+            results[f"Recall@{key}"] = 1.0
+            results[f"F1@{key}"] = 1.0
         return results
 
     if n_pred == 0 or n_gt == 0:
         for d in distance_thresholds:
-            results[f"Precision@{int(d)}"] = 0.0
-            results[f"Recall@{int(d)}"] = 0.0
-            results[f"F1@{int(d)}"] = 0.0
+            key = int(d)
+            results[f"TP@{key}"] = 0.0
+            results[f"FP@{key}"] = float(n_pred)
+            results[f"FN@{key}"] = float(n_gt)
+            results[f"Precision@{key}"] = 0.0
+            results[f"Recall@{key}"] = 0.0
+            results[f"F1@{key}"] = 0.0
         return results
 
-    # Compute pairwise Euclidean distance matrix (n_pred, n_gt)
     diff = preds[:, None, :] - gts[None, :, :]
     dist = np.sqrt(np.sum(diff ** 2, axis=-1))
 
     for d in distance_thresholds:
+        key = int(d)
         thresh = float(d)
-        matched_gt = set()
+        p_cand, g_cand = np.nonzero(dist <= thresh)
         tp = 0
-        pairs = []
-        for i in range(n_pred):
-            for j in range(n_gt):
-                if dist[i, j] <= thresh:
-                    pairs.append((dist[i, j], i, j))
-        pairs.sort(key=lambda x: x[0])
-
-        matched_preds = set()
-        for _, p_idx, g_idx in pairs:
-            if p_idx not in matched_preds and g_idx not in matched_gt:
-                matched_preds.add(p_idx)
-                matched_gt.add(g_idx)
-                tp += 1
+        if p_cand.size > 0:
+            order = np.argsort(dist[p_cand, g_cand], kind="mergesort")
+            matched_p = np.zeros(n_pred, dtype=bool)
+            matched_g = np.zeros(n_gt, dtype=bool)
+            for idx in order.tolist():
+                pi = int(p_cand[idx])
+                gi = int(g_cand[idx])
+                if not matched_p[pi] and not matched_g[gi]:
+                    matched_p[pi] = True
+                    matched_g[gi] = True
+                    tp += 1
 
         fp = n_pred - tp
         fn = n_gt - tp
         prec = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
         rec = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
         f1 = float((2.0 * prec * rec) / (prec + rec)) if (prec + rec) > 0 else 0.0
-        results[f"Precision@{int(d)}"] = prec
-        results[f"Recall@{int(d)}"] = rec
-        results[f"F1@{int(d)}"] = f1
+        results[f"TP@{key}"] = float(tp)
+        results[f"FP@{key}"] = float(fp)
+        results[f"FN@{key}"] = float(fn)
+        results[f"Precision@{key}"] = prec
+        results[f"Recall@{key}"] = rec
+        results[f"F1@{key}"] = f1
 
     return results
 

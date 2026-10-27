@@ -171,7 +171,7 @@ def _compute_auxiliary_losses(
         or cfg.lambda_scale_align > 0.0 or getattr(cfg, "lambda_rn_transport", 0.0) > 0.0
         or cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0
         or (cfg.use_spectral_loss and cfg.lambda_spectral > 0.0)
-        or (getattr(cfg, "use_chfl", False) and getattr(cfg, "lambda_chfl", 0.0) > 0.0)
+        or ((getattr(cfg, "use_chfl_loss", False) or getattr(cfg, "use_chfl", False)) and getattr(cfg, "lambda_chfl", 0.0) > 0.0)
     )
     if not has_aux:
         for k in (
@@ -345,7 +345,7 @@ def _compute_auxiliary_losses(
         losses["spectral"] = losses["spectral_dc"] = losses["spectral_ac"] = zero_val
 
     # Characteristic Function Loss (ChfL)
-    if getattr(cfg, "use_chfl_loss", False) and getattr(cfg, "lambda_chfl", 0.0) > 0.0:
+    if (getattr(cfg, "use_chfl_loss", False) or getattr(cfg, "use_chfl", False)) and getattr(cfg, "lambda_chfl", 0.0) > 0.0:
         def _compute_chfl(dmap: torch.Tensor) -> torch.Tensor:
             if getattr(cfg, "chfl_canonical", True):
                 return canonical_chfl_loss(

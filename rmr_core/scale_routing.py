@@ -12,6 +12,14 @@ def _make_gn(channels: int) -> nn.GroupNorm:
     return nn.GroupNorm(1, channels)
 
 
+def _init_symmetry_breaking_(weight: torch.Tensor, seed: int = 1337) -> None:
+    """Tiny deterministic symmetry-breaking init (~5e-7) without perturbing global RNG."""
+    with torch.no_grad():
+        gen = torch.Generator(device="cpu").manual_seed(seed)
+        noise = torch.empty(weight.shape, dtype=torch.float32, device="cpu").normal_(0.0, 5e-7, generator=gen)
+        weight.copy_(noise.clamp_(-1e-6, 1e-6).to(device=weight.device, dtype=weight.dtype))
+
+
 class ScaleRoutingHead(nn.Module):
     """Ultra-lightweight Spatial Scale Routing Head for RMR.
 
@@ -57,7 +65,7 @@ class ScaleRoutingHead(nn.Module):
             bias=True,
         )
 
-        nn.init.zeros_(self.pw.weight)
+        _init_symmetry_breaking_(self.pw.weight, seed=1337)
         nn.init.zeros_(self.pw.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -150,7 +158,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        nn.init.zeros_(self.pw_scale.weight)
+        _init_symmetry_breaking_(self.pw_scale.weight, seed=1337)
         nn.init.zeros_(self.pw_scale.bias)
 
         # Branch 2: Aspect Ratio Head (A=2: 1:1 square, 2:1 vertical rectangle)
@@ -160,7 +168,7 @@ class FactorizedRoutingHead(nn.Module):
             kernel_size=1,
             bias=True,
         )
-        nn.init.zeros_(self.pw_aspect.weight)
+        _init_symmetry_breaking_(self.pw_aspect.weight, seed=1338)
         nn.init.zeros_(self.pw_aspect.bias)
 
     def forward(

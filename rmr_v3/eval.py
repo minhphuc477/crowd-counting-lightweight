@@ -156,6 +156,18 @@ def main() -> None:
         "--use-live-weights", dest="use_ema", action="store_false", default=True,
         help="Evaluate live checkpoint weights instead of EMA weights",
     )
+    ap.add_argument(
+        "--eval-localization", dest="eval_localization", action="store_true", default=False,
+        help="Compute canonical point localization Precision/Recall/F1 (@4px, @8px)",
+    )
+    ap.add_argument(
+        "--max-size", dest="max_size", type=int, default=None,
+        help="Override maximum evaluation image dimension (e.g. 4096 for high-res QNRF/NWPU)",
+    )
+    ap.add_argument(
+        "--density-bins", dest="density_bins", nargs=2, type=float, default=None,
+        help="Override density stratification thresholds (e.g. --density-bins 50 150 for SHB)",
+    )
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -180,10 +192,12 @@ def main() -> None:
         manifest = cfg.get("data", {}).get("val_manifest", "data/sha_a_test.jsonl")
         manifest_path = Path(manifest)
 
-    use_tiling = bool(cfg.get("eval", {}).get("tiling", True)) if args.tiling is None else args.tiling
+    eval_cfg = cfg.get("eval", {})
+    default_tiling = bool(eval_cfg.get("run_tiling", eval_cfg.get("tiling", False)))
+    use_tiling = default_tiling if args.tiling is None else bool(args.tiling)
     use_tta = bool(args.tta or args.enable_tta)
     mode_tag = "uniform" if uniform_reliability else "weighted"
-    tiling_tag = "" if use_tiling else "_notiling"
+    tiling_tag = "_tiled" if use_tiling else ""
     tta_tag = "_tta" if use_tta else ""
     default_dir_name = f"eval_{manifest_path.stem}_{mode_tag}{tiling_tag}{tta_tag}"
     ckpt_dir = ckpt_path if ckpt_path.is_dir() else ckpt_path.parent
@@ -195,12 +209,19 @@ def main() -> None:
         stride = 2
     else:
         stride = int(getattr(model_cfg, "output_stride", cfg.get("model", {}).get("output_stride", 4)))
+    d_cfg = cfg.get("data", {})
+    eff_max_size = int(args.max_size) if args.max_size is not None else int(d_cfg.get("max_size", 2048))
+    norm_mode = CrowdManifestDataset.resolve_norm(
+        getattr(model_cfg, "backbone_name", cfg.get("model", {}).get("backbone_name")),
+        d_cfg.get("norm_mode", "auto"),
+    )
     dataset = CrowdManifestDataset(
         manifest_path,
         train=False,
         output_stride=stride,
-        data_root=cfg.get("data", {}).get("data_root"),
-        max_size=int(cfg.get("data", {}).get("max_size", 2048)),
+        data_root=d_cfg.get("data_root"),
+        max_size=eff_max_size,
+        norm_mode=norm_mode,
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=collate_eval)
 
@@ -243,7 +264,8 @@ def main() -> None:
 
     print(f"Evaluating {ckpt_path.name} on {manifest_path} ({len(dataset)} samples)...", flush=True)
 
-    density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
+    raw_bins = args.density_bins if args.density_bins is not None else eval_cfg.get("density_bins", [100.0, 500.0])
+    density_bins = (float(raw_bins[0]), float(raw_bins[1]))
 
     rows, summary = evaluate_dataset(
         model=model,
@@ -256,6 +278,7 @@ def main() -> None:
         enforce_gt_consistency=True,
         density_bins=density_bins,
         use_tta=use_tta,
+        eval_localization=bool(args.eval_localization),
     )
 
     corrs = compute_reliability_correlations(diag_rows, scale_map=scale_map)
@@ -326,7 +349,7 @@ def main() -> None:
         "torch_version": torch.__version__,
         "parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "mode": mode_tag,
-        "tiling": args.tiling,
+        "tiling": use_tiling,
     }
 
     save_evaluation_artifacts(out_dir, rows, summary)
@@ -349,9 +372,17 @@ def main() -> None:
             f"Y1={summary['mae_y1']:.2f} -> Y2={summary['mae_y2']:.2f}"
         )
     lo, hi = density_bins
+    if summary.get("n_zero", 0) > 0:
+        print(f"  Zero-Scene MAE (gt==0): {summary['mae_zero']:.3f} (n={summary['n_zero']})")
     print(f"  Sparse MAE (<={lo:g}): {summary['mae_sparse']:.2f} (n={summary['n_sparse']})")
     print(f"  Moderate MAE ({lo:g}-{hi:g}): {summary['mae_moderate']:.2f} (n={summary['n_moderate']})")
     print(f"  Dense MAE (>{hi:g}): {summary['mae_dense']:.2f} (n={summary['n_dense']})")
+    if "loc_F1@4" in summary:
+        print(
+            f"  Point Localization: F1@4px={summary['loc_F1@4']:.3f} "
+            f"(P={summary['loc_Precision@4']:.3f}, R={summary['loc_Recall@4']:.3f}) | "
+            f"F1@8px={summary['loc_F1@8']:.3f} (P={summary['loc_Precision@8']:.3f}, R={summary['loc_Recall@8']:.3f})"
+        )
     if "pearson_rate_var_error" in summary:
         print(f"  Pearson(var, err): {summary['pearson_rate_var_error']:.4f}")
         print(f"  Spearman(var, err): {summary['spearman_rate_var_error']:.4f}")

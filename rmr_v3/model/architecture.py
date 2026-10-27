@@ -252,7 +252,7 @@ class RMRv3(nn.Module):
         divisor = 16  # FPN reductions (4, 8, 16) require resolution divisibility
         pad_h = (divisor - h_in % divisor) % divisor
         pad_w = (divisor - w_in % divisor) % divisor
-        x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
+        x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate") if (pad_h > 0 or pad_w > 0) else x
 
         p4, p8, p16 = self._extract_carrier_features(x_in)
         scene_tilt, delta_scale = None, None
@@ -339,8 +339,8 @@ class RMRv3(nn.Module):
         self,
         x: torch.Tensor,
         *,
-        peak_threshold: float = 0.05,
-        nms_kernel: int = 3,
+        peak_threshold: float | None = None,
+        nms_kernel: int | None = None,
         area_sqm: float = 100.0,
     ) -> dict[str, Any]:
         """Execute comprehensive multi-task inference on an input image tensor.
@@ -368,10 +368,16 @@ class RMRv3(nn.Module):
         density = out.y[0, 0].detach().cpu().numpy()
         pred_count = float(density.sum())
         stride = 2 if getattr(self.cfg, "subpixel_dm", False) or self.cfg.subpixel_stride2 else self.cfg.output_stride
+        eff_thresh = (0.0125 if stride == 2 else 0.05) if peak_threshold is None else float(peak_threshold)
+        eff_nms = (5 if stride == 2 else 3) if nms_kernel is None else int(nms_kernel)
 
-        # 1. Subpixel peak localization
+        # 1. Subpixel peak localization (scale-invariant via local mass integration)
         points_xy, scores = extract_subpixel_peaks(
-            density, threshold=peak_threshold, nms_kernel=nms_kernel, stride=stride
+            density,
+            threshold=eff_thresh,
+            nms_kernel=eff_nms,
+            stride=stride,
+            integrate_window=(peak_threshold is None),
         )
 
         # 2. Analytical uncertainty quantification

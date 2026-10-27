@@ -17,12 +17,15 @@ from .transforms import (
     cap_image_resolution,
     normalize_image,
     rasterize_points,
+    resolve_backbone_norm_mode,
     train_transform,
 )
 
 
 class CrowdManifestDataset(Dataset):
     """Standardized Crowd Counting Dataset with Zero-Stall In-Memory RAM Caching."""
+
+    resolve_norm = staticmethod(resolve_backbone_norm_mode)
 
     def __init__(
         self,
@@ -50,6 +53,7 @@ class CrowdManifestDataset(Dataset):
         preload: bool = False,
         crowd_aware_crop: bool = True,
         crowd_aware_prob: float = 0.50,
+        norm_mode: str = "inception",
     ):
         manifest_path = Path(manifest)
         if manifest_path.name in ("sha_a_train.jsonl", "sha_a_val.jsonl"):
@@ -84,6 +88,7 @@ class CrowdManifestDataset(Dataset):
         self.cache_images = bool(cache_images)
         self.crowd_aware_crop = bool(crowd_aware_crop)
         self.crowd_aware_prob = float(crowd_aware_prob)
+        self.norm_mode = resolve_backbone_norm_mode(None, norm_mode)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
@@ -196,7 +201,7 @@ class CrowdManifestDataset(Dataset):
 
         h, w = image_t.shape[-2:]
         target_y = rasterize_points(pts, h, w, stride=self.output_stride)
-        image_t = normalize_image(image_t)
+        image_t = normalize_image(image_t, mode=self.norm_mode)
         return {
             "image": image_t,
             "target_y": target_y,

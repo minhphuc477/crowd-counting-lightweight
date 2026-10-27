@@ -125,6 +125,11 @@ class ResidualDilatedFineHead(nn.Module):
         # Exact prior calibration: m0 = log1p(exp(init_bias))
         m0 = math.log1p(math.exp(float(init_bias)))
         if self.subpixel_stride2:
+            with torch.no_grad():
+                gen = torch.Generator(device="cpu").manual_seed(1337)
+                eps = torch.empty(self.final_conv.weight.shape, dtype=torch.float32).normal_(0.0, 1e-4, generator=gen)
+                base_w = self.final_conv.weight[:1].repeat(4, 1, 1, 1)
+                self.final_conv.weight.copy_(base_w + eps.to(self.final_conv.weight.device, self.final_conv.weight.dtype))
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
             if self.head_activation == "relu":
                 nn.init.constant_(self.final_conv.bias, m0 / 4.0)
