@@ -155,12 +155,23 @@ def test_hann_tiling_localization_and_zero_scene_metrics() -> None:
     assert out_hann.shape == (1, 65, 75)
     assert torch.allclose(out_hann, torch.full_like(out_hann, 0.25), atol=1e-5)
 
-    # Broad foreground head (sigma=6px on Stride-2 grid, total mass=1.0, peak cell < 0.05)
+    # 1) Sharp 1-cell Dirac spike + 6px-apart adjacent dense crowd heads (zero plateau corner-shift!)
+    dirac = torch.zeros(32, 32)
+    dirac[10, 10] = 1.0
+    dirac[10, 13] = 1.0  # 3 cells = 6.0px apart at Stride 2
+    dirac[25, 25] = 0.08  # Sub-person noise (< 0.25) must NOT leak!
+    pts_dirac, _ = extract_subpixel_peaks(dirac, threshold=0.0125, nms_kernel=3, stride=2, integrate_window=True)
+    loc_dirac = evaluate_point_localization(
+        pts_dirac, torch.tensor([[21.0, 21.0], [27.0, 21.0]]), distance_thresholds=(4.0, 8.0)
+    )
+    assert len(pts_dirac) == 2 and loc_dirac["F1@4"] == 1.0
+
+    # 2) Broad foreground head (sigma=6px on Stride-2 grid, total mass=1.0, peak cell < 0.05)
     yy, xx = torch.meshgrid(torch.arange(64), torch.arange(64), indexing="ij")
     gauss = torch.exp(-(((xx * 2.0 + 1.0 - 64.0) ** 2 + (yy * 2.0 + 1.0 - 64.0) ** 2) / (2.0 * 6.0 ** 2)))
     gauss = gauss / gauss.sum()
     assert float(gauss.max()) < 0.05  # Single-cell threshold 0.05 would miss this person!
-    pts_det, _ = extract_subpixel_peaks(gauss, threshold=0.0125, nms_kernel=5, stride=2, integrate_window=True)
+    pts_det, _ = extract_subpixel_peaks(gauss, threshold=0.0125, nms_kernel=3, stride=2, integrate_window=True)
     loc = evaluate_point_localization(pts_det, torch.tensor([[64.0, 64.0]]), distance_thresholds=(4.0, 8.0))
     assert loc["F1@4"] == 1.0
 

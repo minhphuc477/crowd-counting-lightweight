@@ -131,6 +131,7 @@ def predict_multiscale_tta(
     scales: tuple[float, ...] = (1.0,),
     use_hflip: bool = True,
     forward_kwargs: dict[str, Any] | None = None,
+    blend_mode: str = "core",
 ) -> torch.Tensor:
     """Multi-Scale Test-Time Augmentation (TTA) with Horizontal Flip and Partition-of-Unity Fusion.
 
@@ -192,6 +193,7 @@ def predict_multiscale_tta(
                 tile_size=tile_size,
                 halo=halo,
                 forward_kwargs=forward_kwargs,
+                blend_mode=blend_mode,
             )
 
             if use_hflip:
@@ -204,6 +206,7 @@ def predict_multiscale_tta(
                     tile_size=tile_size,
                     halo=halo,
                     forward_kwargs=forward_kwargs,
+                    blend_mode=blend_mode,
                 )
                 d_unflip = torch.flip(d_flip, dims=[-1])
                 d_fused = 0.5 * (d_orig + d_unflip)

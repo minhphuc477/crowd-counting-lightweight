@@ -168,6 +168,10 @@ def main() -> None:
         "--density-bins", dest="density_bins", nargs=2, type=float, default=None,
         help="Override density stratification thresholds (e.g. --density-bins 50 150 for SHB)",
     )
+    ap.add_argument(
+        "--tile-blend", dest="tile_blend", choices=("core", "hann"), default=None,
+        help="Tiled overlap assembly mode ('hann' Partition-of-Unity or 'core' hard crop)",
+    )
     args = ap.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -266,6 +270,7 @@ def main() -> None:
 
     raw_bins = args.density_bins if args.density_bins is not None else eval_cfg.get("density_bins", [100.0, 500.0])
     density_bins = (float(raw_bins[0]), float(raw_bins[1]))
+    tile_blend = str(args.tile_blend if args.tile_blend is not None else eval_cfg.get("tile_blend_mode", "hann"))
 
     rows, summary = evaluate_dataset(
         model=model,
@@ -278,7 +283,8 @@ def main() -> None:
         enforce_gt_consistency=True,
         density_bins=density_bins,
         use_tta=use_tta,
-        eval_localization=bool(args.eval_localization),
+        eval_localization=bool(args.eval_localization or eval_cfg.get("eval_localization", False)),
+        tile_blend_mode=tile_blend,
     )
 
     corrs = compute_reliability_correlations(diag_rows, scale_map=scale_map)

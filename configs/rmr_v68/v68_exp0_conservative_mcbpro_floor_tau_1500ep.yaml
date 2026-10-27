@@ -6,15 +6,13 @@
 # Mathematical Invariant 2: 100% Standalone (0.0% Knowledge Distillation, Zero Teachers)
 # Mathematical Invariant 3: High-Floor Cosine Annealing (min_lr_ratio: 0.20, 1500 epochs)
 # Core Single-Variable Innovation over V64 Champion:
-#   mcbpro_conservative_scaling: true (Post-Adjoint Morphological Peak-Protected Transport)
-#   1) Computes linear multiscale adjoint s_raw(u) FIRST (zero per-box Jensen positive bias).
-#   2) Protects verified local Dirac & foreground head peaks via scale-invariant
-#      dimensionless relative morphological prominence gating
-#      p_peak(u) = m_presence(u) * g_prom(u) * (y0 / y0_max)^2
-#      so coarse regional saturation in ultra-dense clusters (IMG_90, IMG_8, IMG_127, IMG_122)
-#      and broad foreground heads (SHB/QNRF/NWPU) never erases resolved carrier peaks.
-#   3) Preserves 100% background false-positive suppression when regional evidence b_R -> 0
-#      and vanishes identically (p_peak = 0) on flat plateaus/Gaussian skirts.
+#   mcbpro_conservative_scaling: true (Mass-Conserving Csiszar I-Projection MC-BPRO)
+#   1) Concentrates diffused carrier skirt/valley mass into verified local head peaks via
+#      dimensionless relative morphological prominence:
+#      y_ref(u) = y_aug(u) * (1 + m_eff(u) * g_prom(u) * (y0 / y0_max)^2).
+#   2) Solves exact Csiszar KL I-projection min_{y >= 0} D_KL(y || y_ref) s.t. A_R y = b_R
+#      via s_R = b_R / (A_R y_ref + eps), strictly conserving regional mass (zero count inflation)
+#      while sharpening peaks and suppressing 100% of empty-background false positives.
 # ==============================================================================
 
 seed: 42

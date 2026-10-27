@@ -86,6 +86,7 @@ def train_transform(
     erasing_max_patches: int = 2,
     crowd_aware_crop: bool = True,
     crowd_aware_prob: float = 0.50,
+    stratified_crowd_crop: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Universal SOTA data augmentation for arbitrary crowd counting datasets (SHA, SHB, QNRF, NWPU, JHU).
 
@@ -165,17 +166,22 @@ def train_transform(
         and random.random() < float(crowd_aware_prob)
         and (max_left > 0 or max_top > 0)
     ):
-        # Spatially stratified crowd-aware crop: sample an occupied 64x64 cell uniformly
-        # first, then sample a head inside that cell, preventing horizon cluster monopoly.
-        cell_gx = torch.div(pts[:, 0].long(), 64, rounding_mode="floor")
-        cell_gy = torch.div(pts[:, 1].long(), 64, rounding_mode="floor")
-        cell_ids = cell_gy * 100000 + cell_gx
-        unique_cells = torch.unique(cell_ids)
-        chosen_cell = unique_cells[random.randint(0, unique_cells.numel() - 1)]
-        cell_pts = pts[cell_ids == chosen_cell]
-        anchor_idx = random.randint(0, cell_pts.shape[0] - 1)
-        anchor_x = float(cell_pts[anchor_idx, 0].item())
-        anchor_y = float(cell_pts[anchor_idx, 1].item())
+        if stratified_crowd_crop:
+            # Opt-in 64x64 cell-stratified sampling for extreme multi-scale datasets
+            cell_gx = torch.div(pts[:, 0].long(), 64, rounding_mode="floor")
+            cell_gy = torch.div(pts[:, 1].long(), 64, rounding_mode="floor")
+            cell_ids = cell_gy * 100000 + cell_gx
+            unique_cells = torch.unique(cell_ids)
+            chosen_cell = unique_cells[random.randint(0, unique_cells.numel() - 1)]
+            cell_pts = pts[cell_ids == chosen_cell]
+            anchor_idx = random.randint(0, cell_pts.shape[0] - 1)
+            anchor_x = float(cell_pts[anchor_idx, 0].item())
+            anchor_y = float(cell_pts[anchor_idx, 1].item())
+        else:
+            # Canonical V64 Champion point-uniform crowd-aware anchor sampling
+            anchor_idx = random.randint(0, pts.shape[0] - 1)
+            anchor_x = float(pts[anchor_idx, 0].item())
+            anchor_y = float(pts[anchor_idx, 1].item())
         jitter_x = random.randint(-crop_size // 4, crop_size // 4)
         jitter_y = random.randint(-crop_size // 4, crop_size // 4)
         left = int(max(0, min(max_left, round(anchor_x - crop_size / 2.0 + jitter_x))))

@@ -39,16 +39,24 @@ def extract_subpixel_peaks(
     k = max(3, int(nms_kernel) | 1)
     pad = k // 2
     if integrate_window:
-        # Local box-integrated mass within k x k window (scale-invariant person mass)
-        response_t = F.avg_pool2d(density_t, kernel_size=k, stride=1, padding=pad) * float(k * k)
-        max_pool = F.max_pool2d(response_t, kernel_size=k, stride=1, padding=pad)
-        peak_mask = (response_t == max_pool) & (
-            (response_t >= float(local_mass_threshold)) | (density_t > float(threshold))
+        # Strictly unimodal 3x3 Binomial kernel [1, 2, 1]^T [1, 2, 1] / 16 preserves exact
+        # Dirac spike centers (zero box-plateau corner shift) while smoothing half-grid ties.
+        binom_1d = torch.tensor([1.0, 2.0, 1.0], dtype=density_t.dtype, device=density_t.device) * 0.25
+        binom_2d = (binom_1d[:, None] * binom_1d[None, :]).view(1, 1, 3, 3)
+        smooth_t = F.conv2d(F.pad(density_t, (1, 1, 1, 1), mode="replicate"), binom_2d)
+        max_pool = F.max_pool2d(smooth_t, kernel_size=k, stride=1, padding=pad)
+        # Scale-adaptive physical head mass window (~10-12px diameter: 5x5 at Stride 2, 3x3 at Stride 4)
+        mass_k = max(k, 5 if int(stride) <= 2 else 3)
+        local_mass = F.avg_pool2d(density_t, kernel_size=mass_k, stride=1, padding=mass_k // 2) * float(
+            mass_k * mass_k
         )
-        score_map = response_t[0, 0]
+        peak_mask = (smooth_t == max_pool) & (local_mass >= float(local_mass_threshold)) & (smooth_t > 1e-6)
+        ref_2d = smooth_t[0, 0]
+        score_map = local_mass[0, 0]
     else:
         max_pool = F.max_pool2d(density_t, kernel_size=k, stride=1, padding=pad)
         peak_mask = (density_t == max_pool) & (density_t > float(threshold))
+        ref_2d = density_t[0, 0]
         score_map = density_t[0, 0]
 
     peak_mask = peak_mask[0, 0]
@@ -59,13 +67,15 @@ def extract_subpixel_peaks(
     if y_indices.numel() == 0:
         return np.zeros((0, 2), dtype=np.float32), np.zeros(0, dtype=np.float32)
 
-    # 2. Subpixel parabolic interpolation (with exact tie suppression within NMS radius pad)
-    ref_2d = score_map if integrate_window else dens_2d
+    # 2. Subpixel parabolic interpolation (sorted by peak height so strongest peak wins ties)
+    order = torch.argsort(ref_2d[y_indices, x_indices], descending=True)
+    y_sorted = y_indices[order].tolist()
+    x_sorted = x_indices[order].tolist()
     eps = 1e-6
     points = []
     scores = []
     kept_yx: list[tuple[int, int]] = []
-    for y0, x0 in zip(y_indices.tolist(), x_indices.tolist(), strict=False):
+    for y0, x0 in zip(y_sorted, x_sorted, strict=False):
         if any(abs(y0 - ky) <= pad and abs(x0 - kx) <= pad for ky, kx in kept_yx):
             continue
         kept_yx.append((y0, x0))

@@ -53,6 +53,7 @@ class CrowdManifestDataset(Dataset):
         preload: bool = False,
         crowd_aware_crop: bool = True,
         crowd_aware_prob: float = 0.50,
+        stratified_crowd_crop: bool = False,
         norm_mode: str = "inception",
     ):
         manifest_path = Path(manifest)
@@ -88,6 +89,7 @@ class CrowdManifestDataset(Dataset):
         self.cache_images = bool(cache_images)
         self.crowd_aware_crop = bool(crowd_aware_crop)
         self.crowd_aware_prob = float(crowd_aware_prob)
+        self.stratified_crowd_crop = bool(stratified_crowd_crop)
         self.norm_mode = resolve_backbone_norm_mode(None, norm_mode)
         self._raw_bytes_cache: dict[int, bytes] = {}
         with self.manifest.open("r", encoding="utf-8") as f:
@@ -192,6 +194,7 @@ class CrowdManifestDataset(Dataset):
                 erasing_max_patches=self.erasing_max_patches,
                 crowd_aware_crop=self.crowd_aware_crop,
                 crowd_aware_prob=self.crowd_aware_prob,
+                stratified_crowd_crop=self.stratified_crowd_crop,
             )
             image.close()
         else:

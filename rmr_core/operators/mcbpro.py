@@ -68,9 +68,9 @@ def closed_form_mcbpro_transport(
     2. Selective Deficit Carrier Seeding: Backprojects Morozov-deadbanded regional deficit
        Delta_R = relu(b_R - Ay0 - deficit_deadband) strictly into foreground valleys g(u) between peaks.
        aug_y0 = y0 + g(u) * A^T(Delta_R / (Ag + eps)).
-    3. Exact Bregman-Poisson Closed-Form Projection: Multiplies augmented carrier by
-       exact regional scaling ratio s_R = b_R / (A aug_y0 + eps), with optional scale-invariant
-       dimensionless relative morphological prominence peak protection.
+    3. Exact Bregman-Poisson Closed-Form Projection: Projects carrier (or morphologically
+       peak-concentrated reference measure when conservative_scaling=True) via exact Csiszar
+       I-projection s_R = b_R / (A y_ref + eps), strictly conserving regional mass A y* = b_R.
     """
     if y0.ndim == 2:
         y0 = y0.unsqueeze(0).unsqueeze(0)
@@ -169,11 +169,29 @@ def closed_form_mcbpro_transport(
     else:
         y_aug = y0_f
 
-    # --- STAGE 3: Exact Bregman-Poisson Closed-Form Projection ---
-    mu_aug = regional_sum(y_aug, boxes_tensor)
-    scaling_ratio = b_s_f / mu_aug.clamp_min(float(eps))
+    # --- STAGE 3: Exact Bregman-Poisson Closed-Form Projection (Csiszar I-Projection) ---
+    if conservative_scaling:
+        k_peak = max(3, int(peak_kernel_size))
+        pad_peak = k_peak // 2
+        k_base = 2 * k_peak - 1
+        pad_base = k_base // 2
+        y0_local_max = F.max_pool2d(y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
+        y0_base_min = -F.max_pool2d(-y0_f, kernel_size=k_base, stride=1, padding=pad_base)
+        apex_ratio = (y0_f / (y0_local_max + float(eps))).clamp(0.0, 1.0).square()
+        rel_prom = torch.relu(y0_f - y0_base_min) / (y0_local_max + float(eps))
+        amp_floor = max(0.20 * float(tau_peak), float(eps))
+        prom_gate = torch.tanh(rel_prom / 0.25) * torch.tanh(y0_local_max / amp_floor)
+        p_peak = (m_effective * apex_ratio * prom_gate).clamp(0.0, 1.0)
+        peak_boost = 1.0 + p_peak
+        y_ref = y_aug * peak_boost
+    else:
+        peak_boost = None
+        y_ref = y_aug
 
-    both_zero = (b_s_f < float(eps)) & (mu_aug < float(eps))
+    mu_ref = regional_sum(y_ref, boxes_tensor)
+    scaling_ratio = b_s_f / mu_ref.clamp_min(float(eps))
+
+    both_zero = (b_s_f < float(eps)) & (mu_ref < float(eps))
     scaling_ratio = torch.where(both_zero, torch.ones_like(scaling_ratio), scaling_ratio)
     scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
@@ -195,32 +213,8 @@ def closed_form_mcbpro_transport(
         adj_s = regional_adjoint(weighted_s, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
         s_raw = adj_s / cov_w
 
-    if conservative_scaling:
-        k_peak = max(3, int(peak_kernel_size))
-        pad_peak = k_peak // 2
-        k_base = 2 * k_peak - 1
-        pad_base = k_base // 2
-        y0_local_max = F.max_pool2d(y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
-        y0_base_min = -F.max_pool2d(-y0_f, kernel_size=k_base, stride=1, padding=pad_base)
-        apex_ratio = (y0_f / (y0_local_max + float(eps))).clamp(0.0, 1.0).square()
-        rel_prom = torch.relu(y0_f - y0_base_min) / (y0_local_max + float(eps))
-        amp_floor = max(0.20 * float(tau_peak), float(eps))
-        prom_gate = torch.tanh(rel_prom / 0.25) * torch.tanh(y0_local_max / amp_floor)
-
-        b_count_field = _backproject_routed(
-            b_s_f, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
-        )
-        m_count = torch.tanh(b_count_field / 0.25)
-        if fg_mask is not None:
-            m_count = (fg_mask.to(dtype=work_dtype).clamp(0.0, 1.0) * m_count).clamp(0.0, 1.0)
-        m_presence = torch.maximum(m_effective, m_count)
-
-        p_peak = (m_presence * apex_ratio * prom_gate).clamp(0.0, 1.0)
-        s_field = s_raw + p_peak * torch.relu(1.0 - s_raw)
-    else:
-        s_field = s_raw
-
-    y_projected = torch.clamp_min(y_aug * s_field, 0.0).to(dtype=y0.dtype)
+    s_field = (peak_boost * s_raw) if peak_boost is not None else s_raw
+    y_projected = torch.clamp_min(y_ref * s_raw, 0.0).to(dtype=y0.dtype)
 
     if return_multiplier:
         return y_projected, s_field.to(dtype=y0.dtype)

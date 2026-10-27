@@ -1,12 +1,12 @@
 # ==============================================================================
-# V68 EXPERIMENT 1 (TRACK A): POST-ADJOINT PEAK-PROTECTED MC-BPRO FOR STRIDE 4
-# Single-Variable Controlled Upgrade over Track A Control Baseline (73.91 MAE)
+# V68 EXPERIMENT 1 (TRACK A): MASS-CONSERVING CSISZAR I-PROJECTION MC-BPRO (STRIDE 4)
+# Single-Variable Controlled Upgrade over V66 Exp5 Track A Control Baseline (v66_exp5)
 # Target: ShanghaiTech Part A (Canonical 300 Train / 182 Test, 0.0% KD)
 # Mathematical Invariant 1: Strictly <= 104,441 params (Actual: 104,391 params)
 # Mathematical Invariant 2: 100% Standalone (0.0% Knowledge Distillation, Zero Teachers)
 # Mathematical Invariant 3: High-Floor Cosine Annealing (min_lr_ratio: 0.20, 1500 epochs)
-# Core Single-Variable Innovation over Track A Champion:
-#   mcbpro_conservative_scaling: true (Post-Adjoint Morphological Peak-Protected Transport)
+# Core Single-Variable Innovation over V66 Exp5 Track A Control Baseline:
+#   mcbpro_conservative_scaling: true (Mass-Conserving Csiszar I-Projection MC-BPRO)
 # ==============================================================================
 
 seed: 42

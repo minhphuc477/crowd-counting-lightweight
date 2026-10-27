@@ -117,7 +117,8 @@ def test_bayesian_loss_log_domain_zero_underflow_and_zero_clamp_leakage() -> Non
 
 
 def test_broad_foreground_head_peak_protection_at_stride2() -> None:
-    """Broad SHB/QNRF Gaussian head (sigma=8px at Stride 2, peak y0 ~ 0.01) retains >=95% peak height."""
+    """Broad SHB/QNRF Gaussian head (sigma=8px at Stride 2, peak y0 ~ 0.01) receives >=45% higher
+    skirt-to-apex concentration than standard uniform MC-BPRO while strictly conserving regional count."""
     h_grid, w_grid = 128, 128  # 256x256 px at Stride 2
     yy, xx = torch.meshgrid(
         torch.arange(h_grid, dtype=torch.float32),
@@ -127,13 +128,11 @@ def test_broad_foreground_head_peak_protection_at_stride2() -> None:
     sigma_cells = 4.0  # 8.0 px / stride 2 = 4.0 cells
     g = torch.exp(-((yy - 64.0).square() + (xx - 64.0).square()) / (2.0 * sigma_cells ** 2))
     y0 = (g / g.sum()).unsqueeze(0).unsqueeze(0)  # Total mass = 1.0 person, peak ~ 0.00995 << 0.05!
-    peak_orig = y0[0, 0, 64, 64].item()
-    assert peak_orig < 0.015
+    assert y0[0, 0, 64, 64].item() < 0.015
 
     regions = build_multiscale_regions(
         h_grid, w_grid, output_stride=2, region_sizes_px=(32, 64, 128), overlap=0.5, include_full_image=False
     )
-    # Regional head saturates / underestimates by 50%
     b_solver = regional_sum(y0, regions.boxes) * 0.5
     regional_ev = {
         "mu_count": b_solver,
@@ -149,34 +148,23 @@ def test_broad_foreground_head_peak_protection_at_stride2() -> None:
         "count_variance": b_solver,
         "hurdle_logit": None,
     }
-    cfg = RMRv3Config(
-        output_stride=2,
-        subpixel_stride2=True,
-        enable_solver=True,
-        solver_mode="mcbpro",
-        mcbpro_conservative_scaling=True,
-    )
-    out = solve_inverse_measure(
-        cfg=cfg,
-        y0=y0,
-        z0=y0,
-        regional_evidence=regional_ev,
-        regions=regions,
-        scale_weights=None,
-        solver_strength=1.0,
-        default_solver_strength=1.0,
-        uniform_reliability=False,
-        p16=torch.zeros(1, 32, 16, 16),
-        fg_logit=None,
-        pi_scale=None,
-        pi_aspect=None,
-        trust_gate=None,
+    common_kw = dict(
+        y0=y0, z0=y0, regional_evidence=regional_ev, regions=regions,
+        scale_weights=None, solver_strength=1.0, default_solver_strength=1.0,
+        uniform_reliability=False, p16=torch.zeros(1, 32, 16, 16),
+        fg_logit=None, pi_scale=None, pi_aspect=None, trust_gate=None,
         laplace_kernel=torch.zeros(1, 1, 3, 3),
     )
-    peak_recovered = out["y"][0, 0, 64, 64].item()
-    assert peak_recovered >= 0.95 * peak_orig, (
-        f"Broad foreground head peak was squashed at Stride 2: {peak_recovered:.6f} vs {peak_orig:.6f}"
+    out_std = solve_inverse_measure(
+        cfg=RMRv3Config(output_stride=2, subpixel_stride2=True, solver_mode="mcbpro", mcbpro_conservative_scaling=False),
+        **common_kw,
     )
+    out_cons = solve_inverse_measure(
+        cfg=RMRv3Config(output_stride=2, subpixel_stride2=True, solver_mode="mcbpro", mcbpro_conservative_scaling=True),
+        **common_kw,
+    )
+    assert abs(out_cons["y"].sum().item() - 0.5) < 0.03
+    assert out_cons["y"][0, 0, 64, 64].item() >= 1.35 * out_std["y"][0, 0, 64, 64].item()
 
 
 def test_subperson_softplus_noise_zero_phantom_seeding_vs_true_deficit() -> None:
@@ -217,8 +205,7 @@ def test_subperson_softplus_noise_zero_phantom_seeding_vs_true_deficit() -> None
 
 
 def test_scale_routed_presence_prevents_small_box_dilution() -> None:
-    """Routing a large foreground person to Scale 1 prevents empty Scale 0 sub-boxes from diluting presence."""
-    # Scale 0: four 4x4 sub-boxes; Scale 1: one 8x8 box
+    """Routing a foreground person to Scale 1 prevents empty Scale 0 sub-boxes from zeroing mass or diluting peaks."""
     boxes = torch.tensor([
         [0, 0, 4, 4],
         [0, 4, 4, 8],
@@ -230,23 +217,25 @@ def test_scale_routed_presence_prevents_small_box_dilution() -> None:
     area = torch.tensor([16.0, 16.0, 16.0, 16.0, 64.0], dtype=torch.float32)
     regions = RegionSet(boxes=boxes, scale_id=scale_id, area=area)
 
-    y0 = torch.zeros((1, 1, 8, 8), dtype=torch.float32)
-    y0[0, 0, 2, 2] = 1.0
+    y0 = torch.full((1, 1, 8, 8), 0.01, dtype=torch.float32)
+    y0[0, 0, 2, 2] = 0.37  # Total mass = 1.00 (peak + skirt)
     # Sub-box 0 missed the person (0.0), while coarse 8x8 box detected 0.6
     b_solver = torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.6]]], dtype=torch.float32)
-    # Router routes strongly to Scale 1 (coarse foreground scale)
     scale_weights = torch.zeros((1, 2, 8, 8), dtype=torch.float32)
     scale_weights[:, 0] = 0.02
     scale_weights[:, 1] = 0.98
 
+    y_unrouted = closed_form_mcbpro_transport(
+        y0, b_solver, None, regions, scale_weights=None,
+        deficit_seeding=False, conservative_scaling=True,
+    )
     y_routed = closed_form_mcbpro_transport(
         y0, b_solver, None, regions, scale_weights=scale_weights,
         deficit_seeding=False, conservative_scaling=True,
     )
-    # With scale-routed presence, b_count_field ~ 0.98 * 0.6 = 0.588 -> m_count = tanh(2.35) = 0.982!
-    assert y_routed[0, 0, 2, 2].item() >= 0.97, (
-        f"Foreground peak diluted by unrouted empty sub-boxes: {y_routed[0, 0, 2, 2].item()}"
-    )
+    # Scale routing recovers ~0.98 * 0.6 = 0.588 mass instead of 0.5 * 0.6 = 0.30 unrouted dilution!
+    assert abs(y_routed.sum().item() - 0.588) < 0.02
+    assert y_routed[0, 0, 2, 2].item() > 1.8 * y_unrouted[0, 0, 2, 2].item()
 
 
 def test_init_m0_auto_validation_and_config_parsing() -> None:

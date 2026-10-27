@@ -226,10 +226,12 @@ def train_one_epoch(
             # error_if_nonfinite=False allows PyTorch AMP GradScaler to safely detect FP16 scale
             # overflows, skip optimizer.step, and dynamically halve scale factor (e.g. 65536 -> 32768)
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip, error_if_nonfinite=False)
+            scale_before = scaler.get_scale() if amp else 1.0
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
-            ema_manager.update(model)
+            if (not amp) or (scaler.get_scale() >= scale_before):
+                ema_manager.update(model)
 
         loss_tracker.update(losses)
         # Zero-Sync Diagnostic Policy: Update tracker on the final batch of the epoch.

@@ -51,6 +51,7 @@ def evaluate_dataset(
     density_bins: tuple[float, float] = (100.0, 500.0),
     use_tta: bool = False,
     eval_localization: bool = False,
+    tile_blend_mode: str = "hann",
 ) -> tuple[list[dict], dict[str, Any]]:
     """Canonical unified evaluation loop over a dataset loader.
 
@@ -141,23 +142,27 @@ def evaluate_dataset(
                         output_stride=eff_output_stride, tile_size=tile_size, halo=0,
                         use_hflip=True,
                         forward_kwargs=forward_kwargs,
+                        blend_mode="core",
                     )
                     y_th = predict_multiscale_tta(
                         model, sample["image"].to(device),
                         output_stride=eff_output_stride, tile_size=tile_size, halo=practical_halo,
                         use_hflip=True,
                         forward_kwargs=forward_kwargs,
+                        blend_mode=tile_blend_mode,
                     )
                 else:
                     y_t0 = predict_tiled(
                         model, sample["image"].to(device),
                         output_stride=eff_output_stride, tile_size=tile_size, halo=0,
                         forward_kwargs=forward_kwargs,
+                        blend_mode="core",
                     )
                     y_th = predict_tiled(
                         model, sample["image"].to(device),
                         output_stride=eff_output_stride, tile_size=tile_size, halo=practical_halo,
                         forward_kwargs=forward_kwargs,
+                        blend_mode=tile_blend_mode,
                     )
                 pred_t0 = float(y_t0.sum().item())
                 pred_th = float(y_th.sum().item())
@@ -191,11 +196,10 @@ def evaluate_dataset(
             if eval_localization and "points" in sample:
                 loc_stride = eff_output_stride
                 loc_thresh = 0.0125 if loc_stride == 2 else 0.05
-                loc_nms = 5 if loc_stride == 2 else 3
                 pred_pts, _ = extract_subpixel_peaks(
                     y,
                     threshold=loc_thresh,
-                    nms_kernel=loc_nms,
+                    nms_kernel=3,
                     stride=loc_stride,
                     integrate_window=True,
                 )

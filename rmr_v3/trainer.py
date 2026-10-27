@@ -141,6 +141,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
         crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", True)),
         crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.50)),
+        stratified_crowd_crop=bool(d_cfg.get("stratified_crowd_crop", False)),
         norm_mode=norm_mode,
     )
     val_manifest = d_cfg.get("val_manifest")
