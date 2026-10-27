@@ -332,7 +332,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         train_loss_keys = (
             "total", "count", "count_l1", "allocation", "cell", "region_nb", "hurdle_bce",
             "trunc_nb", "curvature", "hard_bg", "fg_bce", "scale_align", "spectral",
-            "spectral_dc", "spectral_ac", "cell_carrier", "cell_fine",
+            "spectral_dc", "spectral_ac", "cell_carrier", "cell_fine", "radon_ot", "bayesian",
         )
         for k in train_loss_keys:
             row_log[f"train_{k}"] = loss_avgs.get(k, 0.0)

@@ -5,7 +5,7 @@ from rmr_v3.losses import RMRv3LossConfig
 
 TRAIN_LOG_FIELDNAMES: list[str] = [
     "epoch", "lr_backbone", "lr_main", "solver_strength",
-    "train_total", "train_count", "train_count_l1", "train_flat_dm16", "train_allocation",
+    "train_total", "train_count", "train_count_l1", "train_flat_dm16", "train_allocation", "train_radon_ot", "train_bayesian",
     "train_dm16", "train_dm32", "train_dm64",
     "train_cell", "train_region_nb", "train_hurdle_bce", "train_trunc_nb",
     "train_curvature", "train_hard_bg", "train_fg_bce", "train_scale_align",
