@@ -165,10 +165,17 @@ def train_transform(
         and random.random() < float(crowd_aware_prob)
         and (max_left > 0 or max_top > 0)
     ):
-        # Anchor crop around a random valid head coordinate with spatial jitter
-        anchor_idx = random.randint(0, pts.shape[0] - 1)
-        anchor_x = float(pts[anchor_idx, 0].item())
-        anchor_y = float(pts[anchor_idx, 1].item())
+        # Spatially stratified crowd-aware crop: sample an occupied 64x64 cell uniformly
+        # first, then sample a head inside that cell, preventing horizon cluster monopoly.
+        cell_gx = torch.div(pts[:, 0].long(), 64, rounding_mode="floor")
+        cell_gy = torch.div(pts[:, 1].long(), 64, rounding_mode="floor")
+        cell_ids = cell_gy * 100000 + cell_gx
+        unique_cells = torch.unique(cell_ids)
+        chosen_cell = unique_cells[random.randint(0, unique_cells.numel() - 1)]
+        cell_pts = pts[cell_ids == chosen_cell]
+        anchor_idx = random.randint(0, cell_pts.shape[0] - 1)
+        anchor_x = float(cell_pts[anchor_idx, 0].item())
+        anchor_y = float(cell_pts[anchor_idx, 1].item())
         jitter_x = random.randint(-crop_size // 4, crop_size // 4)
         jitter_y = random.randint(-crop_size // 4, crop_size // 4)
         left = int(max(0, min(max_left, round(anchor_x - crop_size / 2.0 + jitter_x))))

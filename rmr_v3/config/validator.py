@@ -172,7 +172,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8).")
 
 
-    # Validate loss section Ã¢â‚¬â€ Stage 2 extensions
+    # Validate loss section -------- Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
     if isinstance(l_cfg_pre, dict):
         if "dm_target" in l_cfg_pre:

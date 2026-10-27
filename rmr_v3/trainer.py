@@ -129,7 +129,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         data_root=d_cfg.get("data_root"),
         cache_images=bool(d_cfg.get("cache_images", True)),
         preload=bool(d_cfg.get("preload", False)),
-        pad_small_images=bool(d_cfg.get("pad_small_images", False)),
+        pad_small_images=bool(d_cfg.get("pad_small_images", True)),
         boundary_margin=float(d_cfg.get("boundary_margin", 0.0)),
         max_size=int(d_cfg.get("max_size", 2048)),
         saturation_jitter=float(d_cfg.get("saturation_jitter", 0.0)),
@@ -138,7 +138,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         erasing_scale=tuple(d_cfg.get("erasing_scale", [0.005, 0.03])),
         erasing_ratio=tuple(d_cfg.get("erasing_ratio", [0.5, 2.0])),
         erasing_max_patches=int(d_cfg.get("erasing_max_patches", 2)),
-        crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", True)),
+        crowd_aware_crop=bool(d_cfg.get("crowd_aware_crop", False)),
         crowd_aware_prob=float(d_cfg.get("crowd_aware_prob", 0.50)),
     )
     val_manifest = d_cfg.get("val_manifest")

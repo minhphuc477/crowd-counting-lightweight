@@ -149,7 +149,7 @@ def bayesian_loss(
                 dist_mat = torch.cdist(pts, pts)
                 k_eff = min(4, n)
                 knn_d = torch.topk(dist_mat, k=k_eff, largest=False).values[:, -1]
-                sig_pts = (knn_d * 0.4).clamp(float(sigma_min), float(sigma_max))
+                sig_pts = (knn_d * 0.5).clamp(float(sigma_min), float(sigma_max))
                 inv_sq_pts = (1.0 / (2.0 * sig_pts.square())).unsqueeze(1)
 
         # Compute posterior probabilities under torch.no_grad()

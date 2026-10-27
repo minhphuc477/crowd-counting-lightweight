@@ -209,7 +209,7 @@ def test_auto_lr_finder_scheduler_sync() -> None:
     assert suggested_lr is not None
     assert opt.param_groups[2]["lr"] == pytest.approx(suggested_lr, rel=1e-5)
 
-    # Now build scheduler Ã¢â‚¬â€ it must capture suggested_lr in its base_lrs
+    # Now build scheduler -------- it must capture suggested_lr in its base_lrs
     sched = build_v3_scheduler(opt, cfg, epochs=50)
     assert sched.base_lrs[2] == pytest.approx(suggested_lr, rel=1e-5)
 
