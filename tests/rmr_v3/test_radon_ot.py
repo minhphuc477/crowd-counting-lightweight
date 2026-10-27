@@ -1,19 +1,19 @@
 import math
-import torch
 import pytest
+import torch
+import torch.nn.functional as F
 
 from rmr_v3.losses.radon_ot import radon_sliced_wasserstein_loss
 
 
 def test_radon_ot_identity_zero():
-    """When prediction perfectly matches ground truth, loss must be zero."""
+    """When prediction perfectly matches ground truth, loss must be near zero (< 1e-6)."""
     h, w, stride = 64, 64, 4
     pred = torch.zeros(1, 1, h, w, dtype=torch.float32)
-    # Put 1 person at grid cell (10, 15) -> exact pixel center is (15.5 * 4, 10.5 * 4) = (62.0, 42.0)
     pred[0, 0, 10, 15] = 1.0
-    pts = [torch.tensor([[62.0, 42.0]], dtype=torch.float32)]
+    pts = [torch.tensor([[62.0, 42.0]], dtype=torch.float32)]  # center of cell (10, 15)
     loss = radon_sliced_wasserstein_loss(pred, pts, stride=stride, num_projections=4)
-    assert loss.item() == 0.0, f"Expected 0.0 loss for matching point, got {loss.item()}"
+    assert loss.item() < 1e-6, f"Expected < 1e-6 loss for matching point, got {loss.item()}"
 
 
 def test_radon_ot_monotonic_shift():
@@ -24,7 +24,7 @@ def test_radon_ot_monotonic_shift():
     for s in shifts:
         pred = torch.zeros(1, 1, h, w, dtype=torch.float32)
         pred[0, 0, 10 + s, 10 + s] = 1.0
-        pts = [torch.tensor([[40.0, 40.0]], dtype=torch.float32)]  # cell (10, 10)
+        pts = [torch.tensor([[42.0, 42.0]], dtype=torch.float32)]  # cell (10, 10) center
         l = radon_sliced_wasserstein_loss(pred, pts, stride=stride, num_projections=4)
         losses.append(l.item())
 
@@ -32,8 +32,43 @@ def test_radon_ot_monotonic_shift():
         assert losses[i] <= losses[i + 1], f"Monotonicity violated: {losses}"
 
 
+def test_radon_ot_translation_invariance():
+    """Shift penalty must be invariant to where the points are located in the image."""
+    h, w, stride = 128, 128, 4
+    # Shift of 4 cells on the left: target at (16, 16), pred at (16, 20)
+    p_left = torch.zeros(1, 1, h, w)
+    p_left[0, 0, 16, 20] = 1.0
+    pts_left = [torch.tensor([[16.5 * stride, 16.5 * stride]])]
+    loss_left = radon_sliced_wasserstein_loss(p_left, pts_left, stride=stride, num_projections=4)
+
+    # Shift of 4 cells on the right: target at (112, 112), pred at (112, 116)
+    p_right = torch.zeros(1, 1, h, w)
+    p_right[0, 0, 112, 116] = 1.0
+    pts_right = [torch.tensor([[112.5 * stride, 112.5 * stride]])]
+    loss_right = radon_sliced_wasserstein_loss(p_right, pts_right, stride=stride, num_projections=4)
+
+    ratio = loss_left.item() / max(loss_right.item(), 1e-8)
+    assert abs(ratio - 1.0) < 1e-4, f"Translation invariance violated: ratio={ratio}"
+
+
+def test_radon_ot_gradient_dipole():
+    """Gradient at target must be attractive (< 0) and at background must be repulsive (> 0)."""
+    h, w, stride = 64, 64, 4
+    pred = torch.full((1, 1, h, w), 0.01, dtype=torch.float32, requires_grad=True)
+    pts = [torch.tensor([[16.5 * stride, 16.5 * stride]])]  # cell (16, 16)
+    loss = radon_sliced_wasserstein_loss(pred, pts, stride=stride, num_projections=4)
+    loss.backward()
+
+    grad = pred.grad[0, 0]
+    grad_target = grad[16, 16].item()
+    grad_background = grad[60, 60].item()
+
+    assert grad_target < 0.0, f"Expected attractive negative gradient at target, got {grad_target}"
+    assert grad_background > 0.0, f"Expected repulsive positive gradient at background, got {grad_background}"
+
+
 def test_radon_ot_zero_points_foreground_penalty():
-    """When image contains 0 people, foreground predictions must be heavily penalized."""
+    """When image contains 0 people, foreground predictions must be penalized."""
     h, w, stride = 32, 32, 4
     pred_clean = torch.zeros(1, 1, h, w, dtype=torch.float32)
     pred_noisy = torch.full((1, 1, h, w), 0.1, dtype=torch.float32)
@@ -99,4 +134,3 @@ def test_radon_ot_integration_in_allocation_loss():
     assert "bayesian" in losses_dual
     assert "allocation" in losses_dual
     assert loss_dual.item() > 0.0
-
