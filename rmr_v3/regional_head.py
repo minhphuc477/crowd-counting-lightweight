@@ -165,10 +165,13 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             if self.native_scale_pooling and feat_curr.shape[-2:] != src_hw:
                 scale = 4.0 / float(dst_stride)
                 float_boxes = boxes4.float() * scale
+                grid_scale = (float(dst_stride) / 4.0) ** 2
                 if self.regional_feature_stats == "sum":
-                    pooled = fractional_region_sum_features(feat_curr, float_boxes)
+                    pooled = fractional_region_sum_features(feat_curr, float_boxes) * grid_scale
                 elif self.regional_feature_stats == "sum_std":
                     pooled = fractional_region_sum_std_features(feat_curr, float_boxes)
+                    sums = pooled[..., :feature_dim] * grid_scale
+                    pooled = torch.cat([sums, pooled[..., feature_dim:]], dim=-1)
                 elif self.regional_feature_stats == "mean_std":
                     pooled = fractional_region_mean_std_features(feat_curr, float_boxes)
                 else:
