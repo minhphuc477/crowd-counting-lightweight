@@ -96,7 +96,14 @@ def radon_sliced_wasserstein_loss(
 
             # 1. Project 2D grid: s = x * cos(a) + y * sin(a)
             s_grid = grid_x * ca + grid_y * sa
-            s_min, s_max = s_grid.min(), s_grid.max()
+            # Continuous bounding box of feature domain [0, w] x [0, h] eliminates corner clamping distortion
+            c_proj = torch.stack([
+                torch.zeros((), device=device),
+                float(w) * ca,
+                float(h) * sa,
+                float(w) * ca + float(h) * sa,
+            ])
+            s_min, s_max = c_proj.min(), c_proj.max()
             denom = s_max - s_min + eps
             s_norm = (s_grid - s_min) / denom * float(num_bins - 1)
 
