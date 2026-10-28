@@ -8,8 +8,14 @@ from .prefix_sums import fractional_box_sum, prefix2d, regional_sum
 def region_average_features(features: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     """Average pooled region features: [B,C,H,W] -> [B,M,C]."""
     sums = regional_sum(features, boxes, out_dtype=torch.float32)  # [B,C,M]
-    area = ((boxes[:, 2] - boxes[:, 0]).abs() * (boxes[:, 3] - boxes[:, 1]).abs()).float()
-    avg = sums / area.view(1, 1, -1).clamp_min(1.0)
+    h, w = features.shape[-2:]
+    boxes_f = boxes.float()
+    y_min = torch.minimum(boxes_f[:, 0], boxes_f[:, 2]).clamp(0.0, float(h))
+    y_max = torch.maximum(boxes_f[:, 0], boxes_f[:, 2]).clamp(0.0, float(h))
+    x_min = torch.minimum(boxes_f[:, 1], boxes_f[:, 3]).clamp(0.0, float(w))
+    x_max = torch.maximum(boxes_f[:, 1], boxes_f[:, 3]).clamp(0.0, float(w))
+    area = ((y_max - y_min) * (x_max - x_min)).clamp_min(1.0)
+    avg = sums / area.view(1, 1, -1)
     return avg.transpose(1, 2).contiguous().to(features.dtype)
 
 

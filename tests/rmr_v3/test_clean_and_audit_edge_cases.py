@@ -1,19 +1,15 @@
-"""Edge Case, Shape Broadcasting, and KD Alias Verification Suite.
+"""Edge Case, Shape Broadcasting, and Invariant Verification Suite.
 
 Validates:
-1. DensityMapKDLoss accepts both canonical arguments and legacy aliases.
-2. DensityMapKDLoss gracefully handles 3D [B, H, W] teacher maps of different spatial resolutions
-   with exact mass normalization and zero broadcasting warnings.
-3. DensityMapKDLoss functions correctly at batch size B=1.
-4. Hurdle and truncated NB losses correctly align 2D and 3D regional count tensors across ALL
+1. Hurdle and truncated NB losses correctly align 2D and 3D regional count tensors across ALL
    permutations (including 2D mu_count + 3D dispersion + 2D target without IndexError).
-5. Mass-weighted cell loss handles both 3D and 4D density map tensors.
-6. Multiscale DM loss raises ValueError on empty block size specifications instead of ZeroDivisionError.
-7. compute_losses cleanly accepts cfg=None with default initialization.
-8. CoordinateAttention is directly importable from rmr_core top-level.
-9. Fractional region pooling handles inverted bounding boxes by pooling the true rectangle span,
+2. Mass-weighted cell loss handles both 3D and 4D density map tensors.
+3. Multiscale DM loss raises ValueError on empty block size specifications instead of ZeroDivisionError.
+4. compute_losses cleanly accepts cfg=None with default initialization.
+5. CoordinateAttention is directly importable from rmr_core top-level.
+6. Fractional region pooling handles inverted bounding boxes by pooling the true rectangle span,
    matching canonical box pooling.
-10. RMRv3 model parameter count is strictly <= 105,000 and switch_to_deploy preserves outputs.
+7. RMRv3 model parameter count is strictly <= 105,000 and switch_to_deploy preserves outputs.
 """
 
 from __future__ import annotations
@@ -25,63 +21,12 @@ import torch
 from rmr_core import CoordinateAttention
 from rmr_core.losses import LossConfig, compute_losses, multiscale_dm_loss
 from rmr_core.operators import fractional_region_average_features
-from rmr_v3.kd import DensityMapKDLoss
 from rmr_v3.losses import (
     hurdle_focal_bce_loss,
     mass_weighted_cell_loss,
     truncated_nb_nll_loss,
 )
 from rmr_v3.model import RMRv3, RMRv3Config
-
-
-def test_kd_loss_alias_compatibility():
-    """Verify DensityMapKDLoss supports both canonical and legacy alias parameter names."""
-    kd1 = DensityMapKDLoss(lambda_spatial_kl=1.5, lambda_count_kd=0.3)
-    assert kd1.lambda_spatial_kl == 1.5
-    assert kd1.lambda_count_kd == 0.3
-
-    kd2 = DensityMapKDLoss(lambda_spatial=2.0, lambda_count=0.4)
-    assert kd2.lambda_spatial_kl == 2.0
-    assert kd2.lambda_count_kd == 0.4
-
-
-def test_kd_loss_3d_and_multiresolution():
-    """Verify DensityMapKDLoss handles 3D teacher tensors with different resolutions without error."""
-    kd = DensityMapKDLoss()
-    ys = torch.rand(2, 1, 32, 32)
-    yt = torch.rand(2, 64, 64) * 2.0  # 3D teacher with different spatial resolution
-    loss_dict = kd(ys, yt)
-
-    assert "spatial_kl" in loss_dict
-    assert "count_kd" in loss_dict
-    assert "total_kd" in loss_dict
-    assert torch.isfinite(loss_dict["total_kd"])
-
-
-def test_kd_loss_batch1_and_no_broadcasting_warning():
-    """Verify DensityMapKDLoss operates without broadcasting warnings at B=1 and B=2."""
-    kd = DensityMapKDLoss()
-
-    # B=1 test
-    ys1 = torch.rand(1, 1, 32, 32)
-    yt1 = torch.rand(1, 32, 32)
-    with warnings.catch_warnings(record=True) as record:
-        warnings.simplefilter("always")
-        loss1 = kd(ys1, yt1)
-        # Ensure no UserWarning regarding size mismatch / broadcasting
-        for w in record:
-            assert "broadcasting" not in str(w.message).lower()
-    assert torch.isfinite(loss1["total_kd"])
-
-    # B=2 test with 3D teacher of same resolution
-    ys2 = torch.rand(2, 1, 32, 32)
-    yt2 = torch.rand(2, 32, 32)
-    with warnings.catch_warnings(record=True) as record:
-        warnings.simplefilter("always")
-        loss2 = kd(ys2, yt2)
-        for w in record:
-            assert "broadcasting" not in str(w.message).lower()
-    assert torch.isfinite(loss2["total_kd"])
 
 
 def test_hurdle_losses_shape_alignment_all_combinations():

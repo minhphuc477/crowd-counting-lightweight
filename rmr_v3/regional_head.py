@@ -163,9 +163,11 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 feat_curr, dst_stride = p16, 16
 
             if self.native_scale_pooling and feat_curr.shape[-2:] != src_hw:
-                scale = 4.0 / float(dst_stride)
+                src_stride = 4.0  # Base p4 lattice stride
+                scale = src_stride / float(dst_stride)
                 float_boxes = boxes4.float() * scale
-                grid_scale = (float(dst_stride) / 4.0) ** 2
+                # Riemann volume element: cell area ratio (dst_stride / src_stride)^2 preserves total mass
+                grid_scale = (float(dst_stride) / src_stride) ** 2
                 if self.regional_feature_stats == "sum":
                     pooled = fractional_region_sum_features(feat_curr, float_boxes) * grid_scale
                 elif self.regional_feature_stats == "sum_std":

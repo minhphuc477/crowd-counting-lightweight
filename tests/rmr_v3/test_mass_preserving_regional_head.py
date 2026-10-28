@@ -64,6 +64,29 @@ class TestMassPreservingFeatureSum:
         assert (out[..., 12:] >= 0.0).all()
 
 
+
+    def test_harsh_operator_edge_cases_inverted_oob_empty(self) -> None:
+        from rmr_core.operators import region_average_features, fractional_region_average_features
+        feat = torch.ones(2, 4, 32, 32)
+        box_normal = torch.tensor([[4, 4, 12, 12]])
+        box_inv = torch.tensor([[12, 12, 4, 4]])
+        sum_norm = region_sum_features(feat, box_normal)
+        sum_inv = region_sum_features(feat, box_inv)
+        avg_norm = region_average_features(feat, box_normal)
+        avg_inv = region_average_features(feat, box_inv)
+        torch.testing.assert_close(sum_inv, sum_norm)
+        torch.testing.assert_close(avg_inv, avg_norm)
+        box_oob = torch.tensor([[-4, -4, 8, 8]])
+        sum_oob = region_sum_features(feat, box_oob)
+        avg_oob = region_average_features(feat, box_oob)
+        torch.testing.assert_close(sum_oob, torch.full_like(sum_oob, 64.0))
+        torch.testing.assert_close(avg_oob, torch.ones_like(avg_oob))
+        box_empty = torch.tensor([[4, 4, 4, 4]])
+        sum_empty = region_sum_features(feat, box_empty)
+        avg_empty = region_average_features(feat, box_empty)
+        torch.testing.assert_close(sum_empty, torch.zeros_like(sum_empty))
+        torch.testing.assert_close(avg_empty, torch.zeros_like(avg_empty))
+
 class TestProbabilisticRegionalEvidenceHeadStats:
     @pytest.mark.parametrize("stats", ["mean", "mean_std", "sum", "sum_std"])
     @pytest.mark.parametrize("native", [False, True])

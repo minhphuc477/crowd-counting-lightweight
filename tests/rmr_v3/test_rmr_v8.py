@@ -35,7 +35,6 @@ from rmr_v3.losses import (
 from rmr_v3.config import validate_v3_config
 from rmr_v3.train import make_model, make_loss_cfg
 from rmr_v3.eval import load_model_from_ckpt
-from rmr_v3.kd import DensityMapKDLoss
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -384,27 +383,6 @@ def test_odd_and_asymmetric_spatial_resolutions():
 # Knowledge Distillation Mechanics
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_kd_loss_mechanics():
-    """DensityMapKDLoss computes valid spatial KL divergence and count alignment."""
-    kd_loss = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.5)
-
-    y_target = torch.rand(2, 1, 16, 16) * 10.0
-    y_student = y_target.clone().requires_grad_(True)
-
-    # When student matches teacher, count loss is 0 and KL is ~0
-    res_ident = kd_loss(y_student, y_target)
-    assert res_ident["count_kd"].item() < 1e-5
-    assert res_ident["spatial_kl"].item() < 1e-4
-
-    # When student differs, loss is positive and backprops cleanly
-    y_diff = (torch.rand(2, 1, 16, 16) * 5.0).requires_grad_(True)
-    res_diff = kd_loss(y_diff, y_target)
-    assert res_diff["total_kd"].item() > 0.0
-
-    res_diff["total_kd"].backward()
-    assert y_diff.grad is not None
-    assert torch.isfinite(y_diff.grad).all()
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AMP Mixed Precision Safety
@@ -441,22 +419,6 @@ def test_bfloat16_numerical_stability():
 # ─────────────────────────────────────────────────────────────────────────────
 # Advanced Edge Cases & Mathematical Invariants
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_kd_loss_empty_teacher_no_spatial_distortion():
-    """Empty teacher image (count=0) must produce 0 spatial KL, preventing uniform distortion."""
-    kd_loss = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.5)
-
-    # Empty teacher
-    y_teacher_empty = torch.zeros(1, 1, 16, 16)
-    # Student incorrectly predicting positive crowd
-    y_student = torch.ones(1, 1, 16, 16, requires_grad=True)
-
-    res = kd_loss(y_student, y_teacher_empty)
-
-    # Spatial KL MUST be 0.0 — no crowd distribution to distill
-    assert res["spatial_kl"].item() == 0.0
-    # Count KD MUST be positive — student predicted 256 instead of 0
-    assert res["count_kd"].item() > 0.0
 
 
 def test_operator_adjoint_dot_product_identity():

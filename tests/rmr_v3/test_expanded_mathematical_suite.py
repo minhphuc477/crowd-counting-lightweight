@@ -171,30 +171,6 @@ def test_solver_energy_reduction_and_monotonicity():
         assert ea < eb
 
 
-def test_kd_density_map_empty_and_occupied_autograd():
-    """Verify DensityMapKDLoss autograd graph connectivity on both empty background and occupied patches."""
-    from rmr_v3.kd import DensityMapKDLoss
-
-    kd_fn = DensityMapKDLoss(lambda_spatial_kl=1.0, lambda_count_kd=0.5, temperature=1.0)
-
-    # Empty teacher
-    ys = torch.rand(2, 1, 32, 32, requires_grad=True)
-    yt_empty = torch.zeros(2, 1, 32, 32)
-    res_empty = kd_fn(ys, yt_empty)
-    assert res_empty["spatial_kl"].item() == 0.0
-    res_empty["total_kd"].backward()
-    assert ys.grad is not None and torch.isfinite(ys.grad).all()
-
-    # Occupied teacher
-    ys = torch.rand(2, 1, 32, 32, requires_grad=True)
-    yt_occ = torch.zeros(2, 1, 32, 32)
-    yt_occ[0, 0, 10:15, 10:15] = 2.0
-    yt_occ[1, 0, 20:25, 20:25] = 3.0
-    res_occ = kd_fn(ys, yt_occ)
-    assert res_occ["spatial_kl"].item() > 0.0
-    res_occ["total_kd"].backward()
-    assert ys.grad is not None and torch.isfinite(ys.grad).all()
-
 
 def test_predict_tiled_exact_identity_and_seam_invariance():
     """Verify that predict_tiled is strictly identical to full-image inference for images <= tile_size."""

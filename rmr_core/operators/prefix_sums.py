@@ -48,9 +48,11 @@ def rectangle_sum_from_prefix(prefix: torch.Tensor, boxes: torch.Tensor) -> torc
     m = boxes.shape[0]
     boxes_l = boxes.to(device=prefix.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes_l.unbind(dim=-1)
-    y1, x1 = y1.clamp(0, hp - 1), x1.clamp(0, wp - 1)
-    y2, x2 = y2.clamp(0, hp - 1), x2.clamp(0, wp - 1)
-    idx = torch.stack([y2 * wp + x2, y1 * wp + x2, y2 * wp + x1, y1 * wp + x1], dim=0)
+    y_min = torch.minimum(y1, y2).clamp(0, hp - 1)
+    y_max = torch.maximum(y1, y2).clamp(0, hp - 1)
+    x_min = torch.minimum(x1, x2).clamp(0, wp - 1)
+    x_max = torch.maximum(x1, x2).clamp(0, wp - 1)
+    idx = torch.stack([y_max * wp + x_max, y_min * wp + x_max, y_max * wp + x_min, y_min * wp + x_min], dim=0)
     idx_flat = idx.view(1, 1, -1)
 
     gathered = torch.gather(prefix.flatten(-2), dim=-1, index=idx_flat.expand(b, c, -1)).view(b, c, 4, m)
