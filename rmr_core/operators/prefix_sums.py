@@ -99,10 +99,14 @@ def fractional_box_sum(prefix: torch.Tensor, float_boxes: torch.Tensor) -> torch
         raise ValueError("float_boxes must have shape [M, 4]")
     float_boxes = float_boxes.to(device=prefix.device, dtype=torch.float32)
     y1, x1, y2, x2 = float_boxes.unbind(dim=-1)
-    br = continuous_prefix_eval(prefix, y2, x2)
-    tr = continuous_prefix_eval(prefix, y1, x2)
-    bl = continuous_prefix_eval(prefix, y2, x1)
-    tl = continuous_prefix_eval(prefix, y1, x1)
+    y_min = torch.minimum(y1, y2)
+    y_max = torch.maximum(y1, y2)
+    x_min = torch.minimum(x1, x2)
+    x_max = torch.maximum(x1, x2)
+    br = continuous_prefix_eval(prefix, y_max, x_max)
+    tr = continuous_prefix_eval(prefix, y_min, x_max)
+    bl = continuous_prefix_eval(prefix, y_max, x_min)
+    tl = continuous_prefix_eval(prefix, y_min, x_min)
     return br - tr - bl + tl
 
 

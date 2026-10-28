@@ -36,10 +36,12 @@ def regional_adjoint(
     hp, wp = height + 1, width + 1
     boxes_l = boxes.to(device=values.device, dtype=torch.long)
     y1, x1, y2, x2 = boxes_l.unbind(dim=-1)
-    y1, x1 = y1.clamp(0, height), x1.clamp(0, width)
-    y2, x2 = y2.clamp(0, height), x2.clamp(0, width)
-    idx1, idx2 = y1 * wp + x1, y1 * wp + x2
-    idx3, idx4 = y2 * wp + x1, y2 * wp + x2
+    y_min = torch.minimum(y1, y2).clamp(0, height)
+    y_max = torch.maximum(y1, y2).clamp(0, height)
+    x_min = torch.minimum(x1, x2).clamp(0, width)
+    x_max = torch.maximum(x1, x2).clamp(0, width)
+    idx1, idx2 = y_min * wp + x_min, y_min * wp + x_max
+    idx3, idx4 = y_max * wp + x_min, y_max * wp + x_max
     idx_all = torch.cat([idx1, idx2, idx3, idx4], dim=-1).view(1, 1, -1)
 
     orig_dtype = values.dtype if out_dtype is None else out_dtype
