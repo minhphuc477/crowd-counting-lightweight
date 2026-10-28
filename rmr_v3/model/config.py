@@ -346,6 +346,10 @@ class RMRv3Config:
             raise ValueError(
                 f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
             )
+        if self.regional_feature_stats not in ("mean", "mean_std", "sum", "sum_std"):
+            raise ValueError(
+                f"regional_feature_stats must be 'mean', 'mean_std', 'sum', or 'sum_std', got '{self.regional_feature_stats}'"
+            )
         for k in (
             "pm_kappa", "anscombe_tau_dense", "scale_router_temperature",
             "trust_region_floor", "anscombe_c", "adaptive_tau_rho0",

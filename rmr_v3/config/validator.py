@@ -115,8 +115,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"iterations must be >= 1 when enable_solver is True, got {iters}")
         if "regional_feature_stats" in m_cfg:
             stats = str(m_cfg["regional_feature_stats"])
-            if stats not in ("mean", "mean_std"):
-                raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{stats}'")
+            if stats not in ("mean", "mean_std", "sum", "sum_std"):
+                raise ValueError(
+                    f"regional_feature_stats must be 'mean', 'mean_std', 'sum', or 'sum_std', got '{stats}'"
+                )
         if "solver_mode" in m_cfg:
             solver_mode = str(m_cfg["solver_mode"])
             if solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct"):

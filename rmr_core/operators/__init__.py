@@ -24,8 +24,12 @@ from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
     fractional_region_mean_std_features,
+    fractional_region_sum_features,
+    fractional_region_sum_std_features,
     region_average_features,
     region_mean_std_features,
+    region_sum_features,
+    region_sum_std_features,
 )
 from .prefix_sums import (
     _gather_prefix,
@@ -75,6 +79,10 @@ __all__ = [
     "region_average_features",
     "region_geometry",
     "region_mean_std_features",
+    "region_sum_features",
+    "region_sum_std_features",
+    "fractional_region_sum_features",
+    "fractional_region_sum_std_features",
     "regional_adjoint",
     "regional_sum",
     "weighted_coverage",

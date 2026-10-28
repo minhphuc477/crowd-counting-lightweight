@@ -13,9 +13,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rmr_core.operators import (
-    RegionSet, _canonicalize_region_size, fractional_region_average_features,
-    fractional_region_mean_std_features, partition_regions_by_scale,
-    region_average_features, region_mean_std_features, regional_adjoint, regional_sum,
+    RegionSet, _canonicalize_region_size,
+    fractional_region_average_features, fractional_region_mean_std_features,
+    fractional_region_sum_features, fractional_region_sum_std_features,
+    partition_regions_by_scale,
+    region_average_features, region_mean_std_features,
+    region_sum_features, region_sum_std_features,
+    regional_adjoint, regional_sum,
 )
 
 
@@ -70,8 +74,10 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             raise ValueError("dispersion_max must be > dispersion_min")
         if not (dispersion_min <= dispersion_init <= dispersion_max):
             raise ValueError("dispersion_init must lie inside [min,max]")
-        if regional_feature_stats not in ("mean", "mean_std"):
-            raise ValueError(f"regional_feature_stats must be 'mean' or 'mean_std', got '{regional_feature_stats}'")
+        if regional_feature_stats not in ("mean", "mean_std", "sum", "sum_std"):
+            raise ValueError(
+                f"regional_feature_stats must be 'mean', 'mean_std', 'sum', or 'sum_std', got '{regional_feature_stats}'"
+            )
 
         self.region_sizes_px = tuple(
             _canonicalize_region_size(x) for x in region_sizes_px
@@ -82,7 +88,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         self.regional_feature_stats = str(regional_feature_stats)
         self.has_hurdle_head = bool(hurdle_head)
 
-        in_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
+        in_dim = feature_dim + 1 if self.regional_feature_stats in ("mean", "sum") else 2 * feature_dim + 1
 
         self.trunk = nn.Sequential(
             nn.Linear(in_dim, hidden),
@@ -131,7 +137,7 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
         src_hw = p4.shape[-2:]
 
         feature_dim = int(p4.shape[1])
-        out_dim = feature_dim + 1 if self.regional_feature_stats == "mean" else 2 * feature_dim + 1
+        out_dim = feature_dim + 1 if self.regional_feature_stats in ("mean", "sum") else 2 * feature_dim + 1
 
         scale_specs = regions.scale_sizes_px if regions.scale_sizes_px is not None else [
             _canonicalize_region_size(s) for s in self.region_sizes_px
@@ -159,16 +165,14 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
             if self.native_scale_pooling and feat_curr.shape[-2:] != src_hw:
                 scale = 4.0 / float(dst_stride)
                 float_boxes = boxes4.float() * scale
-                if self.regional_feature_stats == "mean_std":
-                    pooled = fractional_region_mean_std_features(
-                        feat_curr,
-                        float_boxes,
-                    )
+                if self.regional_feature_stats == "sum":
+                    pooled = fractional_region_sum_features(feat_curr, float_boxes)
+                elif self.regional_feature_stats == "sum_std":
+                    pooled = fractional_region_sum_std_features(feat_curr, float_boxes)
+                elif self.regional_feature_stats == "mean_std":
+                    pooled = fractional_region_mean_std_features(feat_curr, float_boxes)
                 else:
-                    pooled = fractional_region_average_features(
-                        feat_curr,
-                        float_boxes,
-                    )
+                    pooled = fractional_region_average_features(feat_curr, float_boxes)
             else:
                 if feat_curr.shape[-2:] != src_hw:
                     feat_curr = F.interpolate(
@@ -179,16 +183,14 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                     )
                 boxes_level = boxes4
 
-                if self.regional_feature_stats == "mean_std":
-                    pooled = region_mean_std_features(
-                        feat_curr,
-                        boxes_level,
-                    )
+                if self.regional_feature_stats == "sum":
+                    pooled = region_sum_features(feat_curr, boxes_level)
+                elif self.regional_feature_stats == "sum_std":
+                    pooled = region_sum_std_features(feat_curr, boxes_level)
+                elif self.regional_feature_stats == "mean_std":
+                    pooled = region_mean_std_features(feat_curr, boxes_level)
                 else:
-                    pooled = region_average_features(
-                        feat_curr,
-                        boxes_level,
-                    )
+                    pooled = region_average_features(feat_curr, boxes_level)
 
             geom_scale_px = math.sqrt(float(hy_px) * float(wx_px))
             log_scale = torch.full_like(
@@ -210,7 +212,11 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                     mode="bilinear",
                     align_corners=False,
                 )
-            if self.regional_feature_stats == "mean_std":
+            if self.regional_feature_stats == "sum":
+                pooled_full = region_sum_features(feat_curr, boxes_full)
+            elif self.regional_feature_stats == "sum_std":
+                pooled_full = region_sum_std_features(feat_curr, boxes_full)
+            elif self.regional_feature_stats == "mean_std":
                 pooled_full = region_mean_std_features(feat_curr, boxes_full)
             else:
                 pooled_full = region_average_features(feat_curr, boxes_full)
