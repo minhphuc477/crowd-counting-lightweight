@@ -151,8 +151,8 @@ train:
   min_lr_ratio: 0.20
   grad_clip: 1.0
   amp: true
-  solver_warmup_epochs: 15
-  solver_ramp_epochs: 15
+  solver_warmup_epochs: 0
+  solver_ramp_epochs: 10
   early_stopping: false
   patience: 0
   eval_every: 5
