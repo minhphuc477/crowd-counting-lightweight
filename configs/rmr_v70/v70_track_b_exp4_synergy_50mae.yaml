@@ -6,7 +6,7 @@
 #   3. Mass-Preserving Feature SUM Regional Evidence: r=0.9526 linear correlation with crowd count
 #   4. Radon Sliced Wasserstein (Radon-OT): Continuous directional transport dipole
 #   5. Feature-Guided FED-MCBPRO: Weber-Fechner relative contrast carrier modulation
-# Parameter Invariant: Strictly <= 200,000 params (Actual: 125,738 params, 37.1% safety margin)
+# Parameter Invariant: Strictly <= 200,000 params (Actual: 122,618 params, 38.7% safety margin)
 # Empirical Invariant: Exactly 0.0% Knowledge Distillation, 182 Full Test Images
 # ==============================================================================
 
