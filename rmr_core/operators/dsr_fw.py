@@ -40,6 +40,8 @@ def closed_form_dsr_fw_transport(
     peak_kernel_size: int = 3,
     power_sharpening: int = 4,
     power: int | None = None,
+    tau_z_floor: float = -3.5,
+    max_spike_mass: float = 1.5,
     unit_mass_capacity: bool = True,
     return_details: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -205,11 +207,15 @@ def closed_form_dsr_fw_transport(
     mean_bg_z = F.avg_pool2d(z0_padded, kernel_size=5, stride=1)
     c_z = F.relu(z0_f - mean_bg_z)
 
+    # Absolute confidence gate (strictly prevents background noise & empty scenes from hallucinating phantom spikes)
+    conf_gate = torch.clamp((z0_f - float(tau_z_floor)) / 1.0, 0.0, 1.0)
+    c_z_gated = c_z * conf_gate
+
     # Isotropic 2D apex sharpening (strictly eliminates Cartesian 2-angle ghost cross-talk)
-    c_z_padded = F.pad(c_z, (1, 1, 1, 1), mode="replicate")
+    c_z_padded = F.pad(c_z_gated, (1, 1, 1, 1), mode="replicate")
     c_z_lmax = F.max_pool2d(c_z_padded, kernel_size=3, stride=1)
-    apex_weight = (c_z / (c_z_lmax + float(eps))).clamp(0.0, 1.0).square()
-    salience = vacant * apex_weight * c_z
+    apex_weight = (c_z_gated / (c_z_lmax + float(eps))).clamp(0.0, 1.0).square()
+    salience = vacant * apex_weight * c_z_gated
 
     eff_power = power if power is not None else power_sharpening
     p_exp = max(2, int(eff_power))
@@ -236,7 +242,8 @@ def closed_form_dsr_fw_transport(
             weighted_deficit, boxes_tensor, height=h, width=w, out_dtype=work_dtype
         ) / cov_w
 
-    y_spike = torch.clamp_min(salience_p * adj_deficit, 0.0)
+    y_spike_raw = salience_p * adj_deficit
+    y_spike = torch.clamp(y_spike_raw, min=0.0, max=float(max_spike_mass))
 
     # 6. Total Measure Synthesis
     y_star = torch.clamp_min(y_scale + y_spike, 0.0).to(dtype=y0.dtype)

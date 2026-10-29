@@ -255,3 +255,57 @@ def test_flat_plateau_zero_peak_leakage():
     assert (y_star <= y0).all(), "Surplus contraction must not increase any pixel on flat plateau"
 
 
+def test_empty_scene_zero_hallucination_under_false_alarm():
+    """Verify that an empty scene with false regional alarm injects 0 phantom mass into noise."""
+    h, w = 32, 32
+    torch.manual_seed(42)
+    # Background noise z0 ~ -6.0 (y0 < 0.006)
+    z0 = -6.0 + 0.3 * torch.randn(1, 1, h, w)
+    y0 = F.softplus(z0)
+
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    # Regional head has false alarm predicting 2.0 people in every box
+    b_s = torch.full((1, 1, regions.boxes.shape[0]), 2.0)
+
+    y_star = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        z0=z0,
+        tau_z_floor=-3.5,
+    )
+
+    # Injected mass into background noise must be strictly zero
+    injected_mass = (y_star - y0).clamp_min(0.0).sum().item()
+    assert injected_mass == 0.0, f"Expected 0 injected phantom mass, got {injected_mass}"
+
+
+def test_super_spike_ceiling():
+    """Verify that an extreme deficit box with only 1 faint head is bounded by max_spike_mass."""
+    h, w = 32, 32
+    torch.manual_seed(42)
+    z0 = torch.full((1, 1, h, w), -6.0)
+    # Faint head at (16, 16) with z0 = -2.0 (y0 = 0.126)
+    z0[0, 0, 16, 16] = -2.0
+    y0 = F.softplus(z0)
+
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    # Massive regional deficit: 10 people missing in the region
+    b_s = torch.full((1, 1, regions.boxes.shape[0]), 10.0)
+
+    y_star = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        z0=z0,
+        tau_z_floor=-3.5,
+        max_spike_mass=1.5,
+    )
+
+    peak_val = y_star[0, 0, 16, 16].item()
+    assert peak_val <= 1.5 + y0[0, 0, 16, 16].item() + 1e-4, f"Spike exceeded max_spike_mass: {peak_val}"
+
+
+

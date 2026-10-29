@@ -284,6 +284,8 @@ def solve_inverse_measure(
         ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
         power = float(getattr(cfg, "dsr_fw_power", 4.0))
         unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", True))
+        tau_z_floor = float(getattr(cfg, "dsr_fw_tau_z_floor", -3.5))
+        max_spike_mass = float(getattr(cfg, "dsr_fw_max_spike_mass", 1.5))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
         peak_kernel_size = int(peak_k) if peak_k is not None else (3 if is_stride2 else 3)
         z0_solver_input = z0.detach() if getattr(cfg, "detach_y0_for_solver", False) else z0
@@ -303,6 +305,8 @@ def solve_inverse_measure(
             peak_kernel_size=peak_kernel_size,
             power=power,
             unit_mass_capacity=unit_mass,
+            tau_z_floor=tau_z_floor,
+            max_spike_mass=max_spike_mass,
         )
         return _wrap_closed_form(base_out, y0, y_dsr, effective_strength)
 
