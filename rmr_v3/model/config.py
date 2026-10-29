@@ -45,11 +45,12 @@ class RMRv3Config:
     subpixel_kernel_size: int = 3
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted" | "rep_aspp_lite" | "bifpn_lite"
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "rep_weighted" | "rep_aspp_lite" | "bifpn_lite" | "rlk_hdc"
     context_dilations: tuple[int, ...] = (1, 2, 3)
     use_aspp_gap: bool = True
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
     hdc_dilations: tuple[int, ...] = (1, 2, 3)
+    use_fast_norm_fusion: bool = True
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)

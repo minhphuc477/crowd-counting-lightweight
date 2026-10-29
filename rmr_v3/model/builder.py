@@ -9,6 +9,7 @@ from rmr_core.necks import (
     ASPPLiteFPNNeck,
     BiFPNLiteNeck,
     HDCLiteFPNNeck,
+    RLKHDCFPNNeck,
     RepASPPLiteNeck,
     RepWeightedFPNNeck,
 )
@@ -51,6 +52,14 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
         )
+    if cfg.neck_type == "rlk_hdc":
+        return RLKHDCFPNNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            hdc_dilations=cfg.hdc_dilations,
+            use_gap=cfg.use_aspp_gap,
+            use_fast_norm_fusion=getattr(cfg, "use_fast_norm_fusion", True),
+        )
     if cfg.neck_type == "rep_aspp_lite":
         return RepASPPLiteNeck(
             in_channels=in_channels,
@@ -68,9 +77,8 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
         f"Unsupported neck_type: '{cfg.neck_type}'. "
-        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rep_weighted', 'rep_aspp_lite', or 'bifpn_lite'."
+        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rlk_hdc', 'rep_weighted', 'rep_aspp_lite', or 'bifpn_lite'."
     )
-
 
 
 def build_scale_router(
@@ -116,7 +124,6 @@ def build_scale_router(
             cfg.feature_width, len(cfg.region_sizes_px), cfg.scale_router_temperature
         )
     return None, None
-
 
 
 def build_1x1_gate(enabled: bool, in_channels: int) -> nn.Conv2d | None:

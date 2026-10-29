@@ -21,6 +21,10 @@ from .blocks import (
 from .hdc import (
     HDCLiteFPNNeck,
 )
+from .rlk_hdc import (
+    RLKHDCFPNNeck,
+    StaticFastNormalizedFusion,
+)
 from .rep_aspp import (
     RepASPPLiteNeck,
 )
@@ -39,9 +43,11 @@ __all__ = [
     "DSResidual",
     "DepthwiseDilated",
     "HDCLiteFPNNeck",
+    "RLKHDCFPNNeck",
     "RepASPPLiteNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
+    "StaticFastNormalizedFusion",
     "TinyIR",
     "_gn",
 ]
