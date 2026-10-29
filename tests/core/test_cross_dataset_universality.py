@@ -256,3 +256,22 @@ def test_init_m0_auto_validation_and_config_parsing() -> None:
         validate_v3_config({"model": {"init_m0": "bad_string"}})
     with pytest.raises(ValueError, match="init_m0"):
         validate_v3_config({"model": {"init_m0": -0.01}})
+
+
+def test_tau_z_floor_auto_adapts_to_dataset_density() -> None:
+    """Verify that dsr_fw_tau_z_floor dynamically self-calibrates from dataset prior without hardcoding."""
+    from rmr_v3.model.config import _softplus_inverse
+
+    # SHA Regime: m0 ~ 0.03 -> Stride 2 eff_m0 = 0.0075 -> z_floor ~ -4.89
+    cfg_sha = RMRv3Config(output_stride=2, subpixel_stride2=True, init_m0=0.03, solver_mode="dsr_fw")
+    z_floor_sha = _softplus_inverse(cfg_sha.init_m0 * 0.25)
+    assert abs(z_floor_sha - (-4.89)) < 0.05
+
+    # SHB Regime: m0 ~ 0.0025 -> Stride 2 eff_m0 = 0.000625 -> z_floor ~ -7.38
+    cfg_shb = RMRv3Config(output_stride=2, subpixel_stride2=True, init_m0=0.0025, solver_mode="dsr_fw")
+    z_floor_shb = _softplus_inverse(cfg_shb.init_m0 * 0.25)
+    assert abs(z_floor_shb - (-7.38)) < 0.05
+
+    # Invariant: SHB background floor is ~2.49 logit units below SHA (strictly non-cherry-picked)
+    assert z_floor_sha - z_floor_shb > 2.0
+

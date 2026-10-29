@@ -16,7 +16,7 @@ from rmr_core.operators import (
 )
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
-from .config import RMRv3Config
+from .config import RMRv3Config, _softplus_inverse
 
 
 def _wrap_closed_form(
@@ -292,9 +292,14 @@ def solve_inverse_measure(
         ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
         power = float(getattr(cfg, "dsr_fw_power", 4.0))
         unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", False))
-        tau_z_floor = float(getattr(cfg, "dsr_fw_tau_z_floor", -3.5))
-        if is_stride2 and tau_z_floor >= -3.6:
-            tau_z_floor = -4.9
+        m0_raw = float(getattr(cfg, "init_m0", 0.015763))
+        eff_m0 = m0_raw * 0.25 if is_stride2 else m0_raw
+        default_z_floor = _softplus_inverse(eff_m0)
+        custom_z_floor = getattr(cfg, "dsr_fw_tau_z_floor", None)
+        if custom_z_floor is not None and str(custom_z_floor).strip().lower() != "auto":
+            tau_z_floor = float(custom_z_floor)
+        else:
+            tau_z_floor = default_z_floor
         max_spike_mass = float(getattr(cfg, "dsr_fw_max_spike_mass", 1.5))
         morozov_tol = float(getattr(cfg, "dsr_fw_morozov_tol", 0.0))
         morozov_gamma = float(getattr(cfg, "dsr_fw_morozov_gamma", 0.0))

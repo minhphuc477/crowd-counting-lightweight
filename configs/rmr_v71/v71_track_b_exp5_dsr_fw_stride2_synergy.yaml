@@ -41,7 +41,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.015763
+  init_m0: auto
 
   # Rep-Large-Kernel HDC Neck (RLK-HDC)
   neck_type: rlk_hdc
@@ -81,7 +81,7 @@ model:
   detach_y0_for_solver: false
   pc_tau_noise: 0.005
   pc_tau_peak: 0.0125
-  dsr_fw_tau_z_floor: -4.90
+  dsr_fw_tau_z_floor: auto
   ratio_clamp_max: 5.0
   ratio_clamp_min: 0.2
   dsr_fw_power: 4.0
