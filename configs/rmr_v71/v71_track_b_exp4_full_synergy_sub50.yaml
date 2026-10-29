@@ -85,7 +85,7 @@ model:
   # Peak-Concentrated Inverse Solver (PC-BPRO)
   enable_solver: true
   solver_mode: peak_concentrated
-  detach_y0_for_solver: true
+  detach_y0_for_solver: false
   pc_tau_noise: 0.02
   pc_tau_peak: 0.05
   ratio_clamp_max: 5.0

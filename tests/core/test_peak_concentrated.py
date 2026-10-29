@@ -67,3 +67,31 @@ def test_autograd_differentiability():
 
     assert y0.grad is not None, "Gradient on y0 must exist"
     assert not torch.isnan(y0.grad).any(), "Gradient must be finite"
+
+
+def test_uncovered_pixel_identity():
+    """Verify that uncovered pixels maintain neutral identity multiplier S=1.0."""
+    h, w = 32, 32
+    y0 = torch.full((1, 1, h, w), 0.1)
+
+    # Artificially construct a region set that covers only [0:16, 0:16]
+    boxes = torch.tensor([[0, 0, 16, 16]], dtype=torch.int64)
+    areas = torch.tensor([256.0], dtype=torch.float32)
+    scales = torch.tensor([0], dtype=torch.int64)
+    regions = RegionSet(boxes=boxes, area=areas, scale_id=scales, num_scales=1)
+
+    b_s = torch.tensor([[[10.0]]], dtype=torch.float32)
+
+    y_star, s_eff = closed_form_peak_concentrated_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        return_multiplier=True,
+    )
+
+    # Pixel at (24, 24) is completely outside the box [0:16, 0:16]
+    # S_eff must be identically 1.0 (unchanged)
+    assert torch.isclose(s_eff[0, 0, 24, 24], torch.tensor(1.0), atol=1e-5), "Uncovered pixels must have S=1.0"
+    assert torch.isclose(y_star[0, 0, 24, 24], y0[0, 0, 24, 24], atol=1e-5), "Uncovered pixels must be untouched"
+

@@ -7,7 +7,7 @@
 # Single Variable Control against V71-Exp1 (Direct Baseline):
 #   - enable_solver: false -> true
 #   - solver_mode: direct -> peak_concentrated
-#   - detach_y0_for_solver: true
+#   - detach_y0_for_solver: false (end-to-end peak-focused gradient flow)
 # Parameter Invariant: Strictly <= 200,000 params (Actual: 122,618 params)
 # Empirical Invariant: Exactly 0.0% Knowledge Distillation, 182 Full Test Images
 # ==============================================================================
@@ -90,7 +90,7 @@ model:
   # Peak-Concentrated Inverse Solver (PC-BPRO)
   enable_solver: true
   solver_mode: peak_concentrated
-  detach_y0_for_solver: true
+  detach_y0_for_solver: false
   pc_tau_noise: 0.02
   pc_tau_peak: 0.05
   ratio_clamp_max: 5.0

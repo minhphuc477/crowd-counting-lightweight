@@ -138,15 +138,24 @@ def closed_form_peak_concentrated_transport(
             w_s_k = weighted_s[:, :, mask_k]
             cov_w_k = regional_adjoint(
                 w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
-            ).clamp_min(float(eps))
+            )
             adj_s_k = regional_adjoint(w_s_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
-            s_raw = s_raw + pi_k * (adj_s_k / cov_w_k)
+            s_k = torch.where(
+                cov_w_k > float(eps),
+                adj_s_k / cov_w_k.clamp_min(float(eps)),
+                torch.ones_like(adj_s_k),
+            )
+            s_raw = s_raw + pi_k * s_k
     else:
         cov_w = regional_adjoint(
             w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype
-        ).clamp_min(float(eps))
+        )
         adj_s = regional_adjoint(weighted_s, boxes_tensor, height=h, width=w, out_dtype=work_dtype)
-        s_raw = adj_s / cov_w
+        s_raw = torch.where(
+            cov_w > float(eps),
+            adj_s / cov_w.clamp_min(float(eps)),
+            torch.ones_like(adj_s),
+        )
 
     # 5. Peak-Concentrated Projection: y*(u) = y0(u) * [1.0 + p_peak(u) * (S_raw(u) - 1.0)]
     s_eff = 1.0 + p_peak * (s_raw - 1.0)
