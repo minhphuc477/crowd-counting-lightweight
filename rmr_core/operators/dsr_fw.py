@@ -130,10 +130,14 @@ def closed_form_dsr_fw_transport(
     # 1. Continuous Peak Prominence on L_2 Subpixel Lattice (k_peak = 3 default)
     k_peak = max(3, int(peak_kernel_size))
     pad_peak = k_peak // 2
-    y0_lmax = F.max_pool2d(y0_f, kernel_size=k_peak, stride=1, padding=pad_peak)
+    y0_padded = F.pad(y0_f, (pad_peak, pad_peak, pad_peak, pad_peak), mode="replicate")
+    y0_lmax = F.max_pool2d(y0_padded, kernel_size=k_peak, stride=1)
+    y0_avg = F.avg_pool2d(y0_padded, kernel_size=k_peak, stride=1)
+    prominence = F.relu(y0_f - y0_avg)
+    prominence_gate = torch.clamp(prominence / max(float(tau_noise), float(eps)), 0.0, 1.0)
     apex_ratio = (y0_f / (y0_lmax + float(eps))).clamp(0.0, 1.0).square()
     noise_gate = torch.clamp((y0_f - float(tau_noise)) / max(float(tau_peak), float(eps)), 0.0, 1.0)
-    p_peak = (apex_ratio * noise_gate).clamp(0.0, 1.0)
+    p_peak = (apex_ratio * noise_gate * prominence_gate).clamp(0.0, 1.0)
     is_peak = (p_peak > 0.5) & (y0_f >= (y0_lmax - float(eps)))
 
     # 2. Regional Mass and Physical Unit Mass Capacity
@@ -197,11 +201,13 @@ def closed_form_dsr_fw_transport(
 
     # 5. Stream B: Dual-Certificate Radon Spike Injection (Anti-Carrier Collapse)
     vacant = (1.0 - p_peak).clamp(0.0, 1.0)
-    mean_bg_z = F.avg_pool2d(z0_f, kernel_size=5, stride=1, padding=2)
+    z0_padded = F.pad(z0_f, (2, 2, 2, 2), mode="replicate")
+    mean_bg_z = F.avg_pool2d(z0_padded, kernel_size=5, stride=1)
     c_z = F.relu(z0_f - mean_bg_z)
 
     # Isotropic 2D apex sharpening (strictly eliminates Cartesian 2-angle ghost cross-talk)
-    c_z_lmax = F.max_pool2d(c_z, kernel_size=3, stride=1, padding=1)
+    c_z_padded = F.pad(c_z, (1, 1, 1, 1), mode="replicate")
+    c_z_lmax = F.max_pool2d(c_z_padded, kernel_size=3, stride=1)
     apex_weight = (c_z / (c_z_lmax + float(eps))).clamp(0.0, 1.0).square()
     salience = vacant * apex_weight * c_z
 

@@ -231,3 +231,27 @@ def test_rmrv3_end_to_end_dsr_fw_pipeline():
     grads = [p.grad for p in model.parameters() if p.grad is not None]
     assert len(grads) > 0, "Backbone and heads must receive gradients"
 
+
+def test_flat_plateau_zero_peak_leakage():
+    """Verify that a flat plateau of fog/pedestal has 0 detected peaks and receives 0 bloat."""
+    h, w = 32, 32
+    # Flat plateau with positive pedestal y0 = 0.20 (fog / clutter)
+    y0 = torch.full((1, 1, h, w), 0.20)
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    b_s = torch.full((1, 1, regions.boxes.shape[0]), 0.0)  # Demand 0 count (pure background)
+
+    y_star, details = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        return_details=True,
+    )
+
+    # Flat plateau must NOT produce isolated peak flags
+    p_peak = details["p_peak"]
+    assert (p_peak == 0.0).all(), "Flat plateau must have identically 0 peak prominence"
+    # Surplus contraction should scale down the flat plateau uniformly without creating spikes
+    assert (y_star <= y0).all(), "Surplus contraction must not increase any pixel on flat plateau"
+
+
