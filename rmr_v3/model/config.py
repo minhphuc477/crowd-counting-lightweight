@@ -338,9 +338,9 @@ class RMRv3Config:
                 "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
                 "Keep hybrid_recovery_alpha=0.0."
             )
-        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct"):
+        if self.solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct", "peak_concentrated", "pc_solver", "pc_bpro"):
             raise ValueError(
-                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', 'fed_mcbpro', or 'direct', got '{self.solver_mode}'"
+                f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', 'fed_mcbpro', 'direct', or 'peak_concentrated', got '{self.solver_mode}'"
             )
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(

@@ -20,6 +20,7 @@ from .fed_mcbpro import (
     perspective_mcbpro_transport,
 )
 from .mcbpro import closed_form_mcbpro_transport
+from .peak_concentrated import closed_form_peak_concentrated_transport
 from .morozov import compute_morozov_discrepancy
 from .pooling import (
     fractional_region_average_features,
@@ -60,6 +61,7 @@ __all__ = [
     "center_scatter",
     "charbonnier_tv_step",
     "closed_form_mcbpro_transport",
+    "closed_form_peak_concentrated_transport",
     "closed_form_radon_nikodym_transport",
     "compute_deficit_carrier_seed",
     "compute_feature_high_pass_energy",

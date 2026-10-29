@@ -196,6 +196,7 @@ ALLOWED_MODEL_KEYS = {
     "mcbpro_tau_count_null", "mcbpro_feat_energy_weight",
     "mcbpro_dense_threshold", "mcbpro_contrast_kernel", "mcbpro_noise_floor",
     "mcbpro_conservative_scaling",
+    "pc_tau_noise", "pc_tau_peak", "ratio_clamp_min",
 }
 
 ALLOWED_LOSS_KEYS = {

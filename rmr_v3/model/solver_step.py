@@ -8,6 +8,7 @@ import torch.nn as nn
 from rmr_core.operators import (
     RegionSet,
     closed_form_mcbpro_transport,
+    closed_form_peak_concentrated_transport,
     closed_form_radon_nikodym_transport,
     fed_mcbpro_transport,
     perspective_mcbpro_transport,
@@ -246,6 +247,49 @@ def solve_inverse_measure(
             y_final = (1.0 - effective_strength) * y0 + effective_strength * y_pmcbpro
         else:
             y_final = y_pmcbpro
+
+        base_out.update({
+            "y": y_final,
+            "iterates": [y0, y_final],
+            "residual_fields": [],
+            "energy_trace": [],
+            "solver_strength": effective_strength,
+            "rn_multiplier": s_field,
+        })
+        return RMRModelOutput(**base_out)
+
+    if cfg.solver_mode in ("peak_concentrated", "pc_solver", "pc_bpro"):
+        is_stride2 = bool(
+            getattr(cfg, "subpixel_stride2", False)
+            or getattr(cfg, "subpixel_dm", False)
+            or int(getattr(cfg, "output_stride", 4)) == 2
+        )
+        tau_noise = float(getattr(cfg, "pc_tau_noise", 0.02))
+        tau_peak = float(getattr(cfg, "pc_tau_peak", 0.05))
+        ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 5.0))
+        ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
+        peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
+        peak_kernel_size = int(peak_k) if peak_k is not None else (5 if is_stride2 else 3)
+
+        y_pc, s_field = closed_form_peak_concentrated_transport(
+            y0=y0_solver_input,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            eps=cfg.eps,
+            scale_weights=scale_weights,
+            tau_noise=tau_noise,
+            tau_peak=tau_peak,
+            ratio_clamp_max=ratio_clamp_max,
+            ratio_clamp_min=ratio_clamp_min,
+            peak_kernel_size=peak_kernel_size,
+            return_multiplier=True,
+        )
+
+        if effective_strength < 1.0:
+            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_pc
+        else:
+            y_final = y_pc
 
         base_out.update({
             "y": y_final,
