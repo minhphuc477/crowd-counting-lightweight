@@ -44,7 +44,7 @@ def closed_form_dsr_fw_transport(
     power: int | None = None,
     tau_z_floor: float = -3.5,
     max_spike_mass: float = 1.5,
-    unit_mass_capacity: bool = True,
+    unit_mass_capacity: bool = False,
     morozov_tol: float = 0.0,
     morozov_gamma: float = 0.0,
     b_variance: torch.Tensor | None = None,
@@ -200,9 +200,9 @@ def closed_form_dsr_fw_transport(
         cap_map = torch.where(is_peak, torch.clamp(1.0 - y0_footprint, min=0.0), torch.zeros_like(y0_f))
         cap_r = regional_sum(cap_map, boxes_tensor).clamp_min(0.0)
     else:
-        mu_peak_map = y0_f * p_peak
-        cap_r = (regional_sum(mu_peak_map, boxes_tensor) * (float(ratio_clamp_max) - 1.0)).clamp_min(0.0)
-        cap_map = y0_f * p_peak
+        # Proportional apex scaling with exact mathematical adjoint parity: cap_map matches cap_r
+        cap_map = y0_f * p_peak * (float(ratio_clamp_max) - 1.0)
+        cap_r = regional_sum(cap_map, boxes_tensor).clamp_min(0.0)
 
     is_deficit = delta_r > 0.0
     delta_deficit_exist = torch.where(is_deficit, torch.min(delta_r, cap_r), torch.zeros_like(delta_r))

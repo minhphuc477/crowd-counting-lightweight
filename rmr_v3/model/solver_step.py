@@ -283,7 +283,7 @@ def solve_inverse_measure(
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 5.0))
         ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
         power = float(getattr(cfg, "dsr_fw_power", 4.0))
-        unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", True))
+        unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", False))
         tau_z_floor = float(getattr(cfg, "dsr_fw_tau_z_floor", -3.5))
         max_spike_mass = float(getattr(cfg, "dsr_fw_max_spike_mass", 1.5))
         morozov_tol = float(getattr(cfg, "dsr_fw_morozov_tol", 0.0))

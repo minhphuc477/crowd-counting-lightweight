@@ -13,21 +13,24 @@ class StaticFastNormalizedFusion(nn.Module):
 
     Uses data-agnostic learnable parameters w1, w2 to preserve strict stationarity
     (zero non-stationarity) across feature scales:
-        O = (ReLU(w1) * lateral + ReLU(w2) * upsampled) / (ReLU(w1) + ReLU(w2) + eps)
+        O = (Softplus(w1) * lateral + Softplus(w2) * upsampled) / (Softplus(w1) + Softplus(w2) + eps)
 
     Because w1 and w2 are data-agnostic scalar parameters (not predicted from input X),
     they remain stationary across mini-batches, avoiding the double non-stationarity
     that destabilizes unrolled inverse solvers.
+    Using Softplus guarantees strictly positive weights (> 0) and smooth non-zero gradients
+    everywhere, completely eliminating the dying ReLU / zero-feature collapse risk.
     """
 
     def __init__(self, eps: float = 1e-4) -> None:
         super().__init__()
         self.eps = float(eps)
-        # Learnable scalar parameters, initialized to 1.0 (50-50 equal weighting)
-        self.weights = nn.Parameter(torch.ones(2, dtype=torch.float32))
+        # Learnable scalar parameters, initialized so Softplus(w) = 1.0 (50-50 equal weighting)
+        # softplus_inv(1.0) = ln(e - 1) = 0.5413248546129181
+        self.weights = nn.Parameter(torch.full((2,), 0.5413248546129181, dtype=torch.float32))
 
     def forward(self, lateral: torch.Tensor, upsampled: torch.Tensor) -> torch.Tensor:
-        w = F.relu(self.weights)
+        w = F.softplus(self.weights)
         w_norm = w / (w.sum() + self.eps)
         return w_norm[0] * lateral + w_norm[1] * upsampled
 
