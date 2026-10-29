@@ -51,7 +51,7 @@ model:
   include_full_image: false
   use_diag: false
   native_scale_pooling: true
-  regional_feature_stats: sum
+  regional_feature_stats: mean_std
   region_head_hidden: 96
   dynamic_scale_routing: true
   factorized_scale_routing: false
@@ -68,6 +68,7 @@ model:
   hurdle_head: false
   density_curvature: false
   temp_softplus: true
+  floor_tau: 0.003
   use_coord_attn: false
   ema_decay: 0.999
 
