@@ -77,7 +77,7 @@ class RMRv3(nn.Module):
                 cfg.feature_width,
                 kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
             )
-            if getattr(cfg, "subpixel_dm", False)
+            if (getattr(cfg, "subpixel_dm", False) and not getattr(cfg, "subpixel_stride2", False))
             else None
         )
         if getattr(cfg, "learned_solver_steps", False) and cfg.enable_solver:
