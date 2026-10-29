@@ -250,7 +250,11 @@ def solve_inverse_measure(
             or int(getattr(cfg, "output_stride", 4)) == 2
         )
         tau_noise = float(getattr(cfg, "pc_tau_noise", 0.02))
+        if is_stride2 and tau_noise >= 0.015:
+            tau_noise = tau_noise * 0.25
         tau_peak = float(getattr(cfg, "pc_tau_peak", 0.05))
+        if is_stride2 and tau_peak >= 0.04:
+            tau_peak = tau_peak * 0.25
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 5.0))
         ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
@@ -279,17 +283,23 @@ def solve_inverse_measure(
             or int(getattr(cfg, "output_stride", 4)) == 2
         )
         tau_noise = float(getattr(cfg, "pc_tau_noise", 0.02))
+        if is_stride2 and tau_noise >= 0.015:
+            tau_noise = tau_noise * 0.25
         tau_peak = float(getattr(cfg, "pc_tau_peak", 0.05))
+        if is_stride2 and tau_peak >= 0.04:
+            tau_peak = tau_peak * 0.25
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 5.0))
         ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
         power = float(getattr(cfg, "dsr_fw_power", 4.0))
         unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", False))
         tau_z_floor = float(getattr(cfg, "dsr_fw_tau_z_floor", -3.5))
+        if is_stride2 and tau_z_floor >= -3.6:
+            tau_z_floor = -4.9
         max_spike_mass = float(getattr(cfg, "dsr_fw_max_spike_mass", 1.5))
         morozov_tol = float(getattr(cfg, "dsr_fw_morozov_tol", 0.0))
         morozov_gamma = float(getattr(cfg, "dsr_fw_morozov_gamma", 0.0))
         peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
-        peak_kernel_size = int(peak_k) if peak_k is not None else (3 if is_stride2 else 3)
+        peak_kernel_size = int(peak_k) if peak_k is not None else (5 if is_stride2 else 3)
         z0_solver_input = z0.detach() if getattr(cfg, "detach_y0_for_solver", False) else z0
 
         y_dsr = closed_form_dsr_fw_transport(
