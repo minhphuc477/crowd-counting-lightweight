@@ -109,3 +109,34 @@ def test_rlk_hdc_gradient_flow() -> None:
         if param.requires_grad:
             assert param.grad is not None, f"Missing gradient for {name}"
             assert not torch.isnan(param.grad).any(), f"NaN gradient in {name}"
+
+
+def test_rlk_hdc_prime_spatial_dimensions() -> None:
+    """Verify interpolation parity under irregular and prime spatial dimensions."""
+    neck = RLKHDCFPNNeck(in_channels=(16, 32, 48), width=32, use_gap=True)
+    c4 = torch.randn(2, 16, 67, 73)
+    c8 = torch.randn(2, 32, 34, 37)
+    c16 = torch.randn(2, 48, 17, 19)
+
+    p4, p8, p16 = neck(c4, c8, c16)
+    assert p4.shape == (2, 32, 67, 73)
+    assert p8.shape == (2, 32, 34, 37)
+    assert p16.shape == (2, 32, 17, 19)
+
+
+def test_rlk_hdc_half_and_deploy_invariance() -> None:
+    """Verify switch_to_deploy works identically in float16 (half) mode."""
+    neck_half = RLKHDCFPNNeck().half().eval()
+    c4_h = torch.randn(2, 16, 64, 64, dtype=torch.float16)
+    c8_h = torch.randn(2, 32, 32, 32, dtype=torch.float16)
+    c16_h = torch.randn(2, 48, 16, 16, dtype=torch.float16)
+
+    with torch.no_grad():
+        p4_h, p8_h, p16_h = neck_half(c4_h, c8_h, c16_h)
+
+    neck_half.switch_to_deploy()
+    with torch.no_grad():
+        p4_d, p8_d, p16_d = neck_half(c4_h, c8_h, c16_h)
+
+    diff = torch.max(torch.abs(p4_d - p4_h)).item()
+    assert diff < 1e-4, f"Half precision deploy error too high: {diff}"
