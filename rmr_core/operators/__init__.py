@@ -13,6 +13,7 @@ from .carrier import (
     modulate_carrier_field,
 )
 from .diffusion import charbonnier_tv_step
+from .dsr_fw import closed_form_dsr_fw_transport
 from .fed_mcbpro import (
     compute_feature_high_pass_energy,
     compute_local_contrast_ratio,
@@ -61,6 +62,7 @@ __all__ = [
     "center_scatter",
     "charbonnier_tv_step",
     "closed_form_mcbpro_transport",
+    "closed_form_dsr_fw_transport",
     "closed_form_peak_concentrated_transport",
     "closed_form_radon_nikodym_transport",
     "compute_deficit_carrier_seed",

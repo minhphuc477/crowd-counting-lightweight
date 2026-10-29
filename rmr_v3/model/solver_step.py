@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from rmr_core.operators import (
     RegionSet,
+    closed_form_dsr_fw_transport,
     closed_form_mcbpro_transport,
     closed_form_peak_concentrated_transport,
     closed_form_radon_nikodym_transport,
@@ -16,6 +17,31 @@ from rmr_core.operators import (
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
 from .config import RMRv3Config
+
+
+def _wrap_closed_form(
+    base_out: dict[str, Any],
+    y0: torch.Tensor,
+    y_step: torch.Tensor,
+    effective_strength: float,
+    s_field: torch.Tensor | None = None,
+    iterates: list[torch.Tensor] | None = None,
+) -> RMRModelOutput:
+    y_final = (1.0 - effective_strength) * y0 + effective_strength * y_step if effective_strength < 1.0 else y_step
+    if iterates is None:
+        iterates = [y0, y_final]
+    else:
+        iterates[-1] = y_final
+    base_out.update({
+        "y": y_final,
+        "iterates": iterates,
+        "residual_fields": [],
+        "energy_trace": [],
+        "solver_strength": effective_strength,
+    })
+    if s_field is not None:
+        base_out["rn_multiplier"] = s_field
+    return RMRModelOutput(**base_out)
 
 
 def solve_inverse_measure(
@@ -116,23 +142,8 @@ def solve_inverse_measure(
             y_curr = y_next
             iterates.append(y_curr)
 
-        y_rn = y_curr
-        if effective_strength < 1.0:
-            s_field = (1.0 - effective_strength) + effective_strength * s_accum
-            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_rn
-        else:
-            s_field = s_accum
-            y_final = y_rn
-        iterates[-1] = y_final
-        base_out.update({
-            "y": y_final,
-            "iterates": iterates,
-            "residual_fields": [],
-            "energy_trace": [],
-            "solver_strength": effective_strength,
-            "rn_multiplier": s_field,
-        })
-        return RMRModelOutput(**base_out)
+        s_field = (1.0 - effective_strength) + effective_strength * s_accum if effective_strength < 1.0 else s_accum
+        return _wrap_closed_form(base_out, y0, y_curr, effective_strength, s_field=s_field, iterates=iterates)
 
     if cfg.solver_mode == "mcbpro":
         is_stride2 = bool(
@@ -175,20 +186,7 @@ def solve_inverse_measure(
             return_multiplier=True,
         )
 
-        if effective_strength < 1.0:
-            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_mcbpro
-        else:
-            y_final = y_mcbpro
-
-        base_out.update({
-            "y": y_final,
-            "iterates": [y0, y_final],
-            "residual_fields": [],
-            "energy_trace": [],
-            "solver_strength": effective_strength,
-            "rn_multiplier": s_field,
-        })
-        return RMRModelOutput(**base_out)
+        return _wrap_closed_form(base_out, y0, y_mcbpro, effective_strength, s_field=s_field)
 
     if cfg.solver_mode in ("perspective_mcbpro", "fed_mcbpro"):
         is_stride2 = bool(
@@ -243,20 +241,7 @@ def solve_inverse_measure(
             return_multiplier=True,
         )
 
-        if effective_strength < 1.0:
-            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_pmcbpro
-        else:
-            y_final = y_pmcbpro
-
-        base_out.update({
-            "y": y_final,
-            "iterates": [y0, y_final],
-            "residual_fields": [],
-            "energy_trace": [],
-            "solver_strength": effective_strength,
-            "rn_multiplier": s_field,
-        })
-        return RMRModelOutput(**base_out)
+        return _wrap_closed_form(base_out, y0, y_pmcbpro, effective_strength, s_field=s_field)
 
     if cfg.solver_mode in ("peak_concentrated", "pc_solver", "pc_bpro"):
         is_stride2 = bool(
@@ -285,21 +270,41 @@ def solve_inverse_measure(
             peak_kernel_size=peak_kernel_size,
             return_multiplier=True,
         )
+        return _wrap_closed_form(base_out, y0, y_pc, effective_strength, s_field=s_field)
 
-        if effective_strength < 1.0:
-            y_final = (1.0 - effective_strength) * y0 + effective_strength * y_pc
-        else:
-            y_final = y_pc
+    if cfg.solver_mode in ("dsr_fw", "dsr_fw_solver"):
+        is_stride2 = bool(
+            getattr(cfg, "subpixel_stride2", False)
+            or getattr(cfg, "subpixel_dm", False)
+            or int(getattr(cfg, "output_stride", 4)) == 2
+        )
+        tau_noise = float(getattr(cfg, "pc_tau_noise", 0.02))
+        tau_peak = float(getattr(cfg, "pc_tau_peak", 0.05))
+        ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 5.0))
+        ratio_clamp_min = float(getattr(cfg, "ratio_clamp_min", 0.2))
+        power = float(getattr(cfg, "dsr_fw_power", 4.0))
+        unit_mass = bool(getattr(cfg, "dsr_fw_unit_mass", True))
+        peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
+        peak_kernel_size = int(peak_k) if peak_k is not None else (3 if is_stride2 else 3)
+        z0_solver_input = z0.detach() if getattr(cfg, "detach_y0_for_solver", False) else z0
 
-        base_out.update({
-            "y": y_final,
-            "iterates": [y0, y_final],
-            "residual_fields": [],
-            "energy_trace": [],
-            "solver_strength": effective_strength,
-            "rn_multiplier": s_field,
-        })
-        return RMRModelOutput(**base_out)
+        y_dsr = closed_form_dsr_fw_transport(
+            y0=y0_solver_input,
+            z0=z0_solver_input,
+            b_solver=b_solver,
+            weight_solver=weight_solver,
+            regions=regions,
+            eps=cfg.eps,
+            scale_weights=scale_weights,
+            tau_noise=tau_noise,
+            tau_peak=tau_peak,
+            ratio_clamp_max=ratio_clamp_max,
+            ratio_clamp_min=ratio_clamp_min,
+            peak_kernel_size=peak_kernel_size,
+            power=power,
+            unit_mass_capacity=unit_mass,
+        )
+        return _wrap_closed_form(base_out, y0, y_dsr, effective_strength)
 
     solver_res = unrolled_sirt_solver(
         y0=y0_solver_input,

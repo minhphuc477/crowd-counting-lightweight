@@ -121,10 +121,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "solver_mode" in m_cfg:
             solver_mode = str(m_cfg["solver_mode"])
-            if solver_mode not in ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct", "peak_concentrated", "pc_solver", "pc_bpro"):
-                raise ValueError(
-                    f"solver_mode must be 'additive', 'multiplicative', 'closed_form_rn', 'mcbpro', 'perspective_mcbpro', 'fed_mcbpro', 'direct', or 'peak_concentrated', got '{solver_mode}'"
-                )
+            allowed_solvers = ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct", "peak_concentrated", "pc_solver", "pc_bpro", "dsr_fw", "dsr_fw_solver")
+            if solver_mode not in allowed_solvers:
+                raise ValueError(f"solver_mode invalid, got '{solver_mode}'")
         if "hurdle_gating_mode" in m_cfg:
             hgm = str(m_cfg["hurdle_gating_mode"])
             if hgm not in ("occupancy", "product", "disabled", "unbiased"):

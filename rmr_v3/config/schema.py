@@ -196,7 +196,7 @@ ALLOWED_MODEL_KEYS = {
     "mcbpro_tau_count_null", "mcbpro_feat_energy_weight",
     "mcbpro_dense_threshold", "mcbpro_contrast_kernel", "mcbpro_noise_floor",
     "mcbpro_conservative_scaling",
-    "pc_tau_noise", "pc_tau_peak", "ratio_clamp_min",
+    "pc_tau_noise", "pc_tau_peak", "ratio_clamp_min", "dsr_fw_power", "dsr_fw_unit_mass",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -383,7 +383,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "park_max_aspect", "use_pgh", "park_routing", "park_altitude_bands",
         # DPW: Perspective-Adaptive Dynamic Windows
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
-        "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up",
+        "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up", "dsr_fw_power", "dsr_fw_unit_mass",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell",
