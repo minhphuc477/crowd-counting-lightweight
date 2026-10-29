@@ -179,7 +179,7 @@ ALLOWED_MODEL_KEYS = {
     "detach_y0_for_solver",
     "spatial_morozov", "morozov_gamma_scales",
     "scale_routed_trust", "scale_seeded_carrier", "scale_seed_eps",
-    "hdc_dilations", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
+    "hdc_dilations", "use_fast_norm_fusion", "density_adaptive_scale", "density_scale_gamma", "density_scale_learnable",
     "evidence_anchored_trust", "eatr_alpha", "scale_prior_boost",
     "morozov_rho_cap",
     "pad_small_images", "min_lr_ratio", "bayesian_norm_mode",
