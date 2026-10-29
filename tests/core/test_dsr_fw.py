@@ -155,9 +155,11 @@ def test_ghost_coordinate_rejection():
     # Real heads receive mass
     assert y_star[0, 0, 15, 15] > 0.5
     assert y_star[0, 0, 30, 35] > 0.5
-    # Ghost coordinates MUST receive identically zero injected mass
-    assert abs(y_star[0, 0, 15, 35] - y0[0, 0, 15, 35]) < 1e-6, "Ghost coordinate (15, 35) must receive 0 injected mass"
-    assert abs(y_star[0, 0, 30, 15] - y0[0, 0, 30, 15]) < 1e-6, "Ghost coordinate (30, 15) must receive 0 injected mass"
+    # Ghost coordinates MUST receive identically zero injected mass (injected_mass == 0.0)
+    injected_ghost_1 = (y_star[0, 0, 15, 35] - y0[0, 0, 15, 35]).clamp_min(0.0).item()
+    injected_ghost_2 = (y_star[0, 0, 30, 15] - y0[0, 0, 30, 15]).clamp_min(0.0).item()
+    assert injected_ghost_1 == 0.0, f"Ghost coordinate (15, 35) received injected mass: {injected_ghost_1}"
+    assert injected_ghost_2 == 0.0, f"Ghost coordinate (30, 15) received injected mass: {injected_ghost_2}"
 
 
 def test_prime_dimensions_and_fp16():
@@ -306,6 +308,52 @@ def test_super_spike_ceiling():
 
     peak_val = y_star[0, 0, 16, 16].item()
     assert peak_val <= 1.5 + y0[0, 0, 16, 16].item() + 1e-4, f"Spike exceeded max_spike_mass: {peak_val}"
+
+
+def test_footprint_capacity_broad_head_no_bloat():
+    """Verify that a broad-shouldered head with footprint mass = 1.0 receives 0 bloat."""
+    h, w = 16, 16
+    y0 = torch.zeros(1, 1, h, w)
+    # Head with total mass = 1.00 (apex 0.32 + 4 neighbors 0.17)
+    y0[0, 0, 8, 8] = 0.32
+    y0[0, 0, 7, 8] = 0.17
+    y0[0, 0, 9, 8] = 0.17
+    y0[0, 0, 8, 7] = 0.17
+    y0[0, 0, 8, 9] = 0.17
+    boxes = torch.tensor([[0, 0, 16, 16]], dtype=torch.float32)
+    b_s = torch.tensor([[[2.0]]])  # Regional deficit exists
+
+    y_star = closed_form_dsr_fw_transport(y0, b_s, None, boxes, unit_mass_capacity=True)
+    apex_after = y_star[0, 0, 8, 8].item()
+    assert abs(apex_after - 0.32) < 1e-4, f"Complete head bloated: {apex_after}"
+
+
+def test_hierarchical_fog_first_surplus_contraction():
+    """Verify that background fog is aggressively purged while real heads are preserved."""
+    y0 = torch.full((1, 1, 32, 32), 0.02)
+    # 2 real heads with apex 0.80
+    y0[0, 0, 10, 10] = 0.80
+    y0[0, 0, 20, 20] = 0.80
+    boxes = torch.tensor([[0, 0, 32, 32]], dtype=torch.float32)
+    b_s = torch.tensor([[[2.0]]])  # Ground truth count = 2.0 (the 2 heads)
+
+    y_star = closed_form_dsr_fw_transport(y0, b_s, None, boxes)
+    assert abs(y_star.sum().item() - 2.0) < 0.1, "Total count failed to match target"
+    assert y_star[0, 0, 10, 10].item() > 0.75, "Real head was wrongly crushed"
+    assert y_star[0, 0, 0, 0].item() < 0.002, "Fog was not aggressively eliminated"
+
+
+def test_morozov_discrepancy_soft_thresholding():
+    """Verify that sub-noise measurement discrepancies are regularized to zero."""
+    y0 = torch.full((1, 1, 16, 16), 0.1)  # sum = 25.6
+    boxes = torch.tensor([[0, 0, 16, 16]], dtype=torch.float32)
+    b_s = torch.tensor([[[25.65]]])  # Discrepancy = 0.05
+
+    # With morozov_tol = 0.1, residual is below noise floor
+    y_star = closed_form_dsr_fw_transport(y0, b_s, None, boxes, morozov_tol=0.1)
+    diff = (y_star - y0).abs().sum().item()
+    assert diff < 1e-6, "Morozov failed to suppress sub-noise jitter"
+
 
 
 
