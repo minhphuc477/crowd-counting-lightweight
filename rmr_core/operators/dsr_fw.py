@@ -39,6 +39,7 @@ def closed_form_dsr_fw_transport(
     ratio_clamp_min: float = 0.2,
     peak_kernel_size: int = 3,
     power_sharpening: int = 4,
+    power: int | None = None,
     unit_mass_capacity: bool = True,
     return_details: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -199,13 +200,13 @@ def closed_form_dsr_fw_transport(
     mean_bg_z = F.avg_pool2d(z0_f, kernel_size=5, stride=1, padding=2)
     c_z = F.relu(z0_f - mean_bg_z)
 
-    # Separable 1D Radon profile outer product
-    col_profile = F.relu(z0_f.amax(dim=2, keepdim=True) - mean_bg_z.mean(dim=2, keepdim=True))
-    row_profile = F.relu(z0_f.amax(dim=3, keepdim=True) - mean_bg_z.mean(dim=3, keepdim=True))
-    radon_cross = (col_profile * row_profile).clamp_min(0.0)
+    # Isotropic 2D apex sharpening (strictly eliminates Cartesian 2-angle ghost cross-talk)
+    c_z_lmax = F.max_pool2d(c_z, kernel_size=3, stride=1, padding=1)
+    apex_weight = (c_z / (c_z_lmax + float(eps))).clamp(0.0, 1.0).square()
+    salience = vacant * apex_weight * c_z
 
-    salience = vacant * c_z * (radon_cross + 1e-3)
-    p_exp = max(2, int(power_sharpening))
+    eff_power = power if power is not None else power_sharpening
+    p_exp = max(2, int(eff_power))
     salience_p = salience.clamp_min(0.0) ** p_exp
 
     box_salience = regional_sum(salience_p, boxes_tensor)

@@ -129,3 +129,105 @@ def test_autograd_differentiability():
     assert z0.grad is not None, "Gradient must flow to z0"
     assert not torch.isnan(z0.grad).any(), "Gradient must be finite"
     assert not torch.isnan(b_s.grad).any(), "Gradient must be finite"
+
+
+def test_ghost_coordinate_rejection():
+    """Verify that 2-angle Cartesian ghost coordinates receive identically zero mass."""
+    h, w = 48, 48
+    z0 = torch.full((1, 1, h, w), -8.0)
+    # Head 1 at (15, 15)
+    z0[0, 0, 15, 15] = 2.0
+    # Head 2 at (30, 35)
+    z0[0, 0, 30, 35] = 1.8
+    y0 = F.softplus(z0)
+
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    b_s = torch.full((1, 1, regions.boxes.shape[0]), 4.0)
+
+    y_star = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        z0=z0,
+    )
+
+    # Real heads receive mass
+    assert y_star[0, 0, 15, 15] > 0.5
+    assert y_star[0, 0, 30, 35] > 0.5
+    # Ghost coordinates MUST receive identically zero injected mass
+    assert abs(y_star[0, 0, 15, 35] - y0[0, 0, 15, 35]) < 1e-6, "Ghost coordinate (15, 35) must receive 0 injected mass"
+    assert abs(y_star[0, 0, 30, 15] - y0[0, 0, 30, 15]) < 1e-6, "Ghost coordinate (30, 15) must receive 0 injected mass"
+
+
+def test_prime_dimensions_and_fp16():
+    """Verify numerical stability on prime dimensions and half precision."""
+    h, w = 31, 47
+    z0 = torch.full((1, 1, h, w), -5.0, dtype=torch.float16)
+    z0[0, 0, 11, 23] = 1.0
+    y0 = F.softplus(z0.float()).half()
+
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    b_s = torch.full((1, 1, regions.boxes.shape[0]), 2.0, dtype=torch.float16)
+
+    y_star = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        z0=z0,
+    )
+
+    assert y_star.shape == (1, 1, h, w)
+    assert y_star.dtype == torch.float16
+    assert not torch.isnan(y_star).any()
+
+
+def test_multiscale_scale_weights_routing():
+    """Verify dynamic scale routing with K=3 scale partitions."""
+    h, w = 32, 32
+    z0 = torch.full((2, 1, h, w), -5.0)
+    z0[:, :, 10, 10] = 1.5
+    y0 = F.softplus(z0)
+
+    regions = build_multiscale_regions(h, w, output_stride=2, region_sizes_px=[16, 32], overlap=0.5)
+    b_s = torch.full((2, 1, regions.boxes.shape[0]), 3.0)
+    scale_weights = torch.softmax(torch.randn(2, 3, h, w), dim=1)
+
+    y_star = closed_form_dsr_fw_transport(
+        y0=y0,
+        b_solver=b_s,
+        weight_solver=None,
+        regions=regions,
+        z0=z0,
+        scale_weights=scale_weights,
+    )
+
+    assert y_star.shape == (2, 1, h, w)
+    assert not torch.isnan(y_star).any()
+    assert (y_star >= 0.0).all()
+
+
+def test_rmrv3_end_to_end_dsr_fw_pipeline():
+    """Verify that RMRv3 model forward and backward passes execute cleanly with dsr_fw."""
+    from rmr_v3.model import RMRv3
+    from rmr_v3.model.config import RMRv3Config
+
+    cfg = RMRv3Config()
+    cfg.solver_mode = "dsr_fw"
+    cfg.enable_solver = True
+    cfg.output_stride = 2
+    cfg.subpixel_stride2 = True
+
+    model = RMRv3(cfg)
+    x = torch.randn(2, 3, 64, 64)
+    out = model(x)
+
+    assert out.y is not None
+    assert out.y.shape == (2, 1, 32, 32)
+    loss = out.y.sum()
+    loss.backward()
+
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    assert len(grads) > 0, "Backbone and heads must receive gradients"
+
