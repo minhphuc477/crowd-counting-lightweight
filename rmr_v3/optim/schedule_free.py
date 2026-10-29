@@ -8,7 +8,6 @@ gradient evaluation at interpolation point y with Polyak-Ruppert iterate averagi
 
 from __future__ import annotations
 
-import math
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
 
 import torch

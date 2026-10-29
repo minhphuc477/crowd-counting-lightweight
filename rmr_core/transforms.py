@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import random
-from pathlib import Path
 
 import torch
 from PIL import Image

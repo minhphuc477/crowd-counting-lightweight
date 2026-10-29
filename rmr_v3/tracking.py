@@ -6,7 +6,6 @@ reliability metrics.
 """
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any
 import numpy as np
