@@ -30,6 +30,13 @@
    - Strictly forbidden to arbitrarily cobble together heuristics, dilated layers, or meaningless patches. Everything must have rigorous mathematical/physical justification.
 6. **Controlled Experimentation Protocol**:
    - Never create random experiments on a whim ("không phải muốn là tạo"). Every proposed experiment must have a clear single-variable control against the champion baseline (V64, 69.03 MAE) and require explicit user consent.
+7. **Strict Universality & Anti-Cherry-Picking Invariant**:
+   - Zero hardcoded magic constants derived from a single dataset (e.g. hardcoded logit floors like `-4.9`, `-3.5` from ShanghaiTech Part A).
+   - All cell thresholds must scale dimensionally with stride ($s^2$), and priors must be self-calibrated via `init_m0: auto` and $\tau_{z\_floor} = \text{Softplus}^{-1}(m_{0, \text{eff}})$.
+   - All mathematical formulations must be valid across both dense micro-head (SHA) and sparse broad-foreground (SHB) regimes.
+8. **Experimentation Design Moratorium (Lệnh đóng băng thiết kế thí nghiệm)**:
+   - STRICTLY CEASE proposing or creating new experiments ("ngưng thiết kế đi").
+   - 100% focus on deep, microscopic-to-macroscopic mechanical comprehension of EVERY component of the model, from atomic tensor ops to macro-architecture.
 
 ## 4. Key Artifacts & Narrative Reports
 - Anti-Regression Experimental Guidelines: `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`

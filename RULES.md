@@ -98,3 +98,14 @@
   - Khi thiết lập bất kỳ một thí nghiệm mới nào, bắt buộc phải có **bài toán đối chứng đơn biến (single-variable ablation control)** rõ ràng với mỏ neo tốt nhất (V64 Champion, 69.03 MAE).
   - Phải có giả thuyết khoa học định lượng (hypothesis), cơ chế vật lý dự kiến (mechanism), và tiêu chí đo lường chính xác trước khi khởi tạo cấu hình.
   - Mọi thí nghiệm đề xuất phải nhận được sự đồng thuận hoặc yêu cầu từ người dùng trước khi triển khai.
+
+---
+
+## 12. Quy Chuẩn Tính Phổ Quát & Lệnh Đóng Băng Thiết Kế Thí Nghiệm (CROSS-DATASET UNIVERSALITY & EXPERIMENTATION MORATORIUM)
+- **CẤM CHERRY-PICKING & CẤM HẰNG SỐ MA THUẬT CỨNG (ZERO DATASET CHERRY-PICKING)**:
+  - Tuyệt đối cấm gán cứng bất kỳ hằng số ma thuật (magic constants) nào được tính tay cho riêng một tập dữ liệu cụ thể (ví dụ: gán cứng các ngưỡng logit nền như `-4.9`, `-3.5` của ShanghaiTech Part A vào solver code).
+  - Mọi ngưỡng tế bào ($\tau_{\text{noise}}, \tau_{\text{peak}}$) phải tuân theo định luật biến thiên thứ nguyên vật lý $s^2$, và mọi prior nền phải tự thích nghi theo manifest dữ liệu thông qua cơ chế `init_m0: auto` và $\tau_{z\_floor} = \text{Softplus}^{-1}(m_{0, \text{eff}})$.
+  - Mọi giải pháp toán học bắt buộc phải giữ nguyên tính đúng đắn trên cả hai thái cực phân bố: Siêu đông nghẹt micro-head (ShanghaiTech Part A) và Thưa thớt người tiền cảnh lớn (ShanghaiTech Part B).
+- **LỆNH ĐÓNG BĂNG THIẾT KẾ THÍ NGHIỆM (EXPERIMENTATION FREEZE)**:
+  - **DỪNG NGAY LẬP TỨC** việc tự ý thiết kế, đề xuất, hoặc tạo thêm các cấu hình thí nghiệm YAML mới ("ngưng thiết kế đi").
+  - Tập trung 100% vào việc phân tích, giải phẫu, chứng minh và thấu hiểu tường tận bản chất của từng thành phần trong mô hình: từ toán tử tensor vi mô nhỏ nhất (tích chập, chuẩn hóa, kích hoạt, phép chiếu Radon, solver step, đạo hàm) đến cấu trúc vĩ mô lớn nhất (backbone, neck, multi-scale dictionary, carrier head, inverse solver, loss landscape).
