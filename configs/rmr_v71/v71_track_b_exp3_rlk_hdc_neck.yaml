@@ -1,37 +1,21 @@
-# ==============================================================================
-# V71 TRACK B ABLATION 3: RLK-HDC NECK (VS REPASPP-LITE)
-# Scientific Hypothesis: Replacing RepASPP-Lite with RLK-HDC eliminates ASPP
-# gridding holes by enforcing the HDC condition (M_i <= K with dilations [1,2,3])
-# while the structural re-parameterized 7x7 RepDW kernel expands the effective
-# receptive field to 28px, eliminating the parameter penalty (121,898 params).
-# Single Variable Control against Exp 2:
-#   - neck_type: rep_aspp_lite -> rlk_hdc
-#   - hdc_dilations: [1, 2, 3]
-#   - use_fast_norm_fusion: true
-# Parameter Invariant: Strictly <= 200,000 params (Actual: 121,898 train / 121,034 deploy)
-# Empirical Invariant: Exactly 0.0% Knowledge Distillation, 182 Full Test Images
-# ==============================================================================
-
 seed: 42
-
 data:
   train_manifest: data/sha_a_train_all.jsonl
   val_manifest: data/sha_a_test.jsonl
   crop_size: 512
   pad_small_images: true
-  scale_range: [0.60, 1.40]
+  scale_range: [0.6, 1.4]
   hflip_prob: 0.5
   brightness_jitter: 0.2
   contrast_jitter: 0.2
   saturation_jitter: 0.3
-  grayscale_prob: 0.30
+  grayscale_prob: 0.3
   gamma_jitter: [0.6, 1.5]
   random_invert_prob: 0.0
   random_erasing_prob: 0.35
   erasing_scale: [0.005, 0.03]
   erasing_ratio: [0.5, 2.0]
   erasing_max_patches: 3
-
 model:
   output_stride: 2
   subpixel_stride2: true
@@ -41,14 +25,10 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: auto
-
-  # Rep-Large-Kernel HDC Neck (RLK-HDC)
   neck_type: rlk_hdc
   hdc_dilations: [1, 2, 3]
   use_aspp_gap: true
   use_fast_norm_fusion: true
-
-  # Multiscale Regional Evidence Dictionary (Stride 4 grid)
   region_sizes_px: [32, 64, 128]
   region_overlap: 0.5
   include_full_image: false
@@ -65,8 +45,6 @@ model:
   dynamic_trust_gate: false
   use_top_down_semantic_gate: false
   scale_conditioned_prior: false
-
-  # Fine Carrier Head (Stride 2 Subpixel)
   head_blocks: 1
   hurdle_head: false
   density_curvature: false
@@ -74,8 +52,6 @@ model:
   floor_tau: 0.003
   use_coord_attn: false
   ema_decay: 0.999
-
-  # MC-BPRO Inverse Solver (Kept for Controlled Comparison)
   enable_solver: true
   solver_mode: mcbpro
   detach_y0_for_solver: false
@@ -84,56 +60,16 @@ model:
   mcbpro_reg_threshold: 0.00025
   tau_peak: 0.0125
   ratio_clamp_max: 25.0
-
-loss:
-  output_stride: 2
-  dm_target: dual
-  allocation_loss_type: radon_ot
-  lambda_flat_dm16: 0.0
-  lambda_radon_ot: 1.0
-  radon_ot_projections: 8
-  radon_ot_norm_ref: 100.0
-  lambda_bayesian: 0.0
-
-  # Macro and Scale-Balanced Regional Loss
-  count_loss_mode: nb
-  count_nb_dispersion: 50.0
-  lambda_count: 0.5
-  lambda_count_l1: 0.20
-  lambda_region_nb: 0.5
-  faithful_regional_nb: true
-  regional_nb_beta: 1.0
-  normalize_beta_weights: true
-
-  # Conflicting Auxiliary Losses Eliminated
-  lambda_cell: 0.0
-  lambda_hurdle: 0.0
-  lambda_trunc_nb: 0.0
-  lambda_scale_align: 0.0
-  lambda_curvature: 0.0
-  lambda_hard_bg: 0.0
-  lambda_fg_gate: 0.0
-
-train:
-  epochs: 1500
-  batch_size: 8
-  workers: 4
-  pin_memory: true
-  lr: 0.0001
-  backbone_lr_scale: 0.1
-  weight_decay: 0.0001
-  warmup_epochs: 15
-  min_lr_ratio: 0.20
-  grad_clip: 1.0
-  amp: true
-  solver_warmup_epochs: 5
-  solver_ramp_epochs: 5
-  early_stopping: false
-  patience: 0
-  eval_every: 5
-  deterministic: false
-
+loss: {output_stride: 2, dm_target: dual, allocation_loss_type: radon_ot, lambda_flat_dm16: 0.0,
+  lambda_radon_ot: 1.0, radon_ot_projections: 8, radon_ot_norm_ref: 100.0, lambda_bayesian: 0.0,
+  count_loss_mode: nb, count_nb_dispersion: 50.0, lambda_count: 0.5, lambda_count_l1: 0.0,
+  lambda_region_nb: 0.5, faithful_regional_nb: true, regional_nb_beta: 1.0, normalize_beta_weights: true,
+  lambda_cell: 0.0, lambda_hurdle: 0.0, lambda_trunc_nb: 0.0, lambda_scale_align: 0.0,
+  lambda_curvature: 0.0, lambda_hard_bg: 0.0, lambda_fg_gate: 0.0}
+train: {epochs: 1500, batch_size: 8, workers: 4, pin_memory: true, lr: 0.0001, backbone_lr_scale: 0.1,
+  weight_decay: 0.0001, warmup_epochs: 15, min_lr_ratio: 0.2, grad_clip: 1.0, amp: true,
+  solver_warmup_epochs: 0, solver_ramp_epochs: 10, early_stopping: false, patience: 0,
+  eval_every: 5, deterministic: false}
 eval:
   density_bins: [100.0, 500.0]
-
 output_dir: runs/sha_a/rmr_v71/v71_track_b_exp3_rlk_hdc_neck
