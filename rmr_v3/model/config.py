@@ -123,10 +123,18 @@ class RMRv3Config:
     density_gate_floor: float = 0.02
     tv_type: str = "laplacian"
     tv_eps_c: float = 0.1
-    # Banned coordinate attention (retained for validator rejection)
+    # MC-BPRO, PC-BPRO & DSR-FW Solvers
+    pc_tau_noise: float = 0.02
+    pc_tau_peak: float = 0.05
+    ratio_clamp_min: float = 0.2
+    dsr_fw_power: float = 4.0
+    dsr_fw_unit_mass: bool = False
+    dsr_fw_tau_z_floor: Any = "auto"
+    dsr_fw_max_spike_mass: float = 1.5
+    dsr_fw_morozov_tol: float = 0.0
+    dsr_fw_morozov_gamma: float = 0.0
     use_coord_attn: bool = False
     use_micro_coord_attn: bool = False
-    micro_coord_reduction: int = 8
 
     # Proximal L1-Soft-Thresholding
     proximal_tau: float = 0.0
@@ -283,26 +291,12 @@ class RMRv3Config:
             raise ValueError(f"cyclic_bb_length must be >= 1, got {self.cyclic_bb_length}")
         if self.max_trainable_params < 0:
             raise ValueError(f"max_trainable_params must be >= 0, got {self.max_trainable_params}")
-        if self.region_sizes_px is not None:
-            self.region_sizes_px = _deep_tuple(self.region_sizes_px)
-        if self.aspp_dilations is not None:
-            self.aspp_dilations = _deep_tuple(self.aspp_dilations)
-        if self.hdc_dilations is not None:
-            self.hdc_dilations = _deep_tuple(self.hdc_dilations)
-        if self.context_dilations is not None:
-            self.context_dilations = _deep_tuple(self.context_dilations)
-        if self.morozov_gamma_scales is not None:
-            self.morozov_gamma_scales = _deep_tuple(self.morozov_gamma_scales)
-        if self.fine_head_dilations is not None:
-            self.fine_head_dilations = _deep_tuple(self.fine_head_dilations)
-        if self.use_park:
-            raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
-        if self.use_cpcm:
-            raise ValueError("use_cpcm=True is permanently BANNED. Use dynamic DiAG instead.")
-        if self.use_perspective_elevation:
-            raise ValueError("use_perspective_elevation=True is permanently BANNED.")
-        if getattr(self, "use_pgh", False):
-            raise ValueError("use_pgh=True is permanently BANNED.")
+        for attr in ('region_sizes_px', 'aspp_dilations', 'hdc_dilations', 'context_dilations', 'morozov_gamma_scales', 'fine_head_dilations'):
+            if getattr(self, attr, None) is not None:
+                setattr(self, attr, _deep_tuple(getattr(self, attr)))
+        for banned in ("use_park", "use_cpcm", "use_perspective_elevation", "use_pgh"):
+            if getattr(self, banned, False):
+                raise ValueError(f"{banned}=True is permanently BANNED. Use dynamic DiAG instead.")
         if getattr(self, "dynamic_perspective_windows", False):
             raise ValueError(
                 "dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8: "
