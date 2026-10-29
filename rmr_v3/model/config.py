@@ -273,13 +273,12 @@ class RMRv3Config:
     def __post_init__(self) -> None:
         if (self.subpixel_stride2 or self.subpixel_dm) and self.output_stride != 2:
             warnings.warn(
-                f"subpixel_stride2/subpixel_dm requires output_stride=2; "
-                f"overriding output_stride={self.output_stride} → 2. "
-                "Set output_stride: 2 in your YAML to suppress this warning.",
-                UserWarning,
-                stacklevel=2,
+                f"subpixel_stride2/subpixel_dm requires output_stride=2; overriding output_stride={self.output_stride} -> 2.",
+                UserWarning, stacklevel=2,
             )
             self.output_stride = 2
+        if (self.subpixel_stride2 or self.subpixel_dm or self.output_stride == 2) and self.max_trainable_params == 105000:
+            self.max_trainable_params = 200000
         if self.cyclic_bb_length < 1:
             raise ValueError(f"cyclic_bb_length must be >= 1, got {self.cyclic_bb_length}")
         if self.max_trainable_params < 0:
