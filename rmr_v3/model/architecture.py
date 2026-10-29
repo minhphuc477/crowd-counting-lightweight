@@ -323,6 +323,7 @@ class RMRv3(nn.Module):
             h_in=h_in,
             w_in=w_in,
             regions_solver=regions_solver,
+            regions_carrier=regions_feat,
         )
 
         if delta_scale is not None:

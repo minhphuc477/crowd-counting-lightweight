@@ -136,20 +136,20 @@ def closed_form_dsr_fw_transport(
             active_pi_sum = sum(pi_maps[:, k : k + 1, :, :] for (k, _, _) in active).clamp_min(float(eps))
             routed_scales = []
             for k, mask_k, boxes_k in active:
-                ones_k = torch.ones((1, 1, boxes_k.shape[0]), device=y0.device, dtype=work_dtype)
-                cov_k = regional_adjoint(
-                    ones_k, boxes_k, height=h, width=w, out_dtype=work_dtype
+                w_k = w_s_f[:, :, mask_k].to(dtype=work_dtype)
+                cov_w_k = regional_adjoint(
+                    w_k, boxes_k, height=h, width=w, out_dtype=work_dtype
                 ).clamp_min(float(eps))
                 pi_k = pi_maps[:, k : k + 1, :, :] / active_pi_sum
-                routed_scales.append((mask_k, boxes_k, cov_k, pi_k))
+                routed_scales.append((mask_k, boxes_k, cov_w_k, pi_k))
 
     def project_adjoint(field_per_box: torch.Tensor) -> torch.Tensor:
         if routed_scales is not None:
             out_proj = torch.zeros((b, 1, h, w), device=y0.device, dtype=work_dtype)
-            for mask_k, boxes_k, cov_k, pi_k in routed_scales:
+            for mask_k, boxes_k, cov_w_k, pi_k in routed_scales:
                 w_box_k = (w_s_f[:, :, mask_k] * field_per_box[:, :, mask_k]).to(dtype=work_dtype)
                 adj_k = regional_adjoint(w_box_k, boxes_k, height=h, width=w, out_dtype=work_dtype)
-                out_proj = out_proj + pi_k * (adj_k / cov_k)
+                out_proj = out_proj + pi_k * (adj_k / cov_w_k)
             return out_proj
         cov_single = regional_adjoint(
             w_s_f, boxes_tensor, height=h, width=w, out_dtype=work_dtype

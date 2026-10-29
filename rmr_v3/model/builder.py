@@ -193,12 +193,13 @@ def package_subpixel_output(
     h_in: int,
     w_in: int,
     regions_solver: RegionSet,
+    regions_carrier: RegionSet | None = None,
 ) -> None:
     """Reconcile subpixel dual-lattice outputs and mass conservation."""
     if subpixel_stride2:
         out["y_carrier"] = push_forward_stride2_to_stride4(out.y)
         out["y0_carrier"] = push_forward_stride2_to_stride4(out.y0)
-        out["regions_carrier"] = regions_solver
+        out["regions_carrier"] = regions_carrier if regions_carrier is not None else regions_solver
     elif allocator is not None:
         target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
         out["y_carrier"] = out.y
