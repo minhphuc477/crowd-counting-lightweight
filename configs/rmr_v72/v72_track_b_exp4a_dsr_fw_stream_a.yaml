@@ -25,9 +25,10 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: auto
-  neck_type: rep_aspp_lite
-  aspp_dilations: [2, 4, 8]
+  neck_type: rlk_hdc
+  hdc_dilations: [1, 2, 3]
   use_aspp_gap: true
+  use_fast_norm_fusion: true
   region_sizes_px: [32, 64, 128]
   region_overlap: 0.5
   include_full_image: false
@@ -52,15 +53,20 @@ model:
   use_coord_attn: false
   ema_decay: 0.999
   enable_solver: true
-  solver_mode: mcbpro
+  solver_mode: dsr_fw
   detach_y0_for_solver: false
-  mcbpro_deficit_seeding: true
-  mcbpro_valley_power: 2.0
-  mcbpro_reg_threshold: 0.00025
-  tau_peak: 0.0125
-  ratio_clamp_max: 25.0
+  pc_tau_noise: 0.005
+  pc_tau_peak: 0.0125
+  ratio_clamp_max: 5.0
+  ratio_clamp_min: 0.2
+  dsr_fw_power: 4.0
+  dsr_fw_tau_z_floor: auto
+  dsr_fw_max_spike_mass: 0.0
+  dsr_fw_unit_mass: false
+  dsr_fw_morozov_tol: 0.0
+  mcbpro_peak_kernel_size: 5
 loss: {output_stride: 2, dm_target: dual, allocation_loss_type: radon_ot, lambda_flat_dm16: 0.0,
-  lambda_radon_ot: 1.0, radon_ot_projections: 4, radon_ot_norm_ref: 100.0, lambda_bayesian: 0.0,
+  lambda_radon_ot: 1.0, radon_ot_projections: 8, radon_ot_norm_ref: 100.0, lambda_bayesian: 0.0,
   count_loss_mode: nb, count_nb_dispersion: 50.0, lambda_count: 0.5, lambda_count_l1: 0.0,
   lambda_region_nb: 0.5, faithful_regional_nb: true, regional_nb_beta: 1.0, normalize_beta_weights: true,
   lambda_cell: 0.0, lambda_hurdle: 0.0, lambda_trunc_nb: 0.0, lambda_scale_align: 0.0,
@@ -71,4 +77,4 @@ train: {epochs: 1500, batch_size: 8, workers: 4, pin_memory: true, lr: 0.0001, b
   eval_every: 5, deterministic: false}
 eval:
   density_bins: [100.0, 500.0]
-output_dir: runs/sha_a/rmr_v71/v71_track_b_exp1a_pure_radon_ot_4proj
+output_dir: runs/sha_a/rmr_v72/v72_track_b_exp4a_dsr_fw_stream_a

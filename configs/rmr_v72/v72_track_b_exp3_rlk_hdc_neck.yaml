@@ -72,4 +72,4 @@ train: {epochs: 1500, batch_size: 8, workers: 4, pin_memory: true, lr: 0.0001, b
   eval_every: 5, deterministic: false}
 eval:
   density_bins: [100.0, 500.0]
-output_dir: runs/sha_a/rmr_v71/v71_track_b_exp3_rlk_hdc_neck
+output_dir: runs/sha_a/rmr_v72/v72_track_b_exp3_rlk_hdc_neck
