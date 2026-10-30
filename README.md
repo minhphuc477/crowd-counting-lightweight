@@ -4,7 +4,7 @@
 [![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
 [![Parameters](https://img.shields.io/badge/parameters-Track%20A%20%E2%89%A4104.4k%20%7C%20Track%20B%20%E2%89%A4200k-orange.svg)]()
 [![Knowledge Distillation](https://img.shields.io/badge/knowledge%20distillation-0.0%25%20(standalone)-green.svg)]()
-[![Champion Benchmark](https://img.shields.io/badge/champion%20MAE-69.03%20(V64)%20%7C%2070.02%20(V72)-brightgreen.svg)]()
+[![Champion Benchmark](https://img.shields.io/badge/champion%20MAE-65.33%20(V69)%20%7C%2065.69%20(V70)-brightgreen.svg)]()
 
 > **Core Research Question:** In extreme ultra-lightweight crowd counting ($\le 104,441$ parameters for Stride 4; $\le 200,000$ parameters for Subpixel Stride 2, with exactly $0.0\%$ Knowledge Distillation), how can ill-posed discrete point counting be mathematically formulated as an inverse measure recovery problem without suffering from spatial aliasing, scale collapse, or phantom background fog?
 >
@@ -16,7 +16,7 @@
 
 ## 1. Project Invariants & Operational Standards
 
-All architectures and experiments strictly adhere to [`RULES.md`](RULES.md) and [`GEMINI.md`](GEMINI.md):
+All architectures and experiments strictly adhere to [`rules/RULES.md`](rules/RULES.md) and [`rules/GEMINI.md`](rules/GEMINI.md):
 1. **Strict Parameter Budgets**:
    - **Track A (Stride 4 Anchor)**: Strictly $\le 104,441$ trainable parameters.
    - **Track B (Subpixel Stride 2 Capacity Extension)**: Strictly $\le 200,000$ trainable parameters.
@@ -74,10 +74,14 @@ lightweightcrcn/
 │   └── eval.py             # Evaluation module (full 182-image benchmark)
 ├── tests/                  # Over 1,600 automated unit & regression tests
 ├── tools/                  # Analytical CLI tools (profiling, ONNX, error audits)
-├── CHANGELOG.md            # Comprehensive project release notes & milestones
-├── DERIVATION_PACKAGE.md   # Mathematical derivations from first principles
-├── GEMINI.md               # Operational research invariants & server configuration
-└── RULES.md                # Strict operational and engineering rules
+├── results/                # Forensic evaluations and benchmark results
+└── rules/                  # Operational rules, invariants, project specs & derivations
+    ├── RULES.md            # Strict operational and engineering rules
+    ├── GEMINI.md           # Operational research invariants & server configuration
+    ├── LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md # Anti-regression guidelines
+    ├── PROJECT.md          # Project roadmap & champion benchmarks
+    ├── DERIVATION_PACKAGE.md # Mathematical derivations from first principles
+    └── CHANGELOG.md        # Comprehensive project release notes & milestones
 ```
 
 ---
