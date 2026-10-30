@@ -29,7 +29,11 @@
 5. **Zero Frankencode & Zero Meaningless Patchwork**:
    - Strictly forbidden to arbitrarily cobble together heuristics, dilated layers, or meaningless patches. Everything must have rigorous mathematical/physical justification.
 6. **Controlled Experimentation Protocol**:
-   - Never create random experiments on a whim ("không phải muốn là tạo"). Every proposed experiment must have a clear single-variable control against the champion baseline (V64, 69.03 MAE) and require explicit user consent.
+   - Never create random experiments on a whim ("không phải muốn là tạo"). Every proposed experiment must have a clear single-variable control against the verified champion baselines:
+     * Track A Champion: V69 Exp 1 (65.33 MAE / 108.39 RMSE, 104k params).
+     * Track B Champion: V70 Exp 4b (65.69 MAE / 108.08 RMSE, 122k params).
+     * Anchor Baselines: V64 (69.03 MAE), V72 Exp 0 (70.02 MAE).
+     Explicit user consent is mandatory prior to any new experiment.
 7. **Strict Universality & Anti-Cherry-Picking Invariant**:
    - Zero hardcoded magic constants derived from a single dataset (e.g. hardcoded logit floors like `-4.9`, `-3.5` from ShanghaiTech Part A).
    - All cell thresholds must scale dimensionally with stride ($s^2$), and priors must be self-calibrated via `init_m0: auto` and $\tau_{z\_floor} = \text{Softplus}^{-1}(m_{0, \text{eff}})$.
@@ -41,7 +45,7 @@
 ## 4. Key Artifacts & Narrative Reports
 - Anti-Regression Experimental Guidelines: `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`
 - Operational Rules: `RULES.md`
-- Latest V65 Full Ubuntu Analysis: `BAO_CAO_KHOA_HOC_PHAN_TICH_TOAN_DIEN_KET_QUA_V65_UBUNTU.md`
-- Latest V65 Regression Root Cause & Cleanup: `BAO_CAO_GIAI_PHAU_NGUYEN_NHAN_REGRESSION_V65_VA_CLEANUP_CODEBASE.md`
+- Full 182-Image Forensic Autopsy & Equilibrium Report: `C:\Users\MPhuc\.gemini\antigravity\brain\17085182-6b70-408e-8a49-668ff3f38cdc\BAO_CAO_GIAI_PHAU_VI_MO_HE_THONG_TOAN_DIEN_RMR_VA_DIAGNOSE_SUB50.md`
+- Forensic Dataset Results: `results/forensics/full_182_forensic_results.json`
 - Active Research Branch: `RMR`
-- Active Configs: `configs/rmr_v64/`, `configs/rmr_v65/`
+- Active Configs: `configs/rmr_v64/`, `configs/rmr_v69/`, `configs/rmr_v70/`, `configs/rmr_v72/`

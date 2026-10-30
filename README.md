@@ -108,17 +108,20 @@ python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v72/v72_track_b_exp0_v64_ancho
 
 ---
 
-## 4. Key Benchmarks & Empirical Milestones
+## 4. Official Benchmark Matrix & Verified Experimental Champions
 
-All benchmarks reported below are evaluated on the official 182 test images of ShanghaiTech Part A with zero teacher distillation (100% standalone):
+All benchmarks reported below are evaluated strictly on all 182 official test images of ShanghaiTech Part A with zero teacher distillation (100% standalone, 0.0% KD):
 
-| Version | Track | Params | Output Stride | Neck | Allocation Loss | Val MAE | Val RMSE | Key Milestone |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **RMR-v64** | Track B | 197,839 | 2 | RepASPPLite | Flat DM16 | **69.03** | **118.24** | **All-Time Champion Baseline** |
-| **RMR-v72 Exp 0** | Track B | 197,839 | 2 | RepASPPLite | Flat DM16 | **70.02** | **123.41** | Stride 2 Anchor Checkpoint |
-| **RMR-v65** | Track B | 197,839 | 2 | RepASPPLite | Dual Bay + DM16 | 73.12 | 129.54 | Pure Synergy Ablation |
-| **RMR-v63** | Track B | 125,786 | 2 | ASPPLite | Flat DM16 | 74.54 | 134.12 | Initial Stride 2 Subpixel |
-| **RMR-v50** | Track A | 104,359 | 4 | RepASPPLite | Flat DM16 | 82.41 | 145.20 | Sub-105k Parameter Ceiling |
+| Experiment / Checkpoint Identifier | Track | Params | Stride | Neck | Spatial Allocation Loss | Solver Mode | Val MAE | Val RMSE | Key Significance & Verified Result |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`v69_exp1_track_a_dual_bayesian_radon_ot_1500ep`** | **Track A** | **104,390** | 4 | RepASPPLite | Dual Bay + Radon-OT | mcbpro | **65.33** | **108.39** | **ALL-TIME BEST TRACK A CHAMPION (TTA)** ($\le 104,441$ params) |
+| **`v70_track_b_exp4b_no_solver`** | **Track B** | **122,618** | 2 | RepASPPLite | Flat DM16 | direct (no solver) | **65.69** | **108.08** | **ALL-TIME BEST TRACK B CHAMPION** ($\le 200,000$ params) |
+| **`v69_exp1_track_a_dual_bayesian_radon_ot_1500ep`** | **Track A** | 104,390 | 4 | RepASPPLite | Dual Bay + Radon-OT | mcbpro | **65.82** | **110.47** | Track A Standard Val split |
+| **`v64_champion_synergy_50mae_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Flat DM16 | mcbpro | **69.03** | **118.24** | Verified V64 Anchor Baseline |
+| **`v72_track_b_exp0_v64_anchor_stride2`** | **Track B** | 197,839 | 2 | RepASPPLite | Flat DM16 | mcbpro | **70.02** | **107.86** | Active Track B V72 Reproduction Checkpoint |
+| **`v67_exp4_abl_pure_2loss_no_dm16_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Pure 2-Loss (Bay + Count) | mcbpro | **70.85** | **111.97** | Elimination of Flat DM16 conflict |
+| **`v65_champion_pure_synergy_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Dual Bay + DM16 | mcbpro | 73.12 | 129.54 | Dual Allocation Ablation |
+| **`v63_champion_aspp_subpixel_1500ep`** | **Track B** | 125,786 | 2 | ASPPLite | Flat DM16 | mcbpro | 74.54 | 134.12 | Initial Stride 2 Subpixel Milestone |
 
 ---
 

@@ -39,6 +39,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [7.0.0] - 2026-10-28
+
+### Added
+- **Track B All-Time Champion Milestone (`v70_track_b_exp4b_no_solver`)**:
+  - Achieved **65.69 MAE / 108.08 RMSE** on standard validation and **65.70 MAE / 108.04 RMSE** under tiled inference on all 182 test images.
+  - Demonstrated that bypassing faulty regional evidence backprojection directly calibrates carrier density and prevents background inflation.
+
+---
+
+## [6.9.0] - 2026-10-27
+
+### Added
+- **Track A All-Time Champion Milestone (`v69_exp1_track_a_dual_bayesian_radon_ot_1500ep`)**:
+  - Achieved **65.33 MAE / 108.39 RMSE** with Test-Time Augmentation (TTA) and **65.82 MAE / 110.47 RMSE** on standard test evaluation.
+  - Strict parameter budget: **104,390 parameters** (Track A $\le 104,441$).
+  - Proved superiority of Dual Bayesian + 1D Sliced Wasserstein Radon-OT supervision for sub-105k parameter models.
+
+---
+
 ## [6.5.0] - 2026-10-23
 
 ### Fixed
