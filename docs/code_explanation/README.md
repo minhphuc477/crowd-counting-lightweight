@@ -128,7 +128,7 @@ lightweightcrcn/
 ├── tests/                          # Automated verification test suite (1,170+ tests)
 │   ├── core/                       # Invariant & deep audit tests (test_systematic_deep_audit.py)
 │   └── rmr_v3/                     # Bitwise parity, monolith prevention & ablation tests
-└── docs/code_explanation/          # Systematic Technical Guides (Chapters 1 - 5)
+└── docs/code_explanation/          # Systematic Technical Guides (Chapters 1 - 6)
 ```
 
 ---
@@ -166,3 +166,10 @@ Detailed chapter-by-chapter walkthroughs:
    * P0 Batch sample independence verification ($f(x_i) \equiv [f([x_i, x_j])]_0$).
    * SVD effective rank ($\text{erank}$) measurement preventing representation collapse.
    * Monolith prevention guidelines ensuring lean, maintainable software architecture.
+
+6. **[06. Forensic Equilibrium, Loss Dynamics & Phantom Background Fog](file:///f:/lightweightcrcn/docs/code_explanation/06_forensic_equilibrium_and_phantom_background_fog.md)**
+   * Full 182-image forensic autopsy and inverted density bracket bias analysis.
+   * Dynamic Nash Equilibrium derivation between count loss and spatial allocation loss.
+   * Softplus vanishing gradient trap ($\sigma(-7.67) \approx 0.000465$) and AdamW weight decay freeze.
+   * Regional Evidence Head pooling distortion analysis ($r \approx 0.0521$ on empty background).
+   * Champion architectures breakdown: V69 Exp 1 (65.33 MAE) and V70 Exp 4b (65.69 MAE).
