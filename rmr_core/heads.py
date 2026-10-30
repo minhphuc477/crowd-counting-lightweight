@@ -23,19 +23,7 @@ _CURVATURE_ALPHA_INIT: float = -8.0
 
 
 class FineMeasureHead(nn.Module):
-    """Fine-grained density head with calibrated initial rate.
-
-    The final Conv2d bias is initialized so that:
-        softplus(bias) ≈ mu0 = 0.015763 count/cell
-    i.e. bias ≈ log(exp(0.015763) - 1) ≈ -4.1422.
-    Weights of the last conv are initialized to small values (std=0.01).
-
-    When temp_softplus=True (RMR-v7+), the output activation uses a learnable
-    temperature τ (initialized to 1):
-        output = τ * softplus(z / τ)
-    This prevents saturation at high density, fixing the systematic negative bias
-    observed in RMR-v6 (Bias=-14.72). τ is clamped to ≥ 0.1 during forward pass.
-    """
+    """Fine-grained density head with calibrated rate and compact support activation."""
 
     def __init__(
         self,
@@ -86,6 +74,8 @@ class FineMeasureHead(nn.Module):
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0 / 4.0)
+            elif self.head_activation == "compact_c1":
+                nn.init.constant_(final_conv.bias, math.sqrt(m0 / 4.0))
             else:
                 init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
                 nn.init.constant_(final_conv.bias, init_bias_stride2)
@@ -93,6 +83,8 @@ class FineMeasureHead(nn.Module):
             self.pixel_shuffle = None
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0)
+            elif self.head_activation == "compact_c1":
+                nn.init.constant_(final_conv.bias, math.sqrt(m0))
             else:
                 eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
                 nn.init.constant_(final_conv.bias, eff_bias)  # type: ignore[arg-type]
@@ -215,7 +207,7 @@ class FineMeasureHead(nn.Module):
             self.temp_softplus
             or self.scale_conditioned
             or self.density_curvature
-            or getattr(self, "head_activation", "softplus") == "relu"
+            or getattr(self, "head_activation", "softplus") in ("relu", "compact_c1")
         )
         if is_activated:
             return self.activate(z, scale_weights=scale_weights)
@@ -261,12 +253,14 @@ class ScaleConditionedFineHead(nn.Module):
         m0 = math.log1p(math.exp(float(init_bias)))
         if self.head_activation == "relu":
             eff_bias = float(m0)
+        elif self.head_activation == "compact_c1":
+            eff_bias = math.sqrt(m0)
         else:
             eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
         nn.init.constant_(self.out_conv.bias, eff_bias)  # type: ignore[arg-type]
 
         self.temp_softplus = bool(temp_softplus)
-        if self.temp_softplus and self.head_activation != "relu":
+        if self.temp_softplus and self.head_activation not in ("relu", "compact_c1"):
             self.tau = nn.Parameter(torch.ones(1))
 
         self.density_curvature = bool(density_curvature)

@@ -44,6 +44,17 @@ def _smooth_floor(y_base: torch.Tensor, floor_tau: float) -> torch.Tensor:
     return torch.where(y_pos > tau, y_pos - 0.5 * tau, y_pos.square() / (2.0 * max(tau, 1e-8)))
 
 
+def compact_c1_activation(z: torch.Tensor, tau: float = 0.5) -> torch.Tensor:
+    """C1-continuous quadratic spline with compact support on R_+.
+    z <= 0: y = 0, y' = 0 (exact background fog eradication).
+    0 < z <= tau: y = z^2 / (2*tau), y' = z / tau.
+    z > tau: y = z - tau / 2, y' = 1.
+    """
+    pos = z.clamp_min(0.0)
+    tau_val = max(float(tau), 1e-8)
+    return torch.where(pos > tau_val, pos - 0.5 * tau_val, pos.square() / (2.0 * tau_val))
+
+
 def _apply_curvature(
     y_base: torch.Tensor,
     curvature_alpha: torch.nn.Parameter | None,
@@ -91,6 +102,9 @@ def _density_activate(
     """Shared density activation: ReLU or temperature softplus + density adaptive scale + curvature."""
     if head_activation == "relu":
         return F.relu(z)
+    if head_activation == "compact_c1":
+        tau_val = float(floor_tau) if floor_tau > 0.0 else 0.5
+        return compact_c1_activation(z, tau=tau_val)
 
     if temp_softplus and tau is not None:
         tau_clamped = tau.clamp_min(0.1)

@@ -437,6 +437,6 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
         )
     if cfg.reliability_rate_std_floor <= 0:
         raise ValueError(f"reliability_rate_std_floor ({cfg.reliability_rate_std_floor}) must be > 0")
-    if cfg.head_activation not in ("softplus", "relu"):
-        raise ValueError(f"head_activation must be 'softplus' or 'relu', got '{cfg.head_activation}'")
+    if cfg.head_activation not in ("softplus", "relu", "compact_c1"):
+        raise ValueError(f"head_activation must be 'softplus', 'relu', or 'compact_c1', got '{cfg.head_activation}'")
 
