@@ -1,206 +1,135 @@
-# RMR: Regional Measure Reconciliation for Ultra-Lightweight Crowd Counting
+# RMR: Lightweight Radon Measure Recovery for Crowd Counting
 
 [![CI](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml/badge.svg)](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml)
 [![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
-[![Parameters](https://img.shields.io/badge/carrier-104.4k%20params-orange.svg)]()
-[![Knowledge Distillation](https://img.shields.io/badge/teacher%20distillation-0.0%25%20(standalone)-green.svg)]()
-[![Test Suite](https://img.shields.io/badge/tests-1176%20passed-brightgreen.svg)]()
+[![Parameters](https://img.shields.io/badge/parameters-Track%20A%20%E2%89%A4104.4k%20%7C%20Track%20B%20%E2%89%A4200k-orange.svg)]()
+[![Knowledge Distillation](https://img.shields.io/badge/knowledge%20distillation-0.0%25%20(standalone)-green.svg)]()
+[![Champion Benchmark](https://img.shields.io/badge/champion%20MAE-69.03%20(V64)%20%7C%2070.02%20(V72)-brightgreen.svg)]()
 
-> **Core Research Question:** In ultra-lightweight crowd counting ($\le 105,000$ parameters, zero knowledge distillation), how can discrete regional-count operators replace heavy learned contextual reasoning without suffering from density saturation or background false alarms?
+> **Core Research Question:** In extreme ultra-lightweight crowd counting ($\le 104,441$ parameters for Stride 4; $\le 200,000$ parameters for Subpixel Stride 2, with exactly $0.0\%$ Knowledge Distillation), how can ill-posed discrete point counting be mathematically formulated as an inverse measure recovery problem without suffering from spatial aliasing, scale collapse, or phantom background fog?
 >
-> **Methodology:** Radon Measure Recovery (RMR) formulates crowd counting as an inverse problem in measure spaces. By coupling a lightweight convolutional observer (MobileNetV4, Stride 4) with an unrolled Simultaneous Iterative Reconstruction Technique (SIRT) solver with Lipschitz contraction damping and Morozov discrepancy stopping, RMR reconstructs high-fidelity point density maps while strictly preserving total regional mass.
+> **Mathematical Formulation:**
+> $$\text{Fredholm Integral Operator: } b = \mathcal{A}_\pi y + \eta$$
+> $$\text{Closed-Form Bregman Projection: } y^* = y_0 \cdot \mathcal{A}_\pi^T \left( \frac{b}{\mathcal{A}_\pi y_0 + \epsilon} \right)$$
 
 ---
 
-## 1. Project Invariants & Operational Rules
+## 1. Project Invariants & Operational Standards
 
-Every configuration and code modification strictly adheres to [`RULES.md`](RULES.md):
-1. **Script Immutability**: All shell/PowerShell scripts are strictly immutable without explicit permission. Individual executable commands are provided directly in documentation.
-2. **Strict Parameter Ceilings**: Track A $\le 104,441$ trainable parameters; Track B $\le 200,000$ trainable parameters. Standalone only ($0.0\%$ Knowledge Distillation / Zero Teacher).
-3. **Code Health Invariant**: Every Python source file in `rmr_core/` and `rmr_v3/` strictly satisfies $\le 450$ lines of code.
-4. **Anti-Regression Protocol**: Benchmarked on official ShanghaiTech Part A (300 train, 182 test) with verified `summary.json` outputs.
+All architectures and experiments strictly adhere to [`RULES.md`](RULES.md) and [`GEMINI.md`](GEMINI.md):
+1. **Strict Parameter Budgets**:
+   - **Track A (Stride 4 Anchor)**: Strictly $\le 104,441$ trainable parameters.
+   - **Track B (Subpixel Stride 2 Capacity Extension)**: Strictly $\le 200,000$ trainable parameters.
+2. **100% Standalone (Zero Knowledge Distillation)**:
+   - Exactly $0.0\%$ Knowledge Distillation. Zero teacher networks at training or inference.
+3. **Empirical Integrity**:
+   - Zero fabricated metrics, zero oracle substitutions in reported benchmarks.
+   - Full evaluation on all 182 official ShanghaiTech Part A test images via standard MAE / RMSE / GAME(0,1,2,3) / NAE protocols.
+4. **Code Quality & Maintainability**:
+   - Strictly $\le 450$ lines per Python source file.
+   - Pure Python / YAML configurations.
+5. **Zero Frankencode & Anti-Patchwork Policy**:
+   - Strictly forbidden to arbitrarily cobble together heuristics or ad-hoc patches. Every component must have rigorous mathematical/physical justification.
 
 ---
 
 ## 2. Repository Architecture & Layout
 
-The codebase follows academic research standards (Meta FAIR, Google DeepMind, PyTorch Lightning):
-
 ```text
-crowd-counting-lightweight/
+lightweightcrcn/
 ├── configs/
-│   ├── rmr_research/       # Active research generations (gen7, gen8, gen9, gen10, sub60_e*)
-│   ├── rmr_sub60/          # Canonical Sub-60 anchor configurations
-│   ├── rmr/                # Standard model configurations
-│   └── rmr_v*/             # Historical iteration records (v10 to v34)
+│   ├── rmr_v64/            # Champion baseline configurations (MAE 69.03)
+│   ├── rmr_v72/            # Active Track B Stride 2 anchor suite (MAE 70.02)
+│   ├── rmr_research/       # Core historical research configs (regression tested)
+│   └── rmr_v*/             # Historical iteration configs (v2 to v70)
 ├── data/
 │   ├── part_A_final/       # ShanghaiTech Part A official benchmark images and GT
 │   ├── part_B_final/       # ShanghaiTech Part B official benchmark images and GT
-│   ├── sha_a_train_all.jsonl # 300 training samples (100% official train split)
-│   └── sha_a_test.jsonl    # 182 test samples (100% official test split)
-├── docs/                   # Centralized research specifications, autopsies, and reports
-│   ├── findings.md         # Forensic error autopsy and causal insights
-│   ├── research-state.yaml # Project memory and generation tracker
-│   └── specifications/     # Mathematical operators, FPN necks, and loss formulations
-├── rmr_core/               # Shared canonical primitives (backbones, necks, heads, operators)
-│   ├── backbones.py        # MobileNetV4 dynamic backbone with reductions {4, 8, 16}
-│   ├── necks.py            # Additive and RepWeighted FPN necks
-│   ├── heads.py            # Fine measure density heads with analytical priors
-│   ├── operators/          # Box integrals, prefix sums, adjoint transfer operator H
-│   ├── spectral.py         # Count-preserving DCT-II spectral loss
+│   ├── sha_a_train_all.jsonl # 300 official training samples
+│   └── sha_a_test.jsonl    # 182 official test samples
+├── docs/                   # Authoritative technical documentation and audits
+│   ├── archive/            # Historical design documents and legacy reports
+│   ├── code_explanation/  # 6 modular walkthroughs of architecture, solver, loss, and training
+│   ├── CANONICAL_DATASET_CONFIG_RULES_AND_SPECIFICATIONS.md
+│   ├── CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md
+│   ├── ML_MODEL_DEEP_AUDIT_AND_CODE_REVIEW_PROTOCOL.md
+│   └── TOAN_BO_THANH_PHAN_KIEN_TRUC_MODEL_RMR.md
+├── rmr_core/               # Shared canonical primitives
+│   ├── backbones.py        # MobileNetV4 truncated encoder (reductions 4, 8, 16)
+│   ├── necks/              # RepASPPLite, ASPPLite, RLKHDC, Additive, BiFPN
+│   ├── heads.py            # Fine carrier density heads with analytical priors
+│   ├── operators/          # Box integrals, prefix sums, adjoint transfer, MC-BPRO
+│   ├── dm_loss.py          # Flat & Multi-scale Dirichlet-Multinomial allocation loss
+│   ├── count_loss.py       # Macro Negative-Binomial count loss
 │   └── metrics.py          # NAE, GAME(L) with fractional cell boundary integration
 ├── rmr_v3/                 # Active research engine
-│   ├── model/              # Unified RMR architecture, dual-lattice and evidence heads
-│   ├── solver.py           # Unrolled SIRT solver with Barzilai-Borwein step sizes
-│   ├── solver_ops.py       # Morozov discrepancy, firm thresholding, Lipschitz damping
-│   ├── losses/             # Purified Bayesian, DM16, Negative-Binomial & cell losses
+│   ├── config/             # Strict YAML schema validation & architecture contracts
+│   ├── losses/             # Orthogonal loss orchestration (DM16, Bayesian, Radon-OT)
+│   ├── model/              # Unified RMR architecture, dual-lattice & solver step
 │   ├── optim/              # Cosine Annealing, SafeProdigy, Schedule-Free factories
+│   ├── regional_head.py    # Probabilistic Regional Evidence Head (Beta-NB)
+│   ├── solver.py           # Unrolled iterative SIRT solver (baseline)
 │   ├── trainer.py          # Core training orchestrator
-│   ├── train.py            # CLI wrapper (python -m rmr_v3.train)
-│   └── eval.py             # Evaluation module (python -m rmr_v3.eval)
-├── tests/                  # 1,176 automated tests (100% passed)
+│   ├── train.py            # Training entrypoint wrapper
+│   └── eval.py             # Evaluation module (full 182-image benchmark)
+├── tests/                  # Over 1,600 automated unit & regression tests
 ├── tools/                  # Analytical CLI tools (profiling, ONNX, error audits)
-├── pyproject.toml          # PEP 517/518 build metadata & test configuration
-└── RULES.md                # Project rules and operational invariants
+├── CHANGELOG.md            # Comprehensive project release notes & milestones
+├── DERIVATION_PACKAGE.md   # Mathematical derivations from first principles
+├── GEMINI.md               # Operational research invariants & server configuration
+└── RULES.md                # Strict operational and engineering rules
 ```
 
 ---
 
 ## 3. Official Execution Entrypoints
 
-Mọi tác vụ đào tạo và đánh giá đều được gọi qua module Python chuẩn:
+All training and evaluation workflows are executed via standard Python modules:
 
 ### 3.1 Training Entrypoint
 ```bash
-# Huấn luyện mô hình chuẩn (khuyến nghị luôn có -o để tự động ghi đè output_dir):
-python -m rmr_v3.trainer -c configs/rmr_research/<config_name>.yaml -o
+# Train champion model (automatic output directory creation):
+python train.py --config configs/rmr_v72/v72_track_b_exp0_v64_anchor_stride2.yaml
 
-# Chạy ngầm trong nền trên Ubuntu server với GPU chỉ định:
-CUDA_VISIBLE_DEVICES=0 nohup python -m rmr_v3.trainer \
-  -c configs/rmr_research/<config_name>.yaml \
-  -o \
-  > <log_name>.log 2>&1 &
+# Run on specific GPU in background on Linux workstation:
+CUDA_VISIBLE_DEVICES=0 nohup python train.py \
+  --config configs/rmr_v72/v72_track_b_exp0_v64_anchor_stride2.yaml \
+  > train_v72_exp0.log 2>&1 &
 ```
 
-### 3.2 Evaluation Entrypoint
+### 3.2 Full Test Evaluation Entrypoint
 ```bash
-# Đánh giá checkpoint chuẩn trên tập test:
-python -m rmr_v3.eval --checkpoint runs/sha_a/<run_name>/best_val_mae.pt
+# Evaluate checkpoint on all 182 test images of ShanghaiTech Part A:
+python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v72/v72_track_b_exp0_v64_anchor_stride2/best_val_mae.pt
 
-# Đánh giá kèm Test-Time Augmentation (TTA bảo toàn khối lượng L1):
-python -m rmr_v3.eval --checkpoint runs/sha_a/<run_name>/best_val_mae.pt --tta
+# Evaluate with Test-Time Augmentation (TTA with L1 mass conservation):
+python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v72/v72_track_b_exp0_v64_anchor_stride2/best_val_mae.pt --tta
 ```
 
 ---
 
-## 4. Mathematical Foundations
+## 4. Key Benchmarks & Empirical Milestones
 
-### 4.1 Discrete Regional Operators & Adjoint Transfer Theorem
+All benchmarks reported below are evaluated on the official 182 test images of ShanghaiTech Part A with zero teacher distillation (100% standalone):
 
-Let $Y \in \mathbb{R}_+^G$ be the discrete cell count measure on lattice $G$ (stride $s=4$). The regional observation operator $A \in \{0, 1\}^{M \times G}$ integrates density over multi-scale boxes $R_m \in \{32, 64, 128\}\text{ px}$:
-
-$$ (A Y)_m = \sum_{g \in R_m} Y_g = b_m, \qquad (A^\top r)_g = \sum_{m: g \in R_m} r_m. $$
-
-With regional areas $D_a = \mathrm{diag}(A \mathbf{1}_G)$ and coverage counts $D_c = \mathrm{diag}(A^\top \mathbf{1}_M)$, the normalized transfer operator satisfies the partition of unity:
-
-$$ H = D_c^{-1} A^\top D_a^{-1} A \implies H \mathbf{1}_G = \mathbf{1}_G \quad (\forall \mathcal{R} \text{ covering } G). $$
-
-### 4.2 Unrolled SIRT Solver with Lipschitz Damping
-
-The density field is iteratively reconciled through $T=6$ unrolled iterations:
-
-$$ Y^{(t+1)} = \Pi_+ \left[ Y^{(t)} - \omega^{(t)} \cdot D_{c,w}^{-1} A^\top W D_a^{-1} \mathcal{M}_\gamma\left(A Y^{(t)} - b_{\text{solver}}\right) \right], $$
-
-where:
-1. **Lipschitz Contraction Damping**: $b_{\text{solver}} = \pi_R \odot b_{\text{raw}}$ prevents carrier field explosion in dense crowd clusters.
-2. **Morozov Discrepancy Filter**: $\mathcal{M}_\gamma(r) = \mathrm{sign}(r) \max(|r| - \gamma \sigma(b), 0)$ stops gradient updates below the heteroscedastic noise floor.
-3. **Barzilai-Borwein Rayleigh Step Size**: $\omega^{(t)} = \frac{\langle s^{(t)}, y^{(t)} \rangle}{\|y^{(t)}\|^2}$ guarantees fast non-monotone convergence.
+| Version | Track | Params | Output Stride | Neck | Allocation Loss | Val MAE | Val RMSE | Key Milestone |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **RMR-v64** | Track B | 197,839 | 2 | RepASPPLite | Flat DM16 | **69.03** | **118.24** | **All-Time Champion Baseline** |
+| **RMR-v72 Exp 0** | Track B | 197,839 | 2 | RepASPPLite | Flat DM16 | **70.02** | **123.41** | Stride 2 Anchor Checkpoint |
+| **RMR-v65** | Track B | 197,839 | 2 | RepASPPLite | Dual Bay + DM16 | 73.12 | 129.54 | Pure Synergy Ablation |
+| **RMR-v63** | Track B | 125,786 | 2 | ASPPLite | Flat DM16 | 74.54 | 134.12 | Initial Stride 2 Subpixel |
+| **RMR-v50** | Track A | 104,359 | 4 | RepASPPLite | Flat DM16 | 82.41 | 145.20 | Sub-105k Parameter Ceiling |
 
 ---
 
-## 5. Benchmark Leaderboard (ShanghaiTech Part A)
+## 5. First-Principles Breakthroughs & Current Frontier
 
-Official 300-train / 182-test partition (full-image direct inference, strictly $\le 105,000$ params, 0.0% Knowledge Distillation):
-
-| Generation | Model Run ID | Params | **MAE** | **RMSE** | **MedianAE** | **Bias** | Key Scientific Contribution |
-| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Gen 5** | `m04_iso_fractional_loss` | 104,441 | **71.03** | **111.29** | **44.50** | **-13.57** | **All-Time Project Record**: Fractional Cell Loss $p=0.5$ ($N^{0.5}$ normalization) |
-| **Anchor** | `sub60_e5` / `g10_anchor_sub60_e5` | 104,441 | **71.51** | **114.88** | 45.80 | -8.12 | **Robust Anchor**: Flat DM16 + Product Gating ($\lambda_{\text{cell}}=0.0$) |
-| **Gen 10** | `g10_subpixel_stride2_chfl` | 104,441 | **76.07** | **115.96** | **44.00** | **-2.96** | **Gen 10 Champion**: Subpixel Stride-2 + ChfL $\lambda=0.35$ |
-| **Gen 10** | `g10_clean_asym_morozov` | 104,441 | **77.47** | **114.60** | 46.12 | +1.26 | **Lowest RMSE**: Asymmetric Morozov deadband |
-| **Gen 7** | `g7_champion_synthesis` | 104,441 | 74.72 | 110.08 | 49.30 | +4.12 | Continuous Dynamic Windowing + Curvature Control |
-| **Stage C**| `V3-B` (Stage C Champion) | 101,763 | 83.22 | 141.14 | 52.10 | -2.97 | Initial Reliability-Weighted Reconciliation record |
-| **Stage C**| `B5-P` (Predecessor Baseline) | 101,714 | 94.83 | 166.88 | 61.40 | +11.59 | Unweighted projected SIRT baseline |
-| **Ablation**| `g10_subpixel_stride2_no_solver`| 104,441 | 90.08 | 141.31 | 58.70 | -19.45 | **No Solver Control**: Dense MAE explodes to **176.28** |
-
-> **Causal Finding on Solver Necessity:** Disabling the SIRT solver (`g10_subpixel_stride2_no_solver`) causes Dense MAE ($N > 500$) to explode from **133.71** to **176.28** (+42.57 MAE penalty), conclusively proving that the unrolled variational solver is indispensable for resolving dense crowd clusters under the Rayleigh separation limit.
-
----
-
-## 5. Quickstart Guide
-
-### 5.1 Environment Setup
-
-```bash
-git clone https://github.com/minhphuc477/crowd-counting-lightweight.git
-cd crowd-counting-lightweight
-git checkout RMR
-
-# Create virtual environment (Python 3.10+)
-python3 -m venv .venv
-
-# Activate:
-# Linux / macOS:
-source .venv/bin/activate
-# Windows PowerShell:
-# .venv\Scripts\Activate.ps1
-
-# Install dependencies and local package in editable mode
-pip install -r requirements.txt
-pip install -e .
-```
-
-### 5.2 Running the Test Suite
-
-Verify all 1030+ tests across the repository:
-
-```bash
-python -m pytest tests/ -q
-```
-
-### 5.3 Training SOTA Models
-
-Train the Gen 10 Champion configuration:
-
-```bash
-python -m rmr_v3.train --config configs/rmr_research/gen10/g10_subpixel_stride2_chfl.yaml --run-id g10_subpixel_stride2_chfl --workers 0 --num-threads 2 --no-cudnn-benchmark
-```
-
-Train the Historical Sub-60 Anchor:
-
-```bash
-python -m rmr_v3.train --config configs/rmr_research/sub60_e5.yaml --run-id sub60_e5 --workers 0 --num-threads 2 --no-cudnn-benchmark
-```
-
-### 5.4 Evaluating Checkpoints
-
-Evaluate any trained checkpoint directly on the canonical 182-image ShanghaiTech Part A test set:
-
-```bash
-python -m rmr_v3.eval --checkpoint runs/sha_a/g10_subpixel_stride2_chfl/best_val_mae.pt --manifest data/sha_a_test.jsonl --crop-size 512 --tta false --output-json runs/sha_a/g10_subpixel_stride2_chfl/eval_canonical.json
-```
-
-Or using the CLI alias:
-
-```bash
-python -m rmr_v3.evaluate --checkpoint runs/sha_a/sub60_e5/best_val_mae.pt --manifest data/sha_a_test.jsonl --crop-size 512 --tta false
-```
-
-### 5.5 Model Profiling & Parameter Verification
-
-Verify parameter count and latency on mobile backbones:
-
-```bash
-python tools/architecture_table.py
-python tools/profile_model.py --config configs/rmr_research/gen10/g10_subpixel_stride2_chfl.yaml
-```
+Through exhaustive microscopic-to-macroscopic forensic auditing across all 182 test images and mathematical analysis of loss gradients, the fundamental bottleneck preventing models from achieving Sub-50 MAE has been proven:
+1. **The Dynamic Nash Equilibrium Trap**:
+   Under the composite loss $\mathcal{L} = \lambda_{\text{count}} \mathcal{L}_{\text{count}} + \lambda_{\text{alloc}} \mathcal{L}_{\text{alloc}}$, the network reaches an equilibrium where real crowd peaks receive only $\approx 35.6\%$ of their mass, while the remaining $\approx 64.4\%$ is supplied by an imperceptible background fog ($\approx 0.00124\text{ count/cell}$).
+2. **Gradient Vanishing of Convex Activations**:
+   The Softplus activation $y = \tau \log(1 + e^{z/\tau})$ has an exponentially vanishing derivative $\sigma(z/\tau) \to 0$ for negative background logits $z \approx -7.7$, causing background suppression gradients to vanish by a factor of over $2,000\times$, locking the background bias permanently at $b \approx -5.442$.
+3. **Spatial Averaging Blindness of Regional Head**:
+   Average pooling across large spatial boxes dilutes micro-head signals by $99.5\%$, reducing the Pearson linear correlation of the regional evidence head with ground truth to $r = 0.0521$.
+4. **Resolution Roadmap**:
+   Solving this requires reforming the measure support topology from strictly positive Lebesgue-continuous densities to compact support measures, eliminating the background shortcut and forcing 100% of the crowd mass back onto true head peaks.
