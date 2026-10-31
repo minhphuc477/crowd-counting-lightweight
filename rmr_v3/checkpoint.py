@@ -95,6 +95,7 @@ class CheckpointManager:
         solver_ramp_epochs: int = 20,
         best_mae: float = float("inf"),
         epochs_without_improvement: int = 0,
+        generator: torch.Generator | None = None,
     ) -> None:
         self.out_dir = out_dir
         self.cfg = cfg
@@ -104,6 +105,7 @@ class CheckpointManager:
         self.solver_ramp_epochs = solver_ramp_epochs
         self.best_mae = best_mae
         self.epochs_without_improvement = epochs_without_improvement
+        self.generator = generator
 
     def save_last(
         self,
@@ -128,6 +130,7 @@ class CheckpointManager:
             solver_strength=solver_strength,
             ema_state=ema_manager.state if ema_manager.state else None,
             extra_fields={"ema_updates": ema_manager.num_updates} if ema_manager.state else None,
+            generator=self.generator,
         )
         safe_torch_save(ckpt, self.out_dir / "last.pt")
 
@@ -167,6 +170,7 @@ class CheckpointManager:
                 solver_strength=solver_strength,
                 ema_state=ema_manager.state if ema_manager.state else None,
                 extra_fields={"ema_updates": ema_manager.num_updates} if ema_manager.state else None,
+                generator=self.generator,
             )
             safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
             safe_torch_save(ckpt, self.out_dir / "best_model.pt")

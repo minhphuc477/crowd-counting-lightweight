@@ -141,7 +141,7 @@ train:
   early_stopping: false
   patience: 0
   eval_every: 5
-  deterministic: false
+  deterministic: true
 
 eval:
   density_bins:

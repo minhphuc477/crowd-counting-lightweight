@@ -7,6 +7,7 @@ from typing import Any
 
 os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import torch
 import torch.nn.functional as F
@@ -162,8 +163,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     else:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = not deterministic
+        torch.backends.cudnn.allow_tf32 = not deterministic
         if not deterministic and bool(cfg.get("train", {}).get("cudnn_benchmark", True)):
             torch.backends.cudnn.benchmark = True
     workers = int(cfg.get("train", {}).get("workers", 0))
@@ -255,8 +256,8 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         if "scaler" in ckpt:
             scaler.load_state_dict(ckpt["scaler"])
         if "rng_state" in ckpt:
-            load_rng_state(ckpt["rng_state"], strict=deterministic)
-            print("Restored exact RNG states (random, numpy, torch, cuda)")
+            load_rng_state(ckpt["rng_state"], generator=gen, strict=deterministic)
+            print("Restored exact RNG states (random, numpy, torch, cuda, generator)")
         if ema_manager.restore(ckpt):
             print(f"Restored EMA shadow state from checkpoint ({len(ema_manager.state)} tensors).")
         start_epoch = int(ckpt.get("epoch", 0))
@@ -276,6 +277,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         solver_ramp_epochs=solver_ramp_epochs,
         best_mae=best_mae,
         epochs_without_improvement=epochs_without_improvement,
+        generator=gen,
     )
 
     log_csv = out_dir / "train_log.csv"

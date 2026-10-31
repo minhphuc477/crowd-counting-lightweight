@@ -144,6 +144,7 @@ def build_checkpoint(
     solver_strength: float = 1.0,
     ema_state: dict[str, torch.Tensor] | None = None,
     extra_fields: dict[str, Any] | None = None,
+    generator: torch.Generator | None = None,
 ) -> dict[str, Any]:
     """Canonical checkpoint bundle builder ensuring all state elements and provenance are recorded."""
     git_commit, git_dirty = get_git_info()
@@ -153,7 +154,7 @@ def build_checkpoint(
         "optimizer": optimizer.state_dict() if optimizer is not None else None,
         "scheduler": scheduler.state_dict() if scheduler is not None else None,
         "scaler": scaler.state_dict() if scaler is not None else None,
-        "rng_state": save_rng_state(),
+        "rng_state": save_rng_state(generator=generator),
         "solver_strength": float(solver_strength),
         "config": config,
         "config_hash": config_hash,

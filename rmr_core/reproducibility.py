@@ -39,6 +39,7 @@ def seed_worker(worker_id: int) -> None:
     worker_seed = (torch.initial_seed() + worker_id) % (2**32)
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
 
 
 def make_generator(seed: int = 42) -> torch.Generator:
@@ -48,8 +49,8 @@ def make_generator(seed: int = 42) -> torch.Generator:
     return g
 
 
-def save_rng_state() -> dict[str, Any]:
-    """Capture random, numpy, torch, and CUDA RNG states for exact resume reproducibility."""
+def save_rng_state(generator: torch.Generator | None = None) -> dict[str, Any]:
+    """Capture random, numpy, torch, CUDA, and DataLoader Generator RNG states."""
     state: dict[str, Any] = {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
@@ -57,11 +58,17 @@ def save_rng_state() -> dict[str, Any]:
     }
     if torch.cuda.is_available():
         state["cuda"] = torch.cuda.get_rng_state_all()
+    if generator is not None and isinstance(generator, torch.Generator):
+        state["generator"] = generator.get_state()
     return state
 
 
-def load_rng_state(state: dict[str, Any] | None, strict: bool = False) -> None:
-    """Restore random, numpy, torch, and CUDA RNG states."""
+def load_rng_state(
+    state: dict[str, Any] | None,
+    generator: torch.Generator | None = None,
+    strict: bool = False,
+) -> None:
+    """Restore random, numpy, torch, CUDA, and DataLoader Generator RNG states."""
     if not isinstance(state, dict):
         if strict:
             raise ValueError("RNG state must be a valid dictionary for exact resume.")
@@ -97,6 +104,15 @@ def load_rng_state(state: dict[str, Any] | None, strict: bool = False) -> None:
         except Exception as e:
             if strict:
                 raise RuntimeError(f"Failed to restore CUDA RNG state: {e}") from e
+
+    if generator is not None and isinstance(generator, torch.Generator) and "generator" in state:
+        gen_state = state["generator"]
+        if isinstance(gen_state, torch.Tensor):
+            try:
+                generator.set_state(gen_state)
+            except Exception as e:
+                if strict:
+                    raise RuntimeError(f"Failed to restore DataLoader Generator state: {e}") from e
 
 
 __all__ = [

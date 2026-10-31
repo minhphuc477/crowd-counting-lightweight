@@ -9,6 +9,7 @@ from pathlib import Path
 # Restrict glibc memory arenas and OpenMP threads to prevent heap explosion across parallel runs
 os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 # Ensure repository root is on sys.path and remove script dir to prevent shadowing stdlib modules (e.g. profile)
 _script_dir = str(Path(__file__).resolve().parent)
