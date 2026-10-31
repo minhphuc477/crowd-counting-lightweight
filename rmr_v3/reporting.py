@@ -70,6 +70,8 @@ def format_epoch_row(
         alloc_repr = f"fidt: {train_allocation:.3f}"
     elif alloc_type == "ot_sinkhorn":
         alloc_repr = f"ot: {train_allocation:.3f}"
+    elif alloc_type == "sn_voronoi_poisson":
+        alloc_repr = f"sn_vp: {train_allocation:.3f}"
     else:
         alloc_repr = f"dm16: {train_allocation:.3f}"
 
@@ -143,6 +145,8 @@ def format_eval_block(
         alloc_repr = f"alloc(fidt): {train_allocation:.3f}"
     elif alloc_type == "ot_sinkhorn":
         alloc_repr = f"alloc(ot): {train_allocation:.3f}"
+    elif alloc_type == "sn_voronoi_poisson":
+        alloc_repr = f"alloc(sn_vp): {train_allocation:.3f}"
     else:
         alloc_repr = f"alloc(dm16): {train_allocation:.3f}"
 
