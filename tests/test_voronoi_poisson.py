@@ -129,3 +129,22 @@ def test_device_cuda_and_amp() -> None:
     loss.backward()
     assert pred.grad is not None
     assert not torch.isnan(pred.grad).any()
+
+
+def test_centering_span_invariants() -> None:
+    """Verifies that single-pixel cells and closest pixels receive zero centering penalty."""
+    h, w = 4, 4
+    stride = 4
+    # Image size 16x16. 1 point at (2, 2) which is inside grid pixel (0, 0)
+    pts = [torch.tensor([[2.0, 2.0]])]
+    # Predict exactly 1.0 at pixel (0, 0)
+    pred = torch.zeros(1, 1, h, w, requires_grad=True)
+    with torch.no_grad():
+        pred[0, 0, 0, 0] = 1.0
+
+    # With lambda_center=1.0 and lambda_global=0.0:
+    loss = scale_normalized_voronoi_poisson_loss(
+        pred, pts, stride=stride, lambda_center=1.0, lambda_global=0.0
+    )
+    # Since cell mass = 1.0 (loss_person = 0) and pixel (0, 0) is closest to (2, 2) (loss_center = 0):
+    assert torch.isclose(loss, torch.tensor(0.0), atol=1e-5)

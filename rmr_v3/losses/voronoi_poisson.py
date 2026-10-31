@@ -164,15 +164,25 @@ def scale_normalized_voronoi_poisson_loss(
             loss_person_raw = (cell_mass - 1.0).abs().sum()
 
             # Term 2: Proximal Intra-Cell Centering Moment
-            # Pulls mass toward the true coordinate z_i within each cell V_i
-            cell_max_radius = torch.zeros(n_points, device=device, dtype=torch.float32)
-            cell_max_radius.scatter_reduce_(
+            # Pulls mass toward the true coordinate z_i within each multi-pixel cell V_i
+            cell_max_dist = torch.zeros(n_points, device=device, dtype=torch.float32)
+            cell_max_dist.scatter_reduce_(
                 0, cell_idx, dist_to_head, reduce="amax", include_self=False
             )
-            cell_max_radius = torch.clamp(cell_max_radius, min=1e-4)
+            cell_min_dist = torch.full((n_points,), float("inf"), device=device, dtype=torch.float32)
+            cell_min_dist.scatter_reduce_(
+                0, cell_idx, dist_to_head, reduce="amin", include_self=False
+            )
+            cell_span = cell_max_dist - cell_min_dist
+            has_span = cell_span > 1e-4
 
-            # Relative distance in [0, 1] within each Voronoi cell
-            rel_dist = dist_to_head / cell_max_radius[cell_idx]
+            # For single-pixel cells or equidistant cells, intra-cell spatial variance is zero (rel_dist = 0)
+            # For multi-pixel cells, rel_dist is in [0, 1], with 0 at the closest pixel and 1 at cell boundary
+            rel_dist = torch.where(
+                has_span[cell_idx],
+                (dist_to_head - cell_min_dist[cell_idx]) / torch.clamp(cell_span[cell_idx], min=1e-4),
+                torch.zeros_like(dist_to_head),
+            )
             loss_center_raw = (rel_dist.square() * d_flat).sum()
 
             # Term 3: Scale-Normalized Global Poisson Count Consistency
