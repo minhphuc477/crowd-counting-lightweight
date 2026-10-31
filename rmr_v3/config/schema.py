@@ -245,8 +245,10 @@ ALLOWED_LOSS_KEYS = {
     "count_target", "cell_target", "bayesian_norm_mode", "bayesian_canonical_bg",
     "bayesian_adaptive_sigma", "adaptive_sigma", "bayesian_sigma_min", "bayesian_sigma_max",
     "lambda_bayesian", "lambda_fidt", "lambda_ot", "strict_loss_triad",
-    "lambda_strauss", "strauss_radius",
-    "lambda_rn_transport", "cell_power",
+    "lambda_strauss", "strauss_radius", "lambda_rn_transport", "cell_power",
+    # Scale-Normalized Voronoi-Poisson Loss additions
+    "lambda_sn_vp", "sn_vp_lambda_center", "sn_vp_lambda_global",
+    "sn_vp_chunk_size", "sn_vp_norm_mode", "sn_vp_norm_ref",
 }
 
 ALLOWED_TRAIN_KEYS = {
