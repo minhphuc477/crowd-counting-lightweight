@@ -43,6 +43,7 @@ class RMRv3LossConfig:
     lambda_radon_ot: float = 1.0
     radon_ot_projections: int = 4
     radon_ot_norm_ref: float = 100.0
+    radon_ot_scale_by_length: bool = False
 
     # Count loss configuration
     count_loss_mode: str = "nb"  # "nb" | "log1p" | "l1"

@@ -1,4 +1,11 @@
-"""Multi-Scale Consistent Bregman-Poisson Recovery Operator (MC-BPRO).
+"""Neural-Guided Multiplicative Algebraic Reconstruction (Neural-MART / Richardson-Lucy).
+
+Grounded in classical Multiplicative Algebraic Reconstruction (MART, Gordon et al. 1970)
+and Richardson-Lucy deconvolution (Richardson 1972, Lucy 1974) with box projection operator A.
+Extended with 3 neural inductances:
+1. Multiplicative Zero-Support Solution: Selective Deficit Carrier Seeding into foreground valleys.
+2. Background Noise Blowup Solution: Regional Evidence Support Gating m_reg = tanh(b / tau).
+3. Scale Contradiction Solution: Dynamic Scale-Partitioned Normalized Adjoint Projection.
 
 Exact closed-form measure recovery resolving the 3 historical solver pathologies:
 1. Multiplicative Zero-Support Trap: Solved via Selective Deficit Carrier Seeding into foreground valleys.

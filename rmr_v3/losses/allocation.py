@@ -85,7 +85,7 @@ def compute_single_allocation(
             rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
             rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
             l_rot = radon_sliced_wasserstein_loss(
-                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref
+                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref, scale_by_length=bool(getattr(cfg, "radon_ot_scale_by_length", False))
             )
             lam_rot = float(getattr(cfg, "lambda_radon_ot", 1.0))
             comps[-888], comps[-999] = l_rot, l_bay
@@ -94,7 +94,7 @@ def compute_single_allocation(
             rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
             rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
             loss_val = radon_sliced_wasserstein_loss(
-                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref
+                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref, scale_by_length=bool(getattr(cfg, "radon_ot_scale_by_length", False))
             )
             comps[-888] = loss_val
         else:

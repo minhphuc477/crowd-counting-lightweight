@@ -40,6 +40,7 @@ def radon_sliced_wasserstein_loss(
     num_projections: int = 4,
     norm_ref: float = 100.0,
     smooth_beta: float = 0.01,
+    scale_by_length: bool = False,
     eps: float = 1e-6,
 ) -> torch.Tensor:
     r"""Compute exact closed-form Sliced Wasserstein distance between normalized density and points.
@@ -49,8 +50,10 @@ def radon_sliced_wasserstein_loss(
         points_list: List of length B with ground-truth head coordinates [N_i, 2] in image pixels.
         stride: Network spatial downsampling stride (e.g. 2 or 4).
         num_projections: Number of canonical 1D projection angles theta in [0, pi). Default: 4.
-        norm_ref: Reference count for normalizing background penalty on empty patches. Default: 100.0.
+        norm_ref: Reference count preserved for backward API compatibility. Default: 100.0.
         smooth_beta: Huber loss transition point for C1 smooth CDF distance. Default: 0.01.
+        scale_by_length: When True, scales 1D integral by physical line length (denom) in feature
+            cells rather than dimensionless unit interval [0, 1]. Default: False (canonical).
         eps: Small numerical constant to prevent zero-division.
 
     Returns:
@@ -134,7 +137,8 @@ def radon_sliced_wasserstein_loss(
 
             # 3. Smooth C1 Huber L1 difference between normalized CDFs (eliminates subgradient 0 plateaus)
             diff = f_p - f_q
-            w1_k = F.smooth_l1_loss(diff, torch.zeros_like(diff), beta=smooth_beta, reduction="sum") / float(num_bins)
+            step_size = (denom / float(num_bins)) if scale_by_length else (1.0 / float(num_bins))
+            w1_k = F.smooth_l1_loss(diff, torch.zeros_like(diff), beta=smooth_beta, reduction="sum") * step_size
             swd_i = swd_i + w1_k
 
         swd_i = swd_i / float(num_projections)
