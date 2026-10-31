@@ -118,6 +118,8 @@ def _compute_core_losses(
     # Composite Total Core Loss
     if cfg.allocation_loss_type in ("dual_bayesian_dm16", "dual_bayesian_radon_ot"):
         alloc_term = loss_allocation
+    elif cfg.allocation_loss_type == "sn_voronoi_poisson":
+        alloc_term = float(getattr(cfg, "lambda_sn_vp", 1.0)) * loss_allocation
     elif cfg.allocation_loss_type == "radon_ot":
         lam_rot = float(getattr(cfg, "lambda_radon_ot", 1.0))
         alloc_term = lam_rot * loss_allocation

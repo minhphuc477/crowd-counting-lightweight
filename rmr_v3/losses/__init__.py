@@ -22,6 +22,10 @@ from .spatial_priors import (
     topk_hard_background_loss,
 )
 from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
+from .voronoi_poisson import (
+    ScaleNormalizedVoronoiPoissonLoss,
+    scale_normalized_voronoi_poisson_loss,
+)
 from .radon_ot import radon_sliced_wasserstein_loss
 from .dual_supervision import compute_dual_lattice_losses
 from .orchestration import compute_rmr_v3_losses
@@ -46,6 +50,8 @@ __all__ = [
     "physical_scale_alignment_loss",
     "foreground_gating_bce_loss",
     "bayesian_loss",
+    "scale_normalized_voronoi_poisson_loss",
+    "ScaleNormalizedVoronoiPoissonLoss",
     "fidt_loss",
     "sinkhorn_ot_loss",
     "radon_sliced_wasserstein_loss",

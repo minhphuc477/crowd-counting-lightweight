@@ -12,6 +12,7 @@ from rmr_core.losses import flat_dm_block_loss, multiscale_dm_loss
 from .config import RMRv3LossConfig
 from .fidt import canonical_fidt_loss
 from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
+from .voronoi_poisson import scale_normalized_voronoi_poisson_loss
 from .radon_ot import radon_sliced_wasserstein_loss
 
 
@@ -124,6 +125,23 @@ def compute_single_allocation(
                 loss_type=getattr(cfg, "fidt_loss_type", "smooth_l1"),
                 normalize_by_count=True,
             )
+    elif cfg.allocation_loss_type == "sn_voronoi_poisson":
+        l_center = float(getattr(cfg, "sn_vp_lambda_center", 0.1))
+        l_global = float(getattr(cfg, "sn_vp_lambda_global", 0.5))
+        n_mode = str(getattr(cfg, "sn_vp_norm_mode", "canonical"))
+        n_ref = float(getattr(cfg, "sn_vp_norm_ref", 100.0))
+        c_size = int(getattr(cfg, "sn_vp_chunk_size", 4096))
+        loss_val = scale_normalized_voronoi_poisson_loss(
+            inp,
+            points,
+            stride=stride,
+            lambda_center=l_center,
+            lambda_global=l_global,
+            norm_mode=n_mode,
+            norm_ref=n_ref,
+            chunk_size=c_size,
+        )
+        comps[-777] = loss_val
     elif cfg.allocation_loss_type == "ot_sinkhorn":
         loss_val = sinkhorn_ot_loss(inp, points, reg=cfg.ot_reg, num_iters=cfg.ot_num_iters, stride=stride)
     elif cfg.use_multiscale_dm or cfg.use_hierarchical_dm:
@@ -191,6 +209,11 @@ def route_allocation_loss(
         losses["bayesian"] = loss_allocation
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
         losses["radon_ot"] = torch.zeros_like(loss_allocation)
+    elif cfg.allocation_loss_type == "sn_voronoi_poisson":
+        losses["sn_voronoi_poisson"] = loss_allocation
+        losses["bayesian"] = torch.zeros_like(loss_allocation)
+        losses["radon_ot"] = torch.zeros_like(loss_allocation)
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
     elif cfg.allocation_loss_type == "radon_ot":
         losses["radon_ot"] = loss_allocation
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
