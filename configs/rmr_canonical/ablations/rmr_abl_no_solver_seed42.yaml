@@ -73,7 +73,6 @@ model:
 
   # SINGLE-VARIABLE ABLATION: ZERO SOLVER (DIRECT REGRESSION)
   enable_solver: false
-  allow_unsupervised_solver: true
   solver_mode: direct
 
   floor_tau: 0.003
@@ -133,7 +132,6 @@ train:
   patience: 0
   eval_every: 5
   deterministic: true
-  allow_unsupervised_solver: true
 
 eval:
   density_bins:

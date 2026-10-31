@@ -73,7 +73,6 @@ model:
 
   # Closed-Form MC-BPRO Transport Solver
   enable_solver: true
-  allow_unsupervised_solver: true
   solver_mode: mcbpro
   mcbpro_deficit_seeding: true
   mcbpro_valley_power: 2.0
