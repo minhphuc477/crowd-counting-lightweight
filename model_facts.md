@@ -224,6 +224,17 @@ Phân tích tính khả tái lập dựa trên việc đối chiếu cấu hình
      - MAE: **65.69** | RMSE: **109.10** | Bias: **-19.35** | Sparse MAE: **15.63** | Dense MAE: **127.52**
 - **Quy chuẩn khoa học**: Mọi bảng công bố trong bài báo và tài liệu kỹ thuật bắt buộc phải báo cáo song song cả hai cột `Raw Single-Pass` và `TTA` để đảm bảo tính minh bạch tuyệt đối.
 
+#### 4.1.1. Mã băm SHA256 các Checkpoint Thực nghiệm Mới (Exp 2, 3, 4)
+- **Exp 2 (`runs/canonical/rmr_exp2_soft_solver_104k_seed42/best_val_mae.pt`)**:
+  - SHA256: `148BCA21E755B9CE934DA5E4240240E9421B2066DB30043021A594046FCB6340`
+  - Tham số học được: **104,390** (Stride 4, Soft-Margin MC-BPRO evidence gating $\tau=0.2, \text{clamp\_min}=0.01$).
+- **Exp 3 (`runs/canonical/rmr_exp3_stride2_16px_no_router_seed42/best_val_mae.pt`)**:
+  - SHA256: `6FFF80CF157AE5B5C7673318E918CB88F636E66B102CFA25F7938A987B97C73A`
+  - Tham số học được: **104,006** (Stride 2, bỏ Scale Router -483 params, thêm hộp vùng mịn 16px).
+- **Exp 4 (`runs/canonical/rmr_exp4_synergistic_stride2_seed42/best_val_mae.pt`)**:
+  - SHA256: `04B69F740275B78B50BD752942F17D0D91249D457C0A95D47CEE6878D1557AD1`
+  - Tham số học được: **104,006** (Stride 2, kết hợp Soft-Margin MC-BPRO + hộp vùng mịn 16px, không router).
+
 #### 4.2. Bằng chứng thực nghiệm về độ phân tán liên-seed (Giải quyết Red Flag 4 - Seed 7)
 Cùng một cấu hình mã nguồn và siêu tham số, chạy trên 2 seed (42 và 7) cho kết quả thực tế như sau:
 
@@ -392,6 +403,9 @@ Dưới đây là bảng kết quả đầy đủ của 10 mô hình canonical v
 | **S1** | Pure Bayesian Point (w/o Radon-OT SWD) | 104,390 | 65.74 | 108.27 | -24.80 | 26.23 | 123.74 | 66.24 | 108.14 | -25.24 | 23.12 | 123.40 |
 | **S2** | Pure Radon-OT SWD (w/o Bayesian Point) | 104,390 | 79.97 | 128.50 | +5.41 | 21.24 | 147.68 | 78.21 | 125.81 | +5.54 | 21.31 | 144.83 |
 | **S3** | Flat Box Supervised Loss (DM16) | 104,390 | 75.53 | 116.48 | +16.45 | 28.81 | 134.81 | 74.77 | 115.33 | +15.13 | 28.30 | 135.27 |
+| **Exp 2** | **Soft-Margin MC-BPRO Solver (Stride 4)** | 104,390 | **65.21** | 110.14 | -22.80 | 21.32 | **123.33** | **65.67** | **108.79** | -22.36 | 21.67 | **122.52** |
+| **Exp 3** | **Fine Regional 16px Box (w/o Router, Stride 2)** | 104,006 | 68.22 | 114.21 | -19.64 | 23.76 | 126.28 | 68.31 | 112.55 | -19.82 | 22.51 | 127.03 |
+| **Exp 4** | **Synergistic Stride 2 (Soft Solver + 16px Box)** | 104,006 | 67.59 | 114.61 | **-17.22** | 22.63 | 123.67 | 68.46 | 113.41 | **-17.31** | 20.69 | 129.20 |
 
 ---
 
