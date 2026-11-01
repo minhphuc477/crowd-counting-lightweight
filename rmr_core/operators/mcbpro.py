@@ -1,7 +1,8 @@
-"""Neural-Guided Multiplicative Algebraic Reconstruction (Neural-MART / Richardson-Lucy).
+"""Closed-Form Multiplicative Bregman-Poisson Recovery Operator (MC-BPRO).
 
-Grounded in classical Multiplicative Algebraic Reconstruction (MART, Gordon et al. 1970)
-and Richardson-Lucy deconvolution (Richardson 1972, Lucy 1974) with box projection operator A.
+Grounded in classical simultaneous Multiplicative Algebraic Reconstruction (SMART, Byrne 1993;
+Csiszár 1991 I-divergence projection), MART (Gordon et al. 1970), and Richardson-Lucy deconvolution
+(Richardson 1972, Lucy 1974) adapted for multiscale spatial box projection operator A.
 Extended with 3 neural inductances:
 1. Multiplicative Zero-Support Solution: Selective Deficit Carrier Seeding into foreground valleys.
 2. Background Noise Blowup Solution: Regional Evidence Support Gating m_reg = tanh(b / tau).

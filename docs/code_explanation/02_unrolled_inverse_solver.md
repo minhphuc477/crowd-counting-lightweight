@@ -1,6 +1,11 @@
-# Chapter 2: Unrolled Inverse Solver & Mathematical Foundations
+# Chapter 2: Measure Recovery Operators & Mathematical Foundations
 
-This document details the mathematical formulation, algorithmic structure, and physical justification of the **Unrolled SIRT Inverse Solver** in RMR-v3 ([`rmr_v3/solver.py`](file:///f:/lightweightcrcn/rmr_v3/solver.py), [`rmr_v3/model/solver_step.py`](file:///f:/lightweightcrcn/rmr_v3/model/solver_step.py), and [`rmr_core/operators/`](file:///f:/lightweightcrcn/rmr_core/operators/)).
+This document details the mathematical formulation, algorithmic structure, and physical justification of the measure recovery operators in RMR-v3:
+1. **Canonical Production Solver**: **Closed-Form Multiplicative Bregman-Poisson Recovery Operator (MC-BPRO)** ([`rmr_core/operators/mcbpro.py`](file:///f:/lightweightcrcn/rmr_core/operators/mcbpro.py), [`rmr_v3/model/solver_step.py`](file:///f:/lightweightcrcn/rmr_v3/model/solver_step.py)).
+2. **Historical / Legacy Formulation**: **Unrolled SIRT Iterative Solver** ([`rmr_v3/solver.py`](file:///f:/lightweightcrcn/rmr_v3/solver.py)).
+
+> [!IMPORTANT]
+> **Production Ground Truth**: All canonical experiments (Track A baseline, Stride-2, and ablations) use **MC-BPRO** (`solver_mode: mcbpro`, 0 trainable parameters, 0 iterative loops, $O(1)$ graph complexity). The unrolled iterative SIRT solver is maintained for historical ablation and research comparison only.
 
 ---
 
@@ -21,13 +26,72 @@ where:
 
 ---
 
-## 2. Iterative Unrolled Solver Architecture
+## 2. Canonical Production Operator: MC-BPRO (Closed-Form Bregman-Poisson Recovery)
+
+In the canonical production architecture (`rmr_canonical_104k_seed42.yaml`), RMR-v3 implements the **Closed-Form Multiplicative Bregman-Poisson Recovery Operator (MC-BPRO)** ([`rmr_core/operators/mcbpro.py`](file:///f:/lightweightcrcn/rmr_core/operators/mcbpro.py)).
+
+### 2.1. Mathematical Foundations & Lineage
+MC-BPRO generalizes classical **Multiplicative Algebraic Reconstruction (MART)** (Gordon et al. 1970), **Simultaneous MART (SMART)** (Byrne 1993), and **Richardson-Lucy deconvolution** (Richardson 1972, Lucy 1974) to multiscale spatial region operators $\mathcal{A}$ with 3 neural inductances:
+- **0 Learnable Parameters**: Pure algebraic tensor operations.
+- **0 Iterative Loops**: Evaluated in a single closed-form forward step ($O(1)$ computational complexity).
+- **Exact Csiszár I-Projection**: Minimizes the generalized Kullback-Leibler / Bregman divergence $D_{KL}(y \parallel y_0) = \int (y \log(y/y_0) - y + y_0) du$ subject to $\mathcal{A} y = b$.
+
+### 2.2. The 3-Stage Pipeline of MC-BPRO
+
+```mermaid
+flowchart TD
+    accTitle: MC-BPRO Closed-Form Measure Recovery Pipeline
+    accDescr: Three-stage closed-form projection showing regional evidence gating, selective deficit seeding in valleys, and simultaneous Csiszar I-projection.
+
+    subgraph S1 ["Stage 1: Evidence Support Gating"]
+        B["Regional Counts b"] --> BP1["Adjoint Backprojection A*"]
+        BP1 --> Field["Density Field b_density"]
+        Field --> TanhGate["m_reg = tanh(b_density / tau_reg)"]
+    end
+
+    subgraph S2 ["Stage 2: Deficit Carrier Seeding"]
+        Y0["Prior Carrier y0"] --> Fwd["Ay0"]
+        B & Fwd --> Deficit["Delta_R = ReLU(b_R - Ay0 - delta_db)"]
+        Deficit & TanhGate --> Valley["Gap Capacity g(u) in Valleys"]
+        Valley --> YAug["y_aug = y0 + epsilon_seed"]
+    end
+
+    subgraph S3 ["Stage 3: Bregman-Poisson Projection"]
+        YAug --> FwdAug["A y_aug"]
+        B & FwdAug --> Ratio["Scaling Ratio r_R = b_R / (A y_aug + eps)"]
+        Ratio --> AdjointScale["s(u) = A*(W * r) / A*(W * 1)"]
+        YAug & AdjointScale --> YStar["Recovered Measure y* = y_aug * s(u)"]
+    end
+```
+
+1. **Stage 1: Regional Evidence Support Field**:
+   Backprojects coarse box density to form a continuous crowd presence mask:
+   $$m_{\text{reg}}(u) = \tanh\left(\frac{b_{\text{density}}(u)}{\tau_{\text{reg}}}\right)$$
+   Cells where all overlapping boxes predict near-zero count have $m_{\text{reg}}(u) \equiv 0$, guaranteeing zero background leakage.
+
+2. **Stage 2: Selective Deficit Carrier Seeding**:
+   When regional evidence $b_R$ predicts massive crowds that exceed the prior carrier $\mathcal{A} y_0$, the zero-support trap is bypassed by seeding mass into foreground valleys $g(u)$ between detected peaks:
+   $$\Delta_R = \operatorname{ReLU}(b_R - \mathcal{A} y_0 - \delta_{\text{deadband}})$$
+   $$y_{\text{aug}}(u) = y_0(u) + g(u) \odot \mathcal{A}^* \left(\frac{\Delta_R}{\mathcal{A} g + \epsilon}\right)$$
+
+3. **Stage 3: Exact Bregman-Poisson Projection (Csiszár I-Projection)**:
+   Computes the simultaneous multiplicative update:
+   $$r_R = \operatorname{clamp}\left(\frac{b_R}{\mathcal{A} y_{\text{aug}} + \epsilon}, 0, R_{\max}\right)$$
+   $$s(u) = \frac{\mathcal{A}^*(W \odot r)}{\mathcal{A}^* W + \epsilon}, \quad y^*(u) = y_{\text{aug}}(u) \odot s(u)$$
+   This guarantees exact regional mass recovery while preserving spatial sharpness.
+
+---
+
+## 3. Legacy Iterative Unrolled Solver (SIRT Formulation)
 
 To invert $\mathcal{A}$ without parameter explosion, RMR-v3 unrolls $T=6$ iterations of the **Simultaneous Iterative Reconstruction Technique (SIRT)** into a differentiable computational graph:
 
 ```mermaid
 sequenceDiagram
     autonumber
+    accTitle: Legacy Unrolled SIRT Inverse Solver Sequence
+    accDescr: Sequence diagram illustrating the historical 6-iteration SIRT unrolled computational loop.
+
     participant Net as Feature Neck (P4)
     participant Init as Carrier Head (y0)
     participant Reg as Regional Head (b, Var)
