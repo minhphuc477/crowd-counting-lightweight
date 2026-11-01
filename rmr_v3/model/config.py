@@ -114,6 +114,8 @@ class RMRv3Config:
     mcbpro_feat_energy_weight: float = 0.25
     mcbpro_contrast_kernel: int = 15
     mcbpro_dense_threshold: float = 2.0
+    mcbpro_soft_margin_gating: bool = False
+    mcbpro_dense_clamp_min: float = 1.0
     mcbpro_noise_floor: float = 0.2
     mcbpro_peak_kernel_size: int = 7
     mcbpro_conservative_scaling: bool = False

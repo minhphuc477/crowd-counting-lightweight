@@ -204,3 +204,44 @@ def test_trust_region_deficit_allowance_and_asymmetric_density_morozov():
     # Shrunk residual retains high magnitude (~ -14.59)
     assert shrunk_asym.item() < -14.0
 
+
+def test_mcbpro_soft_margin_evidence_gating_invariants():
+    """Verify MC-BPRO Soft-Margin Evidence Gating:
+    1. Background region (b_s=0.0): Scaling ratio stays ~0, suppressing background fog.
+    2. Dense crowd region with undercounting b_s < mu_ref: Scaling ratio is clamped
+       from below at dense_clamp_min=1.0, preventing carrier deflation.
+    3. Dense crowd region with b_s > mu_ref: Scaling ratio > 1.0 is preserved.
+    """
+    from rmr_core.operators.mcbpro import closed_form_mcbpro_transport
+
+    h, w = 16, 16
+    boxes = torch.tensor([[0, 0, 8, 8], [8, 8, 16, 16]], dtype=torch.int64)
+    area = torch.tensor([64, 64], dtype=torch.int64)
+    scale_id = torch.tensor([0, 0], dtype=torch.int64)
+    regions = RegionSet(boxes=boxes, area=area, scale_id=scale_id)
+
+    y0 = torch.zeros((1, 1, h, w), dtype=torch.float32)
+    y0[0, 0, 2:6, 2:6] = 30.0 / 16.0
+    y0[0, 0, 10:14, 10:14] = 0.5 / 16.0
+
+    b_solver = torch.tensor([[20.0, 0.0]], dtype=torch.float32)
+
+    # Standard MC-BPRO deflates carrier in region 0
+    y_std = closed_form_mcbpro_transport(
+        y0=y0, b_solver=b_solver, weight_solver=None, regions=regions,
+        soft_margin_gating=False, deficit_seeding=False,
+    )
+    assert y_std[0, 0, :8, :8].sum().item() < 22.0
+
+    # Upgraded MC-BPRO with Soft-Margin Evidence Gating
+    y_soft = closed_form_mcbpro_transport(
+        y0=y0, b_solver=b_solver, weight_solver=None, regions=regions,
+        soft_margin_gating=True, dense_clamp_min=1.0, dense_evidence_threshold=2.0,
+        deficit_seeding=False,
+    )
+    # Invariant 1: Dense carrier peaks are NOT deflated
+    assert y_soft[0, 0, :8, :8].sum().item() >= 29.5
+
+    # Invariant 2: Background region is still cleanly suppressed
+    assert y_soft[0, 0, 8:, 8:].sum().item() < 0.05
+

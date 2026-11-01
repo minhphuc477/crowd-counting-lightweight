@@ -160,13 +160,12 @@ def solve_inverse_measure(
         if is_stride2 and tau_peak >= 0.04:
             tau_peak = tau_peak * 0.25
         ratio_clamp_max = float(getattr(cfg, "ratio_clamp_max", 25.0))
-        peak_k = getattr(cfg, "mcbpro_peak_kernel_size", None)
-        peak_kernel_size = (
-            int(peak_k) if peak_k is not None else (7 if is_stride2 else 5)
-        )
+        peak_kernel_size = int(getattr(cfg, "mcbpro_peak_kernel_size", 7 if is_stride2 else 5))
         fg_mask = torch.sigmoid(fg_logit) if fg_logit is not None else None
-
         conservative_scaling = bool(getattr(cfg, "mcbpro_conservative_scaling", False))
+        soft_margin_gating = bool(getattr(cfg, "mcbpro_soft_margin_gating", False))
+        dense_clamp_min = float(getattr(cfg, "mcbpro_dense_clamp_min", 1.0))
+        dense_thresh = float(getattr(cfg, "mcbpro_dense_threshold", 2.0))
 
         y_mcbpro, s_field = closed_form_mcbpro_transport(
             y0=y0_solver_input,
@@ -184,6 +183,9 @@ def solve_inverse_measure(
             peak_kernel_size=peak_kernel_size,
             conservative_scaling=conservative_scaling,
             return_multiplier=True,
+            soft_margin_gating=soft_margin_gating,
+            dense_clamp_min=dense_clamp_min,
+            dense_evidence_threshold=dense_thresh,
         )
 
         return _wrap_closed_form(base_out, y0, y_mcbpro, effective_strength, s_field=s_field)
