@@ -195,7 +195,7 @@ ALLOWED_MODEL_KEYS = {
     "tau_peak", "ratio_clamp_max", "mcbpro_peak_kernel_size",
     "mcbpro_tau_count_null", "mcbpro_feat_energy_weight",
     "mcbpro_dense_threshold", "mcbpro_contrast_kernel", "mcbpro_noise_floor",
-    "mcbpro_conservative_scaling",
+    "mcbpro_conservative_scaling", "mcbpro_soft_margin_gating", "mcbpro_dense_clamp_min",
     "pc_tau_noise", "pc_tau_peak", "ratio_clamp_min", "dsr_fw_power", "dsr_fw_unit_mass",
     "dsr_fw_tau_z_floor", "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
 }
