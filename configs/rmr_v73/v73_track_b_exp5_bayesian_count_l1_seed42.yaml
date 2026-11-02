@@ -1,9 +1,7 @@
 # ==============================================================================
-# V73 TRACK B EXPERIMENT 11: PURE 1-LOSS BAYESIAN DIRECT REGRESSION (SEED 42)
-# Core Research Question: Is Bayesian Likelihood alone sufficient for both
-# micro-localization and macro-count regulation without any auxiliary count loss?
-# Mathematical Basis: Ma et al. (CVPR 2019) proved background likelihood
-# P(z_0=1|y) = 1 - \sum P(z_n=1|y) intrinsically acts as a global count regularizer.
+# V73 TRACK B EXPERIMENT 5: BAYESIAN + COUNT L1 DIRECT REGRESSION (SEED 42)
+# Core Research Question: Does standard deterministic L1 count loss
+# perform better or worse than probabilistic Negative-Binomial count loss?
 # Invariant: Strictly <= 200,000 params (Actual: 113,463 params), 0.0% KD, 182 Test Imgs
 # ==============================================================================
 
@@ -94,10 +92,10 @@ loss:
   bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
 
-  # Pure 1-Loss: Exactly 1 Loss Term! Zero Loss-Balancing Hyperparameters!
+  # Orthogonal 2-Loss: Bayesian Likelihood + Standard Deterministic L1 Count
   lambda_bayesian: 1.0
-  lambda_count: 0.0
-  count_loss_mode: nb
+  lambda_count: 0.1
+  count_loss_mode: l1
   count_nb_dispersion: 50.0
 
   # All other losses 0.0
@@ -136,4 +134,4 @@ eval:
   - 100.0
   - 500.0
 
-output_dir: runs/sha_a/rmr_v73/v73_track_b_exp11_pure_bayesian_1loss_seed42
+output_dir: runs/sha_a/rmr_v73/v73_track_b_exp5_bayesian_count_l1_seed42

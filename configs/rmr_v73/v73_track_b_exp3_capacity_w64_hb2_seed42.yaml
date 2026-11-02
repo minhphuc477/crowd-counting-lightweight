@@ -1,8 +1,8 @@
 # ==============================================================================
-# V73 TRACK B EXPERIMENT 12: BAYESIAN + COUNT L1 DIRECT REGRESSION (SEED 42)
-# Core Research Question: Does standard deterministic L1 count loss
-# perform better or worse than probabilistic Negative-Binomial count loss?
-# Invariant: Strictly <= 200,000 params (Actual: 113,463 params), 0.0% KD, 182 Test Imgs
+# V73 TRACK B EXPERIMENT 3: HIGH CAPACITY DIRECT REGRESSION (W=64, HEAD_BLOCKS=2)
+# Core Research Question: How much does scaling feature capacity (width 64) and
+# decoder depth (2 ResBlocks in MPC-Head) improve dense crowd resolution within 200k?
+# Invariant: Strictly <= 200,000 params (Actual: 127,895 params, +72,105 headroom!), 0.0% KD
 # ==============================================================================
 
 seed: 42
@@ -36,14 +36,14 @@ data:
 model:
   output_stride: 2
   subpixel_stride2: true
-  feature_width: 48
+  feature_width: 64
   max_trainable_params: 200000
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
   init_m0: 0.015763
 
-  # Structural Re-parameterization Neck with Gated GAP
+  # Structural Re-parameterization Neck with Gated GAP (Capacity 64)
   neck_type: rep_aspp_lite
   aspp_dilations:
   - 2
@@ -52,10 +52,10 @@ model:
   use_aspp_gap: true
   aspp_gap_mode: gate
 
-  # Native Stride 2 Continuous Polyphase Carrier Head
+  # High-Capacity 2-Block Continuous Polyphase Carrier Head
   fine_carrier_type: mpc
   floor_tau: 0.003
-  head_blocks: 1
+  head_blocks: 2
 
   # Direct Neural Regression: Solver 100% Disabled
   enable_solver: false
@@ -92,10 +92,10 @@ loss:
   bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
 
-  # Orthogonal 2-Loss: Bayesian Likelihood + Standard Deterministic L1 Count
+  # Orthogonal 2-Loss: Bayesian + Negative-Binomial Count
   lambda_bayesian: 1.0
-  lambda_count: 0.1
-  count_loss_mode: l1
+  lambda_count: 0.5
+  count_loss_mode: nb
   count_nb_dispersion: 50.0
 
   # All other losses 0.0
@@ -134,4 +134,4 @@ eval:
   - 100.0
   - 500.0
 
-output_dir: runs/sha_a/rmr_v73/v73_track_b_exp12_bayesian_count_l1_seed42
+output_dir: runs/sha_a/rmr_v73/v73_track_b_exp3_capacity_w64_hb2_seed42

@@ -1,20 +1,10 @@
 # ==============================================================================
-# V73 TRACK B EXPERIMENT 8: PURIFIED DIRECT NEURAL REGRESSION (ZERO SOLVER, 2 LOSSES)
-# Core Philosophy: Radical Simplification based on Empirical Truth:
-#   1. Solver Elimination: MCBPRO solver empirically caused +9.60 higher RMSE (111.32 vs 101.72)
-#      and massive negative bias (-19.74 vs -7.81). Direct regression (y = y0) is strictly superior.
-#   2. Loss De-bloating: Cut from 5 competing losses down to EXACTLY 2 orthogonal losses:
-#      L_total = L_Bayesian (micro point allocation) + 0.5 * L_Count_NB (macro count conservation).
-#      Zero Radon-OT, zero Region-NB, zero Cell L1, zero background hurdle interference.
-#   3. Minimalist Clean Architecture:
-#      - Backbone: MobileNetV4-Conv-Small (87,568 params)
-#      - Neck: RepASPP-Lite with Gated GAP (22,320 params)
-#      - Head: Native Stride 2 Continuous Polyphase Carrier (MPC-Head, 4,995 params)
-#      - Total Trainable Parameters: 113,463 params (headroom: +86,537 under 200k ceiling!)
-# Invariant: Strictly <= 200,000 params, 0.0% Knowledge Distillation, 182 Full Test Images
+# V73 TRACK B EXPERIMENT 7: FLAGSHIP DIRECT NEURAL REGRESSION (SEED 101)
+# Multi-seed Statistical Verification (Seed 101)
+# Invariant: Strictly <= 200,000 params (Actual: 113,463 params), 0.0% KD, 182 Test Imgs
 # ==============================================================================
 
-seed: 42
+seed: 101
 
 data:
   train_manifest: data/sha_a_train_all.jsonl
@@ -70,7 +60,7 @@ model:
   enable_solver: false
   solver_mode: direct
 
-  # Lightweight auxiliary regional config (not used in forward regression)
+  # Lightweight auxiliary regional config
   regional_head_type: ebgb
   region_head_hidden: 48
   region_sizes_px:
@@ -107,7 +97,7 @@ loss:
   count_loss_mode: nb
   count_nb_dispersion: 50.0
 
-  # All 4 other legacy/redundant losses deactivated (Zero gradient interference)
+  # All 4 other legacy/redundant losses deactivated
   lambda_radon_ot: 0.0
   lambda_region_nb: 0.0
   lambda_flat_dm16: 0.0
@@ -143,4 +133,4 @@ eval:
   - 100.0
   - 500.0
 
-output_dir: runs/sha_a/rmr_v73/v73_track_b_exp8_purified_direct_seed42
+output_dir: runs/sha_a/rmr_v73/v73_track_b_exp7_flagship_seed101
