@@ -69,10 +69,10 @@ model:
   use_diag: false
   native_scale_pooling: true
   regional_feature_stats: mean
-  dynamic_scale_routing: true
+  dynamic_scale_routing: false
   factorized_scale_routing: false
   scale_router_temperature: 1.0
-  pre_solver_scale_gating: true
+  pre_solver_scale_gating: false
   scale_gating_power: 1.0
   foreground_gate: false
   dynamic_trust_gate: false
