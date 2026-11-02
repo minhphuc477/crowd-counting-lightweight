@@ -109,3 +109,40 @@
 - **LỆNH ĐÓNG BĂNG THIẾT KẾ THÍ NGHIỆM (EXPERIMENTATION FREEZE)**:
   - **DỪNG NGAY LẬP TỨC** việc tự ý thiết kế, đề xuất, hoặc tạo thêm các cấu hình thí nghiệm YAML mới ("ngưng thiết kế đi").
   - Tập trung 100% vào việc phân tích, giải phẫu, chứng minh và thấu hiểu tường tận bản chất của từng thành phần trong mô hình: từ toán tử tensor vi mô nhỏ nhất (tích chập, chuẩn hóa, kích hoạt, phép chiếu Radon, solver step, đạo hàm) đến cấu trúc vĩ mô lớn nhất (backbone, neck, multi-scale dictionary, carrier head, inverse solver, loss landscape).
+
+---
+
+## 13. Quy Chuẩn Đặt Câu Hỏi & Mục Tiêu Nghiên Cứu (ZERO-JARGON & PROBLEM-FIRST RESEARCH INTEGRITY)
+- **CẤM SUY DIỄN RQs VÀ ROs TỪ NỘI BỘ CODEBASE HOẶC FILE `.md`**:
+  - Nghiêm cấm tuyệt đối việc lấy các file `.md`, các tên hàm, lớp, hay thuật ngữ nội bộ của codebase (như `solver`, `mcbpro`, `ebgb`, `hurdle`, `carrier`, `sirt`) để biến thành các tiêu chí giả tưởng hoặc câu hỏi nghiên cứu (RQs) và mục tiêu nghiên cứu (ROs) của bài báo.
+  - Các RQs và ROs của bài báo bắt buộc phải được xuất phát 100% từ các bài toán mở thực tế của cộng đồng khoa học quốc tế (Computer Vision / Deep Learning / Spatial Statistics / Measure Theory).
+  - Sử dụng ngôn ngữ học thuật chuẩn mực quốc tế (CVPR / ICCV / ECCV / TPAMI), tập trung vào các vấn đề nền tảng: sai số lượng tử hóa không gian (spatial quantization error), suy biến gradient khi thiếu nhãn biên dạng (gradient degradation under point-only supervision), sự đánh đổi giữa độ phân giải và dung lượng mô hình trên biên (boundary capacity-resolution trade-off).
+
+---
+
+## 14. Quy Chuẩn Khảo Sát Văn Hiến Khách Quan (UNBIASED & GENERAL LITERATURE EXPLORATION)
+- **CẤM TÌM KIẾM CÓ ĐỊNH KIẾN XÁC NHẬN (ZERO CONFIRMATION BIAS)**:
+  - Nghiêm cấm việc sử dụng các từ khóa thu hẹp (narrow-down keywords) mang tính thiên lệch hoặc cố tình chọn từ để ép công cụ tìm kiếm trả về câu trả lời củng cố cho giả thuyết định kiến sẵn của mô hình.
+  - Khi khảo sát các bài toán mở và so sánh hiện trạng kỹ thuật (SOTA), bắt buộc phải thực hiện tìm kiếm đa chiều, trung lập, khảo sát đầy đủ cả ưu điểm và nhược điểm của các phương pháp đối thủ.
+  - Báo cáo tài liệu phải dẫn nguồn chính xác từ các hội nghị hàng đầu (CVPR, ICCV, ECCV, NeurIPS) hoặc tạp chí bình duyệt uy tín (TPAMI, IJCV, Neurocomputing, PR, IEEE TCSVT), không trích dẫn tài liệu không rõ nguồn gốc.
+
+---
+
+## 15. Quy Chuẩn Đường Biên Pareto Thực Tế (EMPIRICALLY GROUNDED PARETO FRONTIER)
+- **CẤM HOANG TƯỞNG VỀ CHỈ SỐ MÔ HÌNH SIÊU NHẸ (NO HALLUCINATED PARETO CLAIMS)**:
+  - Tuyệt đối không được hoang tưởng hoặc so sánh khập khiễng yêu cầu mô hình siêu nhẹ $\le 200\text{k}$ tham số không chưng cất tri thức (0% KD) phải đạt MAE 40-50 ngang ngửa các mô hình khổng lồ 16M-100M tham số (như MAN, STEERER, ViT-based SOTA).
+  - Đường biên Pareto trong khoa học phải được định vị chính xác dựa trên các công trình đã xuất bản trong cùng phân khúc ràng buộc:
+    * Phân khúc $\le 200\text{k}$ tham số (Standalone, 0% KD) trên ShanghaiTech Part A:
+      - **Lw-Count** (IEEE TCSVT 2022): 71k tham số, MAE 78.2 / RMSE 120.8.
+      - **LSANet** (Neurocomputing 2022): 200k tham số, MAE 66.1 / RMSE 110.2.
+    * Do đó, mức MAE 65.62 / RMSE 101.72 tại 113k tham số đã là đường biên Pareto SOTA được kiểm chứng thực nghiệm chặt chẽ ở phân khúc dưới 200k tham số.
+
+---
+
+## 16. Nguyên Tắc Tinh Gọn Mô Hình & Loại Bỏ Thành Phần Thừa (OCCAM'S RAZOR & USEFULNESS INVARIANT)
+- **CẤM DUY TRÌ THÀNH PHẦN VÔ NGHĨA HOẶC LÀM TỆ KẾT QUẢ**:
+  - Không được phép nhồi nhét quá nhiều hàm loss (như cấu trúc 5 loss mâu thuẫn gradient) hoặc duy trì các module kiến trúc phức tạp khi thực nghiệm đã chứng minh chúng không đem lại lợi ích hoặc làm tăng phương sai (như unrolled solver lặp làm tăng RMSE).
+  - Mọi module được giữ lại trong mô hình bắt buộc phải thỏa mãn 2 điều kiện:
+    1. Đóng góp cải thiện kết quả rõ ràng qua kiểm tra đối chứng đơn biến (single-variable ablation).
+    2. Có vai trò toán học / xử lý tín hiệu không thể thay thế.
+  - Nếu một thành phần không giúp ích, phải cắt bỏ hoàn toàn khỏi pipeline (loại bỏ cả forward pass lẫn loss), không để lại mã nguồn chết hay sử dụng các cờ cấu hình tạm bợ.

@@ -41,6 +41,15 @@
 8. **Experimentation Design Moratorium (Lệnh đóng băng thiết kế thí nghiệm)**:
    - STRICTLY CEASE proposing or creating new experiments ("ngưng thiết kế đi").
    - 100% focus on deep, microscopic-to-macroscopic mechanical comprehension of EVERY component of the model, from atomic tensor ops to macro-architecture.
+9. **Zero-Jargon & Problem-First Research Integrity**:
+   - Zero tolerance for fabricating Research Questions (RQs) or Objectives (ROs) from codebase quirks or local .md files.
+   - All research formulations must address genuine open problems recognized by the international Computer Vision community (CVPR/ICCV/ECCV/TPAMI).
+10. **Unbiased Literature Exploration**:
+   - Strictly prohibit confirmation-bias searches and narrow-down queries. Conduct comprehensive, balanced surveys.
+11. **Empirical Pareto Frontier Grounding**:
+   - Ground all baseline claims in published peer-reviewed literature. Sub-200k standalone SOTA is anchored by LSANet (200k params, MAE 66.1 / RMSE 110.2).
+12. **Occam's Razor & Invariant of Usefulness**:
+   - Excise any component or loss that fails to demonstrate statistically significant improvement in single-variable ablation tests (e.g., removing unhelpful iterative solvers and multi-loss bloat).
 
 ## 4. Key Artifacts & Narrative Reports
 - Anti-Regression Experimental Guidelines: `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`
