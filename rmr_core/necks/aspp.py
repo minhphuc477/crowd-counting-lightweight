@@ -35,11 +35,15 @@ class ASPPLiteFPNNeck(nn.Module):
         width: int = 32,
         aspp_dilations: tuple[int, ...] = (1, 3, 6),
         use_aspp_gap: bool = True,
+        aspp_gap_mode: str = "add",
     ):
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = width
         self.use_aspp_gap = bool(use_aspp_gap)
+        self.aspp_gap_mode = str(aspp_gap_mode).lower().strip()
+        if self.aspp_gap_mode not in ("add", "gate"):
+            raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
 
         # Lateral 1x1 projections
         self.lat4 = ConvGNAct(c4, width, 1)
@@ -79,7 +83,10 @@ class ASPPLiteFPNNeck(nn.Module):
         if self.aspp_gap is not None:
             gap_vec = self.aspp_gap(l16)
             gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)
-            aspp_out = aspp_out + gap_broadcast
+            if getattr(self, "aspp_gap_mode", "add") == "gate":
+                aspp_out = aspp_out * (1.0 + torch.tanh(gap_broadcast))
+            else:
+                aspp_out = aspp_out + gap_broadcast
 
         p16_pre = self.aspp_proj(l16 + aspp_out)
         p16 = self.ref16(p16_pre)

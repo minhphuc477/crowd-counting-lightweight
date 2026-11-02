@@ -23,9 +23,9 @@ from .dense_scaling import compute_elementwise_dense_scaling
 from .allocation import route_allocation_loss
 from .cell import compute_cell_loss
 from .regional import (
+    compute_regional_evidence_loss,
     hurdle_focal_bce_loss,
     scale_balanced_regional_count_loss,
-    scale_balanced_regional_nb_nll,
     truncated_nb_nll_loss,
 )
 from .spatial_priors import (
@@ -54,6 +54,7 @@ def _compute_core_losses(
     cfg: RMRv3LossConfig,
     points: list[torch.Tensor] | None,
     router: TargetSupervisionRouter,
+    outputs: dict[str, Any] | None = None,
 ) -> dict[str, torch.Tensor]:
     """Compute primary count, cell, allocation, and regional Negative-Binomial losses."""
     losses: dict[str, torch.Tensor] = {}
@@ -93,18 +94,13 @@ def _compute_core_losses(
     loss_allocation, alloc_losses = route_allocation_loss(y, y0, target_float, points, cfg)
     losses.update(alloc_losses)
 
-    # 4. Regional Negative-Binomial Evidence Loss
+    # 4. Regional Evidence Loss (EB-GB or Negative-Binomial)
     if cfg.lambda_region_nb > 0.0:
-        losses["region_nb"] = scale_balanced_regional_nb_nll(
-            target_region,
-            mean_region,
-            dispersion_region,
-            regions,
-            mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
-            regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
-            faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
-            normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
+        reg_l, reg_aux = compute_regional_evidence_loss(
+            target_region, mean_region, dispersion_region, regions, cfg, outputs
         )
+        losses["region_nb"] = reg_l
+        losses.update(reg_aux)
     else:
         losses["region_nb"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
@@ -242,25 +238,21 @@ def _compute_auxiliary_losses(
     # Regional Hurdle BCE & Truncated NB Loss
     hurdle_logit = outputs.get("hurdle_logit", None)
     if hurdle_logit is not None:
-        h_bce = (
-            hurdle_focal_bce_loss(hurdle_logit.float(), target_region)
-            if cfg.lambda_hurdle > 0.0
-            else zero_val
-        )
-        t_nb = (
-            truncated_nb_nll_loss(
-                mean_region,
-                dispersion_region,
-                target_region,
-                regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
-                faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
-                normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
+        if "bin_logits" in outputs:
+            h_bce = losses.get("ebgb_hurdle", zero_val)
+            t_nb = zero_val
+        else:
+            h_bce = hurdle_focal_bce_loss(hurdle_logit.float(), target_region) if cfg.lambda_hurdle > 0.0 else zero_val
+            t_nb = (
+                truncated_nb_nll_loss(
+                    mean_region, dispersion_region, target_region,
+                    regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
+                    faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
+                    normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
+                ) if cfg.lambda_trunc_nb > 0.0 else zero_val
             )
-            if cfg.lambda_trunc_nb > 0.0
-            else zero_val
-        )
+            losses["total"] = losses["total"] + cfg.lambda_hurdle * h_bce + cfg.lambda_trunc_nb * t_nb
         losses["hurdle_bce"], losses["trunc_nb"] = h_bce, t_nb
-        losses["total"] = losses["total"] + cfg.lambda_hurdle * h_bce + cfg.lambda_trunc_nb * t_nb
     else:
         losses["hurdle_bce"] = losses["trunc_nb"] = zero_val
 
@@ -431,6 +423,7 @@ def compute_rmr_v3_losses(
         cfg=cfg,
         points=points,
         router=router,
+        outputs=outputs,
     )
     return _compute_auxiliary_losses(
         losses=losses,

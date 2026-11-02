@@ -74,12 +74,16 @@ class RLKHDCFPNNeck(nn.Module):
         use_gap: bool = True,
         use_fast_norm_fusion: bool = True,
         eps: float = 1e-4,
+        aspp_gap_mode: str = "add",
     ) -> None:
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = width
         self.use_gap = bool(use_gap)
         self.use_fast_norm_fusion = bool(use_fast_norm_fusion)
+        self.aspp_gap_mode = str(aspp_gap_mode).lower().strip()
+        if self.aspp_gap_mode not in ("add", "gate"):
+            raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
 
         # 1. Lateral 1x1 projections: C -> width via 1x1 Conv + GroupNorm + SiLU
         self.lat4 = ConvGNAct(c4, width, k=1)
@@ -130,7 +134,10 @@ class RLKHDCFPNNeck(nn.Module):
         if self.aspp_gap is not None:
             gap_vec = self.aspp_gap(l16)
             gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)
-            hdc_accum = hdc_accum + gap_broadcast
+            if getattr(self, "aspp_gap_mode", "add") == "gate":
+                hdc_accum = hdc_accum * (1.0 + torch.tanh(gap_broadcast))
+            else:
+                hdc_accum = hdc_accum + gap_broadcast
 
         # Feed directly into RepDWBlock7x7 refinement block
         p16 = self.ref16(l16 + hdc_accum)

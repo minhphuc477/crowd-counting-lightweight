@@ -7,11 +7,14 @@ Provides:
 """
 from __future__ import annotations
 
+from typing import Any
 import torch
 import torch.nn.functional as F
 
 from rmr_core.losses import negative_binomial_nll_mean_dispersion
 from rmr_core.operators import RegionSet
+from .ebgb import scale_balanced_regional_ebgb_loss
+from ..ebgb_head import DEFAULT_GEOMETRIC_BINS
 
 
 def hurdle_focal_bce_loss(
@@ -170,7 +173,8 @@ def scale_balanced_regional_nb_nll(
 
     scale_losses = []
     num_scales = int(getattr(regions, "num_scales", 3))
-    for sid in range(num_scales):
+    start_sid = -1 if (regions.scale_id == -1).any() else 0
+    for sid in range(start_sid, num_scales):
         mask = (regions.scale_id == sid)
         t_count = mask.float().sum()
         if t_count <= 0:
@@ -220,7 +224,8 @@ def scale_balanced_regional_count_loss(
 
     num_scales = int(getattr(regions, "num_scales", 3))
     scale_losses = []
-    for sid in range(num_scales):
+    start_sid = -1 if (regions.scale_id == -1).any() else 0
+    for sid in range(start_sid, num_scales):
         mask = (regions.scale_id == sid)
         if not mask.any():
             continue
@@ -230,4 +235,55 @@ def scale_balanced_regional_count_loss(
         scale_losses.append(rel_error.mean())
 
     return torch.stack(scale_losses).mean() if scale_losses else (mean_region.sum()) * 0.0
+
+
+def compute_regional_evidence_loss(
+    target_region: torch.Tensor,
+    mean_region: torch.Tensor,
+    dispersion_region: torch.Tensor,
+    regions: RegionSet,
+    cfg: Any,
+    outputs: dict[str, Any] | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Compute scale-balanced regional evidence loss.
+
+    Dispatches to scale_balanced_regional_ebgb_loss if bin_logits is present
+    in outputs (Error-Bounded Geometric Binning with bounded gradients ||nabla_z L||_infty <= 1.0),
+    otherwise evaluates scale_balanced_regional_nb_nll (Negative-Binomial NLL).
+    """
+    aux: dict[str, torch.Tensor] = {}
+    if outputs is not None and "bin_logits" in outputs and outputs["bin_logits"] is not None:
+        bin_logits = outputs["bin_logits"]
+        bin_centers = outputs.get("bin_centers", None)
+        if bin_centers is None:
+            bin_centers = torch.tensor(
+                DEFAULT_GEOMETRIC_BINS,
+                device=bin_logits.device,
+                dtype=bin_logits.dtype,
+            )
+        hurdle_logit = outputs.get("hurdle_logit", None)
+        lam_hurdle = float(getattr(cfg, "ebgb_lambda_hurdle", getattr(cfg, "lambda_hurdle", 0.0)))
+        smoothing = float(getattr(cfg, "ebgb_smoothing", 0.0))
+        ebgb_loss, ebgb_aux = scale_balanced_regional_ebgb_loss(
+            bin_logits=bin_logits,
+            target_region=target_region,
+            bin_centers=bin_centers,
+            regions=regions,
+            hurdle_logit=hurdle_logit,
+            lambda_hurdle=lam_hurdle,
+            smoothing=smoothing,
+        )
+        return ebgb_loss, ebgb_aux
+
+    nb_loss = scale_balanced_regional_nb_nll(
+        target_region=target_region,
+        mean_region=mean_region,
+        dispersion_region=dispersion_region,
+        regions=regions,
+        mass_weight_alpha=float(getattr(cfg, "regional_mass_weight_alpha", 0.0)),
+        regional_nb_beta=float(getattr(cfg, "regional_nb_beta", 0.0)),
+        faithful_regional_nb=bool(getattr(cfg, "faithful_regional_nb", False)),
+        normalize_beta_weights=bool(getattr(cfg, "normalize_beta_weights", False)),
+    )
+    return nb_loss, aux
 

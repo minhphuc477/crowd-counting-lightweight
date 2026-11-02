@@ -23,7 +23,7 @@ class RMRModelOutput(dict):
         if key in (
             "hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "pi_aspect",
             "solver_trust_alpha", "y_carrier", "y0_carrier", "carrier_energy",
-            "regions_carrier", "rn_multiplier",
+            "regions_carrier", "rn_multiplier", "bin_logits", "bin_probs", "bin_centers",
         ):
             return None
         raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
@@ -66,6 +66,9 @@ class RMRModelOutput(dict):
     pi_scale: torch.Tensor | None
     hurdle_logit: torch.Tensor | None
     fg_logit: torch.Tensor | None
+    bin_logits: torch.Tensor | None
+    bin_probs: torch.Tensor | None
+    bin_centers: torch.Tensor | None
 
 
 class MappingMixin:

@@ -6,13 +6,8 @@ import torch
 import torch.nn as nn
 
 from rmr_core.operators import (
-    RegionSet,
-    closed_form_dsr_fw_transport,
-    closed_form_mcbpro_transport,
-    closed_form_peak_concentrated_transport,
-    closed_form_radon_nikodym_transport,
-    fed_mcbpro_transport,
-    perspective_mcbpro_transport,
+    RegionSet, closed_form_dsr_fw_transport, closed_form_mcbpro_transport,
+    closed_form_peak_concentrated_transport, closed_form_radon_nikodym_transport, fed_mcbpro_transport,
 )
 from rmr_core.types import RMRModelOutput
 from ..solver import unrolled_sirt_solver
@@ -40,7 +35,8 @@ def _wrap_closed_form(
         "solver_strength": effective_strength,
     })
     if s_field is not None:
-        base_out["rn_multiplier"] = s_field
+        eff_s = (1.0 - effective_strength) + effective_strength * s_field if effective_strength < 1.0 else s_field
+        base_out["rn_multiplier"] = eff_s
     return RMRModelOutput(**base_out)
 
 
@@ -103,6 +99,12 @@ def solve_inverse_measure(
         base_out["hurdle_logit"] = hurdle_logit
     if fg_logit is not None:
         base_out["fg_logit"] = fg_logit
+    if "bin_logits" in regional_evidence:
+        base_out["bin_logits"] = regional_evidence["bin_logits"]
+    if "bin_probs" in regional_evidence:
+        base_out["bin_probs"] = regional_evidence["bin_probs"]
+    if "bin_centers" in regional_evidence:
+        base_out["bin_centers"] = regional_evidence["bin_centers"]
 
     if not cfg.enable_solver or cfg.solver_mode == "direct":
         base_out.update({
@@ -142,8 +144,7 @@ def solve_inverse_measure(
             y_curr = y_next
             iterates.append(y_curr)
 
-        s_field = (1.0 - effective_strength) + effective_strength * s_accum if effective_strength < 1.0 else s_accum
-        return _wrap_closed_form(base_out, y0, y_curr, effective_strength, s_field=s_field, iterates=iterates)
+        return _wrap_closed_form(base_out, y0, y_curr, effective_strength, s_field=s_accum, iterates=iterates)
 
     if cfg.solver_mode == "mcbpro":
         is_stride2 = bool(
@@ -166,6 +167,8 @@ def solve_inverse_measure(
         soft_margin_gating = bool(getattr(cfg, "mcbpro_soft_margin_gating", False))
         dense_clamp_min = float(getattr(cfg, "mcbpro_dense_clamp_min", 1.0))
         dense_thresh = float(getattr(cfg, "mcbpro_dense_threshold", 2.0))
+        tau_null = float(getattr(cfg, "mcbpro_tau_count_null", 0.5))
+        def_deadband = float(getattr(cfg, "mcbpro_deficit_deadband", 0.20))
 
         y_mcbpro, s_field = closed_form_mcbpro_transport(
             y0=y0_solver_input,
@@ -176,6 +179,7 @@ def solve_inverse_measure(
             scale_weights=scale_weights,
             fg_mask=fg_mask,
             deficit_seeding=deficit_seeding,
+            deficit_deadband=def_deadband,
             valley_power=valley_power,
             reg_threshold=reg_threshold,
             tau_peak=tau_peak,
@@ -186,6 +190,7 @@ def solve_inverse_measure(
             soft_margin_gating=soft_margin_gating,
             dense_clamp_min=dense_clamp_min,
             dense_evidence_threshold=dense_thresh,
+            tau_count_null=tau_null,
         )
 
         return _wrap_closed_form(base_out, y0, y_mcbpro, effective_strength, s_field=s_field)

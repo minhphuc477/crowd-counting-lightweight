@@ -26,11 +26,15 @@ class HDCLiteFPNNeck(nn.Module):
         width: int = 32,
         hdc_dilations: tuple[int, ...] = (1, 2, 3),
         use_gap: bool = False,
+        aspp_gap_mode: str = "add",
     ):
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = width
         self.use_gap = bool(use_gap)
+        self.aspp_gap_mode = str(aspp_gap_mode).lower().strip()
+        if self.aspp_gap_mode not in ("add", "gate"):
+            raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
 
         self.lat4 = ConvGNAct(c4, width, 1)
         self.lat8 = ConvGNAct(c8, width, 1)
@@ -70,7 +74,10 @@ class HDCLiteFPNNeck(nn.Module):
         if self.aspp_gap is not None:
             gap_vec = self.aspp_gap(l16)
             gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)
-            hdc_accum = hdc_accum + gap_broadcast
+            if getattr(self, "aspp_gap_mode", "add") == "gate":
+                hdc_accum = hdc_accum * (1.0 + torch.tanh(gap_broadcast))
+            else:
+                hdc_accum = hdc_accum + gap_broadcast
 
         p16 = self.ref16(self.hdc_proj(l16 + hdc_accum))
 

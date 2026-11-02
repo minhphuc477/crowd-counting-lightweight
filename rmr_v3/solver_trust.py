@@ -31,6 +31,13 @@ def apply_trust_region_clamping(
     if trust_region_kappa <= 0.0:
         return delta_y
 
+    dense_gate: torch.Tensor | None = None
+    if density_adaptive_trust:
+        z_local = F.avg_pool2d(
+            z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False
+        )
+        dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
+
     eff_kappa = float(trust_region_kappa)
     if scale_routed_trust and scale_routing_weights is not None:
         pi_fine = scale_routing_weights[:, 0:1, :, :].float().detach()
@@ -38,11 +45,7 @@ def apply_trust_region_clamping(
         fl_sparse = float(effective_trust_floor)
         fl_dense = float(trust_region_floor_dense) * area_scale
         eff_floor = fl_sparse + (fl_dense - fl_sparse) * pi_fine
-    elif density_adaptive_trust:
-        z_local = F.avg_pool2d(
-            z_state.float(), kernel_size=5, stride=1, padding=2, count_include_pad=False
-        )
-        dense_gate = torch.sigmoid((z_local - float(trust_dense_tau)) / 0.03)
+    elif density_adaptive_trust and dense_gate is not None:
         eff_pos_kappa = eff_kappa + (float(trust_dense_kappa) - eff_kappa) * dense_gate
         eff_floor = float(effective_trust_floor)
     else:
@@ -57,6 +60,8 @@ def apply_trust_region_clamping(
             psi_deficit.float().detach() / (base_bound_rem + 1e-4), max=1.0
         )
         bound_removal = bound_removal * (1.0 - 0.75 * deficit_ratio)
+    if density_adaptive_trust and dense_gate is not None:
+        bound_removal = bound_removal * (1.0 - 0.85 * dense_gate)
 
     # 2. Mass addition bound (delta_y > 0): Decoupled from zero-carrier strangulation
     eff_floor_pos = float(trust_addition_floor) * area_scale

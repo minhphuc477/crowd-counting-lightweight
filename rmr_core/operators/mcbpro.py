@@ -70,6 +70,7 @@ def closed_form_mcbpro_transport(
     soft_margin_gating: bool = False,
     dense_clamp_min: float = 1.0,
     dense_evidence_threshold: float = 2.0,
+    tau_count_null: float = 0.5,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Execute the 3-stage MC-BPRO measure recovery operator.
 
@@ -207,7 +208,12 @@ def closed_form_mcbpro_transport(
     scaling_ratio = scaling_ratio.clamp(0.0, float(ratio_clamp_max))
 
     if soft_margin_gating:
-        crowd_gate = torch.tanh(b_s_f / max(float(dense_evidence_threshold), float(eps)))
+        area_scale_factor = 64.0 / area
+        norm_crowd_count = torch.maximum(b_s_f, mu_ref) * area_scale_factor
+        effective_dense_excess = torch.relu(norm_crowd_count - float(tau_count_null))
+        crowd_gate = torch.tanh(
+            effective_dense_excess / max(float(dense_evidence_threshold), float(eps))
+        )
         clamped_ratio = torch.clamp_min(scaling_ratio, float(dense_clamp_min))
         scaling_ratio = (1.0 - crowd_gate) * scaling_ratio + crowd_gate * clamped_ratio
 

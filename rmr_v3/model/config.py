@@ -6,13 +6,10 @@ import warnings
 from typing import Any
 
 def _softplus_inverse(y: float) -> float:
-    y = max(float(y), 1e-8)
-    return math.log(math.expm1(y))
+    return math.log(math.expm1(max(float(y), 1e-8)))
 
 def _deep_tuple(val: Any) -> Any:
-    if isinstance(val, (list, tuple)):
-        return tuple(_deep_tuple(x) for x in val)
-    return val
+    return tuple(_deep_tuple(x) for x in val) if isinstance(val, (list, tuple)) else val
 
 def _require_positive(name: str, val: float) -> None:
     if val <= 0.0:
@@ -21,6 +18,7 @@ def _require_positive(name: str, val: float) -> None:
 def _require_non_negative(name: str, val: float) -> None:
     if val < 0.0:
         raise ValueError(f"{name} must be non-negative, got {val}")
+
 def _require_unit_interval(name: str, val: float) -> None:
     if not (0.0 <= val <= 1.0):
         raise ValueError(f"{name} must be in [0.0, 1.0], got {val}")
@@ -51,6 +49,7 @@ class RMRv3Config:
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
     hdc_dilations: tuple[int, ...] = (1, 2, 3)
     use_fast_norm_fusion: bool = True
+    aspp_gap_mode: str = "add"
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
@@ -71,6 +70,11 @@ class RMRv3Config:
     detach_y0_for_solver: bool = False
     learned_solver_steps: bool = False
     morozov_gamma_max: float = 1.0
+
+    # Head Architecture Types
+    fine_carrier_type: str = "standard"
+    regional_head_type: str = "probabilistic"
+    ebgb_lambda_hurdle: float = 1.0
 
     # Negative-Binomial regional uncertainty
     dispersion_init: float = 50.0
@@ -281,6 +285,10 @@ class RMRv3Config:
     morozov_density_beta: float = 2.0
 
     def __post_init__(self) -> None:
+        if isinstance(self.init_m0, str) and self.init_m0.strip().lower() == 'auto':
+            self.init_m0 = 0.015763
+        elif self.init_m0 is not None:
+            self.init_m0 = float(self.init_m0)
         if (self.subpixel_stride2 or self.subpixel_dm) and self.output_stride != 2:
             warnings.warn(
                 f"subpixel_stride2/subpixel_dm requires output_stride=2; overriding output_stride={self.output_stride} -> 2.",
@@ -337,6 +345,12 @@ class RMRv3Config:
         valid_solvers = ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct", "peak_concentrated", "pc_solver", "pc_bpro", "dsr_fw", "dsr_fw_solver")
         if self.solver_mode not in valid_solvers:
             raise ValueError(f"Invalid solver_mode '{self.solver_mode}'")
+        if self.aspp_gap_mode not in ("add", "gate"):
+            raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
+        if self.fine_carrier_type not in ("standard", "mpc"):
+            raise ValueError(f"fine_carrier_type must be 'standard' or 'mpc', got '{self.fine_carrier_type}'")
+        if self.regional_head_type not in ("probabilistic", "ebgb"):
+            raise ValueError(f"regional_head_type must be 'probabilistic' or 'ebgb', got '{self.regional_head_type}'")
         if self.tv_type not in ("laplacian", "charbonnier", "perona_malik"):
             raise ValueError(
                 f"tv_type must be 'laplacian', 'charbonnier', or 'perona_malik', got '{self.tv_type}'"
@@ -368,9 +382,7 @@ class RMRv3Config:
         if self.proximal_mu <= 1.0:
             raise ValueError(f"proximal_mu must be > 1.0, got {self.proximal_mu}")
         if self.adjoint_mode not in ("flat", "radon_nikodym", "anscombe_vst"):
-            raise ValueError(
-                f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'"
-            )
+            raise ValueError(f"adjoint_mode must be 'flat', 'radon_nikodym', or 'anscombe_vst', got '{self.adjoint_mode}'")
         if self.adjoint_mode == "anscombe_vst":
             self.use_anscombe_sirt = True
         if self.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
@@ -402,14 +414,9 @@ class RMRv3Config:
                     continue
                 if "tuple" in str(f.type) and isinstance(v, (list, tuple)):
                     kwargs[k] = tuple(tuple(x) if isinstance(x, (list, tuple)) else x for x in v)
-                elif f.type in (bool, "bool"):
-                    kwargs[k] = bool(v)
-                elif f.type in (int, "int"):
-                    kwargs[k] = int(v)
-                elif f.type in (float, "float"):
-                    kwargs[k] = float(v)
-                elif f.type in (str, "str"):
-                    kwargs[k] = str(v)
+                elif f.type in (bool, "bool", int, "int", float, "float", str, "str"):
+                    coerce_fn = bool if "bool" in str(f.type) else (int if "int" in str(f.type) else (float if "float" in str(f.type) else str))
+                    kwargs[k] = coerce_fn(v)
                 else:
                     kwargs[k] = v
         return cls(**kwargs)
@@ -426,10 +433,7 @@ def validate_architecture_contract(cfg: RMRv3Config) -> None:
     if cfg.enable_solver and (cfg.iterations < 1 or cfg.omega <= 0):
         raise ValueError("iterations must be >= 1 and omega > 0 when enable_solver=True")
     if cfg.reliability_mode not in ("nb_rate_variance", "rate_variance", "snr", "hybrid_hurdle"):
-        raise ValueError(
-            f"Unsupported reliability_mode: {cfg.reliability_mode}. "
-            "Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'."
-        )
+        raise ValueError(f"Unsupported reliability_mode: {cfg.reliability_mode}. Must be 'nb_rate_variance', 'snr', or 'hybrid_hurdle'.")
     if len(cfg.region_sizes_px) == 0:
         raise ValueError("region_sizes_px must not be empty")
     if cfg.reliability_weight_min <= 0 or not (cfg.reliability_weight_min < cfg.reliability_weight_max):

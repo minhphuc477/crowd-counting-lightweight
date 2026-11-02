@@ -54,7 +54,7 @@ def extract_regional_evidence(
     if cfg.hurdle_head and "hurdle_logit" in regional:
         pi_r = torch.sigmoid(regional["hurdle_logit"].detach())
         mode = getattr(cfg, "hurdle_gating_mode", "occupancy")
-        if mode in ("disabled", "unbiased"):
+        if mode in ("disabled", "unbiased") or "bin_logits" in regional:
             b_solver = b_solver_raw
         elif mode == "product":
             b_solver = pi_r * b_solver_raw
@@ -97,7 +97,7 @@ def extract_regional_evidence(
         weight_solver = weight_solver.detach()
         b_variance = b_variance.detach()
 
-    return {
+    res = {
         "mu_count": mu_count,
         "dispersion": dispersion,
         "log_dispersion": regional["log_dispersion"],
@@ -111,3 +111,10 @@ def extract_regional_evidence(
         "count_variance": reliability["count_variance"],
         "hurdle_logit": regional.get("hurdle_logit", None),
     }
+    if "bin_logits" in regional:
+        res["bin_logits"] = regional["bin_logits"]
+    if "bin_probs" in regional:
+        res["bin_probs"] = regional["bin_probs"]
+    if "bin_centers" in regional:
+        res["bin_centers"] = regional["bin_centers"]
+    return res

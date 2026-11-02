@@ -44,6 +44,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             width=cfg.feature_width,
             aspp_dilations=cfg.aspp_dilations,
             use_aspp_gap=cfg.use_aspp_gap,
+            aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "add"),
         )
     if cfg.neck_type == "hdc_lite":
         return HDCLiteFPNNeck(
@@ -51,6 +52,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             width=cfg.feature_width,
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
+            aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "add"),
         )
     if cfg.neck_type == "rlk_hdc":
         return RLKHDCFPNNeck(
@@ -59,6 +61,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
             use_fast_norm_fusion=getattr(cfg, "use_fast_norm_fusion", True),
+            aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "add"),
         )
     if cfg.neck_type == "rep_aspp_lite":
         return RepASPPLiteNeck(
@@ -139,6 +142,15 @@ def build_1x1_gate(enabled: bool, in_channels: int) -> nn.Conv2d | None:
 def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
     """Construct fine carrier head from configuration."""
     init_bias = _softplus_inverse(cfg.init_m0)
+    if getattr(cfg, "fine_carrier_type", "standard") == "mpc":
+        from rmr_core.mpc_head import MicroSpatialPolyphaseCarrierHead
+        return MicroSpatialPolyphaseCarrierHead(
+            width=cfg.feature_width,
+            init_bias=float(init_bias),
+            subpixel_stride2=cfg.subpixel_stride2,
+            floor_tau=cfg.floor_tau,
+            head_blocks=getattr(cfg, "head_blocks", 1),
+        )
     return build_fine_head(
         width=cfg.feature_width,
         scale_conditioned_fine_head=cfg.scale_conditioned_fine_head,
@@ -169,6 +181,18 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
 
 def build_regional_evidence_head(cfg: RMRv3Config) -> nn.Module:
     """Construct probabilistic regional evidence head from configuration."""
+    if getattr(cfg, "regional_head_type", "probabilistic") == "ebgb":
+        from rmr_v3.ebgb_head import UnsaturableRegionalEvidenceHead
+        return UnsaturableRegionalEvidenceHead(
+            region_sizes_px=cfg.region_sizes_px,
+            feature_dim=cfg.feature_width,
+            hidden_dim=cfg.region_head_hidden,
+            regional_feature_stats=cfg.regional_feature_stats,
+            native_scale_pooling=cfg.native_scale_pooling,
+            dispersion_min=cfg.dispersion_min,
+            dispersion_max=cfg.dispersion_max,
+            hurdle_head=getattr(cfg, "hurdle_head", True),
+        )
     return ProbabilisticRegionalEvidenceHead(
         feature_dim=cfg.feature_width,
         hidden=cfg.region_head_hidden,

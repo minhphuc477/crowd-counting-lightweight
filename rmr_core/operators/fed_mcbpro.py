@@ -148,10 +148,13 @@ def fed_mcbpro_transport(
     b_s_raw = torch.nan_to_num(b_solver.to(dtype=work_dtype), nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
     w_s_f = torch.nan_to_num(weight_solver.to(dtype=work_dtype), nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
     boxes_tensor = regions.boxes if hasattr(regions, "boxes") else regions
+    area = regions.area.to(dtype=work_dtype, device=y0.device).view(1, 1, -1).clamp_min(1.0)
+    area_scale = 64.0 / area
 
     # Observation-space smooth null-measure shrinkage (anchors noise before projection)
     if tau_count_null > 0.0:
-        null_factor = torch.clamp(b_s_raw / float(tau_count_null), 0.0, 1.0) ** 2
+        norm_raw = b_s_raw * area_scale
+        null_factor = torch.clamp(norm_raw / float(tau_count_null), 0.0, 1.0) ** 2
         b_s_f = b_s_raw * null_factor
     else:
         b_s_f = b_s_raw
@@ -193,7 +196,6 @@ def fed_mcbpro_transport(
     ).clamp_min(float(eps))
 
     # --- STAGE 1: Continuous Scale-Routed Regional Presence Field ---
-    area = regions.area.to(dtype=work_dtype, device=y0.device).view(1, 1, -1).clamp_min(1.0)
     density_per_box = b_s_f / area
     b_density_field = _backproject_routed(
         density_per_box, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
@@ -236,7 +238,8 @@ def fed_mcbpro_transport(
             if dense_threshold > 0.0:
                 t_null = float(tau_count_null)
                 t_dense = float(dense_threshold)
-                gate_boxes = torch.clamp((b_s_f - t_null) / max(t_dense - t_null, float(eps)), 0.0, 1.0)
+                norm_b = b_s_f * area_scale
+                gate_boxes = torch.clamp((norm_b - t_null) / max(t_dense - t_null, float(eps)), 0.0, 1.0)
                 dense_gate_field = _backproject_routed(
                     gate_boxes, boxes_tensor, cov_uniform, routed_scales, b, h, w, work_dtype
                 )

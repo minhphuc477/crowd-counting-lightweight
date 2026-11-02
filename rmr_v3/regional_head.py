@@ -19,7 +19,7 @@ from rmr_core.operators import (
     partition_regions_by_scale,
     region_average_features, region_mean_std_features,
     region_sum_features, region_sum_std_features,
-    regional_adjoint, regional_sum,
+    regional_sum,
 )
 
 
@@ -197,11 +197,9 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 else:
                     pooled = region_average_features(feat_curr, boxes_level)
 
-            geom_scale_px = math.sqrt(float(hy_px) * float(wx_px))
-            log_scale = torch.full_like(
-                pooled[..., :1],
-                fill_value=float(math.log(geom_scale_px / 32.0)),
-            )
+            area_k = regions.area[mask].to(device=device, dtype=dtype).view(1, -1, 1).clamp_min(1.0)
+            eff_scale_px = 4.0 * torch.sqrt(area_k)
+            log_scale = torch.log((eff_scale_px / 32.0).clamp_min(1.0 / 32.0)).expand(b, -1, 1)
 
             out[:, mask, :] = torch.cat([pooled, log_scale], dim=-1)
 
@@ -225,11 +223,9 @@ class ProbabilisticRegionalEvidenceHead(nn.Module):
                 pooled_full = region_mean_std_features(feat_curr, boxes_full)
             else:
                 pooled_full = region_average_features(feat_curr, boxes_full)
-            geom_scale_px = math.sqrt(float(src_hw[0] * 4.0) * float(src_hw[1] * 4.0))
-            log_scale_full = torch.full_like(
-                pooled_full[..., :1],
-                fill_value=float(math.log(max(geom_scale_px, 32.0) / 32.0)),
-            )
+            area_full = regions.area[mask_full].to(device=device, dtype=dtype).view(1, -1, 1).clamp_min(1.0)
+            eff_scale_full_px = 4.0 * torch.sqrt(area_full)
+            log_scale_full = torch.log((eff_scale_full_px / 32.0).clamp_min(1.0)).expand(b, -1, 1)
             out[:, mask_full, :] = torch.cat([pooled_full, log_scale_full], dim=-1)
 
         return out

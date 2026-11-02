@@ -60,6 +60,18 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             hra = float(m_cfg["hybrid_recovery_alpha"])
             if not (0.0 <= hra <= 1.0):
                 raise ValueError(f"hybrid_recovery_alpha must be in [0.0, 1.0], got {hra}")
+        if "aspp_gap_mode" in m_cfg and m_cfg["aspp_gap_mode"] is not None:
+            gap_m = str(m_cfg["aspp_gap_mode"]).lower().strip()
+            if gap_m not in ("add", "gate"):
+                raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got {m_cfg['aspp_gap_mode']!r}")
+        if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
+            fct = str(m_cfg["fine_carrier_type"]).lower().strip()
+            if fct not in ("standard", "mpc"):
+                raise ValueError(f"fine_carrier_type must be 'standard' or 'mpc', got {m_cfg['fine_carrier_type']!r}")
+        if "regional_head_type" in m_cfg and m_cfg["regional_head_type"] is not None:
+            rht = str(m_cfg["regional_head_type"]).lower().strip()
+            if rht not in ("probabilistic", "ebgb"):
+                raise ValueError(f"regional_head_type must be 'probabilistic' or 'ebgb', got {m_cfg['regional_head_type']!r}")
         if "curvature_alpha_init" in m_cfg:
             try:
                 float(m_cfg["curvature_alpha_init"])
