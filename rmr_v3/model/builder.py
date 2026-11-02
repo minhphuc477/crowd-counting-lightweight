@@ -69,6 +69,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             width=cfg.feature_width,
             aspp_dilations=cfg.aspp_dilations,
             use_aspp_gap=cfg.use_aspp_gap,
+            aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "add"),
         )
     if cfg.neck_type == "bifpn_lite":
         return BiFPNLiteNeck(

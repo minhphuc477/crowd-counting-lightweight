@@ -51,6 +51,7 @@ model:
   - 4
   - 8
   use_aspp_gap: true
+  aspp_gap_mode: gate
 
   # Breakthrough Heads
   fine_carrier_type: mpc
