@@ -20,19 +20,18 @@ import scipy.io
 
 
 def extract_if_needed(zip_path: Path, dest_dir: Path) -> Path:
-    if not zip_path.exists():
-        raise FileNotFoundError(f"Zip archive not found: {zip_path}")
-
-    # Check if already extracted
+    # Check if already extracted first (allows deleting zip to save disk space)
     extracted_train = dest_dir / "Train"
-    if not extracted_train.exists():
-        extracted_nested = dest_dir / "UCF-QNRF_ECCV18" / "Train"
-        if extracted_nested.exists():
-            return dest_dir / "UCF-QNRF_ECCV18"
-
+    extracted_nested = dest_dir / "UCF-QNRF_ECCV18" / "Train"
+    if extracted_nested.exists():
+        print(f"UCF-QNRF already extracted in {dest_dir / 'UCF-QNRF_ECCV18'}")
+        return dest_dir / "UCF-QNRF_ECCV18"
     if extracted_train.exists():
         print(f"UCF-QNRF already extracted in {dest_dir}")
         return dest_dir
+
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Zip archive not found: {zip_path}")
 
     print(f"Extracting {zip_path} to {dest_dir}...")
     dest_dir.mkdir(parents=True, exist_ok=True)
