@@ -221,10 +221,10 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "cell_loss_mode" in l_cfg_pre:
             clm = str(l_cfg_pre["cell_loss_mode"])
-            if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
+            if clm not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized", "mse", "l1"):
                 raise ValueError(
                     "cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', "
-                    f"or 'count_harmonized', got '{clm}'"
+                    f"'count_harmonized', 'mse', or 'l1', got '{clm}'"
                 )
         if "cell_tau_head" in l_cfg_pre and float(l_cfg_pre["cell_tau_head"]) <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {l_cfg_pre['cell_tau_head']}")

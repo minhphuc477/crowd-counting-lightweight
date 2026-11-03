@@ -168,10 +168,10 @@ class RMRv3LossConfig:
                 f"count_loss_mode must be 'nb', 'log1p', 'l1', 'smooth_l1', or 'anscombe', "
                 f"got '{self.count_loss_mode}'"
             )
-        if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized"):
+        if self.cell_loss_mode not in ("balanced", "mass_weighted", "count_invariant", "ci_cell", "count_harmonized", "mse", "l1"):
             raise ValueError(
                 f"cell_loss_mode must be 'balanced', 'mass_weighted', 'count_invariant', "
-                f"or 'count_harmonized', got '{self.cell_loss_mode}'"
+                f"'count_harmonized', 'mse', or 'l1', got '{self.cell_loss_mode}'"
             )
         if self.cell_tau_head <= 0.0:
             raise ValueError(f"cell_tau_head must be strictly positive, got {self.cell_tau_head}")

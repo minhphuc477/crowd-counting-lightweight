@@ -173,6 +173,10 @@ def compute_cell_loss(
     from rmr_core.losses import balanced_smooth_l1
 
     stride = int(getattr(cfg, "output_stride", 4))
+    if cfg.cell_loss_mode == "mse":
+        return F.mse_loss(density_map.float(), target_float.float())
+    if cfg.cell_loss_mode == "l1":
+        return F.l1_loss(density_map.float(), target_float.float())
     if cfg.cell_loss_mode in ("count_invariant", "ci_cell"):
         return count_invariant_cell_loss(
             density_map,
