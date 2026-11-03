@@ -164,6 +164,33 @@ def count_harmonized_cell_loss(
     return torch.stack(sample_losses).mean()
 
 
+_GAUSSIAN_KERNEL_CACHE: dict[tuple[float, int, str], torch.Tensor] = {}
+
+
+def gaussian_blur_density(target: torch.Tensor, sigma: float = 2.0, kernel_size: int = 15) -> torch.Tensor:
+    """Convolve discrete point impulse map with 2D Gaussian kernel.
+
+    Preserves exact discrete mass sum while spreading impulse counts into
+    standard continuous Gaussian density maps (canonical setup of CSRNet, LSANet, TinyCount).
+    """
+    if sigma <= 0.0:
+        return target.float()
+    key = (float(sigma), int(kernel_size), str(target.device))
+    if key not in _GAUSSIAN_KERNEL_CACHE:
+        radius = kernel_size // 2
+        x = torch.arange(-radius, radius + 1, device=target.device, dtype=torch.float32)
+        k1d = torch.exp(-0.5 * (x / sigma) ** 2)
+        k2d = torch.outer(k1d, k1d)
+        kernel = (k2d / k2d.sum()).view(1, 1, kernel_size, kernel_size)
+        if len(_GAUSSIAN_KERNEL_CACHE) >= 8:
+            _GAUSSIAN_KERNEL_CACHE.pop(next(iter(_GAUSSIAN_KERNEL_CACHE)))
+        _GAUSSIAN_KERNEL_CACHE[key] = kernel
+    else:
+        kernel = _GAUSSIAN_KERNEL_CACHE[key]
+    radius = kernel_size // 2
+    return F.conv2d(target.float(), kernel, padding=radius)
+
+
 def compute_cell_loss(
     density_map: torch.Tensor,
     target_float: torch.Tensor,
@@ -174,9 +201,15 @@ def compute_cell_loss(
 
     stride = int(getattr(cfg, "output_stride", 4))
     if cfg.cell_loss_mode == "mse":
-        return F.mse_loss(density_map.float(), target_float.float())
+        sigma = float(getattr(cfg, "cell_gaussian_sigma", 2.0))
+        t_target = gaussian_blur_density(target_float, sigma=sigma)
+        # Canonical Crowd Counting MSE (CSRNet / MCNN / LSANet / TinyCount):
+        # L = 0.5 * sum_{i,j} (y - D)^2 averaged over batch
+        return 0.5 * F.mse_loss(density_map.float(), t_target, reduction="none").sum(dim=(-2, -1)).mean()
     if cfg.cell_loss_mode == "l1":
-        return F.l1_loss(density_map.float(), target_float.float())
+        sigma = float(getattr(cfg, "cell_gaussian_sigma", 2.0))
+        t_target = gaussian_blur_density(target_float, sigma=sigma)
+        return F.l1_loss(density_map.float(), t_target, reduction="none").sum(dim=(-2, -1)).mean()
     if cfg.cell_loss_mode in ("count_invariant", "ci_cell"):
         return count_invariant_cell_loss(
             density_map,

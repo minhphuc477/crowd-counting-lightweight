@@ -112,7 +112,9 @@ def _compute_core_losses(
         losses["region_count"] = torch.zeros((), device=y.device, dtype=y.dtype)
 
     # Composite Total Core Loss
-    if cfg.allocation_loss_type in ("dual_bayesian_dm16", "dual_bayesian_radon_ot"):
+    if cfg.allocation_loss_type in ("none", "disabled", "off"):
+        alloc_term = torch.zeros((), device=y.device, dtype=y.dtype)
+    elif cfg.allocation_loss_type in ("dual_bayesian_dm16", "dual_bayesian_radon_ot"):
         alloc_term = loss_allocation
     elif cfg.allocation_loss_type == "sn_voronoi_poisson":
         alloc_term = float(getattr(cfg, "lambda_sn_vp", 1.0)) * loss_allocation

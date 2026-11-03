@@ -111,7 +111,7 @@ ALLOWED_LOSS_KEYS = {
     "spectral_transform", "regional_mass_weight_alpha", "regional_nb_beta", "faithful_regional_nb",
     "normalize_beta_weights",
     # CI-Cell Loss & Count-Harmonized Cell Loss additions
-    "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref",
+    "cell_tau_head", "cell_alpha", "cell_fg_ratio", "cell_norm_power", "cell_norm_ref", "cell_gaussian_sigma",
     # FIDT (H1) & ChfL (H2) additions
     "fidt_k", "fidt_loss_type", "fidt_loss_mode", "fidt_normalize_by_count",
     "use_chfl", "use_chfl_loss", "lambda_chfl", "chfl_canonical", "chfl_step", "chfl_tik", "chfl_bandwidth",

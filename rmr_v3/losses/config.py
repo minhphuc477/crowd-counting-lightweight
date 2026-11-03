@@ -82,6 +82,7 @@ class RMRv3LossConfig:
     cell_norm_power: float = 1.0        # power exponent for positive mass norm (1.0 = std, 0.5 = sqrt)
     cell_power: float | None = None      # alias for cell_norm_power
     cell_norm_ref: float = 100.0        # reference count for balanced normalization anchor
+    cell_gaussian_sigma: float = 2.0    # Gaussian sigma for continuous density map ground truth when cell_loss_mode is 'mse' or 'l1'
 
     lambda_curvature: float = 0.0        # weight for curvature power loss (0 = disabled)
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
@@ -180,11 +181,11 @@ class RMRv3LossConfig:
         if self.allocation_loss_type not in (
             "flat_dm16", "bayesian", "ot_sinkhorn", "fidt",
             "dual_bayesian_dm16", "radon_ot", "dual_bayesian_radon_ot",
-            "sn_voronoi_poisson",
+            "sn_voronoi_poisson", "none",
         ):
             raise ValueError(
                 f"allocation_loss_type must be 'flat_dm16', 'bayesian', 'ot_sinkhorn', 'fidt', "
-                f"'dual_bayesian_dm16', 'radon_ot', 'dual_bayesian_radon_ot', or 'sn_voronoi_poisson', got '{self.allocation_loss_type}'"
+                f"'dual_bayesian_dm16', 'radon_ot', 'dual_bayesian_radon_ot', 'sn_voronoi_poisson', or 'none', got '{self.allocation_loss_type}'"
             )
         if self.fidt_k <= 0.0:
             raise ValueError(f"fidt_k must be strictly positive, got {self.fidt_k}")

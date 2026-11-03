@@ -26,6 +26,9 @@ def compute_single_allocation(
     comps: dict[int, torch.Tensor] = {}
     stride = int(getattr(cfg, "output_stride", 4))
 
+    if cfg.allocation_loss_type in ("none", "disabled", "off"):
+        return torch.zeros((), device=inp.device, dtype=inp.dtype), {}
+
     if cfg.allocation_loss_type in ("dual_bayesian_dm16", "bayesian", "dual_bayesian_radon_ot", "radon_ot"):
         if cfg.allocation_loss_type == "dual_bayesian_dm16":
             b_px = int(getattr(cfg, "dm_block_px", 16))
@@ -189,6 +192,17 @@ def route_allocation_loss(
     cfg: RMRv3LossConfig,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute and route allocation loss (Bayesian, DM16, FIDT, OT) across y, y0, or dual."""
+    if cfg.allocation_loss_type in ("none", "disabled", "off"):
+        zero = torch.zeros((), device=y.device, dtype=y.dtype)
+        return zero, {
+            "allocation": zero,
+            "allocation_y": zero,
+            "allocation_y0": zero,
+            "bayesian": zero,
+            "radon_ot": zero,
+            "flat_dm16": zero,
+        }
+
     comps: dict[int, torch.Tensor] = {}
     losses: dict[str, torch.Tensor] = {}
     if cfg.dm_target == "dual" and y is not y0:
@@ -222,6 +236,16 @@ def route_allocation_loss(
         losses["flat_dm16"] = torch.zeros_like(loss_allocation)
         losses["bayesian"] = comps.get(-999, torch.zeros_like(loss_allocation))
         losses["radon_ot"] = comps.get(-888, torch.zeros_like(loss_allocation))
+    elif cfg.allocation_loss_type == "ot_sinkhorn":
+        losses["ot_sinkhorn"] = loss_allocation
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+        losses["bayesian"] = torch.zeros_like(loss_allocation)
+        losses["radon_ot"] = torch.zeros_like(loss_allocation)
+    elif cfg.allocation_loss_type == "fidt":
+        losses["fidt"] = loss_allocation
+        losses["flat_dm16"] = torch.zeros_like(loss_allocation)
+        losses["bayesian"] = torch.zeros_like(loss_allocation)
+        losses["radon_ot"] = torch.zeros_like(loss_allocation)
     else:
         b_px = int(getattr(cfg, "dm_block_px", 16))
         losses["flat_dm16"] = comps.get(b_px, loss_allocation)
