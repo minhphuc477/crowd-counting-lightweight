@@ -173,6 +173,11 @@ def gaussian_blur_density(target: torch.Tensor, sigma: float = 2.0, kernel_size:
     Preserves exact discrete mass sum while spreading impulse counts into
     standard continuous Gaussian density maps (canonical setup of CSRNet, LSANet, TinyCount).
     """
+    if target.ndim == 2:
+        target = target.unsqueeze(0).unsqueeze(0)
+    elif target.ndim == 3:
+        target = target.unsqueeze(1)
+
     if sigma <= 0.0:
         return target.float()
     key = (float(sigma), int(kernel_size), str(target.device))
@@ -200,6 +205,10 @@ def compute_cell_loss(
     from rmr_core.losses import balanced_smooth_l1
 
     stride = int(getattr(cfg, "output_stride", 4))
+    if density_map.ndim == 2:
+        density_map = density_map.unsqueeze(0).unsqueeze(0)
+    elif density_map.ndim == 3:
+        density_map = density_map.unsqueeze(1)
     if cfg.cell_loss_mode == "mse":
         sigma = float(getattr(cfg, "cell_gaussian_sigma", 2.0))
         t_target = gaussian_blur_density(target_float, sigma=sigma)
