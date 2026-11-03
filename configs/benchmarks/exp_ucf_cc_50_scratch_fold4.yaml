@@ -31,7 +31,7 @@ model:
   feature_width: 32
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
-  init_m0: 0.00394075
+  init_m0: 0.008416
   neck_type: aspp_lite
   aspp_dilations:
   - 2
@@ -81,6 +81,6 @@ train:
   backbone_lr_scale: 1.0
 eval:
   density_bins:
-  - 100.0
   - 500.0
+  - 1500.0
 output_dir: runs/benchmarks/exp_ucf_cc_50_scratch_fold4

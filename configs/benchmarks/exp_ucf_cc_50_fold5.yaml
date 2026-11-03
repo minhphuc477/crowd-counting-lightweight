@@ -33,7 +33,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.00394075
+  init_m0: 0.008416
   neck_type: aspp_lite
   aspp_dilations:
   - 2
@@ -81,6 +81,6 @@ train:
   deterministic: true
 eval:
   density_bins:
-  - 100.0
   - 500.0
+  - 1500.0
 output_dir: runs/benchmarks/exp_ucf_cc_50_fold5
