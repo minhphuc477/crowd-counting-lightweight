@@ -1,7 +1,7 @@
 # GIẢI PHẪU TOÀN DIỆN UCF-QNRF & MA TRẬN ABLATIONS CHUYÊN BIỆT (104K PARAMS)
 
 > **Tác giả**: Antigravity Vision Research  
-> **Trạng thái**: **13/13 CẤU HÌNH ĐÃ KIỂM TOÁN VÀ PASS 100% (Commit: `origin/RMR`)**  
+> **Trạng thái**: **19/19 CẤU HÌNH ĐÃ KIỂM TOÁN VÀ PASS 100% (Commit: `origin/RMR`)**  
 > **Mục tiêu**: Thiết lập hệ thống thực nghiệm chuẩn mực cho UCF-QNRF — benchmark có độ biến thiên mật độ và kích thước ảnh khắc nghiệt nhất thế giới; kiểm chứng năng lực của cơ chế Radon-OT trên đám đông siêu đông (>12,000 người/ảnh) với ngân sách tối đa 104k tham số.
 
 ---
@@ -80,9 +80,17 @@ flowchart TD
     D --> B5["B5: Stratified Crowd Crop<br/>(64x64 Cell Stratification chống lệch dense)"]
     D --> B6["B6: Scale Preservation<br/>(scale_range [0.8, 1.2] chống co nén đầu < 1px)"]
     D --> B7["B7: Dense Harmonized Flagship<br/>(B5 + B6 + Bayesian σ_min=1.5 khử bão hòa)"]
+
+    A --> E["Nhóm D: Kiến trúc & Hàm Loss Cốt lõi (Architecture & Loss Core)"]
+    E --> C1["C1: No Count Loss<br/>(λ_count=0.0 đo hiện tượng trôi dạt số đếm)"]
+    E --> C2["C2: Count L1 Loss<br/>(L1 count vs Negative Binomial dispersion)"]
+    E --> C3["C3: Stride 4 Output<br/>(Độ phân giải Stride 4 vs Subpixel Stride 2)"]
+    E --> C4["C4: Radon 2 Projections<br/>(K=2 góc chiếu vs K=4)"]
+    E --> C5["C5: No Neck<br/>(Loại bỏ ASPP-Lite, chứng minh Receptive Field)"]
+    E --> C6["C6: Crop Size 384<br/>(Kích thước patch 384 vs 512 trên ảnh lớn)"]
 ```
 
-### Chi tiết 11 Thí nghiệm Ablations:
+### Chi tiết 17 Thí nghiệm Ablations:
 
 1. **`exp_qnrf_abl_a1_flagship_104k.yaml`** (Flagship Base):
    - Direct Feedforward + Dual Bayesian ($\sigma=8.0$) + Radon-OT ($\lambda=0.85, K=4$) + Count NB ($\lambda=0.5$).
@@ -117,31 +125,55 @@ flowchart TD
 11. **`exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml`** (Dense Harmonized Flagship):
     - Kết hợp toàn diện: `stratified_crowd_crop: true` + `scale_range: [0.8, 1.2]` + `bayesian_sigma_min: 1.5`.
     - *Mục đích*: Tối ưu hóa toàn diện cho vùng cực đông của QNRF, giải quyết hiện tượng đếm thiếu (Bias $-112.44$) mà không làm ảnh hưởng đến vùng thưa.
+12. **`exp_qnrf_abl_c1_no_count_loss_104k.yaml`** (No Count Loss):
+    - Tắt hoàn toàn hàm mất mát số đếm toàn cục ($\lambda_{\text{count}} = 0.0$).
+    - *Mục đích*: Chứng minh rằng ràng buộc tổng số đếm toàn cục là bắt buộc để ngăn chặn trôi dạt tích phân mật độ trên tập QNRF có số lượng người lên đến 12,865.
+13. **`exp_qnrf_abl_c2_count_l1_104k.yaml`** (Count Loss L1 vs Negative Binomial):
+    - Thay thế hàm mất mát Negative Binomial bằng chuẩn $L_1$ truyền thống.
+    - *Mục đích*: Khẳng định giá trị của cơ chế Overdispersion Modeling ($\text{Var} > \text{Mean}$) trong phân phối Negative Binomial khi đối mặt với độ phân tán cực đại của QNRF.
+14. **`exp_qnrf_abl_c3_stride4_104k.yaml`** (Stride 4 vs Subpixel Stride 2):
+    - Chuyển độ phân giải bản đồ mật độ từ Stride 2 ($256 \times 256$) sang Stride 4 ($128 \times 128$).
+    - *Mục đích*: Chứng minh thực nghiệm rằng Stride 2 đóng vai trò quyết định trong việc bóc tách các đầu người bị dính chặt vào nhau ở các cụm đông.
+15. **`exp_qnrf_abl_c4_radon_2proj_104k.yaml`** (Radon Projections $K=2$ vs $K=4$):
+    - Giảm số góc chiếu Radon từ 4 góc ($0^\circ, 45^\circ, 90^\circ, 135^\circ$) xuống 2 góc trực giao ($0^\circ, 90^\circ$).
+    - *Mục đích*: Đo lường độ nhạy của biến đổi Radon theo số lượng góc chiếu, chứng minh $K=4$ là điểm cân bằng tối ưu giữa độ chính xác hình học và tốc độ tính toán.
+16. **`exp_qnrf_abl_c5_no_neck_104k.yaml`** (No Neck vs ASPP-Lite):
+    - Bỏ các nhánh tích chập giãn nở $[2, 4, 8]$ của ASPP-Lite, chỉ giữ lại tích chập $1 \times 1$.
+    - *Mục đích*: Chứng minh rằng mở rộng trường tiếp nhận đa tỷ lệ là tối cần thiết để nhận dạng người ở cả tiền cảnh gần lẫn hậu cảnh xa.
+17. **`exp_qnrf_abl_c6_crop384_104k.yaml`** (Crop Size 384 vs 512):
+    - Giảm kích thước crop huấn luyện từ $512 \times 512 \to 384 \times 384$.
+    - *Mục đích*: Đánh giá sự phụ thuộc của mô hình vào ngữ cảnh không gian xung quanh trên ảnh độ phân giải siêu lớn.
 
 ---
 
-## 5. BẢNG KIỂM TOÁN TỰ ĐỘNG (13/13 CONFIGS PASSED)
+## 5. BẢNG KIỂM TOÁN TỰ ĐỘNG (19/19 CONFIGS PASSED)
 
-Toàn bộ 13 cấu hình đã được kiểm tra tính hợp lệ cú pháp, kiểm tra nạp dữ liệu thực tế từ UCF-QNRF, kiểm tra forward-pass và backward-pass qua mạng:
+Toàn bộ 19 cấu hình đã được kiểm tra tính hợp lệ cú pháp, kiểm tra nạp dữ liệu thực tế từ UCF-QNRF, kiểm tra forward-pass và backward-pass qua mạng:
 
 ```text
-=========================================================================================================
-QNRF BENCHMARK & ABLATION AUDIT SUMMARY: 13/13 PASSED (100% VERIFIED)
-=========================================================================================================
-PASS | exp_qnrf_direct_scratch_104k.yaml            | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_direct_pretrained_104k.yaml         | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_a1_flagship_104k.yaml           | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_a2_pure_bayesian_104k.yaml      | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_a3_pure_radon_ot_104k.yaml      | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_a4_gaussian_mse_104k.yaml       | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_b1_solver_sirt_104k.yaml        | Params: 103744  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: True
-PASS | exp_qnrf_abl_b2_radon_8proj_104k.yaml        | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_b3_sigma4_uncalibrated_104k.yaml | Params: 104006  | m0: 0.001498 | SigmaMax: 4.0  | MaxSize: 2048  | Solver: False
-PASS | exp_qnrf_abl_b4_maxsize_1536_104k.yaml       | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 1536  | Solver: False
-PASS | exp_qnrf_abl_b5_stratified_crop_104k.yaml    | Params: 104006  | m0: 0.001498 | Stratified: Yes | ScaleRange: Std | Solver: False
-PASS | exp_qnrf_abl_b6_scale_preservation_104k.yaml | Params: 104006  | m0: 0.001498 | Stratified: No  | ScaleRange: 0.8-1.2 | Solver: False
-PASS | exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml | Params: 104006 | m0: 0.001498 | Stratified: Yes | ScaleRange: 0.8-1.2 | SigmaMin: 1.5
-=========================================================================================================
+=============================================================================================================================
+QNRF BENCHMARK & ABLATION AUDIT SUMMARY: 19/19 PASSED (100% VERIFIED)
+=============================================================================================================================
+PASS | exp_qnrf_direct_scratch_104k.yaml            | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_direct_pretrained_104k.yaml         | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_a1_flagship_104k.yaml           | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_a2_pure_bayesian_104k.yaml      | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_a3_pure_radon_ot_104k.yaml      | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_a4_gaussian_mse_104k.yaml       | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_b1_solver_sirt_104k.yaml        | Params: 103744  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | Solver: True
+PASS | exp_qnrf_abl_b2_radon_8proj_104k.yaml        | Params: 104006  | m0: 0.001498 | Stride: 2 | K_proj: 8     | MaxSize: 2048
+PASS | exp_qnrf_abl_b3_sigma4_uncalibrated_104k.yaml | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 4.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_b4_maxsize_1536_104k.yaml       | Params: 104006  | m0: 0.001498 | Stride: 2 | SigmaMax: 8.0 | MaxSize: 1536
+PASS | exp_qnrf_abl_b5_stratified_crop_104k.yaml    | Params: 104006  | m0: 0.001498 | Stride: 2 | Stratified: Yes | ScaleRange: Std
+PASS | exp_qnrf_abl_b6_scale_preservation_104k.yaml | Params: 104006  | m0: 0.001498 | Stride: 2 | Stratified: No  | Scale: 0.8-1.2
+PASS | exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml | Params: 104006 | m0: 0.001498 | Stride: 2 | Stratified: Yes | SigmaMin: 1.5
+PASS | exp_qnrf_abl_c1_no_count_loss_104k.yaml      | Params: 104006  | m0: 0.001498 | Stride: 2 | CountLoss: 0.0 | MaxSize: 2048
+PASS | exp_qnrf_abl_c2_count_l1_104k.yaml           | Params: 104006  | m0: 0.001498 | Stride: 2 | CountMode: L1  | MaxSize: 2048
+PASS | exp_qnrf_abl_c3_stride4_104k.yaml            | Params: 103907  | m0: 0.001498 | Stride: 4 | Output: 128x128 | MaxSize: 2048
+PASS | exp_qnrf_abl_c4_radon_2proj_104k.yaml        | Params: 104006  | m0: 0.001498 | Stride: 2 | K_proj: 2     | MaxSize: 2048
+PASS | exp_qnrf_abl_c5_no_neck_104k.yaml            | Params: 102246  | m0: 0.001498 | Stride: 2 | Neck: 1x1 Conv | MaxSize: 2048
+PASS | exp_qnrf_abl_c6_crop384_104k.yaml            | Params: 104006  | m0: 0.001498 | Stride: 2 | Crop: 384x384  | MaxSize: 2048
+=============================================================================================================================
 ```
 
 ---
@@ -160,34 +192,44 @@ python -m rmr_v3.train --config configs/benchmarks/exp_qnrf_direct_pretrained_10
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml
 ```
 
-### B. Chạy Ma Trận Ablations QNRF
+### B. Chạy Ma Trận Ablations QNRF (Theo Từng Nhóm)
 ```bash
+# === Nhóm A: Giám sát Không gian ===
 # A1: Flagship Base (From-Scratch)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_a1_flagship_104k.yaml
-
 # A2: Pure Bayesian (λ_rot = 0.0)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_a2_pure_bayesian_104k.yaml
-
 # A3: Pure Radon-OT (λ_bay = 0.0)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_a3_pure_radon_ot_104k.yaml
-
 # A4: Gaussian MSE Baseline (Density Map Regression)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_a4_gaussian_mse_104k.yaml
 
+# === Nhóm B: Động học & Siêu tham số ===
 # B1: Solver SIRT vs Direct Feedforward
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b1_solver_sirt_104k.yaml
-
 # B2: Radon Projections (K=8 vs K=4)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b2_radon_8proj_104k.yaml
-
 # B3: Sigma 4.0 uncalibrated vs Sigma 8.0 calibrated
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b3_sigma4_uncalibrated_104k.yaml
-
 # B4: Resolution Capping (max_size=1536 vs max_size=2048)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b4_maxsize_1536_104k.yaml
 
+# === Nhóm C: Dữ liệu & Thang đo Cực đông ===
 # B5: Stratified Crowd Crop (64x64 cell sampling)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b5_stratified_crop_104k.yaml
-
 # B6: Scale Preservation (scale_range [0.8, 1.2])
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b6_scale_preservation_104k.yaml
+
+# === Nhóm D: Kiến trúc & Hàm Loss Cốt lõi ===
+# C1: No Count Loss (λ_cnt = 0.0)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c1_no_count_loss_104k.yaml
+# C2: Count Loss L1 Mode (vs Negative Binomial)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c2_count_l1_104k.yaml
+# C3: Stride 4 Output (vs Subpixel Stride 2)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c3_stride4_104k.yaml
+# C4: Radon 2 Projections (K=2 vs K=4)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c4_radon_2proj_104k.yaml
+# C5: No Neck (ASPP-Lite removed)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c5_no_neck_104k.yaml
+# C6: Crop Size 384 (vs 512)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_c6_crop384_104k.yaml
