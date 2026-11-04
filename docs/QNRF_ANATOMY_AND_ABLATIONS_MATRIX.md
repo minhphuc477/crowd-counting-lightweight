@@ -1,7 +1,7 @@
 # GIẢI PHẪU TOÀN DIỆN UCF-QNRF & MA TRẬN ABLATIONS CHUYÊN BIỆT (104K PARAMS)
 
 > **Tác giả**: Antigravity Vision Research  
-> **Trạng thái**: **10/10 CẤU HÌNH ĐÃ KIỂM TOÁN VÀ PASS 100% (Commit: `origin/RMR`)**  
+> **Trạng thái**: **13/13 CẤU HÌNH ĐÃ KIỂM TOÁN VÀ PASS 100% (Commit: `origin/RMR`)**  
 > **Mục tiêu**: Thiết lập hệ thống thực nghiệm chuẩn mực cho UCF-QNRF — benchmark có độ biến thiên mật độ và kích thước ảnh khắc nghiệt nhất thế giới; kiểm chứng năng lực của cơ chế Radon-OT trên đám đông siêu đông (>12,000 người/ảnh) với ngân sách tối đa 104k tham số.
 
 ---
@@ -57,7 +57,7 @@ $$\mathcal{W}_1(\mu_{1D}, \nu_{1D}) = \int |F_\mu(t) - F_\nu(t)| \, dt$$
 
 ---
 
-## 4. MA TRẬN ABLATIONS CHUYÊN BIỆT CHO QNRF (8 THÍ NGHIỆM)
+## 4. MA TRẬN ABLATIONS CHUYÊN BIỆT CHO QNRF (11 THÍ NGHIỆM)
 
 Tất cả các cấu hình ablation được lưu trữ tại [configs/benchmarks/ablations_qnrf/](file:///f:/lightweightcrcn/configs/benchmarks/ablations_qnrf/) và chạy ở chế độ **From-Scratch (0% ImageNet, 104,006 params)**:
 
@@ -65,8 +65,9 @@ Tất cả các cấu hình ablation được lưu trữ tại [configs/benchmar
 flowchart TD
     A["UCF-QNRF Benchmark Suite (104k Params)"] --> B["Nhóm A: Cơ chế Giám sát Không gian"]
     A --> C["Nhóm B: Động học, Hình học & Siêu tham số"]
+    A --> D["Nhóm C: Phân bổ Dữ liệu & Scale Cực đông (Dense Forensics)"]
 
-    B --> A1["A1: Flagship Champion<br/>Dual Bayesian (σ=8) + Radon-OT (0.85) + Count NB (0.5)"]
+    B --> A1["A1: Flagship Base<br/>Dual Bayesian (σ=8) + Radon-OT (0.85) + Count NB (0.5)"]
     B --> A2["A2: Pure Bayesian<br/>(λ_bay=1.0, λ_rot=0.0)"]
     B --> A3["A3: Pure Radon-OT<br/>(λ_rot=1.0, λ_bay=0.0)"]
     B --> A4["A4: Gaussian MSE Baseline<br/>(Density Map Regression, σ=4.0)"]
@@ -75,9 +76,13 @@ flowchart TD
     C --> B2["B2: Radon Projections<br/>(K=8 projections vs K=4)"]
     C --> B3["B3: Sigma Calibration<br/>(σ_max=4.0 SHA uncalibrated vs σ_max=8.0 calibrated)"]
     C --> B4["B4: Resolution Capping<br/>(max_size=1536 vs max_size=2048)"]
+
+    D --> B5["B5: Stratified Crowd Crop<br/>(64x64 Cell Stratification chống lệch dense)"]
+    D --> B6["B6: Scale Preservation<br/>(scale_range [0.8, 1.2] chống co nén đầu < 1px)"]
+    D --> B7["B7: Dense Harmonized Flagship<br/>(B5 + B6 + Bayesian σ_min=1.5 khử bão hòa)"]
 ```
 
-### Chi tiết 8 Thí nghiệm Ablations:
+### Chi tiết 11 Thí nghiệm Ablations:
 
 1. **`exp_qnrf_abl_a1_flagship_104k.yaml`** (Flagship Base):
    - Direct Feedforward + Dual Bayesian ($\sigma=8.0$) + Radon-OT ($\lambda=0.85, K=4$) + Count NB ($\lambda=0.5$).
@@ -103,16 +108,25 @@ flowchart TD
 8. **`exp_qnrf_abl_b4_maxsize_1536_104k.yaml`** (Giới hạn Kích thước $1536$ vs $2048$):
    - Giảm `max_size` từ $2048 \to 1536$.
    - *Mục đích*: Đo lường tác động của việc nén độ phân giải ảnh đối với khả năng phát hiện các đầu người kích thước $< 5$ pixel ở hậu cảnh xa.
+9. **`exp_qnrf_abl_b5_stratified_crop_104k.yaml`** (Stratified Crowd Crop):
+   - Kích hoạt phân tầng lưới $64 \times 64$ (`stratified_crowd_crop: true`) thay vì lấy mẫu điểm đều (point-uniform crop).
+   - *Mục đích*: Giải quyết hiện tượng 90% crop rơi vào cụm cực đông, cân bằng lại số lượng mẫu thưa/vừa/cực đông trong quá trình huấn luyện.
+10. **`exp_qnrf_abl_b6_scale_preservation_104k.yaml`** (Bảo toàn Thang đo Tỷ lệ Không gian):
+    - Khóa dải thu phóng `scale_range: [0.8, 1.2]` và `pad_small_images: false`.
+    - *Mục đích*: Ngăn chặn hiện tượng nén kép (double downscaling: resolution cap $0.34 \times$ scale augment $0.6 \approx 0.20$), đảm bảo đường kính đầu người luôn $\ge 2$ pixel sau khi trích xuất đặc trưng Stride 2.
+11. **`exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml`** (Dense Harmonized Flagship):
+    - Kết hợp toàn diện: `stratified_crowd_crop: true` + `scale_range: [0.8, 1.2]` + `bayesian_sigma_min: 1.5`.
+    - *Mục đích*: Tối ưu hóa toàn diện cho vùng cực đông của QNRF, giải quyết hiện tượng đếm thiếu (Bias $-112.44$) mà không làm ảnh hưởng đến vùng thưa.
 
 ---
 
-## 5. BẢNG KIỂM TOÁN TỰ ĐỘNG (10/10 CONFIGS PASSED)
+## 5. BẢNG KIỂM TOÁN TỰ ĐỘNG (13/13 CONFIGS PASSED)
 
-Toàn bộ 10 cấu hình đã được kiểm tra tính hợp lệ cú pháp, kiểm tra nạp dữ liệu thực tế từ UCF-QNRF, kiểm tra forward-pass và backward-pass qua mạng:
+Toàn bộ 13 cấu hình đã được kiểm tra tính hợp lệ cú pháp, kiểm tra nạp dữ liệu thực tế từ UCF-QNRF, kiểm tra forward-pass và backward-pass qua mạng:
 
 ```text
 =========================================================================================================
-QNRF BENCHMARK & ABLATION AUDIT SUMMARY: 10/10 PASSED (100% VERIFIED)
+QNRF BENCHMARK & ABLATION AUDIT SUMMARY: 13/13 PASSED (100% VERIFIED)
 =========================================================================================================
 PASS | exp_qnrf_direct_scratch_104k.yaml            | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
 PASS | exp_qnrf_direct_pretrained_104k.yaml         | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
@@ -124,6 +138,9 @@ PASS | exp_qnrf_abl_b1_solver_sirt_104k.yaml        | Params: 103744  | m0: 0.00
 PASS | exp_qnrf_abl_b2_radon_8proj_104k.yaml        | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 2048  | Solver: False
 PASS | exp_qnrf_abl_b3_sigma4_uncalibrated_104k.yaml | Params: 104006  | m0: 0.001498 | SigmaMax: 4.0  | MaxSize: 2048  | Solver: False
 PASS | exp_qnrf_abl_b4_maxsize_1536_104k.yaml       | Params: 104006  | m0: 0.001498 | SigmaMax: 8.0  | MaxSize: 1536  | Solver: False
+PASS | exp_qnrf_abl_b5_stratified_crop_104k.yaml    | Params: 104006  | m0: 0.001498 | Stratified: Yes | ScaleRange: Std | Solver: False
+PASS | exp_qnrf_abl_b6_scale_preservation_104k.yaml | Params: 104006  | m0: 0.001498 | Stratified: No  | ScaleRange: 0.8-1.2 | Solver: False
+PASS | exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml | Params: 104006 | m0: 0.001498 | Stratified: Yes | ScaleRange: 0.8-1.2 | SigmaMin: 1.5
 =========================================================================================================
 ```
 
@@ -138,6 +155,9 @@ python -m rmr_v3.train --config configs/benchmarks/exp_qnrf_direct_scratch_104k.
 
 # QNRF Pretrained (104k, ImageNet weights, lr=1e-4, 1500 epochs)
 python -m rmr_v3.train --config configs/benchmarks/exp_qnrf_direct_pretrained_104k.yaml
+
+# QNRF B7: Dense Harmonized Flagship (Tối ưu hóa Vùng Cực đông)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b7_dense_harmonized_flagship_104k.yaml
 ```
 
 ### B. Chạy Ma Trận Ablations QNRF
@@ -165,4 +185,9 @@ python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b
 
 # B4: Resolution Capping (max_size=1536 vs max_size=2048)
 python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b4_maxsize_1536_104k.yaml
-```
+
+# B5: Stratified Crowd Crop (64x64 cell sampling)
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b5_stratified_crop_104k.yaml
+
+# B6: Scale Preservation (scale_range [0.8, 1.2])
+python -m rmr_v3.train --config configs/benchmarks/ablations_qnrf/exp_qnrf_abl_b6_scale_preservation_104k.yaml
