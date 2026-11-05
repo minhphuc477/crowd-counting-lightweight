@@ -43,7 +43,20 @@ model:
   eps: 1.0e-06
   pretrained: false
   backbone_lr_scale: 1.0
-  solver_steps: 3
+  region_sizes_px:
+  - 32
+  - 64
+  - 128
+  region_overlap: 0.5
+  include_full_image: false
+  region_head_hidden: 46
+  mcbpro_deficit_seeding: true
+  mcbpro_valley_power: 2.0
+  mcbpro_reg_threshold: 0.001
+  mcbpro_peak_kernel_size: 5
+  tau_peak: 0.05
+  ratio_clamp_max: 25.0
+  floor_tau: 0.00075
 loss:
   output_stride: 2
   allocation_loss_type: dual_bayesian_radon_ot
@@ -61,9 +74,11 @@ loss:
   count_nb_dispersion: 50.0
   lambda_bayesian: 0.15
   lambda_flat_dm16: 0.0
-  lambda_region_nb: 0.0
+  lambda_region_nb: 0.5
   lambda_count: 0.5
   lambda_cell: 0.0
+  faithful_regional_nb: true
+  regional_nb_beta: 1.0
 train:
   epochs: 1500
   batch_size: 8

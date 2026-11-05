@@ -73,20 +73,14 @@ loss:
 train:
   epochs: 1000
   batch_size: 8
-  lr_init: 0.0005
-  lr_min: 1.0e-06
   warmup_epochs: 10
   weight_decay: 0.0001
-  grad_clip_norm: 1.0
   ema_decay: 0.999
-  amp_enabled: true
-  val_interval: 5
-  seed: 42
+  lr: 0.0005
+  amp: true
+  eval_every: 5
+  grad_clip: 1.0
 eval:
-  output_stride: 2
-  tile_size: 1024
-  overlap: 128
-  tta: false
   density_bins:
   - 200.0
   - 1000.0

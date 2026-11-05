@@ -83,5 +83,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-  output_stride: 4
 output_dir: runs/benchmarks/ablations_sha/exp_sha_abl_b5_stride4_104k

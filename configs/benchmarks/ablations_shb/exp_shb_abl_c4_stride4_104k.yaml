@@ -84,5 +84,4 @@ eval:
   - 50.0
   - 150.0
   run_tiling: false
-  output_stride: 4
 output_dir: runs/benchmarks/ablations_shb/exp_shb_abl_c4_stride4_104k
