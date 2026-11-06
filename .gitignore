@@ -20,6 +20,8 @@ data/*
 !data/part_A_final/**
 !data/part_B_final/
 !data/part_B_final/**
+!data/ucf_cc_50/
+!data/ucf_cc_50/**
 .cache/
 *.tar.gz
 *.zip
