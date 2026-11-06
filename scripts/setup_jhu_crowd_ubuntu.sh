@@ -13,29 +13,19 @@ ZIP_PATH="data/jhu_crowd_v2.0.zip"
 
 mkdir -p data
 
+GOOGLE_DRIVE_ID="1pA7ZeXU3hh-1txS9lFQiCek1ts3MdBaj"
+
 if [ -d "$DATA_DIR/train/images" ]; then
     echo "[OK] JHU-CROWD++ already extracted in $DATA_DIR"
 elif [ -f "$ZIP_PATH" ]; then
     echo "[INFO] Extracting $ZIP_PATH..."
     unzip -q "$ZIP_PATH" -d data/
 else
-    echo "[!] JHU-CROWD++ zip archive not found at $ZIP_PATH."
-    echo ""
-    echo "Choose one of the following methods to download on Ubuntu:"
-    echo ""
-    echo "--- METHOD 1: Using Kaggle CLI ---"
-    echo "  pip install kaggle"
-    echo "  # Ensure ~/.kaggle/kaggle.json exists with chmod 600"
-    echo "  kaggle datasets download -d viethoangzbzwq/jhu-crowd-cohzi -p data/"
-    echo "  unzip data/jhu-crowd-cohzi.zip -d $DATA_DIR"
-    echo ""
-    echo "--- METHOD 2: Using gdown (Google Drive) ---"
-    echo "  pip install gdown"
-    echo "  gdown <GOOGLE_DRIVE_ID> -O $ZIP_PATH"
-    echo "  unzip -q $ZIP_PATH -d data/"
-    echo ""
-    echo "After downloading and extracting, re-run this script to build manifests!"
-    exit 0
+    echo "[INFO] Downloading JHU-CROWD++ (~2.87 GB) via gdown..."
+    pip install -q gdown
+    gdown "https://drive.google.com/uc?id=${GOOGLE_DRIVE_ID}" -O "$ZIP_PATH"
+    echo "[INFO] Extracting $ZIP_PATH..."
+    unzip -q "$ZIP_PATH" -d data/
 fi
 
 echo "[INFO] Generating canonical manifests (train: 2272, val: 500, test: 1600)..."
