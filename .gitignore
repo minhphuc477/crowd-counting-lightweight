@@ -16,6 +16,7 @@ ENV/
 # Datasets & Model Caches (datasets and jsonl manifests are tracked)
 data/*
 !data/*.jsonl
+!data/*forensics*.json
 !data/part_A_final/
 !data/part_A_final/**
 !data/part_B_final/

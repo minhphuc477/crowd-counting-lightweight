@@ -1,0 +1,89 @@
+{
+  "jhu_train": {
+    "split": "jhu_train",
+    "num_images": 2272,
+    "total_heads": 844387,
+    "mean_heads": 371.65,
+    "std_heads": 1129.1,
+    "median_heads": 111.0,
+    "min_heads": 0,
+    "max_heads": 25791,
+    "bins": {
+      "zero (==0)": 2,
+      "sparse (1-50)": 643,
+      "moderate (51-500)": 1297,
+      "dense (501-2000)": 244,
+      "extreme (>2000)": 86
+    },
+    "width_range": [
+      169,
+      8580
+    ],
+    "height_range": [
+      107,
+      4914
+    ],
+    "median_resolution": [
+      1000,
+      640
+    ]
+  },
+  "jhu_val": {
+    "split": "jhu_val",
+    "num_images": 500,
+    "total_heads": 148430,
+    "mean_heads": 296.86,
+    "std_heads": 671.93,
+    "median_heads": 93.5,
+    "min_heads": 2,
+    "max_heads": 5928,
+    "bins": {
+      "zero (==0)": 0,
+      "sparse (1-50)": 168,
+      "moderate (51-500)": 269,
+      "dense (501-2000)": 49,
+      "extreme (>2000)": 14
+    },
+    "width_range": [
+      300,
+      7295
+    ],
+    "height_range": [
+      206,
+      3840
+    ],
+    "median_resolution": [
+      1000,
+      625
+    ]
+  },
+  "jhu_test": {
+    "split": "jhu_test",
+    "num_images": 1600,
+    "total_heads": 521698,
+    "mean_heads": 326.06,
+    "std_heads": 722.85,
+    "median_heads": 117.5,
+    "min_heads": 0,
+    "max_heads": 9059,
+    "bins": {
+      "zero (==0)": 4,
+      "sparse (1-50)": 432,
+      "moderate (51-500)": 926,
+      "dense (501-2000)": 196,
+      "extreme (>2000)": 42
+    },
+    "width_range": [
+      232,
+      10088
+    ],
+    "height_range": [
+      130,
+      5760
+    ],
+    "median_resolution": [
+      1000,
+      613
+    ]
+  }
+}
