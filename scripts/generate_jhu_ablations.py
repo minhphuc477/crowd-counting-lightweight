@@ -89,7 +89,9 @@ variants = {
     },
     "exp_jhu_abl_c2_no_neck_104k": {
         "model": {
-            "neck_type": "direct",
+            "neck_type": "aspp_lite",
+            "aspp_dilations": [1],
+            "use_aspp_gap": False,
         }
     },
     "exp_jhu_abl_c3_radon_8proj_104k": {
