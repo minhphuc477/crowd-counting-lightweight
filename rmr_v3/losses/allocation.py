@@ -85,12 +85,15 @@ def compute_single_allocation(
             else:
                 l_bay = torch.zeros((), device=inp.device, dtype=inp.dtype)
 
-            rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
-            rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
-            l_rot = radon_sliced_wasserstein_loss(
-                inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref, scale_by_length=bool(getattr(cfg, "radon_ot_scale_by_length", False))
-            )
             lam_rot = float(getattr(cfg, "lambda_radon_ot", 1.0))
+            if lam_rot > 0.0:
+                rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
+                rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))
+                l_rot = radon_sliced_wasserstein_loss(
+                    inp, points, stride=stride, num_projections=rot_proj, norm_ref=rot_ref, scale_by_length=bool(getattr(cfg, "radon_ot_scale_by_length", False))
+                )
+            else:
+                l_rot = torch.zeros((), device=inp.device, dtype=inp.dtype)
             comps[-888], comps[-999] = l_rot, l_bay
             loss_val = float(cfg.lambda_bayesian) * l_bay + lam_rot * l_rot
         elif cfg.allocation_loss_type == "radon_ot":

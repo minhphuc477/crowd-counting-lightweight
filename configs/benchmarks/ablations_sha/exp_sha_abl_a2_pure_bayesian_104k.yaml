@@ -45,7 +45,7 @@ model:
   backbone_lr_scale: 1.0
 loss:
   output_stride: 2
-  allocation_loss_type: dual_bayesian_radon_ot
+  allocation_loss_type: bayesian
   bayesian_sigma: 4.0
   bayesian_adaptive_sigma: true
   bayesian_sigma_min: 2.0
