@@ -1,0 +1,27 @@
+{
+  "dataset": "NWPU-Crowd",
+  "total_labeled_images": 3609,
+  "total_test_images": 1500,
+  "train_images": 3109,
+  "val_images": 500,
+  "train_total_heads": 1292452,
+  "val_total_heads": 196238,
+  "train_mean_count": 415.7130910260534,
+  "train_median_count": 157.0,
+  "train_max_count": 20033,
+  "train_min_count": 0,
+  "val_mean_count": 392.476,
+  "val_median_count": 147.0,
+  "val_max_count": 12924,
+  "zero_count_images": 248,
+  "zero_count_fraction": 0.06871709614851759,
+  "density_tiers": {
+    "sparse_le_100": 1127,
+    "moderate_101_to_500": 1409,
+    "dense_gt_500": 573
+  },
+  "knn_sample_count": 67791,
+  "knn_median_distance_px": 25.56636619567871,
+  "knn_pct_sub_4px": 1.6668879349766192,
+  "knn_pct_sub_16px": 29.251670575740143
+}
