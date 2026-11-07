@@ -39,6 +39,19 @@ fi
 echo "[INFO] Generating canonical manifests (train: 2272, val: 500, test: 1600)..."
 python scripts/create_jhu_crowd_manifests.py --data-dir "$DATA_DIR" --out-dir data
 
+CLEAN_ZIP="${CLEAN_ZIP:-0}"
+if [[ "${1:-}" == "--clean-zip" || "$CLEAN_ZIP" == "1" ]]; then
+    if [ -f "$ZIP_PATH" ]; then
+        echo "[INFO] Cleaning up $ZIP_PATH to free ~3.08 GB disk space..."
+        rm -f "$ZIP_PATH"
+        echo "[OK] Deleted $ZIP_PATH successfully."
+    fi
+elif [ -f "$ZIP_PATH" ]; then
+    echo ""
+    echo "[TIP] To delete the zip archive and free ~3.08 GB disk space, run:"
+    echo "  rm -f $ZIP_PATH"
+fi
+
 echo ""
 echo "===================================================================="
 echo " [SUCCESS] JHU-CROWD++ Manifests Generated Successfully!"

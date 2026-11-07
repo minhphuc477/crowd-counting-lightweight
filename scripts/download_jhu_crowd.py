@@ -16,6 +16,11 @@ except ImportError:
     import gdown
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Download and setup JHU-CROWD++")
+    parser.add_argument("--clean-zip", action="store_true", help="Delete zip archive after successful extraction")
+    args = parser.parse_args()
+
     dest_zip = Path("data/jhu_crowd_v2.0.zip")
     extract_dir = Path("data/jhu_crowd_v2.0")
     
@@ -49,6 +54,13 @@ def main():
         "--out-dir", "data",
     ]
     subprocess.run(cmd, check=True)
+    if args.clean_zip and dest_zip.exists():
+        print(f"[INFO] Cleaning up {dest_zip} to free ~3.08 GB...")
+        dest_zip.unlink(missing_ok=True)
+        print(f"[OK] Deleted {dest_zip} successfully.")
+    elif dest_zip.exists():
+        print(f"[TIP] To free ~3.08 GB disk space, delete archive via: rm -f {dest_zip}")
+
     print("[SUCCESS] JHU-CROWD++ is completely ready for training and inspection!")
     return 0
 
