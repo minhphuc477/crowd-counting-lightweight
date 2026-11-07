@@ -54,6 +54,8 @@ variants = {
             "lambda_count": 0.0,
             "lambda_bayesian": 0.0,
             "lambda_radon_ot": 0.0,
+            "cell_loss_mode": "mse",
+            "cell_gaussian_sigma": 4.0,
         }
     },
 

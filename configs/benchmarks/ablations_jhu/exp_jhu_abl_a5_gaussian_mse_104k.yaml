@@ -64,6 +64,8 @@ loss:
   lambda_region_nb: 0.0
   lambda_count: 0.0
   lambda_cell: 1.0
+  cell_loss_mode: mse
+  cell_gaussian_sigma: 4.0
 train:
   epochs: 800
   batch_size: 8
