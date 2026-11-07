@@ -7,7 +7,13 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-import gdown
+try:
+    import gdown
+except ImportError:
+    import subprocess
+    print("[INFO] gdown not found, installing via pip...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "gdown"])
+    import gdown
 
 def main():
     dest_zip = Path("data/jhu_crowd_v2.0.zip")

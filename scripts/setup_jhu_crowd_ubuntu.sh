@@ -19,13 +19,21 @@ if [ -d "$DATA_DIR/train/images" ]; then
     echo "[OK] JHU-CROWD++ already extracted in $DATA_DIR"
 elif [ -f "$ZIP_PATH" ]; then
     echo "[INFO] Extracting $ZIP_PATH..."
-    unzip -q "$ZIP_PATH" -d data/
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$ZIP_PATH" -d data/
+    else
+        python3 -m zipfile -e "$ZIP_PATH" data/
+    fi
 else
-    echo "[INFO] Downloading JHU-CROWD++ (~2.87 GB) via gdown..."
+    echo "[INFO] Downloading JHU-CROWD++ (~3.08 GB) via gdown..."
     pip install -q gdown
     gdown "https://drive.google.com/uc?id=${GOOGLE_DRIVE_ID}" -O "$ZIP_PATH"
     echo "[INFO] Extracting $ZIP_PATH..."
-    unzip -q "$ZIP_PATH" -d data/
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$ZIP_PATH" -d data/
+    else
+        python3 -m zipfile -e "$ZIP_PATH" data/
+    fi
 fi
 
 echo "[INFO] Generating canonical manifests (train: 2272, val: 500, test: 1600)..."
