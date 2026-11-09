@@ -1,0 +1,83 @@
+{
+  "overall": {
+    "mae": 80.87933300298639,
+    "rmse": 311.94856198061365,
+    "nae": 0.5222126507251404
+  },
+  "weather": {
+    "Clear / Normal": {
+      "mae": 74.0,
+      "rmse": 231.9,
+      "n": 1409
+    },
+    "Fog / Haze": {
+      "mae": 112.03,
+      "rmse": 255.79,
+      "n": 64
+    },
+    "Rain": {
+      "mae": 96.47,
+      "rmse": 221.14,
+      "n": 49
+    },
+    "Snow": {
+      "mae": 169.8,
+      "rmse": 969.67,
+      "n": 78
+    }
+  },
+  "distractors": {
+    "Normal Crowd Scenes": {
+      "mae": 81.3,
+      "rmse": 314.77,
+      "n": 1569
+    },
+    "Distractor Negatives": {
+      "mae": 59.38,
+      "rmse": 89.12,
+      "n": 31
+    }
+  },
+  "scenes": {
+    "stadium": {
+      "mae": 187.59,
+      "rmse": 614.81,
+      "n": 296
+    },
+    "street": {
+      "mae": 27.4,
+      "rmse": 53.64,
+      "n": 215
+    },
+    "crowd-gathering": {
+      "mae": 97.91,
+      "rmse": 241.58,
+      "n": 170
+    },
+    "protest": {
+      "mae": 45.31,
+      "rmse": 92.03,
+      "n": 168
+    },
+    "conference": {
+      "mae": 18.83,
+      "rmse": 55.14,
+      "n": 119
+    },
+    "rally": {
+      "mae": 155.4,
+      "rmse": 455.7,
+      "n": 94
+    },
+    "concert": {
+      "mae": 77.45,
+      "rmse": 177.67,
+      "n": 90
+    },
+    "gathering": {
+      "mae": 10.75,
+      "rmse": 27.93,
+      "n": 84
+    }
+  }
+}
