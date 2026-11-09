@@ -1,0 +1,66 @@
+{
+  "jpeg_corruption": [
+    {
+      "quality": 10,
+      "mae": 132.63,
+      "rmse": 235.29
+    },
+    {
+      "quality": 20,
+      "mae": 99.34,
+      "rmse": 180.33
+    },
+    {
+      "quality": 30,
+      "mae": 86.36,
+      "rmse": 155.98
+    },
+    {
+      "quality": 40,
+      "mae": 80.35,
+      "rmse": 143.78
+    },
+    {
+      "quality": 50,
+      "mae": 86.88,
+      "rmse": 146.85
+    },
+    {
+      "quality": 70,
+      "mae": 69.22,
+      "rmse": 113.66
+    },
+    {
+      "quality": 90,
+      "mae": 68.31,
+      "rmse": 114.95
+    },
+    {
+      "quality": 100,
+      "mae": 67.91,
+      "rmse": 111.59
+    }
+  ],
+  "negative_distractors": {
+    "num_samples": 4,
+    "mean_phantom_count": 185.1,
+    "samples": [
+      {
+        "id": "jhu_test_0104",
+        "pred_count": 88.69
+      },
+      {
+        "id": "jhu_test_0157",
+        "pred_count": 510.99
+      },
+      {
+        "id": "jhu_test_2227",
+        "pred_count": 64.22
+      },
+      {
+        "id": "jhu_test_3139",
+        "pred_count": 76.49
+      }
+    ]
+  }
+}
