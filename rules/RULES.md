@@ -128,14 +128,14 @@
 
 ---
 
-## 15. Quy Chuẩn Đường Biên Pareto Thực Tế (EMPIRICALLY GROUNDED PARETO FRONTIER)
-- **CẤM HOANG TƯỞNG VỀ CHỈ SỐ MÔ HÌNH SIÊU NHẸ (NO HALLUCINATED PARETO CLAIMS)**:
+## 15. Quy Chuẩn Đánh Đổi Hiệu Năng - Tài Nguyên Thực Tế (EMPIRICALLY GROUNDED RESOURCE-ACCURACY TRADE-OFF)
+- **CẤM HOANG TƯỞNG VỀ CHỈ SỐ MÔ HÌNH SIÊU NHẸ (NO HALLUCINATED CAPACITY CLAIMS)**:
   - Tuyệt đối không được hoang tưởng hoặc so sánh khập khiễng yêu cầu mô hình siêu nhẹ $\le 200\text{k}$ tham số không chưng cất tri thức (0% KD) phải đạt MAE 40-50 ngang ngửa các mô hình khổng lồ 16M-100M tham số (như MAN, STEERER, ViT-based SOTA).
-  - Đường biên Pareto trong khoa học phải được định vị chính xác dựa trên các công trình đã xuất bản trong cùng phân khúc ràng buộc:
+  - Khung đánh đổi chi phí tính toán trong khoa học phải được định vị chính xác dựa trên các công trình đã xuất bản trong cùng phân khúc ràng buộc:
     * Phân khúc $\le 200\text{k}$ tham số (Standalone, 0% KD) trên ShanghaiTech Part A:
       - **Lw-Count** (IEEE TCSVT 2022): 71k tham số, MAE 78.2 / RMSE 120.8.
       - **LSANet** (Neurocomputing 2022): 200k tham số, MAE 66.1 / RMSE 110.2.
-    * Do đó, mức MAE 65.62 / RMSE 101.72 tại 113k tham số đã là đường biên Pareto SOTA được kiểm chứng thực nghiệm chặt chẽ ở phân khúc dưới 200k tham số.
+    * Do đó, mức MAE 65.62 / RMSE 101.72 tại 113k tham số đã là mốc SOTA được kiểm chứng thực nghiệm chặt chẽ ở phân khúc dưới 200k tham số.
 
 ---
 
@@ -149,14 +149,20 @@
 
 ---
 
-## 17. Lệnh Cấm Tuyệt Đối Lạm Dụng Thuật Ngữ "Pareto" Trong Problem Statement, RO và RQ (STRICT BAN ON PARETO JARGON IN CORE RESEARCH FORMULATIONS)
-- **BẢN CHẤT HỌC THUẬT**: 
-  - Bài toán Crowd Counting KHÔNG PHẢI là bài toán Pareto. Về mặt giải tích và thị giác máy tính, đây là bài toán nghịch đảo khôi phục độ đo Radon liên tục (Constrained Radon Measure Recovery) từ quan sát ảnh 2D bị suy thoái: $b = \mathcal{A}_\pi y + \eta$ dưới ràng buộc ngân sách tham số cực tiểu ($\le 104\text{k}$ params, 0% KD).
+## 17. LỆNH CẤM TUYỆT ĐỐI TOÀN DIỆN VÀ KHÔNG NGOẠI LỆ TỪ "PARETO" (ABSOLUTE & UNCONDITIONAL BAN ON "PARETO" ACROSS ALL AGENTS, DOCS, AND CODE)
+- **BẢN CHẤT KHOA HỌC & LỖI BIAS NGHIÊM TRỌNG**:
+  - Bài toán Crowd Counting trong nghiên cứu này là bài toán nghịch đảo khôi phục độ đo Radon liên tục có ràng buộc (Constrained Radon Measure Recovery) từ quan sát ảnh 2D bị suy thoái: $b = \mathcal{A}_\pi y + \eta$ dưới ngân sách tham số cực tiểu ($\le 104\text{k}$ params, 0% KD).
   - Quá trình tối ưu bằng AdamW/SGD cực tiểu hóa một hàm mất mát vô hướng duy nhất $\mathcal{L}_{\text{total}}$, hoàn toàn không phải thuật toán tối ưu đa mục tiêu tiến hóa Pareto (như NSGA-II hay MOEA/D).
-- **LỆNH CẤM BẮT BUỘC**:
-  - TUYỆT ĐỐI CẤM đưa các chữ "Pareto", "đường biên Pareto", "tối ưu Pareto", "vị trí Pareto độc tôn" vào: Tiêu đề (Title), Tóm tắt (Abstract), Tuyên bố bài toán (Problem Statement), Mục tiêu nghiên cứu (RO), Câu hỏi nghiên cứu (RQ), và các mô hình toán học giải tích.
-  - CẤM mọi hình thức thổi phồng (hype) bằng các cụm từ sáo rỗng ("tỷ lệ nén khủng khiếp", "đè bẹp SOTA", "đột phá mang tính nền tảng"). Phải trung thực tuyệt đối với các điểm nghẽn kỹ thuật thực tế (bias âm -19 đến -24 người, sương mù nền chiếm 64.4% mass, Dense MAE vọt lên 127.67).
-- **VỊ TRÍ DUY NHẤT ĐƯỢC PHÉP XUẤT HIỆN**:
-  - Thuật ngữ "Đường biên Pareto" (Pareto frontier) CHỈ ĐƯỢC PHÉP xuất hiện duy nhất ở Chương "Thực nghiệm & Thảo luận" (Experiments & Discussion) dưới dạng một biểu đồ phân tán hậu nghiệm (Post-hoc Benchmarking Scatter Plot: MAE vs Params/FLOPs) để minh họa mối quan hệ đánh đổi thực nghiệm giữa độ chính xác và tài nguyên phần cứng.
+  - Việc gọi một biểu đồ phân tán 2D (Scatter Plot: MAE vs Params/FLOPs) là "Pareto" là thói quen lạm dụng buzzword sáo rỗng của AI, thể hiện sự thiếu hiểu biết về toán học tối ưu, gây thiên kiến (bias) nặng nề, và bị cấm triệt để.
+- **LỆNH CẤM BẮT BUỘC KHÔNG NGOẠI LỆ (ZERO TOLERANCE)**:
+  - **TUYỆT ĐỐI CẤM SỬ DỤNG TỪ "PARETO" DƯỚI MỌI HÌNH THỨC TRONG TOÀN BỘ REPOSITORY, PROMPTS, DOCS, VÀ OUTPUTS**:
+    * Không dùng trong Tiêu đề (Title), Tóm tắt (Abstract), Tuyên bố bài toán (Problem Statement).
+    * Không dùng trong Mục tiêu nghiên cứu (RO), Câu hỏi nghiên cứu (RQ).
+    * Không dùng trong Chương Thực nghiệm, Bảng biểu, hay Chú thích hình.
+    * Không dùng trong câu trả lời cho người dùng hoặc văn bản trao đổi giữa các agent.
+- **CHUẨN MỰC THUẬT NGỮ THAY THẾ CHÍNH XÁC**:
+  - Biểu đồ phân tán so sánh sai số với tài nguyên phần cứng phải được gọi đúng bản chất khoa học:
+    * Tiếng Việt: **"Biểu đồ đánh đổi thực nghiệm độ phức tạp - độ chính xác"** hoặc **"Biểu đồ phân tán tham số - sai số"**.
+    * Tiếng Anh: **"Empirical Complexity-Accuracy Trade-off Plot"** hoặc **"Parameter vs. Error Scatter Plot"**.
 
 

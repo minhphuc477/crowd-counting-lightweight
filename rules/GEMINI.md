@@ -46,8 +46,9 @@
    - All research formulations must address genuine open problems recognized by the international Computer Vision community (CVPR/ICCV/ECCV/TPAMI).
 10. **Unbiased Literature Exploration**:
    - Strictly prohibit confirmation-bias searches and narrow-down queries. Conduct comprehensive, balanced surveys.
-11. **Empirical Pareto Frontier Grounding**:
+11. **Empirical Complexity-Accuracy Trade-off Grounding**:
    - Ground all baseline claims in published peer-reviewed literature. Sub-200k standalone SOTA is anchored by LSANet (200k params, MAE 66.1 / RMSE 110.2).
+   - Absolute ban on the buzzword "Pareto" across all agents and docs. Use "Empirical Complexity-Accuracy Trade-off".
 12. **Occam's Razor & Invariant of Usefulness**:
    - Excise any component or loss that fails to demonstrate statistically significant improvement in single-variable ablation tests (e.g., removing unhelpful iterative solvers and multi-loss bloat).
 
