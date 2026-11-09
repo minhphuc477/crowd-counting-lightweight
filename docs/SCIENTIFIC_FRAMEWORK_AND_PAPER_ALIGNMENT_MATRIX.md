@@ -1,91 +1,67 @@
-# KHUNG KHOA HỌC & MA TRẬN CĂN CHỈNH BÀI BÁO TOP-TIER
-## Ultra-Lightweight Continuous Measure Crowd Counting (RMRv3, $\le 104\text{k}$ Parameters)
+# KHUNG KHOA HỌC & MA TRẬN CĂN CHỈNH BÀI BÁO CHUẨN MỰC
+## Constrained Continuous Radon Measure Recovery for Ultra-Lightweight Crowd Counting ($\le 104\text{k}$ Parameters, 0% KD)
 
 > **Tài liệu Định hướng Học thuật Gốc (Canonical Academic Specification)**  
-> **Mục tiêu:** Chuyển hóa toàn bộ công trình từ một "báo cáo kỹ thuật thử nghiệm các hàm mất mát" sang một **bài báo khoa học đỉnh cao (Top-tier Scientific Publication)** nhắm tới các tạp chí/hội nghị hàng đầu (*IEEE TPAMI, CVPR, Elsevier Pattern Recognition*).  
-> **Cam kết:** 100% số liệu thực nghiệm được trích xuất trực tiếp từ nhật ký huấn luyện (`train_log.csv`, `summary.json`), tuân thủ nghiêm ngặt chuẩn mực khách quan khoa học, không ngụy tạo số liệu, không tô hồng kết quả.
+> **Nguyên tắc cốt lõi (Rule 17):** Tuyệt đối không lạm dụng thuật ngữ "Pareto" trong Problem Statement, RQ và RO. Thuật ngữ "Đường biên Pareto" chỉ xuất hiện duy nhất ở phần *Thực nghiệm & Thảo luận* dưới dạng biểu đồ phân tán hậu nghiệm (Post-hoc Benchmarking Scatter Plot: MAE vs Params/FLOPs).  
+> **Tính trung thực khoa học:** Không dùng từ ngữ thổi phồng (zero hype). Thừa nhận và phân tích trực diện các điểm nghẽn kỹ thuật thực tế (bias âm -19 đến -24 người/ảnh, sương mù nền chiếm 64.4% khối lượng dự đoán do bẫy bão hòa Softplus, Dense MAE vọt lên 127.67).
 
 ---
 
-## 1. CĂN NGUYÊN KHOA HỌC & CÁC NGHỊCH LÝ NỀN TẢNG (THE CORE SCIENTIFIC BARRIERS)
+## 1. BẢN CHẤT BÀI TOÁN & CÁC ĐIỂM NGHẼN KỸ THUẬT (PROBLEM STATEMENT & ROOT CAUSES)
 
-Hầu hết các công trình nén mạng trong thị giác máy tính thất bại khi chuyển giao sang bài toán đếm đám đông (Crowd Counting) vì họ coi đây là một bài toán hồi quy hình ảnh thông thường. Trên thực tế, đếm đám đông trên mô hình siêu nhẹ ($\le 10^5$ tham số) đối mặt với 4 rào cản vật lý và toán học căn bản:
+### 1.1. Bản Chất Toán Học của Bài Toán Đếm Đám Đông
+Về mặt giải tích và thị giác máy tính, bài toán đếm đám đông không phải là bài toán tối ưu đa mục tiêu (Multi-Objective Optimization). Đây là **bài toán nghịch đảo khôi phục độ đo Radon liên tục (Constrained Radon Measure Recovery)** từ quan sát ảnh 2D bị suy thoái:
+$$b = \mathcal{A}_\pi y + \eta$$
+Trong đó:
+- $y \in \mathcal{M}^+(\Omega)$ là độ đo mật độ thực cần khôi phục trên miền ảnh $\Omega \subset \mathbb{R}^2$.
+- $\mathcal{A}_\pi$ là toán tử chiếu phối cảnh suy thoái (perspective degradation operator).
+- $b$ là quan sát ảnh đầu vào có nhiễu $\eta$.
 
-```mermaid
-flowchart TD
-    subgraph CoreParadox ["4 Nghịch lý Nền tảng của Bài toán Đếm Đám đông Siêu nhẹ"]
-        P1["<b>Nghịch lý 1: Biểu diễn Độ đo</b><br/>Nhãn điểm Dirac rời rạc vs.<br/>Mạng xấp xỉ liên tục"]
-        P2["<b>Nghịch lý 2: Giới hạn Nyquist</b><br/>Trường tiếp nhận ngữ cảnh (ASPP) vs.<br/>Hiện tượng răng cưa tần số cao"]
-        P3["<b>Nghịch lý 3: Dị phương sai Thống kê</b><br/>Giả định sai số đồng nhất (L1/L2) vs.<br/>Biến thiên mật độ bùng nổ (Over-dispersion)"]
-        P4["<b>Nghịch lý 4: Ranh giới Pareto Biên</b><br/>Ngân sách siêu nhỏ (&le; 104k params, ~0.1G FLOPs) vs.<br/>Độ bền vững trước suy hao môi trường thực tế"]
-    end
-    
-    subgraph MathematicalFormulations ["Giải pháp Toán học & Kiến trúc Đột phá"]
-        M1["Sliced Radon-OT (1D Closed-form)<br/>+ Dual Bayesian Conditional Allocation"]
-        M2["Phân tích Phổ Nyquist:<br/>Direct 1x1 Subpixel Projection (No-Neck)"]
-        M3["Dual-Scale Supervision:<br/>Negative-Binomial Heteroscedastic Likelihood"]
-        M4["Khung Đánh giá Thực nghiệm 5 Benchmark<br/>(70 Cấu hình Kiểm toán Độc lập)"]
-    end
-
-    P1 ==> M1
-    P2 ==> M2
-    P3 ==> M3
-    P4 ==> M4
-```
-
-### 1.1. Nghịch lý 1: Giãn nở Liên tục của Nhãn Điểm Rời rạc (The Continuous Relaxation Paradox)
-* **Bản chất:** Nhãn giám sát đám đông là tập hợp các độ đo Dirac rời rạc: $\mu_{\text{GT}} = \sum_{i=1}^N \delta(x - x_i)$, trong khi mạng nơ-ron tích chập là các bộ xấp xỉ hàm liên tục trên lưới rời rạc $\mathbb{R}^{H \times W}$.
-* **Lỗ hổng của tiếp cận cũ (Gaussian Density Map):** Suốt 10 năm qua (2016–2025), cộng đồng sử dụng phép tích chập làm mượt Gaussian: $D(x) = \sum_{i=1}^N \mathcal{N}(x; x_i, \sigma^2 I)$. Tuy nhiên, phép biến đổi này làm mất thông tin không thể đảo ngược (irreversible information loss): khi khoảng cách giữa các cá thể nhỏ hơn bán kính hạt ($\|x_i - x_j\| < 2\sigma$), các phân phối hòa lẫn thành một mảng bão hòa không cực trị. Các mạng khổng lồ ($>20\text{M}$ tham số) dùng dung lượng lớn để "học vẹt" cách giải chập nghịch đảo; nhưng trên mạng siêu nhẹ ($\le 100\text{k}$ tham số), dung lượng bị quá tải, gây hiện tượng under-counting nghiêm trọng ở vùng đông và hallucination ở nền phức tạp.
-
-### 1.2. Nghịch lý 2: Giới hạn Lấy mẫu Nyquist vs. Mở rộng Trường tiếp nhận (The Nyquist-Receptive Field Trade-off)
-* **Bản chất:** Để phân biệt người với rác thị giác, mạng cần trường tiếp nhận (Receptive Field) lớn để nắm bắt ngữ cảnh cảnh quan (scene-level context). Các kiến trúc truyền thống dùng các khối kim tự tháp giãn nở (ASPP, FPN).
-* **Điểm bế tắc trên mạng siêu nén:** Các bộ lọc giãn nở (dilated convolutions với dilation rate $d > 1$) lấy mẫu thưa trên lưới đặc trưng, tạo ra các "lỗ hổng không gian" (gridding / comb artifacts). Trong các vùng đám đông siêu đặc (như ShanghaiTech A hay JHU), tần số không gian của các đầu người vượt quá tần số lấy mẫu Nyquist của lưới tích chập giãn nở. Hậu quả là dilated convolution vô tình triệt tiêu các xung điểm tần số cao, biến các đầu người liền kề thành một khối nhòe.
-
-### 1.3. Nghịch lý 3: Bùng nổ Dị phương sai & Lỗi Hồi quy Đồng nhất (The Heteroscedastic Over-Dispersion Paradox)
-* **Bản chất:** Số lượng người trong ảnh biến thiên từ $0$ đến hàng nghìn cá thể. Phương sai của sai số đếm tăng phi tuyến tính theo mật độ: $\mathrm{Var}(Y|X) \gg \mathbb{E}[Y|X]$.
-* **Lỗ hổng của tiếp cận cũ ($L_1 / L_2$ Regression):** Các hàm mất mát hồi quy chuẩn ngầm định nhiễu tuân theo phân phối Gauss hoặc Laplace đồng phương sai (constant variance $\sigma^2$). Khi áp dụng vào dữ liệu đám đông, gradient từ các mảng siêu đặc áp đảo hoàn toàn gradient từ vùng thưa, hoặc ngược lại làm trôi dạt trọng số toàn cục, gây ra hiện tượng under-counting có hệ thống.
-
-### 1.4. Nghịch lý 4: Ranh giới Pareto Biên & Độ Bền vững Môi trường (The Pareto Edge Boundary)
-* **Bản chất:** Liệu một mô hình có dung lượng chỉ $\approx 10^5$ tham số và chi phí tính toán $\sim 0.1\text{ GFLOPs}$ có thể duy trì tính bất biến trước các điều kiện suy hao quang học nghiêm trọng (sương mù, tuyết, mưa, ban đêm) mà không cần dựa dẫm vào các Foundation Models hàng chục triệu tham số hay không?
+### 1.2. Ba Điểm Nghẽn Cốt Tử Khi Ràng Buộc Ngân Sách Cực Tiểu ($\le 104\text{k}$ Params, 0% KD)
+1. **Sự sụp đổ cân bằng học đường tắt (Shortcut Learning Equilibrium):**
+   Dưới các hàm loss đếm tổng thể và phân bổ điểm, mô hình nơ-ron nhỏ rơi vào trạng thái cân bằng thoái hóa: phân bổ khoảng $35.6\%$ khối lượng vào các vị trí đầu người thật, và làm rò rỉ tới $64.4\%$ khối lượng còn lại vào nền rỗng dưới dạng một lớp sương mù đồng nhất ($\approx 0.00124\text{ count/cell}$). Trên toàn bộ ảnh kích thước lớn, lượng rò rỉ này tích tụ thành hơn 200 "người ảo" (phantom people).
+2. **Bẫy bão hòa gradient lồi của hàm kích hoạt (Convex Activation Trap):**
+   Do đạo hàm của hàm Softplus suy giảm theo hàm mũ khi logit âm ($\sigma(z) \to 0$ khi $z < -6$), gradient descent bị triệt tiêu khi cố gắng đẩy logit vùng nền xuống sâu hơn dưới tác động của weight decay. Kết quả là mô hình bị kẹt ở mức logit nền khoảng $-7.7$, không thể triệt tiêu hoàn toàn sương mù nền.
+3. **Hiện tượng Under-counting có hệ thống và Sụp đổ ở cảnh đông (Dense Failure):**
+   Trong các bức ảnh có mật độ cực cao (hơn 1,000 người), khoảng cách giữa các đầu người nhỏ hơn bước sải đặc trưng ($d < 4\text{px}$). Các đặc trưng bị bão hòa, dẫn đến bias âm có hệ thống (mô hình đếm thiếu từ 19 đến 24 người/ảnh trên ShanghaiTech A) và sai số ở vùng đông (Dense MAE) tăng vọt lên tới $127.67$ (chênh lệch gấp 8 lần so với vùng thưa Sparse MAE $15.63$).
 
 ---
 
 ## 2. MA TRẬN CĂN CHỈNH KHOA HỌC (THE ALIGNMENT MATRIX)
 
-| Thành phần | RQ1: Biểu diễn Độ đo Không gian (Spatial Measure Representation) | RQ2: Tính Bất định Dị phương sai (Heteroscedastic Uncertainty) | RQ3: Động học Nyquist & Cổ mạng (Spatial Nyquist Dynamics) | RQ4: Ranh giới Bền vững Pareto (Pareto Robustness Boundary) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Research Question (RQ)** | Làm thế nào để mô hình hóa sự phân bổ khối lượng đám đông liên tục mà bảo đảm đồng thời **bảo toàn tuyệt đối tổng khối lượng toàn cục** và **khả năng phân giải sub-pixel** mà không làm mờ Gaussian và giữ độ phức tạp tính toán $O(K \log K)$? | Tại sao các hàm hồi quy truyền thống ($L_1/L_2$) luôn gây under-counting có hệ thống trên dải mật độ biến thiên rộng ($10^0 - 10^4$), và làm thế nào để mô hình hóa hiện tượng over-dispersion trong kiến trúc $\le 10^5$ params? | Định luật nào chi phối mối quan hệ đánh đổi giữa nhu cầu mở rộng trường tiếp nhận (Receptive Field) và nguy cơ răng cưa (aliasing) do vi phạm tần số lấy mẫu Nyquist của các bộ lọc giãn nở trong vùng đám đông cực đặc? | Đâu là giới hạn vật lý về độ chính xác và tính bất biến của một mô hình chỉ có $\sim 10^5$ tham số khi đối mặt với suy hao môi trường khắc nghiệt (sương mù, mưa tuyết, đêm tối) mà không dùng Foundation Models? |
-| **Research Objective (RO)** | Xây dựng khung lý thuyết tối ưu vận chuyển lát cắt (Sliced Radon-OT) kết hợp phân bổ có điều kiện Bayes (Bayesian conditional allocation), chứng minh nghiệm giải tích dạng đóng 1D bảo toàn khối lượng chính xác tuyệt đối. | Thiết lập cơ chế giám sát kép: phân rã ước lượng không gian cục bộ và hàm hợp lý Negative-Binomial rời rạc vĩ mô, tách biệt kỳ vọng $\mu(x)$ và tham số phân tán $r(x)$. | Phân tích phổ tần số và ranh giới Nyquist trên các tập dữ liệu có mật độ đối lập (SHA cực đặc vs. SHB góc rộng), chứng minh tính ưu việt của phép chiếu trực tiếp $1\times 1$ Subpixel khi mật độ chạm ngưỡng Nyquist. | Thiết lập hệ thống kiểm toán thực nghiệm quy mô lớn nhất phân khúc mạng nhỏ: 70 cấu hình trên 5 benchmark quốc tế, phân rã chi tiết theo thuộc tính môi trường khắc nghiệt của JHU-CROWD++. |
-| **Proposed Method** | **Dual Radon-OT + Bayesian Loss**: 4 góc chiếu tích phân Radon $\theta \in \{0^\circ, 45^\circ, 90^\circ, 135^\circ\}$ bảo toàn khối lượng toàn cục; Bayesian loss gán điểm cục bộ không làm mờ. | **Negative-Binomial Count Head**: Tối ưu trực tiếp hàm log-likelihood rời rạc của phân phối Negative-Binomial song song với cell allocation loss, tự thích ứng với phương sai bùng nổ. | **Direct $1\times 1$ Subpixel vs. ASPP-Lite**: Khối phục hồi độ phân giải trực tiếp không dùng tích chập giãn nở, triệt tiêu comb-aliasing và giảm tham số xuống 102k. | **RMRv3 Standard Pipeline**: Chuẩn hóa động kích thước $\le 1024$ (stride 2), crowd-aware sampling, huấn luyện từ đầu (scratch) và tiền huấn luyện tối thiểu. |
-| **Empirical Evidence** | **[C]** JHU: Flagship đạt **63.63 MAE**, vượt Gaussian MSE (**70.80 MAE**, $\Delta = -7.17$) và Pure Radon-OT (**74.55 MAE**). SHA: Flagship đạt **74.29 MAE** vs. Pure ROT **84.54 MAE**. | **[C]** Lặp lại nhất quán trên 4 dataset: JHU: NB đạt **63.63** vs. $L_1$ **76.35** ($\Delta = +12.72$). QNRF: NB đạt **109.80** vs. $L_1$ **125.65** ($\Delta = +15.85$). SHA: NB đạt **74.29** vs. $L_1$ **89.33** ($\Delta = +15.04$). | **[C]** SHA cực đặc: No-Neck đạt **66.24 MAE** (102k params), tốt hơn có Neck (**74.29 MAE**). SHB góc rộng: ASPP Neck đạt **10.49 MAE**, tốt hơn No-Neck (**10.94 MAE**). | **[C]** JHU: Pretrained đạt **61.72 MAE**, Scratch đạt **63.63 MAE**. UCF_CC_50 5-Fold: **$298.65 \pm 76.19$ MAE**, đánh bại MobileCount (305.2 MAE, 2.5M params). |
-| **Scientific Contribution** | Khung toán học Continuous Measure Crowd Counting giải tích dạng đóng $O(K \log K)$, xóa bỏ hoàn toàn heuristic Gaussian kernel. | Mô hình hóa toán học hiện tượng over-dispersion trong crowd counting, loại bỏ lỗi under-counting kinh niên của hàm mất mát $L_1/L_2$. | Khám phá và công thức hóa nguyên lý đánh đổi tần số không gian trong thiết kế cổ mạng: dilated conv gây hại khi khoảng cách điểm chạm ngưỡng Nyquist. | Thiết lập kỷ lục Pareto toàn cầu cho thị giác biên ($\le 104\text{k}$ params, ~0.11 GFLOPs), thu hẹp khoảng cách với các mạng khổng lồ gấp 200 lần. |
-| **Limitation & Failure Mode** | Radon-OT đơn lẻ không hội tụ được vị trí điểm nếu thiếu Bayesian loss (MAE tăng vọt lên 84.54 trên SHA nếu bỏ Bayesian). | Tham số phân tán $r$ nhạy cảm với khởi tạo ban đầu, cần kẹp giá trị (clamping) để tránh bùng nổ gradient NLL ở những epoch đầu. | Không tồn tại một cấu trúc cổ mạng duy nhất cho mọi miền mật độ: Cần đánh đổi giữa độ phân giải xung điểm cực hạn (No-Neck) và trường tiếp nhận ngữ cảnh (ASPP). | Trên ảnh độ phân giải siêu cao (> 4000px) có nhiều cây cối phức tạp nhưng rất ít người, mô hình có xu hướng dự đoán dương nhẹ nếu thiếu crowd-aware sampling. |
+Bảng căn chỉnh ánh xạ $1-1$ giữa bài toán mở thực tế, câu hỏi nghiên cứu (RQ), mục tiêu nghiên cứu (RO), phương pháp giải quyết, bằng chứng thực nghiệm và giới hạn kỹ thuật:
+
+| Thành phần | RQ1: Giới hạn Băng thông Không gian - Tần số (Spatial Bandwidth & Sampling) | RQ2: Cơ chế Cổng Hỗ trợ & Dị phương sai Thống kê (Support Gating & Heteroscedasticity) | RQ3: Tính Thích ứng Tiên nghiệm Phân bố Đa Miền (Cross-Domain Prior Adaptation) |
+| :--- | :--- | :--- | :--- |
+| **Problem Statement** | Khi không sử dụng mạng Teacher chưng cất tri thức (0% KD), backbone cực nhẹ ($\approx 87\text{k}$ params) bị suy giảm độ phân giải không gian nghiêm trọng ở bước sải thô, làm mất dấu các xung điểm cá thể trong cụm đám đông đặc. | Hàm kích hoạt Softplus rơi vào bẫy bão hòa gradient lồi khiến 64.4% khối lượng bị rò rỉ vào nền (sương mù nền); đồng thời giả định sai số đồng phương sai ($L_1/L_2$) gây sai số đếm có hệ thống khi mật độ biến thiên từ $10^0$ đến $10^4$. | Phân bố mật độ và góc nhìn camera biến thiên cực lớn giữa các môi trường thực tế (chênh lệch hơn 6 lần giữa SHA và SHB/QNRF), khiến các mô hình dùng tham số tiên nghiệm cố định bị lệch phân bố nghiêm trọng. |
+| **Research Question (RQ)** | Năng lực biểu diễn không gian - tần số của mạng nơ-ron $\le 104\text{k}$ tham số bị giới hạn như thế nào khi tái tạo các xung điểm rời rạc, và cấu trúc nào dung hòa được giữa trường tiếp nhận ngữ cảnh và độ phân giải xung điểm? | Làm thế nào để giải phóng bẫy bão hòa gradient lồi của hàm kích hoạt để triệt tiêu sương mù nền, đồng thời mô hình hóa được hiện tượng bùng nổ phương sai (over-dispersion) của dữ liệu đếm rời rạc? | Cơ chế thích ứng nào cho phép mô hình tự động hiệu chỉnh mật độ tiên nghiệm $m_0$ và trường nhìn phối cảnh theo chiều dọc camera mà không phụ thuộc vào các ngưỡng gán cứng thủ công? |
+| **Research Objective (RO)** | Xây dựng khung phân rã độ đo liên tục kết hợp Sliced Radon-OT (1D closed-form CDF) và phân bổ điều kiện Bayes; giải phẫu ranh giới hiệu quả giữa khối cổ mạng ASPP đa tỉ lệ và phép chiếu trực tiếp $1\times 1$ Subpixel. | Thiết kế cơ chế cổng hỗ trợ phi tuyến (Decoupled Support Gating) tách biệt việc phát hiện có người và ước lượng cường độ; tích hợp hàm hợp lý Negative-Binomial phân tán dị phương sai cho giám sát số lượng vĩ mô. | Phát triển cơ chế tự động hiệu chuẩn mật độ tiên nghiệm $m_0$ động theo manifest dữ liệu; đánh giá tính khái quát hóa và độ ổn định xuyên miền trên 5 tập benchmark chuẩn quốc tế. |
+| **Proposed Method** | **Dual Radon-OT + Bayesian Loss & Subpixel Reconstruction:** 4 góc chiếu Radon $\theta \in \{0^\circ, 45^\circ, 90^\circ, 135^\circ\}$ bảo toàn khối lượng toàn cục với chi phí $O(K \log K)$; đầu ra PixelShuffle Stride-2 giữ nguyên chi tiết điểm. | **Negative-Binomial Count Head & Support Gating:** Giám sát song song kỳ vọng $\mu(x)$ và tham số phân tán $r(x)$ qua Negative Log-Likelihood; dập tắt kích hoạt nền rỗng để ngăn rò rỉ khối lượng. | **Adaptive Manifest Normalization & Multi-Scale Pipeline:** Chuẩn hóa động kích thước ảnh $\le 1024$, tính toán $m_0$ tự động từ nhãn huấn luyện, và áp dụng crowd-aware crop để cân bằng phân bố mẫu. |
+| **Empirical Evidence** | **[C]** Trên SHA: No-Neck ($1\times 1$ conv, 102k params) đạt **66.24 MAE**, vượt ASPP Neck (**74.29 MAE**). Ngược lại trên SHB: ASPP Neck đạt **10.49 MAE** vs No-Neck **10.94 MAE**. Pure Radon-OT đơn lẻ kém hơn Flagship (SHA: 84.54 vs 74.29; JHU: 74.55 vs 63.63). | **[C]** Negative-Binomial vượt trội áp đảo $L_1$ count loss trên cả 4 dataset: JHU: **63.63** vs **76.35** ($\Delta = +12.72$). QNRF: **109.80** vs **125.65** ($\Delta = +15.85$). SHA: **74.29** vs **89.33** ($\Delta = +15.04$). SHB: **10.49** vs **11.89** ($\Delta = +1.40$). | **[C]** Mô hình đạt độ ổn định cao trên 5 bộ dữ liệu: JHU Val: **61.72 MAE** (Pretrained) / **63.63 MAE** (Scratch); QNRF Test: **105.36 MAE** (Pretrained) / **109.80 MAE** (Scratch); UCF_CC_50: **$298.65 \pm 76.19$ MAE** (5-Fold CV). |
+| **Limitation & Failure Mode** | Khi khoảng cách điểm $< 4\text{px}$, các bộ lọc dilated conv trong ASPP gây hiện tượng răng cưa không gian (comb-aliasing); trong khi phép chiếu $1\times 1$ lại thiếu ngữ cảnh ở ảnh góc rộng. | Khối lượng sương mù nền vẫn chiếm một phần đáng kể nếu tham số khởi tạo bias không đủ sâu; tham số phân tán $r$ cần được kẹp giá trị cẩn thận để tránh mất ổn định ở epoch đầu. | Trên ảnh có kích thước cực lớn (> 4000px) nhưng mật độ người rất thấp (nhiều tán cây, kiến trúc lặp lại), mô hình vẫn có xu hướng báo dương nhẹ nếu không có crowd-aware sampling. |
 
 ---
 
-## 3. BỐN ĐÓNG GÓP KHOA HỌC ĐỘT PHÁ (THE 4 CORE CONTRIBUTIONS)
+## 3. BA ĐÓNG GÓP KHOA HỌC CHUẨN MỰC (CORE SCIENTIFIC CONTRIBUTIONS)
 
-1. **Đóng góp Lý thuyết Biểu diễn (Theoretical Representation Framework):**
-   * *Khung Biểu Diễn Độ Đo Liên Tục Giải Tích Dạng Đóng.* Chúng tôi loại bỏ giả định Gaussian làm mượt heuristic vốn tồn tại suốt một thập kỷ. Bằng cách phân rã bài toán vận chuyển tối ưu Wasserstein 2D thành tích phân các lát cắt Radon 1D ($\mathcal{SW}_1$), chúng tôi đạt được nghiệm giải tích dạng đóng thông qua hàm phân phối tích lũy (CDF) với độ phức tạp $O(K \log K)$ thay vì $O(K^3)$ của Sinkhorn 2D. Cơ chế này bảo đảm tính bảo toàn khối lượng chính xác tuyệt đối (zero mass bias) trong khi vẫn duy trì độ sắc nét cực hạn dưới điểm ảnh thông qua phân bổ điều kiện Bayes.
+1. **Khung Khôi Phục Độ Đo Liên Tục Giải Tích Dạng Đóng (Closed-Form Continuous Measure Recovery):**
+   * Chúng tôi giải bài toán bảo toàn khối lượng toàn cục trong đếm đám đông bằng cách phân rã bài toán Wasserstein 2D sang tích phân các bài toán vận chuyển tối ưu 1D dọc theo các góc chiếu Radon ($\mathcal{SW}_1$). Nghiệm giải tích dạng đóng thông qua hàm phân phối tích lũy (CDF) đạt độ phức tạp $O(K \log K)$, cho phép tối ưu trực tiếp trên mạng siêu nhẹ mà không cần ma trận lặp Sinkhorn đắt đỏ và không cần làm mờ Gaussian heuristic.
 
-2. **Đóng góp Thống kê & Tối ưu (Statistical Formulation of Over-Dispersion):**
-   * *Mô Hình Hóa Hiện Tượng Dị Phương Sai Bùng Nổ Trong Đếm Đám Đông.* Chúng tôi chỉ ra sai lầm căn bản của các phương pháp hiện hành khi áp dụng hàm mất mát hồi quy đồng phương sai ($L_1, L_2$) lên dữ liệu có phương sai bùng nổ phi tuyến. Việc tích hợp phân phối Negative-Binomial vào giám sát số lượng vĩ mô đã giải quyết triệt để lỗi under-counting kinh niên, mang lại sự cải thiện vượt bậc từ $+1.4$ đến $+15.8\text{ MAE}$ trên 4 tập dữ liệu độc lập.
+2. **Cơ Chế Giám Sát Bất Định Dị Phương Sai & Phân Tách Không Gian (Heteroscedastic Uncertainty Modeling & Spatial Support):**
+   * Chúng tôi chứng minh về mặt giải tích và thực nghiệm rằng hàm mất mát hồi quy $L_1/L_2$ phá vỡ cân bằng tối ưu do giả định sai về phương sai đồng nhất. Việc đưa hàm hợp lý rời rạc Negative-Binomial vào giám sát số lượng vĩ mô kết hợp với phân bổ điểm Bayes cục bộ đã triệt tiêu đáng kể hiện tượng under-counting có hệ thống, cải thiện từ $+1.4$ đến $+15.8\text{ MAE}$ đồng thời trên 4 tập dữ liệu độc lập.
 
-3. **Phát hiện Kiến trúc & Giới hạn Nyquist (Architectural Discovery of Spatial Sampling):**
-   * *Nguyên Lý Đánh Đổi Tần Số Không Gian Trong Thiết Kế Cổ Mạng.* Chúng tôi phát hiện và chứng minh hiện tượng: khi mật độ đám đông tiến sát giới hạn lấy mẫu Nyquist của lưới đặc trưng, các khối cổ mạng đa tỉ lệ dùng tích chập giãn nở (ASPP) tạo ra hiện tượng răng cưa không gian (comb-aliasing), triệt tiêu các xung điểm tần số cao. Khám phá này giải thích tại sao cấu trúc No-Neck ($1\times 1$ conv, 102k tham số) lại vượt trội hơn Flagship có Neck trên ShanghaiTech Part A (66.24 vs. 74.29 MAE), đồng thời định hình nguyên tắc thiết kế cổ mạng thích ứng theo phân bố không gian.
-
-4. **Đóng góp Thực nghiệm & Ranh giới Pareto Toàn cầu (Global Pareto Frontier Benchmark):**
-   * *Tái Định Nghĩa Đường Biên Pareto Cho Trí Tuệ Biên.* Chúng tôi thực hiện chiến dịch kiểm toán thực nghiệm toàn diện nhất từ trước tới nay cho phân khúc mạng dưới $1\text{M}$ tham số (70 cấu hình trên 5 benchmark lớn). Với ngân sách cực hạn **102k–104k tham số và ~0.11 GFLOPs**, mô hình vượt trội hơn hẳn các mô hình cùng kích thước (giảm 39.9% MAE so với MCNN 130k; giảm 24 lần tham số so với MobileCount 2.5M mà vẫn chính xác hơn), chứng minh rằng mạng siêu nén vẫn có thể đạt hiệu năng cạnh tranh nếu được định hướng đúng đắn về mặt hình học và thống kê.
+3. **Khảo Sát Thực Nghiệm Đa Trung Tâm & Phân Tích Đánh Đổi Phần Cứng (Comprehensive Multi-Dataset Empirical Study):**
+   * Chúng tôi cung cấp một nghiên cứu thực nghiệm có kiểm soát với 70 cấu hình trên 5 benchmark quốc tế (JHU-CROWD++, UCF-QNRF, ShanghaiTech A/B, UCF_CC_50). Trong phần Thảo luận thực nghiệm, chúng tôi phân tích mối quan hệ đánh đổi thực tế (Empirical Trade-off: MAE vs Params/FLOPs), chứng minh rằng mạng $\le 104\text{k}$ tham số huấn luyện hoàn toàn từ đầu (0% KD) đạt hiệu năng cạnh tranh với các mô hình lớn hơn nhiều lần.
 
 ---
 
-## 4. BẢNG DỮ LIỆU THỰC NGHIỆM ĐÃ KIỂM TOÁN (5 BENCHMARKS, 70 CONFIGS)
+## 4. DỮ LIỆU THỰC NGHIỆM ĐÃ KIỂM TOÁN (5 BENCHMARKS, 70 CONFIGS)
 
-*(Nguồn dữ liệu: `train_log.csv` và `summary.json`, Commit `74257fa`, hạt giống cố định `seed: 42`)*
+*(Trích xuất trực tiếp từ `train_log.csv` và `summary.json`, Commit `74257fa`, hạt giống cố định `seed: 42`)*
 
-### 4.1. Bảng Tổng Hợp Đa Benchmark Toàn Cầu
+### 4.1. Bảng Tổng Hợp 5 Tập Dữ Liệu Chuẩn Quốc Tế
 
-| Tập Dữ Liệu | Giao thức Đánh giá | Nghị quyết / Resize | Số lượng Đầu (Train / Test) | Phiên bản Mô hình | Tham số | MACs (FLOPs) | MAE | RMSE | NAE | Bias |
+| Tập Dữ Liệu | Giao thức Đánh giá | Nghị quyết / Resize | Số lượng Đầu (Train / Test) | Biến thể Mô hình | Tham số | MACs (FLOPs) | MAE | RMSE | NAE | Bias |
 | :--- | :--- | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **JHU-CROWD++** | Official Val (500 imgs) | Dynamic $\le 1024$ | 844k / 521k | Pretrained | 104,006 | ~0.11 G | **61.72** | **227.79** | 0.285 | -13.54 |
 | **JHU-CROWD++** | Official Val (500 imgs) | Dynamic $\le 1024$ | 844k / 521k | Scratch (Flagship) | 104,006 | ~0.11 G | **63.63** | **254.78** | 0.259 | -30.77 |
@@ -104,45 +80,42 @@ flowchart TD
 
 ### 4.2. Bằng Chứng Đối Chứng Bất Biến Giữa Các Giả Thuyết Khoa Học
 
-#### Giả Thuyết 1: Negative-Binomial Likelihood khắc phục hiện tượng Dị phương sai (Over-Dispersion)
+#### Giả Thuyết 1: Giám sát Số lượng Negative-Binomial vs Naive $L_1$
 * **JHU:** Flagship (NB): **63.63** vs. $L_1$ Count: **76.35** ($\Delta = +12.72\text{ MAE}$)
 * **QNRF:** Flagship (NB): **109.80** vs. $L_1$ Count: **125.65** ($\Delta = +15.85\text{ MAE}$) vs. No Count: **143.83** ($\Delta = +34.03\text{ MAE}$)
 * **SHA:** Flagship (NB): **74.29** vs. $L_1$ Count: **89.33** ($\Delta = +15.04\text{ MAE}$)
 * **SHB:** Flagship (NB): **10.49** vs. $L_1$ Count: **11.89** ($\Delta = +1.40\text{ MAE}$)
 
-#### Giả Thuyết 2: Sliced Radon-OT bảo toàn khối lượng nhưng cần Bayesian Likelihood để định vị điểm
+#### Giả Thuyết 2: Vai trò của Sliced Radon-OT và Bayesian Likelihood
 * **JHU:** Flagship: **63.63** vs. Pure ROT: **74.55** vs. Gaussian MSE: **70.80**
 * **QNRF:** Flagship: **109.80** vs. Pure ROT: **122.68** vs. Gaussian MSE: **119.51**
 * **SHA:** Flagship: **74.29** vs. Pure ROT: **84.54**
 * **SHB:** Flagship: **10.49** vs. Pure ROT: **13.83** vs. Gaussian MSE: **11.85**
-* *Nhận xét:* Pure Radon-OT luôn có Bias toàn cục sát 0 nhất trên mọi tập dữ liệu (JHU: $+2.60$, QNRF: $+2.31$, SHA: $+4.76$, SHB: $+4.12$), nhưng cần sự kết hợp của Bayesian Loss để định vị chính xác vị trí xung điểm.
+* *Nhận xét:* Pure Radon-OT có Bias toàn cục sát 0 nhất trên mọi tập dữ liệu (JHU: $+2.60$, QNRF: $+2.31$, SHA: $+4.76$, SHB: $+4.12$), chứng minh tính bảo toàn khối lượng chính xác; nhưng bắt buộc cần thành phần Bayesian Loss để định vị điểm nhọn cục bộ.
 
-#### Giả Thuyết 3: Răng cưa Nyquist của Dilated Convolutions trên Mật độ Siêu đặc
-* Trên **ShanghaiTech Part A (Mật độ cực đặc, khoảng cách điểm $< 4\text{px}$):**
+#### Giả Thuyết 3: Phép Chiếu Trực Tiếp $1\times 1$ Subpixel vs ASPP Dilated Neck
+* Trên **ShanghaiTech Part A (Đám đông siêu đặc, khoảng cách điểm $< 4\text{px}$):**
   * Mô hình **No-Neck** ($1\times 1$ conv trực tiếp, $102,246$ params): **66.24 MAE | 102.27 RMSE**
   * Mô hình **Flagship có ASPP Neck** (dilated conv, $104,006$ params): **74.29 MAE | 118.23 RMSE**
-  * *Kết luận:* Khi khoảng cách giữa các đầu người nhỏ hơn bước nhảy giãn nở (dilation step), các bộ lọc ASPP gây răng cưa không gian, làm mờ các điểm lân cận. Phép chiếu trực tiếp $1\times 1$ giữ nguyên tần số không gian cao.
-* Trên **ShanghaiTech Part B (Mật độ thưa, góc nhìn sâu từ tiền cảnh đến hậu cảnh):**
+  * *Nguyên nhân:* Tích chập giãn nở làm suy hao thông tin tần số cao khi khoảng cách điểm nhỏ hơn bước nhảy giãn nở.
+* Trên **ShanghaiTech Part B (Mật độ thưa, biến thiên góc nhìn sâu):**
   * Mô hình **Flagship có ASPP Neck**: **10.49 MAE | 16.98 RMSE**
   * Mô hình **No-Neck**: **10.94 MAE | 18.49 RMSE**
-  * *Kết luận:* Khi mật độ thưa và kích thước đầu người thay đổi mạnh theo phối cảnh, trường tiếp nhận đa tỉ lệ của ASPP là cần thiết để bao quát các đầu người lớn ở tiền cảnh.
+  * *Nguyên nhân:* Khi quy mô người thay đổi từ tiền cảnh đến hậu cảnh, trường tiếp nhận đa tỉ lệ của ASPP là cần thiết để bao quát các đầu người kích thước lớn.
 
 ---
 
-## 5. THIẾT KẾ BÀI BÁO & PHÒNG VỆ PHẢN BIỆN (REBUTTAL DEFENSE)
+## 5. THỰC NGHIỆM ĐÁNH ĐỔI PHẦN CỨNG & PHÒNG VỆ PHẢN BIỆN (REBUTTAL READINESS)
 
-### 5.1. Thiết Kế "Hero Figure" (Figure 1)
-* **Panel A (Trục Tọa Độ Pareto):** Trục hoành là GFLOPs (log-scale từ 0.05 đến 100 GFLOPs), trục tung là MAE trên ShanghaiTech A. RMRv3 nằm ở góc tối ưu tuyệt đối (FLOPs $\sim 0.1$, MAE $\sim 66.2$), hoàn toàn cô lập các mô hình VGG19/ViT cồng kềnh ở góc trên bên phải.
-* **Panel B (Độ Phân Giải Xung Điểm Dưới Điểm Ảnh):** Cắt trực tiếp một lát cắt đám đông siêu đặc (khoảng cách điểm $< 3$ pixels). So sánh Ground Truth vs. Gaussian Density Map ($\sigma=4.0$, dính liền thành một mảng vô định hình) vs. Dự đoán của RMRv3 (tách bạch rõ ràng từng đỉnh xung cực đại).
+### 5.1. Biểu Đồ Đánh Đổi Thực Nghiệm Hậu Nghiệm (Empirical Trade-off Scatter Plot — Chương 4)
+* Trong chương Thực nghiệm và Thảo luận, một biểu đồ phân tán hậu nghiệm (Post-hoc Benchmarking Scatter Plot) sẽ được sử dụng để minh họa mối quan hệ giữa MAE và số lượng tham số / FLOPs:
+  - So sánh với các mô hình cùng phân khúc siêu nhẹ ($\le 200\text{k}$ tham số, Standalone, 0% KD): TinyCount (60k params, 0.16G FLOPs, SHA MAE 63.17 / RMSE 120.80), Lw-Count (71k params, 0.8G FLOPs, SHA MAE 68.20 / RMSE 113.50), LSANet (200k params, 14.4G FLOPs, SHA MAE 66.10 / RMSE 110.20).
+  - So với các mô hình khổng lồ ($>20\text{M}$ tham số): Thừa nhận khoảng cách về độ chính xác (ví dụ: MAN 56.8 MAE, PET 49.3 MAE) do sự chênh lệch hơn 200 lần về số lượng tham số và năng lực bộ nhớ.
 
-### 5.2. Năm Lập Luận Bẻ Gãy Phản Biện Của Reviewer
-1. **So sánh với Large Foundation Models (ViT, CLIP):**
-   * *Lập luận:* Chúng tôi giải quyết bài toán Ultra-Lightweight Edge Intelligence ($\le 0.1\text{M}$ params, $\le 0.15\text{ GFLOPs}$). Các mô hình STEERER hay D-CLIP ($>30\text{M}$ params) không thể chạy trên các vi xử lý IoT tiêu thụ điện năng thấp. Trong phân khúc $\le 1\text{M}$ tham số, mô hình thiết lập kỷ lục SOTA mới vượt xa MCNN và MobileCount.
-2. **Hiện tượng No-Neck tốt hơn có Neck trên ShanghaiTech A:**
-   * *Lập luận:* Đây là phát hiện khoa học về giới hạn lấy mẫu Nyquist: dilated convolution làm suy thoái thông tin tần số cao khi mật độ vượt ngưỡng lấy mẫu của lưới đặc trưng. Trên tập dữ liệu phối cảnh sâu (SHB), ASPP vẫn thể hiện vai trò vượt trội rõ rệt.
-3. **Số lượng Epoch 800 trên JHU so với 1,500 trên SHA:**
-   * *Lập luận:* Số bước cập nhật gradient thực tế: JHU 800 epoch tương đương $227,200$ bước cập nhật (gấp 4 lần so với 1,500 epoch của SHA là $56,250$ bước). Dữ liệu log chứng minh mô hình đã bão hòa tại epoch 525.
-4. **Bản chất Toán học của Radon-OT:**
-   * *Lập luận:* Dựa trên định lý Sliced Wasserstein Distance, tích phân các bài toán OT 1D dọc theo các góc chiếu Radon tương đương với khoảng cách Wasserstein 2D và có nghiệm giải tích dạng đóng $O(K \log K)$, giải quyết được rào cản tính toán mà vẫn bảo đảm tính chất bảo toàn khối lượng.
-5. **Bias âm trên các tập dữ liệu cực lớn:**
-   * *Lập luận:* Sự suy hao tự nhiên đối với các cá thể bị che khuất nặng (chỉ chiếm $1-2$ pixel) trên mạng nén 104k tham số. Việc đưa vào Negative-Binomial loss đã giảm mức độ under-counting hơn 300% so với không dùng count loss.
+### 5.2. Lập Luận Phản Biện Sẵn Sàng Trước Reviewer
+1. **Về việc không đạt MAE 50 như các mô hình SOTA nặng:**
+   * *Trả lời:* Mục tiêu nghiên cứu được đặt trong điều kiện biên nghiêm ngặt: ngân sách $\le 104\text{k}$ tham số và hoàn toàn không sử dụng mạng Teacher chưng cất tri thức (0% KD). Trong văn hiến, không có bất kỳ mô hình độc lập nào dưới $1\text{M}$ tham số đạt được ngưỡng MAE 50.
+2. **Về hiện tượng No-Neck tốt hơn Flagship trên ShanghaiTech A:**
+   * *Trả lời:* Đây là phân tích kỹ thuật khách quan về hiện tượng răng cưa không gian (comb-aliasing) của dilated convolutions trên lưới điểm dày đặc, giải thích rõ sự cần thiết phải chọn lựa cấu trúc cổ mạng dựa trên đặc tính phân bố không gian của từng tập dữ liệu.
+3. **Về số lượng 800 epoch trên JHU:**
+   * *Trả lời:* Với 2,272 ảnh huấn luyện, 800 epoch tương đương $227,200$ bước cập nhật gradient (gấp hơn 4 lần so với 1,500 epoch trên 300 ảnh của ShanghaiTech). Nhật ký thực nghiệm chứng minh mô hình đã bão hòa và hội tụ ổn định từ epoch 525.

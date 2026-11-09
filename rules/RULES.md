@@ -146,3 +146,17 @@
     1. Đóng góp cải thiện kết quả rõ ràng qua kiểm tra đối chứng đơn biến (single-variable ablation).
     2. Có vai trò toán học / xử lý tín hiệu không thể thay thế.
   - Nếu một thành phần không giúp ích, phải cắt bỏ hoàn toàn khỏi pipeline (loại bỏ cả forward pass lẫn loss), không để lại mã nguồn chết hay sử dụng các cờ cấu hình tạm bợ.
+
+---
+
+## 17. Lệnh Cấm Tuyệt Đối Lạm Dụng Thuật Ngữ "Pareto" Trong Problem Statement, RO và RQ (STRICT BAN ON PARETO JARGON IN CORE RESEARCH FORMULATIONS)
+- **BẢN CHẤT HỌC THUẬT**: 
+  - Bài toán Crowd Counting KHÔNG PHẢI là bài toán Pareto. Về mặt giải tích và thị giác máy tính, đây là bài toán nghịch đảo khôi phục độ đo Radon liên tục (Constrained Radon Measure Recovery) từ quan sát ảnh 2D bị suy thoái: $b = \mathcal{A}_\pi y + \eta$ dưới ràng buộc ngân sách tham số cực tiểu ($\le 104\text{k}$ params, 0% KD).
+  - Quá trình tối ưu bằng AdamW/SGD cực tiểu hóa một hàm mất mát vô hướng duy nhất $\mathcal{L}_{\text{total}}$, hoàn toàn không phải thuật toán tối ưu đa mục tiêu tiến hóa Pareto (như NSGA-II hay MOEA/D).
+- **LỆNH CẤM BẮT BUỘC**:
+  - TUYỆT ĐỐI CẤM đưa các chữ "Pareto", "đường biên Pareto", "tối ưu Pareto", "vị trí Pareto độc tôn" vào: Tiêu đề (Title), Tóm tắt (Abstract), Tuyên bố bài toán (Problem Statement), Mục tiêu nghiên cứu (RO), Câu hỏi nghiên cứu (RQ), và các mô hình toán học giải tích.
+  - CẤM mọi hình thức thổi phồng (hype) bằng các cụm từ sáo rỗng ("tỷ lệ nén khủng khiếp", "đè bẹp SOTA", "đột phá mang tính nền tảng"). Phải trung thực tuyệt đối với các điểm nghẽn kỹ thuật thực tế (bias âm -19 đến -24 người, sương mù nền chiếm 64.4% mass, Dense MAE vọt lên 127.67).
+- **VỊ TRÍ DUY NHẤT ĐƯỢC PHÉP XUẤT HIỆN**:
+  - Thuật ngữ "Đường biên Pareto" (Pareto frontier) CHỈ ĐƯỢC PHÉP xuất hiện duy nhất ở Chương "Thực nghiệm & Thảo luận" (Experiments & Discussion) dưới dạng một biểu đồ phân tán hậu nghiệm (Post-hoc Benchmarking Scatter Plot: MAE vs Params/FLOPs) để minh họa mối quan hệ đánh đổi thực nghiệm giữa độ chính xác và tài nguyên phần cứng.
+
+
