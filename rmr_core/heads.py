@@ -16,7 +16,7 @@ _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(_M0_INIT) - 1.0)  # ≈ -4.1422
 
 
 from .density_activation import (
-    _apply_curvature, _density_activate, _pool_local_density, _smooth_floor, _softplus_inverse,
+    _apply_curvature, _compact_c1_inverse, _density_activate, _pool_local_density, _smooth_floor, _softplus_inverse,
 )
 
 _CURVATURE_ALPHA_INIT: float = -8.0
@@ -48,6 +48,7 @@ class FineMeasureHead(nn.Module):
         head_activation: str = "softplus",
         head_blocks: int = 1,
         icnr_init: bool = False,
+        pre_shuffle_kernel_size: int = 1,
     ):
         super().__init__()
         self.head_activation = str(head_activation).lower()
@@ -59,10 +60,11 @@ class FineMeasureHead(nn.Module):
         for _ in range(max(1, int(head_blocks))):
             blocks.append(ConvGNAct(width, width, 3, groups=width))
             blocks.append(ConvGNAct(width, width, 1))
-        blocks.append(nn.Conv2d(width, out_channels, 1))
+        pre_k = max(1, int(pre_shuffle_kernel_size))
+        blocks.append(nn.Conv2d(width, out_channels, kernel_size=pre_k, padding=pre_k // 2))
         self.body = nn.Sequential(*blocks)
         final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
-        nn.init.normal_(final_conv.weight, std=0.01)
+        nn.init.normal_(final_conv.weight, std=0.01 / float(pre_k))
         m0 = math.log1p(math.exp(float(init_bias)))
 
         if self.subpixel_stride2:
@@ -75,7 +77,7 @@ class FineMeasureHead(nn.Module):
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0 / 4.0)
             elif self.head_activation == "compact_c1":
-                nn.init.constant_(final_conv.bias, math.sqrt(m0 / 4.0))
+                nn.init.constant_(final_conv.bias, _compact_c1_inverse(m0 / 4.0, self.floor_tau))
             else:
                 init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
                 nn.init.constant_(final_conv.bias, init_bias_stride2)
@@ -84,7 +86,7 @@ class FineMeasureHead(nn.Module):
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0)
             elif self.head_activation == "compact_c1":
-                nn.init.constant_(final_conv.bias, math.sqrt(m0))
+                nn.init.constant_(final_conv.bias, _compact_c1_inverse(m0, self.floor_tau))
             else:
                 eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
                 nn.init.constant_(final_conv.bias, eff_bias)  # type: ignore[arg-type]
@@ -254,7 +256,7 @@ class ScaleConditionedFineHead(nn.Module):
         if self.head_activation == "relu":
             eff_bias = float(m0)
         elif self.head_activation == "compact_c1":
-            eff_bias = math.sqrt(m0)
+            eff_bias = _compact_c1_inverse(m0, self.floor_tau)
         else:
             eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
         nn.init.constant_(self.out_conv.bias, eff_bias)  # type: ignore[arg-type]
@@ -330,44 +332,25 @@ class ScaleConditionedFineHead(nn.Module):
         )
 
     def forward_logits(
-        self,
-        f: tuple[torch.Tensor, ...] | torch.Tensor,
-        scale_weights: torch.Tensor | None = None,
+        self, f: tuple[torch.Tensor, ...] | torch.Tensor, scale_weights: torch.Tensor | None = None
     ) -> torch.Tensor:
         """Compute raw pre-activation logit field z0 modulated by scale routing probabilities."""
-        if isinstance(f, tuple):
-            f = f[0]
+        f = f[0] if isinstance(f, tuple) else f
         h = self.pw(self.dw(f))
-        if scale_weights is not None:
-            if scale_weights.shape[-2:] != h.shape[-2:]:
-                scale_weights = F.interpolate(
-                    scale_weights, size=h.shape[-2:], mode="bilinear", align_corners=False
-                )
-            if scale_weights.shape[1] != self.num_scales:
-                if scale_weights.shape[1] > self.num_scales:
-                    sw = scale_weights[:, :self.num_scales, :, :]
-                else:
-                    pad_k = self.num_scales - scale_weights.shape[1]
-                    sw = F.pad(scale_weights, (0, 0, 0, 0, 0, pad_k), mode="constant", value=0.0)
-            else:
-                sw = scale_weights
-            gamma = 1.0 + self.scale_film(sw)
-            h_mod = h * gamma
-            h_joint = torch.cat([h_mod, sw], dim=1)
-        else:
-            pi_zeros = torch.zeros(
-                h.shape[0], self.num_scales, h.shape[2], h.shape[3], device=h.device, dtype=h.dtype
-            )
-            h_joint = torch.cat([h, pi_zeros], dim=1)
-        return self.out_conv(h_joint)
+        if scale_weights is None:
+            sw = torch.zeros(h.shape[0], self.num_scales, h.shape[2], h.shape[3], device=h.device, dtype=h.dtype)
+            return self.out_conv(torch.cat([h, sw], dim=1))
+        sw = F.interpolate(scale_weights, size=h.shape[-2:], mode="bilinear", align_corners=False) if scale_weights.shape[-2:] != h.shape[-2:] else scale_weights
+        if sw.shape[1] > self.num_scales:
+            sw = sw[:, : self.num_scales, :, :]
+        elif sw.shape[1] < self.num_scales:
+            sw = F.pad(sw, (0, 0, 0, 0, 0, self.num_scales - sw.shape[1]), mode="constant", value=0.0)
+        return self.out_conv(torch.cat([h * (1.0 + self.scale_film(sw)), sw], dim=1))
 
     def forward(
-        self,
-        f: tuple[torch.Tensor, ...] | torch.Tensor,
-        scale_weights: torch.Tensor | None = None,
+        self, f: tuple[torch.Tensor, ...] | torch.Tensor, scale_weights: torch.Tensor | None = None
     ) -> torch.Tensor:
-        z = self.forward_logits(f, scale_weights=scale_weights)
-        return self.activate(z, scale_weights=scale_weights)
+        return self.activate(self.forward_logits(f, scale_weights=scale_weights), scale_weights=scale_weights)
 
 
 def build_fine_head(
@@ -398,7 +381,8 @@ def build_fine_head(
     use_film: bool = True,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
-    if str(head_type).lower() in ("residual_dilated", "first_principles", "rd_finehead"):
+    head_type_l = str(head_type).lower().strip()
+    if head_type_l in ("residual_dilated", "first_principles", "rd_finehead"):
         from .fine_head import ResidualDilatedFineHead
         return ResidualDilatedFineHead(
             width=width,
@@ -411,6 +395,11 @@ def build_fine_head(
             temp_softplus=temp_softplus,
             floor_tau=floor_tau,
             head_activation=head_activation,
+        )
+    if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3"):
+        raise ValueError(
+            f"Unsupported head_type: '{head_type}'. "
+            "Must be 'standard', 'residual_dilated', 'first_principles', 'rd_finehead', 'dw_subpixel', or 'subpixel_k3'."
         )
     kw = {
         "width": width,
@@ -431,11 +420,14 @@ def build_fine_head(
     }
     if scale_conditioned_fine_head:
         return ScaleConditionedFineHead(num_scales=num_scales, **kw)
+    is_dw_subpixel = head_type_l in ("dw_subpixel", "subpixel_k3")
     return FineMeasureHead(
         scale_conditioned=scale_conditioned_prior,
         num_scales=num_scales,
         subpixel_stride2=subpixel_stride2,
         scale_prior_boost=scale_prior_boost,
         head_blocks=head_blocks,
+        icnr_init=is_dw_subpixel,
+        pre_shuffle_kernel_size=max(3, int(subpixel_kernel_size)) if is_dw_subpixel else 1,
         **kw,
     )

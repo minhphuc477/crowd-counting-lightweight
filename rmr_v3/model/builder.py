@@ -9,6 +9,8 @@ from rmr_core.necks import (
     ASPPLiteFPNNeck,
     BiFPNLiteNeck,
     HDCLiteFPNNeck,
+    HighResPConvFPNNeck,
+    PAFPNBiNormNeck,
     RLKHDCFPNNeck,
     RepASPPLiteNeck,
     RepWeightedFPNNeck,
@@ -77,11 +79,22 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             width=cfg.feature_width,
             use_gap=cfg.use_aspp_gap,
         )
+    if cfg.neck_type == "pafpn_binorm":
+        return PAFPNBiNormNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+        )
+    if cfg.neck_type == "pconv_fpn":
+        return HighResPConvFPNNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+        )
     if cfg.neck_type == "additive":
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
         f"Unsupported neck_type: '{cfg.neck_type}'. "
-        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rlk_hdc', 'rep_weighted', 'rep_aspp_lite', or 'bifpn_lite'."
+        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rlk_hdc', 'rep_weighted', "
+        "'rep_aspp_lite', 'bifpn_lite', 'pafpn_binorm', or 'pconv_fpn'."
     )
 
 

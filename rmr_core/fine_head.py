@@ -19,7 +19,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .density_activation import _smooth_floor, _softplus_inverse
+from .density_activation import (
+    _compact_c1_inverse,
+    _smooth_floor,
+    _softplus_inverse,
+    compact_c1_activation,
+)
 from .necks.blocks import _gn
 
 _FINE_HEAD_BIAS_INIT: float = math.log(math.exp(0.015763) - 1.0)  # ≈ -4.1422
@@ -120,7 +125,7 @@ class ResidualDilatedFineHead(nn.Module):
             padding=pad,
             bias=True,
         )
-        nn.init.normal_(self.final_conv.weight, std=0.01)
+        nn.init.normal_(self.final_conv.weight, std=0.01 / float(max(1, int(subpixel_kernel_size))))
 
         # Exact prior calibration: m0 = log1p(exp(init_bias))
         m0 = math.log1p(math.exp(float(init_bias)))
@@ -133,6 +138,8 @@ class ResidualDilatedFineHead(nn.Module):
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
             if self.head_activation == "relu":
                 nn.init.constant_(self.final_conv.bias, m0 / 4.0)
+            elif self.head_activation == "compact_c1":
+                nn.init.constant_(self.final_conv.bias, _compact_c1_inverse(m0 / 4.0, self.floor_tau))
             else:
                 bias_s2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
                 nn.init.constant_(self.final_conv.bias, bias_s2)
@@ -140,12 +147,14 @@ class ResidualDilatedFineHead(nn.Module):
             self.pixel_shuffle = None
             if self.head_activation == "relu":
                 nn.init.constant_(self.final_conv.bias, m0)
+            elif self.head_activation == "compact_c1":
+                nn.init.constant_(self.final_conv.bias, _compact_c1_inverse(m0, self.floor_tau))
             else:
                 eff_b = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
                 nn.init.constant_(self.final_conv.bias, eff_b)
 
         # 4. Temperature Softplus Parameter
-        if self.temp_softplus:
+        if self.temp_softplus and self.head_activation not in ("relu", "compact_c1"):
             self.tau = nn.Parameter(torch.ones(1))
 
     @property
@@ -209,6 +218,9 @@ class ResidualDilatedFineHead(nn.Module):
         """Activate raw logit field into continuous non-negative Radon measure field."""
         if self.head_activation == "relu":
             return F.relu(z)
+        if self.head_activation == "compact_c1":
+            tau_val = float(self.floor_tau) if self.floor_tau > 0.0 else 0.5
+            return compact_c1_activation(z, tau=tau_val)
 
         if self.temp_softplus and hasattr(self, "tau"):
             tau_clamped = self.tau.clamp_min(0.1)

@@ -21,6 +21,13 @@ from .blocks import (
 from .hdc import (
     HDCLiteFPNNeck,
 )
+from .pafpn import (
+    ConvexFastNormalizedFusion,
+    HighResPConvFPNNeck,
+    PAFPNBiNormNeck,
+    PConvBlock,
+    StripMultiKernelContext,
+)
 from .rlk_hdc import (
     RLKHDCFPNNeck,
     StaticFastNormalizedFusion,
@@ -39,15 +46,20 @@ __all__ = [
     "AdditiveFusion",
     "BiFPNLiteNeck",
     "ConvGNAct",
+    "ConvexFastNormalizedFusion",
     "CoordinateAttention",
     "DSResidual",
     "DepthwiseDilated",
     "HDCLiteFPNNeck",
+    "HighResPConvFPNNeck",
+    "PAFPNBiNormNeck",
+    "PConvBlock",
     "RLKHDCFPNNeck",
     "RepASPPLiteNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
     "StaticFastNormalizedFusion",
+    "StripMultiKernelContext",
     "TinyIR",
     "_gn",
 ]

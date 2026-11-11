@@ -141,3 +141,12 @@ def _softplus_inverse(y: float) -> float:
     """Exact inverse of softplus: softplus_inv(y) = log(expm1(y))."""
     y_val = max(float(y), 1e-8)
     return math.log(math.expm1(y_val))
+
+
+def _compact_c1_inverse(y: float, floor_tau: float = 0.0) -> float:
+    """Exact inverse of compact_c1_activation for calibrated Step-0 bias initialization."""
+    tau_eff = float(floor_tau) if float(floor_tau) > 0.0 else 0.5
+    y_val = max(float(y), 0.0)
+    if y_val <= 0.5 * tau_eff:
+        return math.sqrt(2.0 * tau_eff * y_val)
+    return y_val + 0.5 * tau_eff

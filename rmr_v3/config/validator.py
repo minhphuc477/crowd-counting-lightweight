@@ -65,6 +65,20 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             gap_m = str(m_cfg["aspp_gap_mode"]).lower().strip()
             if gap_m not in ("add", "gate"):
                 raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got {m_cfg['aspp_gap_mode']!r}")
+        if "neck_type" in m_cfg and m_cfg["neck_type"] is not None:
+            nt = str(m_cfg["neck_type"]).strip()
+            valid_necks = (
+                "additive", "aspp_lite", "hdc_lite", "rlk_hdc",
+                "rep_weighted", "rep_aspp_lite", "bifpn_lite",
+                "pafpn_binorm", "pconv_fpn",
+            )
+            if nt not in valid_necks:
+                raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")
+        if "head_type" in m_cfg and m_cfg["head_type"] is not None:
+            ht = str(m_cfg["head_type"]).lower().strip()
+            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3")
+            if ht not in valid_heads:
+                raise ValueError(f"head_type must be one of {valid_heads}, got {m_cfg['head_type']!r}")
         if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
             fct = str(m_cfg["fine_carrier_type"]).lower().strip()
             if fct not in ("standard", "mpc"):
