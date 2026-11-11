@@ -326,5 +326,5 @@ CRITICAL_TRAIN_DEFAULTS: dict[str, Any] = {
     "solver_ramp_epochs": 5,
     "warmup_epochs": 5,
     "freeze_bn_after_epoch": -1,
-    "min_lr_ratio": 0.01,
+    "min_lr_ratio": 0.05,
 }

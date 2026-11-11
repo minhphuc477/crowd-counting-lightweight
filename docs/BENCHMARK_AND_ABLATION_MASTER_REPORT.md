@@ -171,7 +171,7 @@ Toàn bộ ma trận thí nghiệm trên SHB đã hoàn tất và được pull 
 
 > **Điểm nhấn Khoa học QNRF**:
 > - Đạt **MAE 109.80, RMSE 189.08** hoàn toàn **From-Scratch** và **MAE 105.36, RMSE 174.94** với **Pretrained** (`0.104M` params).
-> - Thấp hơn MAE công bố của CSRNet ($127.0$) và Composition Loss ($132.0$), tiệm cận Bayesian Loss VGG-19 ($107.5$, $21.5\text{M}$ params). Lưu ý biến thể `c5_no_neck` From-Scratch đạt **108.42 MAE**; cặp đối chứng Pretrained No-Neck và `Radon-OT` chuẩn hóa chiều dài chiếu nằm trong `configs/benchmarks/remediation/`.
+> - Thấp hơn MAE công bố của CSRNet ($127.0$) và Composition Loss ($132.0$), tiệm cận Bayesian Loss VGG-19 ($107.5$, $21.5\text{M}$ params). Lưu ý biến thể `c5_no_neck` From-Scratch đạt **108.42 MAE** nhưng dùng `ema_decay: 0.999` và `warmup_epochs: 10` (khác `a1` không EMA, `warmup: 15`) nên có confounder; cặp đối chứng sạch Pretrained No-Neck (`R2`) và `Radon-OT` chuẩn hóa chiều dài chiếu (`R8`) nằm trong `configs/benchmarks/remediation/`.
 
 ---
 

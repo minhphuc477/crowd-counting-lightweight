@@ -52,7 +52,7 @@ loss:
   bayesian_sigma_max: 4.0
   bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
-  lambda_radon_ot: 1.5
+  lambda_radon_ot: 0.85
   radon_ot_projections: 4
   radon_ot_norm_ref: 100.0
   dm_target: dual

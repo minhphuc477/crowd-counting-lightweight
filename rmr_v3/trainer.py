@@ -234,7 +234,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     grad_accum = max(1, int(cfg.get("train", {}).get("gradient_accumulation_steps", 1)))
     eval_every = int(cfg.get("train", {}).get("eval_every", 5))
     density_bins = tuple(float(x) for x in cfg.get("eval", {}).get("density_bins", [100.0, 500.0]))
-    patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", True) else 0
+    patience = int(cfg.get("train", {}).get("patience", 0)) if cfg.get("train", {}).get("early_stopping", False) else 0
 
     solver_warmup_epochs = int(cfg.get("train", {}).get("solver_warmup_epochs", 5))
     solver_ramp_epochs = int(cfg.get("train", {}).get("solver_ramp_epochs", 5))
