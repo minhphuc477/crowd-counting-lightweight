@@ -76,6 +76,7 @@ ALLOWED_MODEL_KEYS = {
     "mcbpro_soft_margin_gating", "mcbpro_dense_clamp_min", "pc_tau_noise", "pc_tau_peak",
     "ratio_clamp_min", "dsr_fw_power", "dsr_fw_unit_mass", "dsr_fw_tau_z_floor",
     "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
+    "enable_regional_head",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -115,7 +116,7 @@ ALLOWED_LOSS_KEYS = {
     # FIDT (H1) & ChfL (H2) additions
     "fidt_k", "fidt_loss_type", "fidt_loss_mode", "fidt_normalize_by_count",
     "use_chfl", "use_chfl_loss", "lambda_chfl", "chfl_canonical", "chfl_step", "chfl_tik", "chfl_bandwidth",
-    "chfl_num_frequencies", "chfl_omega_max", "lambda_radon_ot", "radon_ot_projections", "radon_ot_norm_ref",
+    "chfl_num_frequencies", "chfl_omega_max", "lambda_radon_ot", "radon_ot_projections", "radon_ot_norm_ref", "radon_ot_scale_by_length",
     # DM block resolution and concentration scaling
     "dm_block_px", "auto_scale_kappa",
     "dm_norm_mode", "dm_ref_count",
@@ -266,6 +267,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
         "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up", "dsr_fw_power", "dsr_fw_unit_mass",
         "dsr_fw_tau_z_floor", "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
+        "enable_regional_head",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell",
@@ -286,6 +288,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dense_loss_thresh", "dense_loss_norm", "dense_loss_alpha", "dense_loss_max_boost",
         "bayesian_sigma", "bayesian_background_ratio", "ot_reg", "ot_num_iters", "dm_strict",
         "bayesian_norm_mode", "bayesian_adaptive_sigma", "adaptive_sigma",
+        "radon_ot_scale_by_length",
     ],
     "train": [
         "lr",

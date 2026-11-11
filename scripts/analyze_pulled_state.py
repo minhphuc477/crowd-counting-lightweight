@@ -238,6 +238,12 @@ def main() -> None:
         runs = [read_run(p) for p in sorted((_REPO_ROOT / f"configs/benchmarks/ablations_{ds}").glob("*.yaml"))]
         print_run_table(f"ABLATIONS - {ds.upper()}", runs)
 
+    rem_dir = _REPO_ROOT / "configs/benchmarks/remediation"
+    if rem_dir.is_dir():
+        rem_runs = [read_run(p) for p in sorted(rem_dir.glob("*.yaml"))]
+        if rem_runs:
+            print_run_table("REMEDIATION SUITE", rem_runs)
+
     print("\n=== EXISTING RESULTS JSONS SUMMARY ===")
     for jname in ["localization_pr_sweep.json", "scale_invariance_sweep.json", "image_corruptions_sweep.json", "annotation_noise_sweep.json"]:
         jp = _REPO_ROOT / "results" / jname

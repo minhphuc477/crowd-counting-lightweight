@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -24,7 +25,23 @@ def extract_regional_evidence(
     grid_h: int,
 ) -> dict[str, Any]:
     """Extract probabilistic regional evidence (count, dispersion, reliability weights)."""
-    regional = region_head((p4, p8, p16), regions)
+    if region_head is None:
+        bsz = int(p4.shape[0])
+        num_regions = int(regions.area.shape[0])
+        zeros = torch.zeros((bsz, 1, num_regions), device=p4.device, dtype=torch.float32)
+        disp_init = float(cfg.dispersion_init)
+        regional = {
+            "mu_count": zeros,
+            "rate": zeros,
+            "dispersion": torch.full(
+                (bsz, 1, num_regions), disp_init, device=p4.device, dtype=torch.float32
+            ),
+            "log_dispersion": torch.full(
+                (bsz, 1, num_regions), math.log(max(disp_init, 1e-8)), device=p4.device, dtype=torch.float32
+            ),
+        }
+    else:
+        regional = region_head((p4, p8, p16), regions)
 
     mu_count = regional["mu_count"]
     dispersion = regional["dispersion"]

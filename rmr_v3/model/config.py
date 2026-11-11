@@ -97,6 +97,7 @@ class RMRv3Config:
     native_scale_pooling: bool = False
     regional_feature_stats: str = "mean"
     region_head_hidden: int = 48
+    enable_regional_head: bool = True
 
     # Hurdle NB head
     hurdle_head: bool = False

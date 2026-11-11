@@ -1,27 +1,32 @@
-# BẢNG TỔNG HỢP KIẾN TRÚC, THỰC NGHIỆM VÀ KẾT QUẢ SOTA MÔ HÌNH 104K
-*(Comprehensive Master Specification: Architecture, Mathematical Objectives, and Empirical Results)*
+# BẢNG TỔNG HỢP KIẾN TRÚC, THỰC NGHIỆM VÀ KẾT QUẢ MÔ HÌNH 104K
+*(Architecture, Mathematical Objectives, and Verified Benchmark Records)*
+
+> [!WARNING]
+> **Ghi chú Kiểm toán Nguồn Dữ liệu (Audit & Provenance Addendum):**
+> * Các bảng chuẩn quốc tế đã kiểm chứng ở nhánh `RMR` nằm tại `runs/benchmarks/` (xem bảng tổng hợp cập nhật trong [`SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`](file:///f:/lightweightcrcn/docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md)): SHA Pretrained **67.57** (seed42) / **69.46±1.66** (3-seed), SHA Scratch **74.29**, SHA No-Neck Scratch **66.24**, SHB Pretrained **10.19** / Scratch **10.49** / `bg005` **9.41**, QNRF Pretrained **105.36** / Scratch **109.80**, JHU Val Pretrained **61.72** / Test **76.58**.
+> * **Mục 4.1 – 4.3 bên dưới** lưu giữ kết quả từ thư mục lịch sử `runs/fairness_study/` và `v69/v70` (đánh giá TTA trước khi chuẩn hóa `configs/benchmarks/`), không phải số liệu Direct Flagship mới nhất trên `runs/benchmarks/`. Đồng thời thông số văn hiến gốc trên SHA của **LSANet** là `66.1` (`200k`), **Lw-Count** là `69.7` (`71k`), và **TinyCount (non-KD)** là `78.2` (`60k`), KHÔNG phải `100.3` / `83.9` như trong bảng lưu trữ cũ.
 
 ---
 
 ## 1. TỔNG QUAN VÀ ĐỊNH VỊ KHOA HỌC
 
-Tài liệu này đóng vai trò là **Hồ sơ Thực nghiệm & Kỹ thuật Gốc (Single Source of Truth)** lưu trữ toàn bộ thông số kiến trúc, công thức toán học, thiết kế thí nghiệm và kết quả định lượng của mô hình đếm đám đông siêu nhẹ **104k tham số** trên tập dữ liệu chuẩn **ShanghaiTech Part A** (300 ảnh train, 182 ảnh test).
+Tài liệu này tổng hợp đặc tả kiến trúc chuẩn `104,006` tham số (Direct Flagship, 0% KD) và ghi nhận tách biệt kết quả lịch sử (`runs/fairness_study/`, Mục 4.1–4.3) với kết quả benchmark chuẩn (`runs/benchmarks/`, Mục 4.4–4.5 & `SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`).
 
 ```mermaid
 flowchart LR
-    subgraph Architecture ["Kiến trúc Siêu nhẹ (104k Params)"]
-        A["MobileNetV4-Small Backbone<br/>(87,568 params, 84.2%)"] --> B["ASPP-Lite Multi-scale Neck<br/>(10,784 params, 10.4%)"]
-        B --> C["Subpixel Stride-2 Fine Head<br/>(1,572 params, 1.5%)"]
-        B -.-> D["Regional Evidence Head<br/>(3,820 params, 3.7%)"]
+    subgraph Architecture ["Kiến trúc RMR Direct (<= 104,006 Params)"]
+        A["MobileNetV4-Small-050<br/>Backbone"] --> B["ASPP-Lite [2,4,8]+GAP<br/>hoặc No-Neck DW 3x3 d=1 (102,246)"]
+        B --> C["Subpixel Stride-2 Fine Head<br/>(Total Direct: 104,006 | Pure-Direct: 99,924)"]
+        B -.-> D["Regional Evidence Head<br/>(4,082 params; idle khi Direct)"]
     end
-    subgraph Loss ["Hàm Mục tiêu Tối ưu"]
+    subgraph Loss ["Hàm Mục tiêu Canonical (runs/benchmarks)"]
         C --> E["1D Sliced Radon-OT (0.85)<br/>+ Dual Bayesian (0.15)"]
-        D -.-> F["Regional NB Loss (0.5)"]
+        D -.-> F["Regional NB (0.0 trong Direct)"]
         C --> G["Global NB Count Loss (0.5)"]
     end
-    subgraph Results ["Đột phá Thực nghiệm"]
-        E & F & G --> H["From-Scratch SOTA: 70.50 MAE<br/>(Đè bẹp LSANet 100.3 & TinyCount 83.9)"]
-        E & F & G --> I["Pretrained Flagship: 65.62 MAE<br/>(Vượt xa Gaussian MSE 75.53)"]
+    subgraph Results ["Kết quả SHA trên runs/benchmarks (No TTA)"]
+        E & F & G --> H["Scratch ASPP: 74.29 MAE<br/>No-Neck Scratch (102k): 66.24 MAE"]
+        E & F & G --> I["Pretrained s42: 67.57 MAE<br/>3-Seed Mean: 69.46 +/- 1.66"]
     end
 ```
 
@@ -29,14 +34,12 @@ flowchart LR
 
 ## 2. ĐẶC TẢ KIẾN TRÚC MÔ HÌNH 104K (ARCHITECTURE SPECIFICATION)
 
-| Khối thành phần | Chi tiết Kỹ thuật & Cấu hình | Số lượng Tham số | Tỉ lệ (%) | Vai trò & Đóng góp |
-| :--- | :--- | :---: | :---: | :--- |
-| **Backbone** | `MobileNetV4-Conv-Small-050` (C4: 32ch, C8: 32ch, C16: 64ch) | 87,568 | 84.2% | Trích xuất đặc trưng kim tự tháp đa tầng với chi phí tối thiểu |
-| **Neck** | `ASPPLiteFPNNeck` (Dilations: [2, 4, 8] + Global Avg Pool, 32ch) | 10,784 | 10.4% | Mở rộng trường tiếp nhận (Receptive Field) bắt đầu người đa kích cỡ |
-| **Fine Head** | Subpixel Convolution Stride-2 (32ch $\to$ 4ch Subpixel $\to$ 1ch Carrier) | 1,572 | 1.5% | Dự đoán trường mật độ liên tục ở độ phân giải cao ($256 \times 256$) |
-| **Evidence Head** *(Tuỳ chọn ở Proposed)* | Multi-scale Regional Head (Vùng 32, 64, 128px; Hidden: 46ch) | 3,820 | 3.7% | Dự đoán tham số phân phối đếm Negative Binomial theo từng vùng |
-| **Cơ chế Suy luận** | **Direct Feedforward** (`enable_solver: false`, $y = y_0$) | **0** | **0.0%** | Loại bỏ 100% solver SIRT lặp, 0 artifact chiếu mờ, tăng FPS |
-| **TỔNG CỘNG** | **Bản Direct Feedforward:**<br>**Bản Proposed (có Regional Head):**<br>*(Ngân sách trần tối đa cho phép: $\le 104,441$)* | **104,006**<br>**104,227** | **100.0%** | **Thỏa mãn nghiêm ngặt trần tham số quốc tế** |
+| Khối thành phần | Chi tiết Kỹ thuật & Cấu hình | Tham số (Tất cả / Trạng thái) | Vai trò & Lưu ý Kiểm toán |
+| :--- | :--- | :---: | :--- |
+| **Backbone + FPN + Subpixel Fine Head + ASPP** | `MobileNetV4-Conv-Small-050` + `ASPPLiteFPNNeck` (`[2,4,8]` + GAP) + Subpixel Stride-2 | **99,924** | Lõi Direct hoạt động thực tế (`enable_regional_head: false` trong `exp_sha_direct_pure_99k`) |
+| **ASPP vs No-Neck delta** | Thay ASPP bằng `DW 3x3 d=1` single-scale fusion (`use_aspp_gap: false`) | **-1,760** (**102,246** tổng khi giữ head) | Giảm aliasing ở mật độ siêu dày SHA/JHU (`66.24` SHA Scratch, `59.65` JHU Scratch) |
+| **Regional Evidence Head** | Multi-scale Regional Head (`region_head_hidden: 48`) | **4,082** | Idle trong Direct Flagship (`enable_solver: false`, `lambda_region_nb: 0.0`); chỉ dùng nếu bật solver `b1` |
+| **TỔNG CỘNG** | **Canonical Direct (`exp_*_direct_*_104k`):**<br>**No-Neck (`102k`):**<br>**Pure-Direct (`99k`, `enable_regional_head=false`):** | **104,006**<br>**102,246**<br>**99,924** | Tất cả đo trực tiếp từ `RMRv3`; `FlopCounterMode @ 512x512`: `0.6547` / `0.6536` / `0.6449` GFLOPs |
 
 ---
 
@@ -72,28 +75,26 @@ $$\mathcal{L}_{\text{Count-NB}} = - \log \Gamma(C + r) + \log \Gamma(r) + \log \
 
 ---
 
-## 4. BẢNG KẾT QUẢ THỰC NGHIỆM HOÀN CHỈNH (COMPREHENSIVE RESULTS)
+## 4. BẢNG KẾT QUẢ THỰC NGHIỆM
 
-### 4.1. ĐƯỜNG ĐUA 1: FROM-SCRATCH (0% ImageNet, Đối đầu LSANet & TinyCount)
-*Tất cả mô hình đều khởi tạo trọng số ngẫu nhiên 100%, không dùng bất kỳ dữ liệu ngoài nào:*
+### 4.1. [LỊCH SỬ / LEGACY] `runs/fairness_study/` — SHA From-Scratch (TTA)
+*Lưu ý: Đây là bộ chạy thăm dò cũ dùng đánh giá TTA trên `runs/fairness_study/`; số liệu văn hiến bên dưới được giữ để đối chiếu lịch sử (số liệu tác giả gốc của LSANet là `66.1`, TinyCount non-KD là `78.2`). Số liệu canonical hiện hành nằm tại `runs/benchmarks/`.*
 
-| Mô hình | Số tham số | Hàm Loss & Kỹ thuật | Test MAE (No TTA) | Test MAE (TTA) | Test RMSE | Đánh giá vị thế khoa học |
+| Mô hình | Số tham số | Hàm Loss & Kỹ thuật | Test MAE (No TTA) | Test MAE (TTA) | Test RMSE | Ghi chú Kiểm toán |
 | :--- | :---: | :--- | :---: | :---: | :---: | :--- |
-| **LSANet** *(IEEE Access)* | 108k | Multi-Scale MSE | 100.30 | — | 148.60 | Baseline SOTA From-Scratch |
-| **TinyCount** *(ICCVW)* | 100k | Progressive DM MSE | 83.90 | — | 138.20 | Baseline SOTA From-Scratch |
-| **Ours Scratch MSE Baseline (A2)** | 104k | Canonical Gaussian MSE | 83.08 | **82.90** | 128.35 | Ngang ngửa TinyCount khi cùng dùng MSE |
-| **Ours Proposed Scratch (A1)** | 104k | Bay + Radon + Regional NB | 70.90 | **72.36** | 108.03 | Kỷ lục hội tụ từ Epoch 815 |
-| **Ours Direct Scratch (Champion)** | **104k** | **Pure Dual Bay + Radon-OT** | **71.24** | $\mathbf{70.50}$ | $\mathbf{105.15}$ | **KỶ LỤC SOTA MỚI: Đè bẹp LSANet (-29.8 MAE) & TinyCount (-13.4 MAE)** |
+| **LSANet** *(Neurocomp'22, bản tái cài đặt cũ)* | 108k | Multi-Scale MSE | 100.30 | — | 148.60 | Bài báo gốc công bố `66.1` (`200k`, `14.4G`) |
+| **TinyCount** *(bản tái cài đặt cũ)* | 100k | Progressive DM MSE | 83.90 | — | 138.20 | Bài báo JRTIP'24 công bố `78.2` non-KD (`60k`) |
+| **Ours Scratch MSE Baseline (A2)** | 104k | Canonical Gaussian MSE | 83.08 | **82.90** | 128.35 | TTA trên `fairness_study` |
+| **Ours Proposed Scratch (A1)** | 104k | Bay + Radon + Regional NB | 70.90 | **72.36** | 108.03 | TTA trên `fairness_study` |
+| **Ours Direct Scratch (Legacy `fairness_study`)** | **104k** | **Pure Dual Bay + Radon-OT** | **71.24** | **70.50** | **105.15** | TTA cũ; bản canonical Direct Scratch trên `runs/benchmarks/` đạt **74.29** (No TTA) |
 
-> [!IMPORTANT]
-> **Điểm cốt lõi cho bài báo:**  
-> - Khi dùng cùng hàm loss MSE, mô hình của chúng ta đạt **82.90 MAE**, chứng tỏ kiến trúc ngang hàng với TinyCount (83.9).
-> - Khi đưa **Dual Bayesian + Radon-OT** vào, MAE rơi tự do xuống **70.50** (giảm $-12.4$ điểm). Bằng chứng không thể bác bỏ về sức mạnh của hàm loss mới.
+> [!NOTE]
+> Trong `runs/fairness_study/`, tổ hợp **Dual Bayesian + Radon-OT** cải thiện từ `82.90` xuống `70.50` MAE TTA so với Gaussian MSE cùng quy trình TTA lịch sử; trên `runs/benchmarks/` (No TTA, chuẩn hiện hành), sự khác biệt là `74.29` (Dual Flagship Scratch) so với `74.60` (Gaussian MSE `a4`), do đó `configs/benchmarks/remediation/` bổ sung cặp đối chứng Pretrained và `radon_ot_scale_by_length: true`.
 
 ---
 
-### 4.2. ĐƯỜNG ĐUA 2: PRE-TRAINED IMAGENET (Mốc Flagship $\sim 65$ MAE)
-*Mô hình sử dụng backbone khởi tạo từ ImageNet-1k tiêu chuẩn:*
+### 4.2. [LỊCH SỬ / LEGACY] `runs/v69-v70` — PRE-TRAINED IMAGENET (SHA TTA cũ)
+*Lưu ý: Đây là nhật ký chạy cũ trước khi chuẩn hóa `configs/benchmarks/`. Kết quả canonical Pretrained trên `runs/benchmarks/` là **67.57 MAE** (seed42) và **69.46 ± 1.66 MAE** (3-seed).*
 
 | Mô hình / Biến thể | Cấu hình Backbone & Head | Test MAE (No TTA) | Test MAE (TTA) | Test RMSE | Ghi chú & Trạng thái |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -106,8 +107,8 @@ $$\mathcal{L}_{\text{Count-NB}} = - \log \Gamma(C + r) + \log \Gamma(r) + \log \
 
 ---
 
-### 4.3. MA TRẬN ABLATION STUDY 1500 EPOCHS (Kiểm chứng từng thành phần)
-*Tất cả các thí nghiệm đều chạy trọn vẹn 1500 epochs trên ShanghaiTech Part A:*
+### 4.3. [LỊCH SỬ / LEGACY] MA TRẬN ABLATION STUDY (Kiểm chứng `runs/v69-v70`)
+*Lưu ý: Xem bảng `runs/benchmarks/ablations_sha/` cập nhật trong [`SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`](file:///f:/lightweightcrcn/docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md).*
 
 ```mermaid
 xychart-beta
@@ -147,8 +148,8 @@ Toàn bộ ma trận thí nghiệm trên SHB đã hoàn tất và được pull 
 | `exp_shb_abl_a3_pure_radon_ot` | Pure Radon-OT ($\lambda_{\text{bay}}=0$) | 825 | 13.83 | 22.62 | +4.12 | 4.57 | 10.71 | 24.88 | 19.61 |
 
 > **Điểm nhấn Khoa học SHB**:
-> - **Đánh bại CSRNet (CVPR 2018)**: CSRNet đạt MAE $10.6$ với $16.26\text{M}$ tham số (VGG16). Mô hình của chúng ta đạt **MAE 9.41** với chỉ **$104,006$ tham số** (ít hơn **156 lần**).
-> - **Hiệu ứng phạt nền (B3)**: Giảm `bayesian_background_ratio` từ $0.10 \to 0.05$ giúp cải thiện MAE từ $10.49 \to 9.41$ (giảm $10.3\%$ sai số) do tránh triệt tiêu các đầu người nhỏ trên nền thưa.
+> - **So sánh với CSRNet (CVPR 2018)**: CSRNet đạt MAE $10.6$ với $16.26\text{M}$ tham số (VGG16). Bản **BG Ratio 0.05 (From-Scratch)** đạt **MAE 9.41** với **$104,006$ tham số** (bản Pretrained Direct `bg=0.10` đạt **10.19 MAE**; bản đối chứng Pretrained `bg=0.05` được bổ sung tại `configs/benchmarks/remediation/exp_shb_pretrained_bg005_104k.yaml`).
+> - **Hiệu ứng phạt nền (B3)**: Giảm `bayesian_background_ratio` từ $0.10 \to 0.05$ cải thiện MAE từ $10.49 \to 9.41$ trên From-Scratch.
 > - **Thất bại của Pure Radon-OT (A3)**: Trên bối cảnh đường phố nhiều nền, thiếu neo giữ Bayesian khiến MAE nhảy lên $13.83$.
 
 ---
@@ -165,11 +166,12 @@ Toàn bộ ma trận thí nghiệm trên SHB đã hoàn tất và được pull 
 | CSRNet | CVPR 2018 | 16.26M | ImageNet | 127.0 | 208.5 |
 | TEDNet | CVPR 2019 | 1.63M | ImageNet | 113.0 | 188.0 |
 | Bayesian Loss (BL) | ICCV 2019 | 21.50M | ImageNet | 107.5 | 184.3 |
-| **Mô hình của chúng ta (RMR Flagship)** | **CVPR Target** | **0.104M (104k)** | **0% From-Scratch** | **109.80** | **189.08** |
+| **RMR Flagship (Scratch)** | **`runs/benchmarks`** | **0.104M (104k)** | **0% From-Scratch** | **109.80** | **189.08** |
+| **RMR Direct (Pretrained)** | **`runs/benchmarks`** | **0.104M (104k)** | **ImageNet-1k** | **105.36** | **174.94** |
 
 > **Điểm nhấn Khoa học QNRF**:
-> - Đạt **MAE 109.80, RMSE 189.08** hoàn toàn **From-Scratch (0% ImageNet pretraining)**.
-> - Đè bẹp CSRNet ($127.0$), Composition Loss ($132.0$), tiếp cận sát Bayesian Loss VGG-19 ($107.5$) với số tham số ít hơn **207 lần** ($0.104\text{M}$ vs $21.5\text{M}$) và tiêu thụ VRAM chỉ vài chục KB nhờ phép chiếu Radon-OT 1D.
+> - Đạt **MAE 109.80, RMSE 189.08** hoàn toàn **From-Scratch** và **MAE 105.36, RMSE 174.94** với **Pretrained** (`0.104M` params).
+> - Thấp hơn MAE công bố của CSRNet ($127.0$) và Composition Loss ($132.0$), tiệm cận Bayesian Loss VGG-19 ($107.5$, $21.5\text{M}$ params). Lưu ý biến thể `c5_no_neck` From-Scratch đạt **108.42 MAE**; cặp đối chứng Pretrained No-Neck và `Radon-OT` chuẩn hóa chiều dài chiếu nằm trong `configs/benchmarks/remediation/`.
 
 ---
 

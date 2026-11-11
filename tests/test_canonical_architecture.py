@@ -126,3 +126,31 @@ def test_resolution_invariance():
             assert out.y.shape[-2] == (shape[-2] + 3) // 4
             assert out.y.shape[-1] == (shape[-1] + 3) // 4
             assert out.y.min().item() >= 0.0, "Output density must be non-negative"
+
+
+def test_remediation_schema_flags_and_pure_direct_budget():
+    """Verify enable_regional_head=False and radon_ot_scale_by_length=True contracts."""
+    from rmr_v3.config import validate_v3_config
+    from rmr_v3.losses import compute_rmr_v3_losses
+
+    cfg = load_config("configs/rmr_canonical/rmr_canonical_104k_seed42.yaml")
+    cfg["model"]["enable_regional_head"] = False
+    cfg["model"]["enable_solver"] = False
+    cfg["loss"]["lambda_region_nb"] = 0.0
+    cfg["loss"]["radon_ot_scale_by_length"] = True
+    validate_v3_config(cfg)
+
+    m_cfg = RMRv3Config.from_dict(cfg["model"])
+    assert m_cfg.enable_regional_head is False
+    model = RMRv3(m_cfg)
+    assert model.region_head is None
+    total_params = sum(p.numel() for p in model.parameters())
+    assert 98_000 <= total_params <= 102_000, f"Expected pure direct ~99.9k params, got {total_params}"
+
+    loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
+    assert loss_cfg.radon_ot_scale_by_length is True
+    x = torch.randn(1, 3, 256, 256, requires_grad=True)
+    out = model(x)
+    losses = compute_rmr_v3_losses(out, torch.zeros(1, 1, 64, 64), cfg=loss_cfg, points=[torch.zeros((0, 2))])
+    assert torch.isfinite(losses["total"])
+    losses["total"].backward()

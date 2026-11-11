@@ -58,7 +58,7 @@ class RMRv3(nn.Module):
         )
         self.fusion = build_neck_module(self.encoder.out_channels, cfg)
         self.fine_head = build_fine_carrier_head(cfg)
-        self.region_head = build_regional_evidence_head(cfg)
+        self.region_head = build_regional_evidence_head(cfg) if getattr(cfg, "enable_regional_head", True) else None
         self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
 
         # Dynamic Scale Routing & DiAG (100% Feature-Driven, Zero Coordinate Linspace)
