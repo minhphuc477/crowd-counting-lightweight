@@ -41,6 +41,7 @@ model:
   - 4
   - 8
   use_aspp_gap: true
+  enable_regional_head: false
   enable_solver: false
   solver_mode: direct
   eps: 1.0e-06

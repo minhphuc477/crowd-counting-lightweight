@@ -39,6 +39,7 @@ model:
   aspp_dilations:
   - 1
   use_aspp_gap: false
+  enable_regional_head: false
   enable_solver: false
   solver_mode: direct
   eps: 1.0e-06

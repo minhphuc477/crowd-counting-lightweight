@@ -157,6 +157,45 @@ def test_full_rmrv3_odd_resolution_forward_backward(neck_type: str) -> None:
     assert any(p.grad is not None and p.grad.abs().sum().item() > 0.0 for p in model.fusion.parameters())
 
 
+@pytest.mark.parametrize(
+    ("neck_type", "head_type"),
+    [
+        ("bifpn_lite", "standard"),
+        ("pafpn_binorm", "standard"),
+        ("pconv_fpn", "standard"),
+        ("pafpn_binorm", "dw_subpixel"),
+        ("pafpn_binorm", "residual_dilated"),
+    ],
+)
+def test_direct_mode_zero_dead_parameters(neck_type: str, head_type: str) -> None:
+    """Every trainable parameter in Pure Direct mode must receive non-zero gradient."""
+    cfg = RMRv3Config(
+        backbone_name="mobilenetv4_conv_small_050.e3000_r224_in1k",
+        pretrained=False,
+        feature_width=32,
+        output_stride=2,
+        subpixel_stride2=True,
+        neck_type=neck_type,
+        head_type=head_type,
+        enable_regional_head=False,
+        enable_solver=False,
+        dynamic_scale_routing=False,
+        factorized_scale_routing=False,
+        use_diag=False,
+    )
+    model = RMRv3(cfg)
+    model.train()
+    x = torch.randn(2, 3, 128, 128)
+    out = model(x)
+    out.y0.sum().backward()
+    dead = [
+        name
+        for name, param in model.named_parameters()
+        if param.requires_grad and (param.grad is None or param.grad.abs().sum().item() == 0.0)
+    ]
+    assert dead == [], f"Dead zero-grad params for ({neck_type}, {head_type}): {dead}"
+
+
 @pytest.mark.parametrize("subpixel_stride2", [False, True])
 @pytest.mark.parametrize("floor_tau", [0.0, 0.1])
 @pytest.mark.parametrize("head_act", ["compact_c1", "relu", "softplus"])

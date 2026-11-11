@@ -15,10 +15,11 @@ class BiFPNLiteNeck(nn.Module):
       - Top-Down pathway:
           p16_td = L16 (+ optional GAP scene context)
           p8_td = DSResidual((w1 * L8 + w2 * Resize(p16_td)) / (w1 + w2 + eps))
-          p4_out = DSResidual((w3 * L4 + w4 * Resize(p8_td)) / (w3 + w4 + eps))
-      - Bottom-Up pathway:
-          p8_out = DSResidual((v1 * L8 + v2 * p8_td + v3 * Downsample(p4_out)) / (v1 + v2 + v3 + eps))
+          p4_td = (w3 * L4 + w4 * Resize(p8_td)) / (w3 + w4 + eps)
+      - Bottom-Up + Fine-Head Feedback pathway:
+          p8_out = DSResidual((v1 * L8 + v2 * p8_td + v3 * Downsample(p4_td)) / (v1 + v2 + v3 + eps))
           p16_out = DSResidual((v4 * L16 + v5 * p16_td + v6 * Downsample(p8_out)) / (v4 + v5 + v6 + eps))
+          p4_out = DSResidual((u1 * L4 + u2 * p4_td + u3 * Resize(p8_out) + u4 * Resize(p16_out)) / (sum(u) + eps))
 
     Fast Normalized Fusion:
       Uses positive learnable weights (via ReLU) to ensure numerical stability and bounded weights.
@@ -59,8 +60,9 @@ class BiFPNLiteNeck(nn.Module):
         self.w_td8 = nn.Parameter(torch.ones(2, dtype=torch.float32))
         self.ref_td8 = DSResidual(width)
 
-        # P4_out = fuse(L4, Resize(P8_td))
+        # P4_td = fuse(L4, Resize(P8_td)); P4_out = fuse(L4, P4_td, Resize(P8_out), Resize(P16_out))
         self.w_td4 = nn.Parameter(torch.ones(2, dtype=torch.float32))
+        self.w_out4 = nn.Parameter(torch.ones(4, dtype=torch.float32))
         self.ref_out4 = DSResidual(width)
 
         # Downsampling for bottom-up pathway (MaxPool 3x3 s2 preserves highest activations, 0 params)
@@ -99,16 +101,15 @@ class BiFPNLiteNeck(nn.Module):
         in_p8_td = w8_norm[0] * l8 + w8_norm[1] * up16_to_8
         p8_td = self.ref_td8(in_p8_td)
 
-        # 2. P4_out
+        # 2. P4_td (intermediate top-down feature before bottom-up aggregation)
         up8_to_4 = F.interpolate(p8_td, size=l4.shape[-2:], mode="bilinear", align_corners=False)
         w4 = F.relu(self.w_td4)
         w4_norm = w4 / (w4.sum() + self.eps)
-        in_p4_out = w4_norm[0] * l4 + w4_norm[1] * up8_to_4
-        p4_out = self.ref_out4(in_p4_out)
+        p4_td = w4_norm[0] * l4 + w4_norm[1] * up8_to_4
 
         # --- Bottom-Up Pathway ---
         # 3. P8_out
-        down4_to_8 = self.downsample8(p4_out)
+        down4_to_8 = self.downsample8(p4_td)
         if down4_to_8.shape[-2:] != l8.shape[-2:]:
             down4_to_8 = F.interpolate(down4_to_8, size=l8.shape[-2:], mode="bilinear", align_corners=False)
         v8 = F.relu(self.v_bu8)
@@ -124,5 +125,18 @@ class BiFPNLiteNeck(nn.Module):
         v16_norm = v16 / (v16.sum() + self.eps)
         in_p16_out = v16_norm[0] * l16 + v16_norm[1] * p16_td + v16_norm[2] * down8_to_16
         p16_out = self.ref_out16(in_p16_out)
+
+        # 5. P4_out (closes bottom-up feedback from P8_out & P16_out into stride-4 carrier)
+        up8_out_to_4 = F.interpolate(p8_out, size=l4.shape[-2:], mode="bilinear", align_corners=False)
+        up16_out_to_4 = F.interpolate(p16_out, size=l4.shape[-2:], mode="bilinear", align_corners=False)
+        u4 = F.relu(self.w_out4)
+        u4_norm = u4 / (u4.sum() + self.eps)
+        in_p4_out = (
+            u4_norm[0] * l4
+            + u4_norm[1] * p4_td
+            + u4_norm[2] * up8_out_to_4
+            + u4_norm[3] * up16_out_to_4
+        )
+        p4_out = self.ref_out4(in_p4_out)
 
         return p4_out, p8_out, p16_out

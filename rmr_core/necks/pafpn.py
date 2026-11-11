@@ -149,7 +149,7 @@ class _BidirectionalConvexFPNBase(nn.Module):
         self.fuse_bu16 = ConvexFastNormalizedFusion(num_inputs=3)
         self.bu16_refine = bu16_refine
 
-        self.fuse_p4 = ConvexFastNormalizedFusion(num_inputs=3)
+        self.fuse_p4 = ConvexFastNormalizedFusion(num_inputs=4)
         self.p4_refine = p4_refine
 
     def forward(
@@ -174,8 +174,10 @@ class _BidirectionalConvexFPNBase(nn.Module):
         down8 = _match_size(self.down8_to_16(p8_out), l16)
         p16_out = self.bu16_refine(self.fuse_bu16([l16, p16_ctx, down8]))
 
-        # Direct C4 fine skip + top-down + bottom-up consensus prevents high-freq contrast damping
-        p4_out = self.p4_refine(self.fuse_p4([l4, p4_td, _match_size(p8_out, l4)]))
+        # Direct C4 fine skip + top-down + bottom-up consensus (P8 + P16 feedback closes gradient loop in Direct mode)
+        p4_out = self.p4_refine(
+            self.fuse_p4([l4, p4_td, _match_size(p8_out, l4), _match_size(p16_out, l4)])
+        )
         return p4_out, p8_out, p16_out
 
 

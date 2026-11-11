@@ -77,8 +77,8 @@ $$\mathcal{L}_{\text{Count-NB}} = - \log \Gamma(C + r) + \log \Gamma(r) + \log \
 
 ## 4. BẢNG KẾT QUẢ THỰC NGHIỆM
 
-### 4.1. [LỊCH SỬ / LEGACY] `runs/fairness_study/` — SHA From-Scratch (TTA)
-*Lưu ý: Đây là bộ chạy thăm dò cũ dùng đánh giá TTA trên `runs/fairness_study/`; số liệu văn hiến bên dưới được giữ để đối chiếu lịch sử (số liệu tác giả gốc của LSANet là `66.1`, TinyCount non-KD là `78.2`). Số liệu canonical hiện hành nằm tại `runs/benchmarks/`.*
+### 4.1. [LỊCH SỬ / LEGACY — ĐÃ XÓA CHECKPOINT] `runs/fairness_study/` — SHA From-Scratch (TTA)
+*Lưu ý: Đây là bộ chạy thăm dò cũ dùng đánh giá TTA trên `runs/fairness_study/` (thư mục checkpoint cũ đã được xóa qua `git rm -rf` để tránh nhầm lẫn; số liệu bên dưới giữ lại cho đối chiếu lịch sử; số liệu tác giả gốc của LSANet là `66.1`, TinyCount non-KD là `78.2`). Số liệu canonical hiện hành nằm tại `runs/benchmarks/`.*
 
 | Mô hình | Số tham số | Hàm Loss & Kỹ thuật | Test MAE (No TTA) | Test MAE (TTA) | Test RMSE | Ghi chú Kiểm toán |
 | :--- | :---: | :--- | :---: | :---: | :---: | :--- |
@@ -196,16 +196,17 @@ Toàn bộ các mô hình (cả Pretrained lẫn From-Scratch) đều được h
 
 Mọi tệp tin kết quả đều đã được lưu trữ, kiểm toán và đẩy lên Git remote trên nhánh `RMR`:
 
-| Thí nghiệm | Checkpoint Trọng số | Tệp Cấu hình YAML | Báo cáo TTA Summary |
+| Thí nghiệm | Checkpoint Trọng số | Tệp Cấu hình YAML | Báo cáo Summary |
 | :--- | :--- | :--- | :--- |
-| **Ours Direct Scratch** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/fairness_study/exp_scratch_direct_dual_bayesian_radon_ot/best_val_mae.pt) | [`exp_scratch_direct_...yaml`](file:///f:/lightweightcrcn/configs/fairness_study/exp_scratch_direct_dual_bayesian_radon_ot.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/fairness_study/exp_scratch_direct_dual_bayesian_radon_ot/eval_sha_a_test_weighted_tta/summary.json) |
-| **Ours Proposed Scratch (A1)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/fairness_study/exp_a1_scratch_104k_proposed/best_val_mae.pt) | [`exp_a1_scratch_...yaml`](file:///f:/lightweightcrcn/configs/fairness_study/exp_a1_scratch_104k_proposed.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/fairness_study/exp_a1_scratch_104k_proposed/eval_sha_a_test_weighted_tta/summary.json) |
-| **Ours Scratch MSE (A2)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/fairness_study/exp_a2_scratch_104k_mse/best_val_mae.pt) | [`exp_a2_scratch_...yaml`](file:///f:/lightweightcrcn/configs/fairness_study/exp_a2_scratch_104k_mse.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/fairness_study/exp_a2_scratch_104k_mse/eval_sha_a_test_weighted_tta/summary.json) |
-| **Canonical Flagship Pretrained** | Checkpoint lịch sử commit `fb3b610` | [`rmr_canonical_104k_seed42.yaml`](file:///f:/lightweightcrcn/configs/rmr_canonical/rmr_canonical_104k_seed42.yaml) | Trích xuất từ Git log lịch sử |
+| **SHA Direct Pretrained (`104k`)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/benchmarks/exp_sha_direct_pretrained_104k/best_val_mae.pt) | [`exp_sha_direct_pretrained_104k.yaml`](file:///f:/lightweightcrcn/configs/benchmarks/exp_sha_direct_pretrained_104k.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/benchmarks/exp_sha_direct_pretrained_104k/eval_val/summary.json) |
+| **SHA Direct Scratch (`104k`)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/benchmarks/exp_sha_direct_scratch_104k/best_val_mae.pt) | [`exp_sha_direct_scratch_104k.yaml`](file:///f:/lightweightcrcn/configs/benchmarks/exp_sha_direct_scratch_104k.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/benchmarks/exp_sha_direct_scratch_104k/eval_val/summary.json) |
+| **SHB Direct Pretrained (`104k`)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/benchmarks/exp_shb_direct_pretrained_104k/best_val_mae.pt) | [`exp_shb_direct_pretrained_104k.yaml`](file:///f:/lightweightcrcn/configs/benchmarks/exp_shb_direct_pretrained_104k.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/benchmarks/exp_shb_direct_pretrained_104k/eval_val/summary.json) |
+| **QNRF Direct Pretrained (`104k`)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/benchmarks/exp_qnrf_direct_pretrained_104k/best_val_mae.pt) | [`exp_qnrf_direct_pretrained_104k.yaml`](file:///f:/lightweightcrcn/configs/benchmarks/exp_qnrf_direct_pretrained_104k.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/benchmarks/exp_qnrf_direct_pretrained_104k/eval_val/summary.json) |
+| **JHU Direct Pretrained (`104k`)** | [`best_val_mae.pt`](file:///f:/lightweightcrcn/runs/benchmarks/exp_jhu_direct_pretrained_104k/best_val_mae.pt) | [`exp_jhu_direct_pretrained_104k.yaml`](file:///f:/lightweightcrcn/configs/benchmarks/exp_jhu_direct_pretrained_104k.yaml) | [`summary.json`](file:///f:/lightweightcrcn/runs/benchmarks/exp_jhu_direct_pretrained_104k/eval_val/summary.json) |
 
-### Lệnh Tái hiện Đánh giá TTA (Evaluation Command):
+### Lệnh Tái hiện Đánh giá (Canonical Evaluation Command):
 ```powershell
-python rmr_v3/eval.py --checkpoint runs/fairness_study/exp_scratch_direct_dual_bayesian_radon_ot/best_val_mae.pt --manifest data/sha_a_test.jsonl --tta
+python -m rmr_v3.eval --checkpoint runs/benchmarks/exp_sha_direct_pretrained_104k/best_val_mae.pt --manifest data/sha_a_test.jsonl
 ```
 
 ---

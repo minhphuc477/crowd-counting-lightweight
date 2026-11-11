@@ -189,7 +189,14 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
         head_type=getattr(cfg, "head_type", "standard"),
         fine_head_dilations=getattr(cfg, "fine_head_dilations", (1, 2)),
         subpixel_kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
-        use_film=getattr(cfg, "fine_head_use_film", True),
+        use_film=bool(
+            getattr(cfg, "fine_head_use_film", True)
+            and (
+                getattr(cfg, "use_diag", False)
+                or getattr(cfg, "factorized_scale_routing", False)
+                or getattr(cfg, "dynamic_scale_routing", False)
+            )
+        ),
     )
 
 
