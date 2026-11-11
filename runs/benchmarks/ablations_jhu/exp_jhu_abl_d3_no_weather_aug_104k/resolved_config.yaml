@@ -80,6 +80,7 @@ train:
   patience: 0
   eval_every: 5
   deterministic: true
+  device: cuda
 eval:
   density_bins:
   - 50.0
