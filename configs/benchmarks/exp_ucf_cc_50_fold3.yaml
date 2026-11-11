@@ -84,4 +84,4 @@ eval:
   density_bins:
   - 500.0
   - 1500.0
-output_dir: runs/benchmarks/exp_ucf_cc_50_fold3
+output_dir: runs_fixed/benchmarks/exp_ucf_cc_50_fold3

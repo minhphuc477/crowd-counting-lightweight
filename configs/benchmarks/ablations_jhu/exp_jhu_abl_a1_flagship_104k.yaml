@@ -85,4 +85,4 @@ eval:
   density_bins:
   - 50.0
   - 500.0
-output_dir: runs/benchmarks/ablations_jhu/exp_jhu_abl_a1_flagship_104k
+output_dir: runs_fixed/benchmarks/ablations_jhu/exp_jhu_abl_a1_flagship_104k

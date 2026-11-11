@@ -67,7 +67,7 @@ model:
   subpixel_stride2: true
   use_aspp_gap: true
   enable_regional_head: false
-output_dir: runs/benchmarks/sweeps_train/exp_sha_loss_radon_0p2_104k
+output_dir: runs_fixed/benchmarks/sweeps_train/exp_sha_loss_radon_0p2_104k
 seed: 42
 train:
   amp: true

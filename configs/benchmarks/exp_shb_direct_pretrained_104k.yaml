@@ -85,4 +85,4 @@ eval:
   - 50.0
   - 150.0
   run_tiling: false
-output_dir: runs/benchmarks/exp_shb_direct_pretrained_104k
+output_dir: runs_fixed/benchmarks/exp_shb_direct_pretrained_104k

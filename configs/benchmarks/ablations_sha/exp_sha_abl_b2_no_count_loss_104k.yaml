@@ -84,4 +84,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/benchmarks/ablations_sha/exp_sha_abl_b2_no_count_loss_104k
+output_dir: runs_fixed/benchmarks/ablations_sha/exp_sha_abl_b2_no_count_loss_104k

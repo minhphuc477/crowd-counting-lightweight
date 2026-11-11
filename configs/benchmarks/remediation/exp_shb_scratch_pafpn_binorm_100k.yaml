@@ -81,4 +81,4 @@ eval:
   - 50.0
   - 150.0
   run_tiling: false
-output_dir: runs/benchmarks/remediation/exp_shb_scratch_pafpn_binorm_100k
+output_dir: runs_fixed/benchmarks/remediation/exp_shb_scratch_pafpn_binorm_100k

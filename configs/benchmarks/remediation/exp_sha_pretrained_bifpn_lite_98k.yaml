@@ -80,4 +80,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/benchmarks/remediation/exp_sha_pretrained_bifpn_lite_98k
+output_dir: runs_fixed/benchmarks/remediation/exp_sha_pretrained_bifpn_lite_98k

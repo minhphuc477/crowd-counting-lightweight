@@ -93,4 +93,4 @@ eval:
   density_bins:
   - 200.0
   - 1000.0
-output_dir: runs/benchmarks/sweeps_train/exp_qnrf_gaussian_mse_jitter_sigma16_104k
+output_dir: runs_fixed/benchmarks/sweeps_train/exp_qnrf_gaussian_mse_jitter_sigma16_104k

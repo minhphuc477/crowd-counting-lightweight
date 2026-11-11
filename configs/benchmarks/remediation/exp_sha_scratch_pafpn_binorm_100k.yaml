@@ -80,4 +80,4 @@ eval:
   density_bins:
   - 100.0
   - 500.0
-output_dir: runs/benchmarks/remediation/exp_sha_scratch_pafpn_binorm_100k
+output_dir: runs_fixed/benchmarks/remediation/exp_sha_scratch_pafpn_binorm_100k

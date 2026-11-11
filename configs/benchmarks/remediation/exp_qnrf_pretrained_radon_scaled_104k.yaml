@@ -92,4 +92,4 @@ eval:
   density_bins:
   - 200.0
   - 1000.0
-output_dir: runs/benchmarks/remediation/exp_qnrf_pretrained_radon_scaled_104k
+output_dir: runs_fixed/benchmarks/remediation/exp_qnrf_pretrained_radon_scaled_104k
