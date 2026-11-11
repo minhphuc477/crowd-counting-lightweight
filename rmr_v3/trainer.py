@@ -49,13 +49,13 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     seed_everything(seed, deterministic=deterministic)
 
     num_threads = cfg.get("train", {}).get("num_threads")
-    if num_threads is not None and int(num_threads) > 0:
-        torch.set_num_threads(int(num_threads))
-        torch.set_num_interop_threads(max(1, int(num_threads) // 2))
-    else:
-        # Default to 2 threads to prevent thread pool explosion and glibc arena bloat across multiple runs
-        torch.set_num_threads(2)
-        torch.set_num_interop_threads(1)
+    # Default to 2 threads to prevent thread pool explosion and glibc arena bloat across multiple runs
+    eff_threads = int(num_threads) if (num_threads is not None and int(num_threads) > 0) else 2
+    torch.set_num_threads(eff_threads)
+    try:
+        torch.set_num_interop_threads(max(1, eff_threads // 2))
+    except RuntimeError:
+        pass
 
     m_cfg = cfg.setdefault("model", {})
     subpix = bool(m_cfg.get("subpixel_stride2", False) or m_cfg.get("subpixel_dm", False))
@@ -413,6 +413,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                     diag_summary=diag_summary,
                     loss_avgs=loss_avgs,
                     loss_cfg=loss_cfg,
+                    enable_regional_head=(model.region_head is not None),
                 ),
                 flush=True,
             )
@@ -420,6 +421,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
             print(format_epoch_row(
                 epoch=epoch, epochs=epochs, row_log=row_log,
                 loss_avgs=loss_avgs, loss_cfg=loss_cfg, solver_strength=solver_strength,
+                enable_regional_head=(model.region_head is not None),
             ), flush=True)
 
         ckpt_manager.save_last(

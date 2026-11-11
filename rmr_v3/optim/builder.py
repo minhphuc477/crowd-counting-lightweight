@@ -155,7 +155,9 @@ def maybe_run_safe_lr_finder(
     effective_loss_fn = loss_fn
     if not callable(loss_fn):
         from rmr_v3.losses import compute_rmr_v3_losses
-        effective_loss_fn = lambda out, tgt: compute_rmr_v3_losses(out, tgt, loss_fn)
+        effective_loss_fn = lambda out, tgt, points=None: compute_rmr_v3_losses(
+            out, tgt, loss_fn, points=points
+        )
 
     logger.info("[LR Finder] Probing optimal LR over %d iterations [%.1e -> %.1e]...", num_iter, min_lr, max_lr)
     finder = SafeLRFinder(model=model, optimizer=optimizer, loss_fn=effective_loss_fn, device=device)

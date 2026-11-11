@@ -76,7 +76,8 @@ class ResidualDilatedFineHead(nn.Module):
     - Stacked Dilated Depthwise Residuals (default dilations: 1, 2) -> ERF = 28px
     - 2D Spatial FiLM Scale Modulator with Step-0 Parity
     - 3x3 Continuous Spatial Projection prior to PixelShuffle(2)
-    - Temperature-Calibrated Softplus with exact initial rate m0
+    - Temperature-Calibrated Softplus with exact Stride-4 canonical initial rate m0^{(4)}
+      (automatically scaled by 1/4 when subpixel_stride2=True)
     """
 
     def __init__(

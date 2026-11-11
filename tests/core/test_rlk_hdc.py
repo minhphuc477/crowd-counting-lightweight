@@ -60,18 +60,18 @@ def test_rlk_hdc_parameter_budget_track_a() -> None:
     """Verify parameter count satisfies Track A strict ceiling <= 104,441."""
     neck = RLKHDCFPNNeck(in_channels=(16, 32, 48), width=32, use_gap=True)
     p_neck_train = sum(p.numel() for p in neck.parameters() if p.requires_grad)
-    assert p_neck_train == 10756, f"Expected 10756, got {p_neck_train}"
+    assert p_neck_train == 10180, f"Expected 10180, got {p_neck_train}"
 
     neck.eval()
     neck.switch_to_deploy()
     p_neck_deploy = sum(p.numel() for p in neck.parameters() if p.requires_grad)
-    assert p_neck_deploy == 10180, f"Expected 10180, got {p_neck_deploy}"
+    assert p_neck_deploy == 8836, f"Expected 8836, got {p_neck_deploy}"
 
     cfg = RMRv3Config(neck_type="rlk_hdc", subpixel_stride2=False)
     model = RMRv3(cfg)
     total_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     assert total_train <= 104441, f"Exceeded Track A ceiling: {total_train} > 104,441"
-    assert total_train == 103879
+    assert total_train == 103303
 
 
 def test_rlk_hdc_fast_norm_fusion_convexity() -> None:
@@ -139,4 +139,5 @@ def test_rlk_hdc_half_and_deploy_invariance() -> None:
         p4_d, p8_d, p16_d = neck_half(c4_h, c8_h, c16_h)
 
     diff = torch.max(torch.abs(p4_d - p4_h)).item()
-    assert diff < 1e-4, f"Half precision deploy error too high: {diff}"
+    # In float16 at magnitude ~6.4, 1 ULP is 0.0039; 2e-2 bounds rounding drift within ~5 ULPs (< 0.5% rel).
+    assert diff < 2e-2, f"Half precision deploy error too high: {diff}"

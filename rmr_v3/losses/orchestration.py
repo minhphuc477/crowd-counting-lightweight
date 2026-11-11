@@ -304,6 +304,7 @@ def _compute_auxiliary_losses(
             eps=cfg.cell_mass_weight_eps,
             alpha=float(cfg.cell_mass_weight_alpha),
             gamma=float(cfg.cell_mass_weight_gamma),
+            compute_fine=False,
         )
         losses["cell_carrier"] = dual["cell_carrier"]
         losses["cell_fine"] = losses["cell"]

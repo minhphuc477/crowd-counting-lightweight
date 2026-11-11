@@ -71,17 +71,44 @@ class SafeLRFinder:
                 data_iter = iter(dataloader)
                 batch = next(data_iter)
 
+            import inspect
+
             if isinstance(batch, (list, tuple)):
                 raw_img, raw_tgt = batch[0], batch[1]
+                raw_pts = batch[2] if len(batch) > 2 else None
             else:
                 raw_img, raw_tgt = batch["image"], batch["target_y"]
+                raw_pts = batch.get("points")
             images = raw_img.to(self.device, non_blocking=True)
             targets = raw_tgt.to(self.device, non_blocking=True)
+            points = None
+            if raw_pts is not None:
+                if isinstance(raw_pts, (list, tuple)):
+                    points = [
+                        p.to(self.device, non_blocking=True) if torch.is_tensor(p) else p
+                        for p in raw_pts
+                    ]
+                elif torch.is_tensor(raw_pts):
+                    points = raw_pts.to(self.device, non_blocking=True)
+                else:
+                    points = raw_pts
 
             self.optimizer.zero_grad(set_to_none=True)
 
             outputs = self.model(images)
-            loss_dict = self.loss_fn(outputs, targets)
+            accepts_points = getattr(self, "_accepts_points", None)
+            if accepts_points is None:
+                sig = inspect.signature(self.loss_fn)
+                accepts_points = any(
+                    k == "points" or p.kind == inspect.Parameter.VAR_KEYWORD
+                    for k, p in sig.parameters.items()
+                )
+                self._accepts_points = accepts_points
+            loss_dict = (
+                self.loss_fn(outputs, targets, points=points)
+                if accepts_points
+                else self.loss_fn(outputs, targets)
+            )
             loss = loss_dict["total"] if isinstance(loss_dict, dict) else loss_dict
 
             loss_val = loss.item() if isinstance(loss, torch.Tensor) else float(loss)

@@ -31,7 +31,7 @@ class RMRv3Config:
     backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
     pretrained: bool = True
     backbone_lr_scale: float = 0.1
-    init_m0: float = 0.015763
+    init_m0: float = 0.015763  # Canonical Stride-4 cell density m0^{(4)} (heads scale by 1/4 for subpixel_stride2)
     max_trainable_params: int = 105000
 
     subpixel_stride2: bool = False

@@ -40,6 +40,36 @@ TRAIN_LOG_FIELDNAMES: list[str] = [
 ]
 
 
+def _is_regional_head_active(
+    enable_regional_head: bool | None,
+    row_log: dict[str, Any],
+    loss_cfg: RMRv3LossConfig,
+    solver_strength: float,
+) -> bool:
+    """Resolve whether regional evidence diagnostics represent an active region_head."""
+    if enable_regional_head is not None:
+        return bool(enable_regional_head)
+    has_zero_mu = "region_mu_mean" in row_log and float(row_log["region_mu_mean"]) == 0.0
+    has_const_w = "region_weight_std" in row_log and float(row_log["region_weight_std"]) == 0.0
+    has_const_disp = (
+        "region_dispersion_p10" in row_log
+        and "region_dispersion_p90" in row_log
+        and float(row_log["region_dispersion_p10"]) == float(row_log["region_dispersion_p90"])
+    )
+    lam_reg = float(getattr(loss_cfg, "lambda_region_nb", 0.0))
+    lam_hurdle = float(getattr(loss_cfg, "lambda_hurdle", 0.0))
+    if (
+        has_zero_mu
+        and has_const_w
+        and has_const_disp
+        and lam_reg == 0.0
+        and lam_hurdle == 0.0
+        and float(solver_strength) == 0.0
+    ):
+        return False
+    return True
+
+
 def format_epoch_row(
     epoch: int,
     epochs: int,
@@ -47,6 +77,7 @@ def format_epoch_row(
     loss_avgs: dict[str, float],
     loss_cfg: RMRv3LossConfig,
     solver_strength: float,
+    enable_regional_head: bool | None = None,
 ) -> str:
     train_allocation = loss_avgs.get("allocation", 0.0)
     train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
@@ -103,6 +134,9 @@ def format_epoch_row(
         active_terms.append(f"reg_nb: {row_log['train_region_nb']:.3f}")
 
     loss_detail = f"Loss: {row_log['train_total']:.4f} [{', '.join(active_terms)}{hurdle_str}{v11_str}]"
+    reg_active = _is_regional_head_active(enable_regional_head, row_log, loss_cfg, solver_strength)
+    if not reg_active:
+        return f"[{epoch+1:04d}/{epochs:04d}] {loss_detail} | RegHead: off"
     return (
         f"[{epoch+1:04d}/{epochs:04d}] {loss_detail} | "
         f"SolvStr: {solver_strength:.2f} | "
@@ -123,6 +157,7 @@ def format_eval_block(
     diag_summary: dict[str, Any],
     loss_avgs: dict[str, float],
     loss_cfg: RMRv3LossConfig,
+    enable_regional_head: bool | None = None,
 ) -> str:
     train_allocation = loss_avgs.get("allocation", 0.0)
     train_dm16 = loss_avgs.get("dm_16", train_allocation if "dm_32" not in loss_avgs else 0.0)
@@ -179,11 +214,20 @@ def format_eval_block(
         f"{alloc_repr}, cell: {row_log['train_cell']:.3f}, "
         f"reg_nb: {row_log['train_region_nb']:.3f}{hurdle_str}{v11_str}]\n"
     )
-    line_solver = (
-        f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {e_red_pct:.1f}% | "
-        f"W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | "
-        f"W_solv: {row_log['solver_weight_mean']:.2f}\n"
-    )
+    reg_active = _is_regional_head_active(enable_regional_head, row_log, loss_cfg, solver_strength)
+    if reg_active:
+        line_solver = (
+            f"  Solver / W    : Str: {solver_strength:.2f} | E_red: {e_red_pct:.1f}% | "
+            f"W_pred: {row_log['region_weight_mean']:.2f} (std: {row_log['region_weight_std']:.2f}) | "
+            f"W_solv: {row_log['solver_weight_mean']:.2f}\n"
+        )
+        line_unc = (
+            f"  Uncertainty   : Coverage: 50%={cov_50}, 80%={cov_80}, 95%={cov_95} | "
+            f"Median Disp: {row_log['region_dispersion_p50']:.1f}\n"
+        )
+    else:
+        line_solver = "  Regional/Solv : disabled (enable_regional_head=false)\n"
+        line_unc = ""
     line_val = (
         f"  Val Metrics   : MAE: {cur_mae:.2f} | RMSE: {float(val_metrics['RMSE']):.2f} | "
         f"NAE: {float(val_metrics['NAE']):.3f} | Bias: {float(val_metrics['Bias']):+.2f}\n"
@@ -191,10 +235,6 @@ def format_eval_block(
     line_game = (
         f"  GAME Hierarchy: G0: {float(val_metrics['GAME0']):.2f} | G1: {float(val_metrics['GAME1']):.2f} | "
         f"G2: {float(val_metrics['GAME2']):.2f} | G3: {float(val_metrics['GAME3']):.2f}{strata_str}\n"
-    )
-    line_unc = (
-        f"  Uncertainty   : Coverage: 50%={cov_50}, 80%={cov_80}, 95%={cov_95} | "
-        f"Median Disp: {row_log['region_dispersion_p50']:.1f}\n"
     )
 
     return (

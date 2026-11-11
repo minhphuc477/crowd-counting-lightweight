@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .blocks import ConvGNAct, DepthwiseDilated
-from .rep_fpn import RepDWBlock7x7
+from .rep_fpn import RepDWBlock7x7, _ChannelMixPW
 
 
 class RepASPPLiteNeck(nn.Module):
@@ -58,10 +58,13 @@ class RepASPPLiteNeck(nn.Module):
             )
         else:
             self.aspp_gap = None
-        # Top-down FPN refinement blocks: Structural Re-parameterized 7x7 Depthwise
-        self.ref16 = RepDWBlock7x7(width)
-        self.ref8 = RepDWBlock7x7(width)
-        self.ref4 = RepDWBlock7x7(width)
+        # Top-down FPN refinement blocks: Structural Re-parameterized Depthwise + 1x1 PW mixing
+        self.ref16 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw16 = _ChannelMixPW(width)
+        self.ref8 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw8 = _ChannelMixPW(width)
+        self.ref4 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw4 = _ChannelMixPW(width)
 
     def forward(
         self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor
@@ -80,24 +83,24 @@ class RepASPPLiteNeck(nn.Module):
             else:
                 aspp_out = aspp_out + gap_broadcast
 
-        # Feed directly into RepDWBlock7x7 refinement block
-        p16 = self.ref16(l16 + aspp_out)
+        # Feed into RepDW refinement + cross-channel 1x1 PW mixing
+        p16 = self.pw16(self.ref16(l16 + aspp_out))
 
         # Top-down FPN (Static 1:1 Additive)
         up16_to_8 = F.interpolate(
             p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
         )
-        p8 = self.ref8(l8 + up16_to_8)
+        p8 = self.pw8(self.ref8(l8 + up16_to_8))
 
         up8_to_4 = F.interpolate(
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )
-        p4 = self.ref4(l4 + up8_to_4)
+        p4 = self.pw4(self.ref4(l4 + up8_to_4))
 
         return p4, p8, p16
 
     def switch_to_deploy(self) -> None:
-        """Algebraically fuse all 3 RepDW refinement blocks into single 7x7 DW convs."""
+        """Algebraically fuse all 3 RepDW refinement blocks into single depthwise convs."""
         self.ref16.switch_to_deploy()
         self.ref8.switch_to_deploy()
         self.ref4.switch_to_deploy()

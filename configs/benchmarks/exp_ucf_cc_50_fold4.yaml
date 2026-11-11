@@ -33,7 +33,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.008416
+  init_m0: 0.036308
   neck_type: aspp_lite
   aspp_dilations:
   - 2
@@ -43,6 +43,7 @@ model:
   enable_solver: false
   solver_mode: direct
   eps: 1.0e-06
+  enable_regional_head: false
 loss:
   output_stride: 2
   allocation_loss_type: dual_bayesian_radon_ot

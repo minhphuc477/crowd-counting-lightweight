@@ -46,6 +46,7 @@ class ScaleRoutingHead(nn.Module):
         super().__init__()
         self.num_scales = int(num_scales)
         self.temperature = float(max(temperature, 0.1))
+        # Retained as a backward-compatible API flag for canonical parameter parity (549 params without spatial bias).
         self.perspective_bias = bool(perspective_bias)
 
         self.dw = nn.Conv2d(
@@ -137,6 +138,7 @@ class FactorizedRoutingHead(nn.Module):
                 f"got num_scales={self.num_scales}, num_aspects={self.num_aspects}"
             )
         self.temperature = float(max(temperature, 0.1))
+        # Retained as a backward-compatible API flag for canonical parameter parity (549 params without spatial bias).
         self.perspective_bias = bool(perspective_bias)
 
         # Shared feature extraction carrier

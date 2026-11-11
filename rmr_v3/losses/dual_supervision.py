@@ -85,6 +85,7 @@ def compute_dual_lattice_losses(
     alpha: float = 2.0,
     gamma: float = 1.25,
     fg_ratio: float = 0.67,
+    compute_fine: bool = True,
 ) -> dict[str, torch.Tensor]:
     """Supervise Stride 4 carrier with canonical v19 convex loss, and Stride 2 with sub-pixel loss.
 
@@ -102,26 +103,42 @@ def compute_dual_lattice_losses(
         loss_carrier = count_harmonized_cell_loss(
             y_carrier, target_stride4, beta=beta, eps=eps, gamma=gamma, fg_ratio=fg_ratio, stride=4
         )
-        loss_fine = count_harmonized_cell_loss(
-            y_fine, target_stride2, beta=beta, eps=eps, gamma=gamma, fg_ratio=fg_ratio, stride=2
+        loss_fine = (
+            count_harmonized_cell_loss(
+                y_fine, target_stride2, beta=beta, eps=eps, gamma=gamma, fg_ratio=fg_ratio, stride=2
+            )
+            if compute_fine
+            else y_fine.new_zeros(())
         )
     elif cell_loss_mode == "mass_weighted":
         loss_carrier = mass_weighted_cell_loss(
             y_carrier, target_stride4, beta=beta, eps=eps, alpha=alpha, gamma=gamma, stride=4
         )
-        loss_fine = mass_weighted_cell_loss(
-            y_fine, target_stride2, beta=beta, eps=eps, alpha=alpha, gamma=gamma, stride=2
+        loss_fine = (
+            mass_weighted_cell_loss(
+                y_fine, target_stride2, beta=beta, eps=eps, alpha=alpha, gamma=gamma, stride=2
+            )
+            if compute_fine
+            else y_fine.new_zeros(())
         )
     elif cell_loss_mode in ("count_invariant", "ci_cell"):
         loss_carrier = count_invariant_cell_loss(
             y_carrier, target_stride4, beta=beta, alpha=alpha, stride=4
         )
-        loss_fine = count_invariant_cell_loss(
-            y_fine, target_stride2, beta=beta, alpha=alpha, stride=2
+        loss_fine = (
+            count_invariant_cell_loss(
+                y_fine, target_stride2, beta=beta, alpha=alpha, stride=2
+            )
+            if compute_fine
+            else y_fine.new_zeros(())
         )
     else:
         loss_carrier = balanced_smooth_l1(y_carrier, target_stride4, beta=beta, stride=4)
-        loss_fine = balanced_smooth_l1(y_fine, target_stride2, beta=beta, stride=2)
+        loss_fine = (
+            balanced_smooth_l1(y_fine, target_stride2, beta=beta, stride=2)
+            if compute_fine
+            else y_fine.new_zeros(())
+        )
 
     return {
         "cell_carrier": loss_carrier,

@@ -8,83 +8,112 @@ from .blocks import ConvGNAct, DepthwiseDilated
 
 
 class RepDWBlock7x7(nn.Module):
-    """Structural Re-parameterization 7x7 Depthwise Refinement Block.
-    
-    Training: Multi-branch (7x7 DW + 1x1 DW + Identity with BatchNorms).
-    Deployment: Fused algebraically into a single standard 7x7 DW Conv (0 extra params/FLOPs).
+    """Structural Re-parameterization Depthwise Refinement Block (default 7x7).
+
+    Training: Multi-branch (kxk DW + 3x3 DW + Identity with BatchNorms).
+    Note: Replaces a scale-invariant 1x1 DW+BN branch (which receives zero gradient under
+    per-channel BN) with a 3x3 DW+BN branch so every parameter contributes non-zero gradients.
+    Deployment: Fused algebraically into a single standard kxk DW Conv (0 extra params/FLOPs).
     """
 
-    def __init__(self, channels: int = 32, act: bool = True):
+    def __init__(self, channels: int = 32, act: bool = True, kernel_size: int = 7):
         super().__init__()
+        k = int(kernel_size)
+        if k < 3 or k % 2 == 0:
+            raise ValueError(f"RepDWBlock7x7 kernel_size must be odd >= 3, got {kernel_size}")
         self.channels = channels
+        self.kernel_size = k
+        pad_k = k // 2
+
         self.rbr_dense = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels, bias=False),
+            nn.Conv2d(channels, channels, kernel_size=k, padding=pad_k, groups=channels, bias=False),
             nn.BatchNorm2d(channels, momentum=0.01),
         )
-        self.rbr_1x1 = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=1, padding=0, groups=channels, bias=False),
+        self.rbr_3x3 = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels, bias=False),
             nn.BatchNorm2d(channels, momentum=0.01),
         )
         self.rbr_identity = nn.BatchNorm2d(channels, momentum=0.01)
         self.act = nn.SiLU(inplace=True) if act else nn.Identity()
         self.is_deployed = False
 
-        # Zero-init secondary branches for safe continuation
-        nn.init.zeros_(self.rbr_1x1[1].weight)
-        nn.init.zeros_(self.rbr_1x1[1].bias)
+        # Zero-init identity skip for stable continuation while keeping rbr_dense/rbr_3x3 active
         nn.init.zeros_(self.rbr_identity.weight)
         nn.init.zeros_(self.rbr_identity.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.is_deployed:
             return self.act(self.rbr_reparam(x))
-        return self.act(self.rbr_dense(x) + self.rbr_1x1(x) + self.rbr_identity(x))
+        return self.act(self.rbr_dense(x) + self.rbr_3x3(x) + self.rbr_identity(x))
 
     def _fuse_bn(self, conv: nn.Conv2d, bn: nn.BatchNorm2d) -> tuple[torch.Tensor, torch.Tensor]:
-        w = conv.weight
-        mean = bn.running_mean
-        var_sqrt = torch.sqrt(bn.running_var + bn.eps)
-        gamma = bn.weight
-        beta = bn.bias
+        w = conv.weight.float()
+        mean = bn.running_mean.float()
+        var_sqrt = torch.sqrt(bn.running_var.float() + bn.eps)
+        gamma = bn.weight.float()
+        beta = bn.bias.float()
         w_fused = w * (gamma / var_sqrt).reshape(-1, 1, 1, 1)
         b_fused = beta - mean * gamma / var_sqrt
         return w_fused, b_fused
 
     def switch_to_deploy(self) -> None:
-        """Fuse multi-branch convolutions into a single 7x7 depthwise convolution."""
+        """Fuse multi-branch convolutions into a single kxk depthwise convolution."""
         if self.is_deployed:
             return
-        w_7, b_7 = self._fuse_bn(self.rbr_dense[0], self.rbr_dense[1])
-        w_1, b_1 = self._fuse_bn(self.rbr_1x1[0], self.rbr_1x1[1])
-        # Pad 1x1 weight to 7x7: pad (3, 3, 3, 3)
-        w_1_padded = F.pad(w_1, (3, 3, 3, 3))
+        k = self.kernel_size
+        pad_k = k // 2
+        orig_dtype = self.rbr_dense[0].weight.dtype
+        w_dense, b_dense = self._fuse_bn(self.rbr_dense[0], self.rbr_dense[1])
+        w_3, b_3 = self._fuse_bn(self.rbr_3x3[0], self.rbr_3x3[1])
+        pad_3 = (k - 3) // 2
+        w_3_padded = F.pad(w_3, (pad_3, pad_3, pad_3, pad_3)) if pad_3 > 0 else w_3
 
-        ident_kernel = torch.zeros(self.channels, 1, 7, 7, device=w_7.device, dtype=w_7.dtype)
-        ident_kernel[:, 0, 3, 3] = 1.0
-        mean = self.rbr_identity.running_mean
-        var_sqrt = torch.sqrt(self.rbr_identity.running_var + self.rbr_identity.eps)
-        gamma = self.rbr_identity.weight
-        beta = self.rbr_identity.bias
+        ident_kernel = torch.zeros(self.channels, 1, k, k, device=w_dense.device, dtype=torch.float32)
+        ident_kernel[:, 0, pad_k, pad_k] = 1.0
+        mean = self.rbr_identity.running_mean.float()
+        var_sqrt = torch.sqrt(self.rbr_identity.running_var.float() + self.rbr_identity.eps)
+        gamma = self.rbr_identity.weight.float()
+        beta = self.rbr_identity.bias.float()
         w_id = ident_kernel * (gamma / var_sqrt).reshape(-1, 1, 1, 1)
         b_id = beta - mean * gamma / var_sqrt
 
-        w_fused = w_7 + w_1_padded + w_id
-        b_fused = b_7 + b_1 + b_id
+        w_fused = (w_dense + w_3_padded + w_id).to(dtype=orig_dtype)
+        b_fused = (b_dense + b_3 + b_id).to(dtype=orig_dtype)
 
         self.rbr_reparam = nn.Conv2d(
-            self.channels, self.channels, kernel_size=7, padding=3, groups=self.channels, bias=True
-        ).to(device=w_7.device, dtype=w_7.dtype)
+            self.channels, self.channels, kernel_size=k, padding=pad_k, groups=self.channels, bias=True
+        ).to(device=w_dense.device, dtype=orig_dtype)
         self.rbr_reparam.weight.data.copy_(w_fused)
         self.rbr_reparam.bias.data.copy_(b_fused)
 
         del self.rbr_dense
-        del self.rbr_1x1
+        del self.rbr_3x3
         del self.rbr_identity
         self.is_deployed = True
 
 
+class _ChannelMixPW(nn.Module):
+    """Cross-channel 1x1 grouped pointwise mixer with GroupNorm, SiLU, and channel shuffle."""
+
+    def __init__(self, channels: int = 32, groups: int = 4) -> None:
+        super().__init__()
+        g = groups if (channels % groups == 0 and channels >= groups) else 1
+        self.groups = g
+        ng = 8 if channels % 8 == 0 else (4 if channels % 4 == 0 else 1)
+        self.pw = nn.Conv2d(channels, channels, kernel_size=1, groups=g, bias=False)
+        self.norm = nn.GroupNorm(ng, channels)
+        self.act = nn.SiLU(inplace=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.act(self.norm(self.pw(x)))
+        if self.groups > 1:
+            b, c, h, w = y.shape
+            y = y.view(b, self.groups, c // self.groups, h, w).transpose(1, 2).contiguous().view(b, c, h, w)
+        return y
+
+
 class RepWeightedFPNNeck(nn.Module):
-    """FPN neck with Softmax-normalized weighted fusion and RepDWBlock (7x7 depthwise)."""
+    """FPN neck with Softmax-normalized weighted fusion, RepDW spatial refinement, and 1x1 PW mixing."""
 
     def __init__(
         self,
@@ -109,9 +138,12 @@ class RepWeightedFPNNeck(nn.Module):
         self.weight_8 = nn.Parameter(torch.zeros(2))
         self.weight_4 = nn.Parameter(torch.zeros(2))
 
-        self.ref16 = RepDWBlock7x7(width)
-        self.ref8 = RepDWBlock7x7(width)
-        self.ref4 = RepDWBlock7x7(width)
+        self.ref16 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw16 = _ChannelMixPW(width)
+        self.ref8 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw8 = _ChannelMixPW(width)
+        self.ref4 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw4 = _ChannelMixPW(width)
 
     def forward(
         self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor
@@ -123,21 +155,21 @@ class RepWeightedFPNNeck(nn.Module):
         # Scale 16 fusion
         w16 = F.softmax(self.weight_16, dim=0)
         ctx_sum = sum(ctx(l16) for ctx in self.context_blocks)
-        p16 = self.ref16(w16[0] * l16 + w16[1] * ctx_sum)
+        p16 = self.pw16(self.ref16(w16[0] * l16 + w16[1] * ctx_sum))
 
         # Scale 8 fusion
         w8 = F.softmax(self.weight_8, dim=0)
         up16_to_8 = F.interpolate(
             p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
         )
-        p8 = self.ref8(w8[0] * l8 + w8[1] * up16_to_8)
+        p8 = self.pw8(self.ref8(w8[0] * l8 + w8[1] * up16_to_8))
 
         # Scale 4 fusion
         w4 = F.softmax(self.weight_4, dim=0)
         up8_to_4 = F.interpolate(
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )
-        p4 = self.ref4(w4[0] * l4 + w4[1] * up8_to_4)
+        p4 = self.pw4(self.ref4(w4[0] * l4 + w4[1] * up8_to_4))
         return p4, p8, p16
 
     def switch_to_deploy(self) -> None:

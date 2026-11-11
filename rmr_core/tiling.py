@@ -91,6 +91,16 @@ def predict_tiled(
                 sx1 = min(w, _aligned_ceil(x1 + halo, s))
                 patch = image[:, sy0:sy1, sx0:sx1].unsqueeze(0)
                 y_patch = model(patch, **forward_kwargs)["y"][0].float()
+                exp_ph = math.ceil((sy1 - sy0) / s)
+                exp_pw = math.ceil((sx1 - sx0) / s)
+                ph_raw, pw_raw = y_patch.shape[-2], y_patch.shape[-1]
+                pad_h = max(0, exp_ph - ph_raw)
+                pad_w = max(0, exp_pw - pw_raw)
+                if pad_h > 0 or pad_w > 0:
+                    pad_mode = "replicate" if (ph_raw > 0 and pw_raw > 0) else "constant"
+                    y_patch = torch.nn.functional.pad(
+                        y_patch.unsqueeze(0), (0, pad_w, 0, pad_h), mode=pad_mode
+                    ).squeeze(0)
 
                 if use_hann and weight_canvas is not None:
                     gsy0, gsx0 = sy0 // s, sx0 // s
@@ -109,9 +119,9 @@ def predict_tiled(
                     gx1 = math.ceil(x1 / s)
                     ly0 = (y0 - sy0) // s
                     lx0 = (x0 - sx0) // s
-                    hh = gy1 - gy0
-                    ww = gx1 - gx0
-                    canvas[:, gy0:gy1, gx0:gx1] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
+                    hh = min(gy1 - gy0, max(0, y_patch.shape[-2] - ly0))
+                    ww = min(gx1 - gx0, max(0, y_patch.shape[-1] - lx0))
+                    canvas[:, gy0:gy0 + hh, gx0:gx0 + ww] = y_patch[:, ly0:ly0 + hh, lx0:lx0 + ww]
 
         if use_hann and weight_canvas is not None:
             canvas = canvas / weight_canvas.clamp_min(1e-6)

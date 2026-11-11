@@ -65,7 +65,7 @@ model:
   enable_solver: false
   eps: 1.0e-06
   feature_width: 32
-  init_m0: 0.001498
+  init_m0: 0.005988
   max_trainable_params: 104441
   neck_type: aspp_lite
   output_stride: 2
@@ -73,6 +73,7 @@ model:
   solver_mode: direct
   subpixel_stride2: true
   use_aspp_gap: true
+  enable_regional_head: false
 output_dir: runs/benchmarks/sweeps_train/exp_qnrf_crop_768_104k
 seed: 42
 train:

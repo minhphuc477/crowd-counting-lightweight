@@ -106,7 +106,7 @@ class TestASPPLiteGatedGAP:
 
         p_add = sum(p.numel() for p in neck_add.parameters() if p.requires_grad)
         p_gate = sum(p.numel() for p in neck_gate.parameters() if p.requires_grad)
-        assert p_add == p_gate == 10756
+        assert p_add == p_gate == 10180
 
         b, h, w = 2, 256, 256
         c4 = torch.randn(b, 16, h // 4, w // 4)

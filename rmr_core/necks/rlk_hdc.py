@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .blocks import ConvGNAct, DepthwiseDilated
-from .rep_fpn import RepDWBlock7x7
+from .rep_fpn import RepDWBlock7x7, _ChannelMixPW
 
 
 class StaticFastNormalizedFusion(nn.Module):
@@ -112,10 +112,13 @@ class RLKHDCFPNNeck(nn.Module):
             self.fuse8 = None
             self.fuse4 = None
 
-        # 4. Structural Re-parameterization Refinement Blocks (7x7 Depthwise)
-        self.ref16 = RepDWBlock7x7(width)
-        self.ref8 = RepDWBlock7x7(width)
-        self.ref4 = RepDWBlock7x7(width)
+        # 4. Structural Re-parameterization Refinement Blocks + Cross-Channel 1x1 PW Mixing
+        self.ref16 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw16 = _ChannelMixPW(width)
+        self.ref8 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw8 = _ChannelMixPW(width)
+        self.ref4 = RepDWBlock7x7(width, kernel_size=5)
+        self.pw4 = _ChannelMixPW(width)
 
     def forward(
         self, c4: torch.Tensor, c8: torch.Tensor, c16: torch.Tensor
@@ -139,8 +142,8 @@ class RLKHDCFPNNeck(nn.Module):
             else:
                 hdc_accum = hdc_accum + gap_broadcast
 
-        # Feed directly into RepDWBlock7x7 refinement block
-        p16 = self.ref16(l16 + hdc_accum)
+        # Feed into RepDW refinement + cross-channel 1x1 PW mixing
+        p16 = self.pw16(self.ref16(l16 + hdc_accum))
 
         # Scale 8 Top-Down Fusion
         up16_to_8 = F.interpolate(
@@ -150,7 +153,7 @@ class RLKHDCFPNNeck(nn.Module):
             f8 = self.fuse8(lateral=l8, upsampled=up16_to_8)
         else:
             f8 = l8 + up16_to_8
-        p8 = self.ref8(f8)
+        p8 = self.pw8(self.ref8(f8))
 
         # Scale 4 Top-Down Fusion
         up8_to_4 = F.interpolate(
@@ -160,12 +163,12 @@ class RLKHDCFPNNeck(nn.Module):
             f4 = self.fuse4(lateral=l4, upsampled=up8_to_4)
         else:
             f4 = l4 + up8_to_4
-        p4 = self.ref4(f4)
+        p4 = self.pw4(self.ref4(f4))
 
         return p4, p8, p16
 
     def switch_to_deploy(self) -> None:
-        """Algebraically fuse all 3 RepDW refinement blocks into single 7x7 DW convs."""
+        """Algebraically fuse all 3 RepDW refinement blocks into single depthwise convs."""
         self.ref16.switch_to_deploy()
         self.ref8.switch_to_deploy()
         self.ref4.switch_to_deploy()

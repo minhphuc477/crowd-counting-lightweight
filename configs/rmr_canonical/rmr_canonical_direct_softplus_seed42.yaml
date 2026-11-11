@@ -70,6 +70,7 @@ model:
   foreground_gate: false
   dynamic_trust_gate: false
   hurdle_head: false
+  enable_regional_head: false
 
   # Direct Carrier: Solver Completely Bypassed (Occam Principle)
   enable_solver: false

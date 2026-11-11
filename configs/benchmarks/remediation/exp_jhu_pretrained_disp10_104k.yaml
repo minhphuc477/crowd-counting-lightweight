@@ -34,7 +34,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.001404
+  init_m0: 0.00561
   neck_type: aspp_lite
   aspp_dilations:
   - 2

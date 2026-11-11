@@ -41,14 +41,14 @@ def test_track_a_exact_parameter_audit():
 
 
 def test_track_b_parameter_audit():
-    """Verify Track B subpixel model has <= 200,000 parameters (exact: 122,618)."""
+    """Verify Track B subpixel model has <= 200,000 parameters (exact: 122,330)."""
     cfg = load_config("configs/rmr_canonical/rmr_canonical_stride2_trackB_122k_seed42.yaml")
     m_cfg = RMRv3Config(**cfg["model"])
     model = RMRv3(m_cfg)
     total_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     assert total_trainable <= 200000, f"Param budget violated: {total_trainable} > 200,000"
-    assert total_trainable == 122618, f"Expected canonical 122,618 params, got {total_trainable}"
+    assert total_trainable == 122330, f"Expected canonical 122,330 params, got {total_trainable}"
 
 
 def test_compact_c1_activation_mathematics():

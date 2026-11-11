@@ -23,7 +23,12 @@ _CURVATURE_ALPHA_INIT: float = -8.0
 
 
 class FineMeasureHead(nn.Module):
-    """Fine-grained density head with calibrated rate and compact support activation."""
+    """Fine-grained density head with calibrated rate and compact support activation.
+
+    Note: ``init_bias`` / ``init_m0`` always follows the canonical Stride-4 cell density
+    convention ``m0^{(4)}``. When ``subpixel_stride2=True``, bias initialization
+    automatically scales mass by ``1/4`` to preserve cell density expectation on Stride 2.
+    """
 
     def __init__(
         self,

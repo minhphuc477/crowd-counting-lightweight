@@ -76,7 +76,7 @@ def test_rmr_v3_with_rep_aspp_neck_param_budget():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     assert total_params <= 104441, f"Param ceiling violated: {total_params} > 104,441"
-    assert total_params == 103875, f"Expected exactly 103,875 params, got {total_params}"
+    assert total_params == 103299, f"Expected exactly 103,299 params, got {total_params}"
 
     # Forward pass check
     x = torch.randn(1, 3, 256, 256)
@@ -101,7 +101,7 @@ def test_rmr_v3_track_b_rep_aspp_param_budget():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     assert total_params <= 200000, f"Track B ceiling violated: {total_params} > 200,000"
-    assert total_params == 121731, f"Expected 121,731 params for Track B W=64, got {total_params}"
+    assert total_params == 122115, f"Expected 122,115 params for Track B W=64, got {total_params}"
 
     x = torch.randn(1, 3, 256, 256)
     model.eval()

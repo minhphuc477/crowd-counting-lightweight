@@ -74,13 +74,26 @@ def main():
     model, _, _, cfg = load_model_from_ckpt(Path(args.checkpoint), device=device)
     model.eval()
 
-    print(f"Loading evaluation dataset from: {args.manifest}")
+    m_cfg = cfg.get("model", {})
+    d_cfg = cfg.get("data", {})
+    eff_stride = int(
+        getattr(
+            getattr(model, "cfg", None),
+            "output_stride",
+            2 if (bool(m_cfg.get("subpixel_stride2", False)) or bool(m_cfg.get("subpixel_dm", False))) else int(m_cfg.get("output_stride", 4)),
+        )
+    )
+    backbone_name = m_cfg.get("backbone_name", m_cfg.get("backbone"))
+    norm_mode = CrowdManifestDataset.resolve_norm(backbone_name, d_cfg.get("norm_mode", "auto"))
+
+    print(f"Loading evaluation dataset from: {args.manifest} (stride={eff_stride}, norm={norm_mode})")
     dataset = CrowdManifestDataset(
         manifest=args.manifest,
         train=False,
         data_root="data",
         max_size=args.max_size,
-        output_stride=int(cfg.get("model", {}).get("output_stride", 2)),
+        output_stride=eff_stride,
+        norm_mode=norm_mode,
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=collate_eval, num_workers=2)
 
@@ -89,7 +102,7 @@ def main():
         model=model,
         loader=loader,
         device=device,
-        output_stride=int(cfg.get("model", {}).get("output_stride", 2)),
+        output_stride=eff_stride,
         density_bins=(50.0, 500.0),
     )
 
