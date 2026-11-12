@@ -71,15 +71,19 @@ class EMAManager:
             yield
             return
         live_backup = {k: v.clone() for k, v in model.state_dict().items()}
+        swap_dict = None
         try:
             swap_dict = {
                 k: (self.state[k].to(device=device, dtype=live_backup[k].dtype) if k in self.state else live_backup[k])
                 for k in live_backup
             }
             model.load_state_dict(swap_dict, strict=True)
+            del swap_dict
+            swap_dict = None
             yield
         finally:
             model.load_state_dict(live_backup)
+            del live_backup
 
 
 class CheckpointManager:
@@ -133,6 +137,7 @@ class CheckpointManager:
             generator=self.generator,
         )
         safe_torch_save(ckpt, self.out_dir / "last.pt")
+        del ckpt
 
     def evaluate_and_save_best(
         self,
@@ -174,6 +179,7 @@ class CheckpointManager:
             )
             safe_torch_save(ckpt, self.out_dir / "best_val_mae.pt")
             safe_torch_save(ckpt, self.out_dir / "best_model.pt")
+            del ckpt
             eval_dir = self.out_dir / "eval_val"
             eval_dir.mkdir(parents=True, exist_ok=True)
             (eval_dir / "summary.json").write_text(json.dumps(val_metrics, indent=2))

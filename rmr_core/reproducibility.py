@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import os
 import random
+import sys
 from typing import Any
 
 import numpy as np
@@ -115,10 +117,37 @@ def load_rng_state(
                     raise RuntimeError(f"Failed to restore DataLoader Generator state: {e}") from e
 
 
+_LIBC_TRIM_FN: Any = None
+
+
+def trim_host_memory() -> None:
+    """Release freed Python and Linux glibc heap arenas back to the OS kernel."""
+    gc.collect()
+    global _LIBC_TRIM_FN
+    if _LIBC_TRIM_FN is False:
+        return
+    if _LIBC_TRIM_FN is None:
+        if sys.platform.startswith("linux"):
+            try:
+                import ctypes
+                _LIBC_TRIM_FN = ctypes.CDLL("libc.so.6").malloc_trim
+            except Exception:
+                _LIBC_TRIM_FN = False
+                return
+        else:
+            _LIBC_TRIM_FN = False
+            return
+    try:
+        _LIBC_TRIM_FN(0)
+    except Exception:
+        pass
+
+
 __all__ = [
     "load_rng_state",
     "make_generator",
     "save_rng_state",
     "seed_everything",
     "seed_worker",
+    "trim_host_memory",
 ]

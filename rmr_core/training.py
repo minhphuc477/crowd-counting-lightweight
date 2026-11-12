@@ -25,6 +25,7 @@ from .reproducibility import (
     save_rng_state,
     seed_everything,
     seed_worker,
+    trim_host_memory,
 )
 from .schedulers import (
     IdentityScheduler,
@@ -47,4 +48,5 @@ __all__ = [
     "save_rng_state",
     "seed_everything",
     "seed_worker",
+    "trim_host_memory",
 ]

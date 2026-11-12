@@ -13,6 +13,7 @@ from torchvision.transforms import functional as TF
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from .manifests import compute_manifest_density, resolve_image_path, resolve_manifest_path
+from .reproducibility import trim_host_memory
 from .transforms import (
     cap_image_resolution,
     normalize_image,
@@ -94,6 +95,7 @@ class CrowdManifestDataset(Dataset):
         self._raw_bytes_cache: dict[int, bytes] = {}
         self._raw_bytes_total: int = 0
         self._max_cache_bytes: int = 256 * 1024 * 1024  # 256 MB cap prevents RSS bloat
+        self._getitem_calls: int = 0
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -155,6 +157,9 @@ class CrowdManifestDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, idx: int) -> dict:
+        self._getitem_calls += 1
+        if self._getitem_calls % 256 == 0:
+            trim_host_memory()
         item = self.items[idx]
         path = resolve_image_path(item["image"], data_root=self.root)
         if self.cache_images:

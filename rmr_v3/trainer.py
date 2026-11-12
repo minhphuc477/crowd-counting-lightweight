@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 
 from rmr_core.data import CrowdManifestDataset, collate_eval, collate_train, compute_manifest_density
 from rmr_core.training import (
-    get_git_info, load_rng_state, make_generator, safe_torch_load, seed_everything, seed_worker,
+    get_git_info, load_rng_state, make_generator, safe_torch_load, seed_everything, seed_worker, trim_host_memory,
 )
 from rmr_v3.checkpoint import CheckpointManager, EMAManager
 from rmr_v3.config import compute_config_hash, validate_resume_compatibility, validate_v3_config
@@ -355,8 +355,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
                 )
             if device.type == "cuda":
                 torch.cuda.empty_cache()
-            import gc
-            gc.collect()
+            trim_host_memory()
 
             eval_map = {
                 "val_mae": "MAE", "val_rmse": "RMSE", "val_nae": "NAE", "val_bias": "Bias",
