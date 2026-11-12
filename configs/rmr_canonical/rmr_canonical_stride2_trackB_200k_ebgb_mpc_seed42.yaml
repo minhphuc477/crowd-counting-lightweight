@@ -42,7 +42,7 @@ model:
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.1
-  init_m0: 0.015763
+  init_m0: 0.00394075
 
   # Structural Re-parameterization Neck (Champion Track B)
   neck_type: rep_aspp_lite

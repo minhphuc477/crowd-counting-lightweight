@@ -29,7 +29,9 @@ def make_model(cfg: dict) -> tuple[RMRv3, bool]:
             resolved = resolve_manifest_path(d_cfg["train_manifest"], data_root=d_cfg.get("data_root"))
             if resolved is not None:
                 try:
-                    m_cfg["init_m0"] = compute_manifest_density(
+                    # Apply 0.25x background-safe sparse prior so Step-0 total mass stays
+                    # below full-image GT (~30%) and avoids Softplus negative saturation.
+                    m_cfg["init_m0"] = 0.25 * compute_manifest_density(
                         resolved,
                         output_stride=4,
                         data_root=d_cfg.get("data_root"),

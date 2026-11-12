@@ -46,7 +46,7 @@ model:
   pretrained: true
   backbone_lr_scale: 0.1
   # Canonical Stride-4 m0 prior (FineMeasureHead automatically scales by 1/4 for Stride-2)
-  init_m0: 0.015763
+  init_m0: 0.00394075
 
   # ASPP-Lite Neck with Dilations [2, 4, 8]
   neck_type: aspp_lite
