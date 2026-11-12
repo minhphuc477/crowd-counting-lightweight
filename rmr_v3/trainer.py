@@ -116,6 +116,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
     (out_dir / "resolved_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
 
     d_cfg = cfg.get("data", {})
+    workers = int(cfg.get("train", {}).get("workers", 0))
     norm_mode = CrowdManifestDataset.resolve_norm(m_cfg.get("backbone_name"), d_cfg.get("norm_mode", "auto"))
     train_ds = CrowdManifestDataset(
         d_cfg["train_manifest"],
@@ -129,7 +130,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         gamma_jitter=tuple(d_cfg.get("gamma_jitter", [1.0, 1.0])),
         random_invert_prob=float(d_cfg.get("random_invert_prob", 0.0)),
         data_root=d_cfg.get("data_root"),
-        cache_images=bool(d_cfg.get("cache_images", True)),
+        cache_images=bool(d_cfg.get("cache_images", workers == 0)),
         preload=bool(d_cfg.get("preload", False)),
         pad_small_images=bool(d_cfg.get("pad_small_images", False)),
         boundary_margin=float(d_cfg.get("boundary_margin", 0.0)),
@@ -151,7 +152,7 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         train=False,
         output_stride=eff_stride,
         data_root=d_cfg.get("data_root"),
-        cache_images=bool(d_cfg.get("cache_images", True)),
+        cache_images=bool(d_cfg.get("cache_val_images", False)),
         preload=bool(d_cfg.get("preload", False)),
         max_size=int(d_cfg.get("max_size", 2048)),
         norm_mode=norm_mode,
@@ -167,7 +168,6 @@ def run_training_loop(cfg: dict[str, Any], args: Any) -> None:
         torch.backends.cudnn.allow_tf32 = not deterministic
         if not deterministic and bool(cfg.get("train", {}).get("cudnn_benchmark", True)):
             torch.backends.cudnn.benchmark = True
-    workers = int(cfg.get("train", {}).get("workers", 0))
     pin_mem = bool(cfg.get("train", {}).get("pin_memory", device.type == "cuda"))
     gen = make_generator(seed) if deterministic else None
     train_loader = DataLoader(

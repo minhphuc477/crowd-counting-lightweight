@@ -119,6 +119,10 @@ def evaluate_v3(
             traj_rows.append(t_diag)
         return {}
 
+    is_direct_no_reg = (
+        getattr(model, "region_head", None) is None
+        and not getattr(model.cfg, "enable_solver", True)
+    )
     eval_solv_str = 0.0 if not getattr(model.cfg, "enable_solver", True) else 1.0
     rows, summary = evaluate_dataset(
         model=model,
@@ -127,7 +131,7 @@ def evaluate_v3(
         output_stride=int(model.cfg.output_stride),
         run_tiling=run_tiling,
         forward_kwargs={"uniform_reliability": uniform_reliability, "solver_strength": eval_solv_str},
-        extra_sample_callback=sample_callback,
+        extra_sample_callback=None if is_direct_no_reg else sample_callback,
         enforce_gt_consistency=True,
         density_bins=density_bins,
     )

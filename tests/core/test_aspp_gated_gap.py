@@ -12,6 +12,7 @@ class TestASPPLiteGatedGAP:
 
     def test_parameter_count_invariance(self):
         """Verify that aspp_gap_mode='gate' has EXACT same parameter count as 'add' (10,784 params)."""
+        torch.manual_seed(42)
         neck_add = ASPPLiteFPNNeck(aspp_gap_mode="add")
         neck_gate = ASPPLiteFPNNeck(aspp_gap_mode="gate")
 
@@ -29,6 +30,7 @@ class TestASPPLiteGatedGAP:
         features before projection (0 * (1 + tanh) == 0), whereas 'add' mode produces
         uniform additive leakage (0 + gap_vec != 0).
         """
+        torch.manual_seed(42)
         neck_add = ASPPLiteFPNNeck(aspp_gap_mode="add")
         neck_gate = ASPPLiteFPNNeck(aspp_gap_mode="gate")
         neck_gate.load_state_dict(neck_add.state_dict())

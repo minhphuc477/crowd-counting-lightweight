@@ -7,102 +7,13 @@ import torch
 import torch.nn.functional as F
 
 
-class _BayesianPersonErrorFunction(torch.autograd.Function):
-    """Memory-efficient exact backward for Bayesian individual count error.
+from .bayesian_fast import (
+    _BAYESIAN_FAST_ELEMS_CAP,
+    _BayesianPersonErrorFunction,
+    fast_bayesian_sample,
+)
 
-    Eliminates O(B * N * M) autograd graph activation retention by recomputing
-    chunked Gaussian kernels on-the-fly during backward, reducing peak loss graph
-    memory from > 3,200 MB to < 100 MB with bitwise mathematical equivalence.
-    Runs strictly in Float32 to prevent FP16 Tensor Core downcast overflow under AMP.
-    """
-
-    @staticmethod
-    def forward(
-        ctx: Any,
-        u: torch.Tensor,
-        pts: torch.Tensor,
-        gx: torch.Tensor,
-        gy: torch.Tensor,
-        inv_k: Union[torch.Tensor, float],
-        target_person: torch.Tensor,
-        chunk_size: int,
-        max_score_row: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        dev_type = u.device.type if u.device.type in ("cuda", "cpu") else "cuda"
-        with torch.amp.autocast(dev_type, enabled=False):
-            u_f = u.float()
-            gx_f = gx.float()
-            gy_f = gy.float()
-            pts_f = pts.float()
-            ms_f = max_score_row.float() if max_score_row is not None else None
-            n = pts.shape[0]
-            c_hat = torch.empty(n, device=u.device, dtype=torch.float32)
-            for c in range(0, n, chunk_size):
-                p = pts_f[c : c + chunk_size]
-                dx = p[:, 0:1] - gx_f
-                dy = p[:, 1:2] - gy_f
-                d2 = dx.square_().add_(dy.square_())
-                ik = inv_k[c : c + chunk_size] if isinstance(inv_k, torch.Tensor) else inv_k
-                if isinstance(ik, torch.Tensor) and ik.ndim == 1:
-                    ik = ik.unsqueeze(1)
-                d2.mul_(-ik)
-                if ms_f is not None:
-                    d2.sub_(ms_f)
-                k_chunk = torch.exp(d2)
-                c_hat[c : c + chunk_size] = torch.matmul(k_chunk, u_f)
-
-            diff = c_hat - target_person.float()
-            err = diff.abs().sum()
-            sign = torch.sign(diff)
-            inv_k_saved = inv_k if isinstance(inv_k, torch.Tensor) else torch.tensor(inv_k, device=u.device)
-            ctx.has_max_score = ms_f is not None
-            if ms_f is not None:
-                ctx.save_for_backward(pts, gx, gy, inv_k_saved, ms_f, sign)
-            else:
-                ctx.save_for_backward(pts, gx, gy, inv_k_saved, sign)
-            ctx.chunk_size = chunk_size
-            return err
-
-    @staticmethod
-    def backward(ctx: Any, grad_err: torch.Tensor) -> tuple[Optional[torch.Tensor], ...]:
-        if ctx.has_max_score:
-            pts, gx, gy, inv_k_saved, ms_f, sign = ctx.saved_tensors
-        else:
-            pts, gx, gy, inv_k_saved, sign = ctx.saved_tensors
-            ms_f = None
-        chunk_size = ctx.chunk_size
-        dev_type = pts.device.type if pts.device.type in ("cuda", "cpu") else "cuda"
-        with torch.amp.autocast(dev_type, enabled=False):
-            n = pts.shape[0]
-            m = gx.shape[1]
-            grad_u = torch.zeros(m, device=pts.device, dtype=torch.float32)
-            inv_k = inv_k_saved
-            gx_f = gx.float()
-            gy_f = gy.float()
-            pts_f = pts.float()
-
-            for c in range(0, n, chunk_size):
-                p = pts_f[c : c + chunk_size]
-                dx = p[:, 0:1] - gx_f
-                dy = p[:, 1:2] - gy_f
-                d2 = dx.square_().add_(dy.square_())
-                ik = inv_k[c : c + chunk_size] if inv_k.ndim > 0 else inv_k
-                if isinstance(ik, torch.Tensor) and ik.ndim == 1:
-                    ik = ik.unsqueeze(1)
-                d2.mul_(-ik)
-                if ms_f is not None:
-                    d2.sub_(ms_f)
-                k_chunk = torch.exp(d2)
-                s_chunk = sign[c : c + chunk_size]
-                grad_u.addmv_(k_chunk.t(), s_chunk)
-
-            grad_u.mul_(grad_err.float())
-            if ctx.has_max_score:
-                return grad_u, None, None, None, None, None, None, None
-            return grad_u, None, None, None, None, None, None
-
-
-_BAYESIAN_GRID_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+_BAYESIAN_GRID_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float, float]] = {}
 
 
 def bayesian_loss(
@@ -128,24 +39,26 @@ def bayesian_loss(
     b, _, h, w = prob_y0.shape
     device = prob_y0.device
 
-    # Create grid of center coordinates in image pixels with LRU cache
+    # Create grid of center coordinates in image pixels with LRU cache (including centered GEMM coords)
     grid_key = (h, w, stride, str(device))
     if grid_key in _BAYESIAN_GRID_CACHE:
-        gx, gy = _BAYESIAN_GRID_CACHE[grid_key]
+        gx, gy, g_xy_c, g_sq, cx, cy = _BAYESIAN_GRID_CACHE[grid_key]
     else:
         y_coords = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) * float(stride)
         x_coords = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) * float(stride)
         grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
         gx = grid_x.flatten().unsqueeze(0)  # [1, M]
         gy = grid_y.flatten().unsqueeze(0)  # [1, M]
+        cx, cy = float(w * stride) * 0.5, float(h * stride) * 0.5
+        g_xy_c = torch.stack([gx[0] - cx, gy[0] - cy], dim=1).contiguous()
+        g_sq = g_xy_c.square().sum(dim=1).unsqueeze(0)
         if len(_BAYESIAN_GRID_CACHE) >= 16:
             _BAYESIAN_GRID_CACHE.pop(next(iter(_BAYESIAN_GRID_CACHE)))
-        _BAYESIAN_GRID_CACHE[grid_key] = (gx, gy)
+        _BAYESIAN_GRID_CACHE[grid_key] = (gx, gy, g_xy_c, g_sq, cx, cy)
     m_total = gx.shape[1]
 
-    # Bounded adaptive chunk size: limits peak chunk tensor to <= 16MB (4,194,304 float32 elements)
-    # Stride 4 (M=16,384) -> chunk_size = 256; Stride 2 (M=65,536) -> chunk_size = 64
-    chunk_size = max(32, min(256, int(4194304 // max(m_total, 1))))
+    # Bounded adaptive chunk size for ultra-dense scenes (<= 64MB temp chunk)
+    chunk_size = max(64, min(256, int(8_388_608 // max(m_total, 1))))
 
     losses: list[torch.Tensor] = []
     inv_two_sigma_sq = 1.0 / (2.0 * sigma * sigma)
@@ -161,6 +74,33 @@ def bayesian_loss(
 
         pts = pts.to(device=device, dtype=torch.float32, non_blocking=True)
         n = pts.shape[0]
+
+        has_custom_target = (
+            targets_list is not None
+            and i < len(targets_list)
+            and targets_list[i] is not None
+            and targets_list[i].shape[0] == n
+        )
+        target_person = (
+            targets_list[i].to(device=device, dtype=torch.float32)
+            if has_custom_target
+            else torch.ones(n, device=device, dtype=torch.float32)
+        )
+        if n * m_total <= _BAYESIAN_FAST_ELEMS_CAP:
+            raw_sample_loss = fast_bayesian_sample(
+                y_flat=y_flat, pts=pts, g_xy_c=g_xy_c, g_sq=g_sq, cx=cx, cy=cy,
+                h=h, w=w, stride=stride, sigma=sigma, background_ratio=background_ratio,
+                canonical_background=canonical_background, adaptive_sigma=adaptive_sigma,
+                sigma_min=sigma_min, sigma_max=sigma_max, target_person=target_person,
+            )
+            if norm_mode == "canonical":
+                sample_loss = raw_sample_loss
+            elif norm_mode == "square_root":
+                sample_loss = raw_sample_loss / max(math.sqrt(float(max(n, 1)) / max(float(norm_ref), 1.0)), 1e-4)
+            else:
+                sample_loss = raw_sample_loss / float(max(n, 1))
+            losses.append(sample_loss)
+            continue
 
         # Compute adaptive per-point sigma if requested (prevents blur overlap in dense clusters
         # while expanding smoothly to sigma_max on sparse / single-person foreground scenes)

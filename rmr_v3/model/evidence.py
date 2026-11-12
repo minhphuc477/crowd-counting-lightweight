@@ -28,17 +28,33 @@ def extract_regional_evidence(
     if region_head is None:
         bsz = int(p4.shape[0])
         num_regions = int(regions.area.shape[0])
-        zeros = torch.zeros((bsz, 1, num_regions), device=p4.device, dtype=torch.float32)
+        zeros = torch.zeros((1, 1, 1), device=p4.device, dtype=torch.float32).expand(bsz, 1, num_regions)
         disp_init = float(cfg.dispersion_init)
+        disp_t = torch.full((1, 1, 1), disp_init, device=p4.device, dtype=torch.float32).expand(bsz, 1, num_regions)
+        log_disp_t = torch.full(
+            (1, 1, 1), math.log(max(disp_init, 1e-8)), device=p4.device, dtype=torch.float32
+        ).expand(bsz, 1, num_regions)
+        if not cfg.enable_solver:
+            ones = torch.ones((1, 1, 1), device=p4.device, dtype=torch.float32).expand(bsz, 1, num_regions)
+            return {
+                "mu_count": zeros,
+                "dispersion": disp_t,
+                "log_dispersion": log_disp_t,
+                "rate": zeros,
+                "b_solver": zeros,
+                "b_variance": zeros,
+                "weight": ones,
+                "weight_solver": ones,
+                "precision": zeros,
+                "rate_variance": zeros,
+                "count_variance": zeros,
+                "hurdle_logit": None,
+            }
         regional = {
             "mu_count": zeros,
             "rate": zeros,
-            "dispersion": torch.full(
-                (bsz, 1, num_regions), disp_init, device=p4.device, dtype=torch.float32
-            ),
-            "log_dispersion": torch.full(
-                (bsz, 1, num_regions), math.log(max(disp_init, 1e-8)), device=p4.device, dtype=torch.float32
-            ),
+            "dispersion": disp_t,
+            "log_dispersion": log_disp_t,
         }
     else:
         regional = region_head((p4, p8, p16), regions)

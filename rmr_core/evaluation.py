@@ -213,6 +213,7 @@ def evaluate_dataset(
                 extra = extra_sample_callback(sample, out, y, row)
                 if extra:
                     row.update(extra)
+            sample.pop("target_device", None)
 
             rows.append(row)
             sample_index += 1

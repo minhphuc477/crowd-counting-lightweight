@@ -92,6 +92,8 @@ class CrowdManifestDataset(Dataset):
         self.stratified_crowd_crop = bool(stratified_crowd_crop)
         self.norm_mode = resolve_backbone_norm_mode(None, norm_mode)
         self._raw_bytes_cache: dict[int, bytes] = {}
+        self._raw_bytes_total: int = 0
+        self._max_cache_bytes: int = 256 * 1024 * 1024  # 256 MB cap prevents RSS bloat
         with self.manifest.open("r", encoding="utf-8") as f:
             self.items = [json.loads(line) for line in f if line.strip()]
 
@@ -139,13 +141,15 @@ class CrowdManifestDataset(Dataset):
             )
 
         for it in self.items:
-            pts_raw = it.get("points", [])
+            pts_raw = it.pop("points", [])
             it["points_tensor"] = torch.tensor(pts_raw, dtype=torch.float32).reshape(-1, 2)
 
         if self.cache_images and preload:
             for i, it in enumerate(self.items):
                 p = resolve_image_path(it["image"], data_root=self.root)
-                self._raw_bytes_cache[i] = p.read_bytes()
+                raw_b = p.read_bytes()
+                self._raw_bytes_cache[i] = raw_b
+                self._raw_bytes_total += len(raw_b)
 
     def __len__(self) -> int:
         return len(self.items)
@@ -154,9 +158,13 @@ class CrowdManifestDataset(Dataset):
         item = self.items[idx]
         path = resolve_image_path(item["image"], data_root=self.root)
         if self.cache_images:
-            if idx not in self._raw_bytes_cache:
-                self._raw_bytes_cache[idx] = path.read_bytes()
-            with io.BytesIO(self._raw_bytes_cache[idx]) as buf, Image.open(buf) as raw_img:
+            raw_b = self._raw_bytes_cache.get(idx)
+            if raw_b is None:
+                raw_b = path.read_bytes()
+                if self._raw_bytes_total + len(raw_b) <= self._max_cache_bytes:
+                    self._raw_bytes_cache[idx] = raw_b
+                    self._raw_bytes_total += len(raw_b)
+            with io.BytesIO(raw_b) as buf, Image.open(buf) as raw_img:
                 image = raw_img.convert("RGB")
         else:
             with Image.open(path) as img:

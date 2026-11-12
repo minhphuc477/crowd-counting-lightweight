@@ -94,6 +94,11 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
             weight_lr_power=weight_lr_power,
         )
 
+    if any(p.is_cuda for g in param_groups for p in g["params"]):
+        try:
+            return torch.optim.AdamW(param_groups, fused=True)
+        except Exception:
+            pass
     return torch.optim.AdamW(param_groups)
 
 

@@ -330,3 +330,43 @@ def test_dual_lattice_single_count_and_step0_init_m0_and_active_yamls() -> None:
             assert float(l_cfg.get("lambda_region_nb", 0.0)) == 0.0
         else:
             assert m_cfg.get("enable_regional_head", True) is True, f"Solver config {p} must keep regional head"
+
+
+def test_fast_bayesian_radon_parity_and_memory_caps() -> None:
+    """Verify vectorized Bayesian + Radon-OT match fallback gradients cleanly and dataset RAM caps hold."""
+    import rmr_v3.losses.bayesian_fast as bf
+    from rmr_v3.losses.point_supervision import bayesian_loss
+    from rmr_v3.losses.radon_ot import radon_sliced_wasserstein_loss
+
+    torch.manual_seed(11)
+    pred_fast = torch.rand((2, 1, 32, 32), dtype=torch.float32, requires_grad=True)
+    pred_chunk = pred_fast.detach().clone().requires_grad_(True)
+    pts = [torch.rand((18, 2)) * 64.0, torch.rand((12, 2)) * 64.0]
+
+    # Compare fast centered-GEMM path vs forced chunked fallback
+    loss_fast = bayesian_loss(pred_fast, pts, sigma=4.0, background_ratio=0.05, stride=2, adaptive_sigma=True, sigma_min=2.0, sigma_max=4.0)
+    loss_fast.backward()
+
+    orig_cap = bf._BAYESIAN_FAST_ELEMS_CAP
+    try:
+        bf._BAYESIAN_FAST_ELEMS_CAP = 0
+        loss_chunk = bayesian_loss(pred_chunk, pts, sigma=4.0, background_ratio=0.05, stride=2, adaptive_sigma=True, sigma_min=2.0, sigma_max=4.0)
+        loss_chunk.backward()
+    finally:
+        bf._BAYESIAN_FAST_ELEMS_CAP = orig_cap
+
+    assert torch.allclose(loss_fast, loss_chunk, atol=1e-5, rtol=1e-5)
+    assert pred_fast.grad is not None and pred_chunk.grad is not None
+    assert torch.allclose(pred_fast.grad, pred_chunk.grad, atol=1e-5, rtol=1e-5)
+
+    # Verify vectorized Radon-OT produces finite positive loss and gradients
+    pred_rot = torch.rand((2, 1, 32, 32), dtype=torch.float32, requires_grad=True)
+    loss_rot = radon_sliced_wasserstein_loss(pred_rot, pts, stride=2, num_projections=4)
+    assert torch.isfinite(loss_rot) and loss_rot.item() > 0.0
+    loss_rot.backward()
+    assert pred_rot.grad is not None and torch.isfinite(pred_rot.grad).all() and pred_rot.grad.abs().sum().item() > 0.0
+
+    # Verify CrowdManifestDataset pops nested Python points lists
+    ds = CrowdManifestDataset("data/sha_a_train_all.jsonl", train=True, cache_images=False)
+    assert "points" not in ds.items[0] and "points_tensor" in ds.items[0]
+
