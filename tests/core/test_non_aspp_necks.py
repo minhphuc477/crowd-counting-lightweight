@@ -274,8 +274,8 @@ def test_validator_accepts_new_necks_and_rejects_typos() -> None:
         validate_v3_config({"model": {"head_type": "unknown_head_typo"}})
 
 
-def test_sfi_lite_simam_shift_equivariance_and_sample_isolation() -> None:
-    """SFILiteFPNNeck with local SimAM gate must preserve shift equivariance and sample isolation."""
+def test_sfi_lite_shift_equivariance_and_sample_isolation() -> None:
+    """SFILiteFPNNeck must preserve shift equivariance and sample isolation without cross-talk."""
     from rmr_core.necks.sfi import SFILiteFPNNeck
 
     torch.manual_seed(42)
@@ -313,32 +313,4 @@ def test_sfi_lite_simam_shift_equivariance_and_sample_isolation() -> None:
     assert c4.grad[0].abs().sum().item() > 0.0
     assert c4.grad[1].abs().max().item() == 0.0, "Cross-sample leakage detected in SFILiteFPNNeck!"
 
-
-def test_density_adaptive_scale_convex_boost() -> None:
-    """Density adaptive scale must not affect negative/zero logits and must scale positive logits super-linearly."""
-    head = build_fine_head(
-        width=32,
-        density_adaptive_scale=True,
-        density_scale_gamma=0.25,
-        floor_tau=0.001,
-        subpixel_stride2=False,
-    )
-    # Negative logit (background)
-    z_neg = torch.tensor([-5.0])
-    y_neg = head.activate(z_neg)
-    y_neg_plain = head.activate(z_neg)
-    assert torch.allclose(y_neg, y_neg_plain)
-
-    # Positive logit (dense peak)
-    z_pos = torch.tensor([4.0])
-    head_plain = build_fine_head(
-        width=32,
-        density_adaptive_scale=False,
-        floor_tau=0.001,
-        subpixel_stride2=False,
-    )
-    y_pos_scaled = head.activate(z_pos)
-    y_pos_plain = head_plain.activate(z_pos)
-    # y = y_plain * (1 + 0.25 * 4.0) = 2.0 * y_plain
-    assert torch.allclose(y_pos_scaled, 2.0 * y_pos_plain, rtol=1e-3)
 

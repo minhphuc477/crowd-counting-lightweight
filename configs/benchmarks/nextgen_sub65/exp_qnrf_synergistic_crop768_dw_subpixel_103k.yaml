@@ -49,9 +49,7 @@ model:
   enable_regional_head: false
   enable_solver: false
   solver_mode: direct
-  floor_tau: 0.002
-  density_adaptive_scale: true
-  density_scale_gamma: 0.25
+  floor_tau: 0.001
   eps: 1.0e-06
 
 loss:

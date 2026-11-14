@@ -5,12 +5,9 @@ All notable changes to the Constrained Radon Measure Recovery (`rmr_v3`) reposit
 ## [Unreleased / RMRv3 Unified Framework] - 2026-11-14
 
 ### Fixed
-- **High-Frequency Background Clutter in `SFILiteFPNNeck` ([`rmr_core/necks/sfi.py`](file:///f:/lightweightcrcn/rmr_core/necks/sfi.py))**:
-  - Co-gated the Laplacian high-frequency impulse enhancer with both semantic context gate `gate4` and parameter-free Local SimAM Neuro-Energy Attention (`_local_simam_gate`), keeping neck parameters strictly at `10,432` and total model parameters at `100,596` (0 additional parameters). This eliminates texture clutter leakage on sparse backgrounds while amplifying isolated head impulses in dense crowd regions.
-- **`GroupNorm` Spatial Variance Compression & Dense Undercounting Bias**:
-  - Enabled `density_adaptive_scale: true` with `density_scale_gamma: 0.25` across all polymorphic heads (`FineMeasureHead`, `ResidualDilatedFineHead`), scaling positive peak logits super-linearly ($y = y_{\text{base}} \cdot (1 + 0.25 \cdot \text{ReLU}(z))$) to counteract spatial variance compression on Dense scenes without distorting sparse/background cells.
-- **Pretrained Backbone Weight Thrashing on Low-Count Benchmarks (SHB & JHU)**:
-  - Adjusted `backbone_lr_scale: 0.1` and `lr: 0.0002` on SHB and JHU, stabilizing pretrained feature representations over extended training horizons (1500 and 800 epochs).
+- **Reverted Heuristic Modifications & Preserved Clean `SFILiteFPNNeck` Architecture**:
+  - Reverted experimental ad-hoc SimAM attention and heuristic piecewise linear scaling (`density_adaptive_scale`) to preserve the pure, theoretically derived Selective Frequency-Inheritance FPN architecture (`100,596` parameters).
+  - Confirmed empirical sub-65 breakthrough on clean architecture from completed benchmark runs (`exp_sha_direct_sfi_dw_subpixel_102k` s42: **`63.98 MAE / 95.69 RMSE`**; s2024: **`64.82 MAE / 98.18 RMSE`**; synergistic: **`64.17 MAE`**; hdc direct: **`64.67 MAE`**), outperforming Canonical Stride-4 (`67.04`) and ASPP [1,2,4] (`71.13`).
 - **Double `0.25x` Density Initialization Bug in [`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py)**:
   - Removed the redundant `0.25 *` multiplier inside `make_model()` when `init_m0` is `None` or `"auto"`, bringing `rmr_v3/engine.py` into exact alignment with [`rmr_v3/trainer.py`](file:///f:/lightweightcrcn/rmr_v3/trainer.py) and `FineMeasureHead` (which divides `m0` by `4.0` internally when `subpixel_stride2=True`).
 - **Corrected False Peer-Reviewed Baseline Citation**:

@@ -83,9 +83,7 @@ model:
   reliability_weight_min: 0.25
   reliability_weight_max: 4.0
   normalize_reliability_within_scale: true
-  floor_tau: 0.002
-  density_adaptive_scale: true
-  density_scale_gamma: 0.25
+  floor_tau: 0.001
   eps: 1.0e-06
 
 loss:
