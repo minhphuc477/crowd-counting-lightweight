@@ -5,10 +5,11 @@ data:
   val_manifest: data/shb_test.jsonl
   data_root: data
   crop_size: 512
-  pad_small_images: false
+  pad_small_images: true
+  max_size: 2048
   scale_range:
-  - 0.75
-  - 1.25
+  - 0.6
+  - 1.4
   hflip_prob: 0.5
   brightness_jitter: 0.2
   contrast_jitter: 0.2
@@ -32,12 +33,13 @@ model:
   subpixel_stride2: true
   subpixel_kernel_size: 3
   head_type: dw_subpixel
+  head_activation: softplus
   feature_width: 32
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.25
-  init_m0: 0.0025
+  init_m0: auto
   neck_type: sfi_lite
   hdc_dilations:
   - 1
@@ -79,17 +81,18 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 1500
+  epochs: 500
   batch_size: 8
   workers: 4
   pin_memory: true
   lr: 0.0003
   backbone_lr_scale: 0.25
   weight_decay: 0.0001
-  warmup_epochs: 20
+  warmup_epochs: 15
   min_lr_ratio: 0.20
   grad_clip: 1.0
   amp: true
+  ema_decay: 0.999
   early_stopping: false
   patience: 0
   eval_every: 5

@@ -94,12 +94,12 @@ Các tuyên bố narrative cũ được viết lại thành các giả thuyết 
   - Bác bỏ nếu $\text{Mean MAE}_{\text{Stride2}} > 70.0$ hoặc độ biến thiên giữa các seed $> 8.0$ MAE.
 
 ### Giả thuyết $H_4$: Định vị Cạnh tranh Thực tế trong Phân khúc Siêu nhẹ (Lightweight SOTA)
-- **Nội dung giả thuyết**: "Trong phân khúc mô hình siêu nhẹ $\le 105k$ tham số không dùng distillation, RMRv3 cạnh tranh với TinyCount (78.2 MAE, 104k) và vượt qua các baseline lịch sử (SANet 67.0, TEDnet 64.2) ở mức độ tối ưu tham số (104k vs 8.0M và 1.6M params), nhưng chưa thể vượt qua các mô hình chuyên biệt dẫn đầu như EBC-ZIP-S (57.2 MAE, 84k) hay FFNet (48.3 MAE)."
+- **Nội dung giả thuyết**: "Trong phân khúc mô hình siêu nhẹ $\le 105k$ tham số không dùng Knowledge Distillation ($0\%$ KD), RMRv3 ($100.6k$–$104.4k$ params) cạnh tranh trực tiếp trong nhóm standalone sub-$200k$ gồm `TinyCount` ($0.060\text{M}$ params, $0.16\text{ GFLOPs}$, SHA $78.2 / 120.8$), `Lw-Count` ($0.071\text{M}$, SHA $69.7 / 100.5$), `MCNN` ($0.133\text{M}$, SHA $110.2$), và `LSANet` ($0.200\text{M}$, $14.4\text{ GFLOPs}$, SHA $66.1 / 110.2$, SHB $8.6$), đồng thời vẫn có khoảng cách sai số so với các mô hình lớn hơn nhiều như `EBC-ZIP-P` ($0.81\text{M}$, SHA $71.18$, SHB $8.23$, QNRF $96.29$), `EBC-ZIP-N` ($3.36\text{M}$, SHA $58.86$), `EBC-ZIP-S` ($33.60\text{M}$, SHA $55.17$) và `EBC-ZIP-B` ($105.60\text{M}$, SHA $47.81$)."
 - **Ngưỡng kiểm chứng định lượng**:
-  1. Bảng so sánh SOTA phải trích dẫn đầy đủ: EBC-ZIP-S (57.2), FFNet (48.3), HMSTUNet (49.1), TEDnet (64.2), SANet (67.0), TinyCount (78.2).
-  2. Không đưa ra bất kỳ tuyên bố "World Record" nào.
+  1. Bảng đối chiếu literature phải phân tầng đúng dung lượng tham số và FLOPs: sub-$105k$ (`TinyCount` 60k -> 78.2, `Lw-Count` 71k -> 69.7), $105k$–$200k$ (`MCNN` 133k -> 110.2, `LSANet` 200k -> 66.1), và $>0.8\text{M}$ (`EBC-ZIP-P` 0.81M -> 71.18, `EBC-ZIP-N` 3.36M -> 58.86, `EBC-ZIP-S` 33.60M -> 55.17, `EBC-ZIP-B` 105.60M -> 47.81). Tuyệt đối không ghi sai `EBC-ZIP-S` là `84k` params.
+  2. Không đưa ra bất kỳ tuyên bố phóng đại hay dùng từ cấm nào (tuân thủ `AGENTS.md`).
 - **Điều kiện bác bỏ**:
-  - Bác bỏ nếu bất kỳ tuyên bố nào so sánh RMRv3 mà bỏ qua EBC-ZIP-S hoặc khẳng định RMRv3 đạt SOTA tuyệt đối phân khúc sub-100k.
+  - Bác bỏ nếu bất kỳ tuyên bố nào gộp nhầm mô hình $\ge 3\text{M}$ params (như `EBC-ZIP-N/S/B`) vào phân khúc $\le 105k$ params hoặc đánh đồng mô hình có KD với standalone $0\%$ KD.
 
 ### Giả thuyết $H_5$: Kiểm soát Tính Khả tái lập (Determinism Control)
 - **Nội dung giả thuyết**: "Việc thiết lập `deterministic: true` kết hợp cố định `DataLoader` generator với `torch.backends.cudnn.benchmark = False` sẽ kiểm soát phương sai chạy lặp lại trên cùng một seed xuống mức sai số chấp nhận được $\le 0.5$ MAE."
@@ -149,10 +149,10 @@ Một bài báo khoa học chuẩn mực phải công khai trung thực các k�
    - Trong khi đó, nếu dùng GT box count thì MAE đạt **4.77**.
    - *Kết luận tiêu cực*: Đầu dự đoán vùng xác suất hiện tại bị bão hòa/undercount ở các đám đông lớn, kéo lùi độ chính xác của solver. Solver không thể phát huy sức mạnh nếu đầu vùng không chuẩn xác.
 
-5. **Kết quả tiêu cực 5: Mô hình vượt ngưỡng 100k tham số và chưa vượt SOTA dẫn đầu**
-   - Mô hình có **104,390 tham số** ($> 100k$).
-   - Trong cùng phân khúc dưới 150k tham số, EBC-ZIP-S đạt **57.2 MAE** (ít hơn 20k tham số và tốt hơn 11.71 MAE).
-   - *Kết luận tiêu cực*: Bài báo không thể định vị theo kiểu "phá kỷ lục tuyệt đối thế giới" mà phải định vị theo hướng "nghiên cứu thực nghiệm giải phẫu toán tử độ đo và tính hiệu quả tính toán".
+5. **Kết quả tiêu cực 5: Chi phí dung lượng ($\approx 101k$–$104k$ params) và khoảng cách so với các mô hình lớn hơn nhiều**
+   - RMRv3 hoạt động trong khoảng **$100.6k$–$104.4k$ tham số** ($\le 104,441$ budget, $0\%$ KD), tức vẫn lớn hơn về mặt tham số so với `TinyCount` ($60k$, SHA $78.2$) và `Lw-Count` ($71k$, SHA $69.7$).
+   - Khi đối chiếu với các mô hình từ $0.81\text{M}$ đến $105.6\text{M}$ params (`EBC-ZIP-P`: $0.81\text{M}$, SHA $71.18$, SHB $8.23$; `EBC-ZIP-N`: $3.36\text{M}$, SHA $58.86$; `EBC-ZIP-S`: $33.60\text{M}$, SHA $55.17$; `EBC-ZIP-B`: $105.60\text{M}$, SHA $47.81$), khoảng cách MAE ở SHA và SHB phản ánh rõ giới hạn biểu diễn của xương sống $<105k$ params khi không dùng Knowledge Distillation.
+   - *Kết luận tiêu cực*: Bài báo phải định vị khách quan ở phân khúc **standalone $0\%$ KD $\le 105k$ params** trên Biểu đồ đánh đổi thực nghiệm độ phức tạp - độ chính xác (*Empirical Complexity-Accuracy Trade-off*), phân tích trung thực giới hạn biểu diễn và giải phẫu toán tử đo lường thay vì tuyên bố phá kỷ lục toàn cục.
 
 ---
 

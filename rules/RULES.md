@@ -74,7 +74,7 @@
 ---
 
 ## 9. Bốn Thủ Phạm Kỹ Thuật Bị Cấm Tuyệt Đối (STRICT BAN ON 4 REGRESSION CULPRITS)
-*Chi tiết cơ sở vật lý và toán học xem tại `LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md`.*
+*Chi tiết cơ sở khoa học, bằng chứng thực nghiệm và danh sách chế độ lỗi xem tại `docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`.*
 1. **CẤM BẬT `use_diag: True`**: Mặc định bắt buộc `use_diag: False`. Global Average Pooling làm ô nhiễm định tuyến thang đo và phạt +4.96 MAE.
 2. **CẤM SCALE JITTER QUÁ ĐÀ**: Bắt buộc `scale_range: [0.6, 1.4]`. Tuyệt đối không dùng cận dưới $< 0.5$ (gây aliasing phá hủy micro-head trên Stride 4).
 3. **CẤM BỎ BAYESIAN POINT LOSS TRÊN TRACK A**: Track A (Stride 4) bắt buộc dùng `dual_bayesian_dm16` (`lambda_bayesian: 0.15`) để bảo toàn định vị điểm trong khối $64 \times 64$ px.
@@ -95,7 +95,7 @@
   - Không được tự ý tạo một loạt file cấu hình YAML hay hàng chục nhánh thử nghiệm bừa bãi khi chưa hiểu rõ bản chất vấn đề.
   - Nghiêm cấm việc thay đổi nhiều biến số cùng một lúc (confounding variables) gây mất dấu nguyên nhân thoái hóa.
 - **BẮT BUỘC ĐỐI CHỨNG KIỂM TRA ĐẦY ĐỦ (CONTROLLED EXPERIMENTATION PROTOCOL)**:
-  - Khi thiết lập bất kỳ một thí nghiệm mới nào, bắt buộc phải có **bài toán đối chứng đơn biến (single-variable ablation control)** rõ ràng với mỏ neo tốt nhất (V64 Champion, 69.03 MAE).
+  - Khi thiết lập bất kỳ một thí nghiệm mới nào, bắt buộc phải có **bài toán đối chứng đơn biến (single-variable ablation control)** rõ ràng với mỏ neo chuẩn hóa trong [`docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`](file:///f:/lightweightcrcn/docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md) (Canonical Anchor `104,390` params và Unified Direct `100,596` params).
   - Phải có giả thuyết khoa học định lượng (hypothesis), cơ chế vật lý dự kiến (mechanism), và tiêu chí đo lường chính xác trước khi khởi tạo cấu hình.
   - Mọi thí nghiệm đề xuất phải nhận được sự đồng thuận hoặc yêu cầu từ người dùng trước khi triển khai.
 
@@ -132,10 +132,12 @@
 - **CẤM HOANG TƯỞNG VỀ CHỈ SỐ MÔ HÌNH SIÊU NHẸ (NO HALLUCINATED CAPACITY CLAIMS)**:
   - Tuyệt đối không được hoang tưởng hoặc so sánh khập khiễng yêu cầu mô hình siêu nhẹ $\le 200\text{k}$ tham số không chưng cất tri thức (0% KD) phải đạt MAE 40-50 ngang ngửa các mô hình khổng lồ 16M-100M tham số (như MAN, STEERER, ViT-based SOTA).
   - Khung đánh đổi chi phí tính toán trong khoa học phải được định vị chính xác dựa trên các công trình đã xuất bản trong cùng phân khúc ràng buộc:
-    * Phân khúc $\le 200\text{k}$ tham số (Standalone, 0% KD) trên ShanghaiTech Part A:
-      - **Lw-Count** (IEEE TCSVT 2022): 71k tham số, MAE 78.2 / RMSE 120.8.
-      - **LSANet** (Neurocomputing 2022): 200k tham số, MAE 66.1 / RMSE 110.2.
-    * Do đó, mức MAE 65.62 / RMSE 101.72 tại 113k tham số đã là mốc SOTA được kiểm chứng thực nghiệm chặt chẽ ở phân khúc dưới 200k tham số.
+    * Phân khúc $\le 200\text{k}$ tham số (Standalone, 0% KD) trên ShanghaiTech Part A (các công trình peer-reviewed đã xác minh):
+      - **TinyCount** (JRTIP 2024, non-KD): `0.060M` (`60k`) params, `0.16` GFLOPs -> `78.2` MAE / `120.8` RMSE.
+      - **Lw-Count** (IEEE TCSVT 2022): `0.071M` (`71k`) params -> `69.7` MAE / `100.5` RMSE.
+      - **MCNN** (CVPR 2016): `0.133M` (`133k`) params, `2.80` GFLOPs -> `110.2` MAE.
+      - **LSANet** (Neurocomputing 2022): `0.200M` (`200k`) params, `14.4` GFLOPs -> `66.1` MAE / `110.2` RMSE (SHB `8.6`).
+    * RMRv3 hoạt động trong khoảng `100.6k–104.4k` params (`0%` KD), với các kết quả kiểm chứng thực tế trên SHA: Canonical 2-seed `68.91 ± 4.65` (`s42: 65.62`, `s7: 72.20`) và Audited Pretrained Direct 3-seed `69.46 ± 1.66` (`runs_fixed: 68.05`). Mọi đánh giá phải trình bày trung bình đa seed, độ lệch chuẩn, và toàn bộ failure modes thay vì cherry-picking seed đơn lẻ.
 
 ---
 

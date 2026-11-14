@@ -1,142 +1,97 @@
-# RMR: Lightweight Radon Measure Recovery for Crowd Counting
+# Constrained Radon Measure Recovery (`rmr_v3`)
 
-[![CI](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml/badge.svg)](https://github.com/minhphuc477/crowd-counting-lightweight/actions/workflows/ci.yml)
-[![Branch](https://img.shields.io/badge/branch-RMR-blue.svg)]()
-[![Parameters](https://img.shields.io/badge/parameters-Track%20A%20%E2%89%A4104.4k%20%7C%20Track%20B%20%E2%89%A4200k-orange.svg)]()
-[![Knowledge Distillation](https://img.shields.io/badge/knowledge%20distillation-0.0%25%20(standalone)-green.svg)]()
-[![Champion Benchmark](https://img.shields.io/badge/champion%20MAE-65.33%20(V69)%20%7C%2065.69%20(V70)-brightgreen.svg)]()
-
-> **Core Research Question:** In extreme ultra-lightweight crowd counting ($\le 104,441$ parameters for Stride 4; $\le 200,000$ parameters for Subpixel Stride 2, with exactly $0.0\%$ Knowledge Distillation), how can ill-posed discrete point counting be mathematically formulated as an inverse measure recovery problem without suffering from spatial aliasing, scale collapse, or phantom background fog?
->
-> **Mathematical Formulation:**
-> $$\text{Fredholm Integral Operator: } b = \mathcal{A}_\pi y + \eta$$
-> $$\text{Closed-Form Bregman Projection: } y^* = y_0 \cdot \mathcal{A}_\pi^T \left( \frac{b}{\mathcal{A}_\pi y_0 + \epsilon} \right)$$
+Ultra-lightweight, $0.0\%$ Knowledge Distillation crowd counting under a strict parameter ceiling ($\le 104,441$ trainable parameters), formulated as Constrained Radon Measure Recovery across diverse density regimes (**ShanghaiTech Part A/B**, **UCF-QNRF**, **JHU-Crowd++**, and **UCF_CC_50**).
 
 ---
 
-## 1. Project Invariants & Operational Standards
+## 1. Mathematical Formulation & Core Scope
 
-All architectures and experiments strictly adhere to [`rules/RULES.md`](rules/RULES.md) and [`rules/GEMINI.md`](rules/GEMINI.md):
-1. **Strict Parameter Budgets**:
-   - **Track A (Stride 4 Anchor)**: Strictly $\le 104,441$ trainable parameters.
-   - **Track B (Subpixel Stride 2 Capacity Extension)**: Strictly $\le 200,000$ trainable parameters.
-2. **100% Standalone (Zero Knowledge Distillation)**:
-   - Exactly $0.0\%$ Knowledge Distillation. Zero teacher networks at training or inference.
-3. **Empirical Integrity**:
-   - Zero fabricated metrics, zero oracle substitutions in reported benchmarks.
-   - Full evaluation on all 182 official ShanghaiTech Part A test images via standard MAE / RMSE / GAME(0,1,2,3) / NAE protocols.
-4. **Code Quality & Maintainability**:
-   - Strictly $\le 450$ lines per Python source file.
-   - Pure Python / YAML configurations.
-5. **Zero Frankencode & Anti-Patchwork Policy**:
-   - Strictly forbidden to arbitrarily cobble together heuristics or ad-hoc patches. Every component must have rigorous mathematical/physical justification.
+Point-supervised crowd counting seeks a non-negative continuous measure $\mu \in \mathcal{M}_+(\Omega)$ with density $y(u) \ge 0$ on $\Omega \subset \mathbb{R}^2$ governed by multi-scale linear integral projections:
+$$b = \mathcal{A}_\pi y + \eta, \qquad N_{\text{pred}} = \int_\Omega y(u)\,du.$$
+
+- **Parameter Budget**: Strictly $\le 104,441$ trainable parameters ($100,596$ params in the unified Direct configuration).
+- **Standalone (`0.0%` KD)**: Zero teacher networks or pre-computed teacher density distillation during training or inference.
+- **Unified Dataset-Agnostic Design (`configs/benchmarks/nextgen_sub65/`)**: Identical model topology, `init_m0: auto` density calibration, data augmentations, composite loss (`Dual Bayesian + 4-angle Radon-OT + Negative-Binomial Count`), and optimizer/EMA hyperparameters across SHA, SHB, UCF-QNRF, and JHU-Crowd++.
 
 ---
 
-## 2. Repository Architecture & Layout
+## 2. Unified Sub-$105k$ Architecture (`100,596` Trainable Params)
+
+| Stage | Module (`rmr_core/` & `rmr_v3/`) | Role | Trainable Params |
+| :--- | :--- | :--- | :---: |
+| **Backbone** | `TimmPyramidBackbone` ([`rmr_core/backbones.py`](file:///f:/lightweightcrcn/rmr_core/backbones.py)) | Truncated `mobilenetv4_conv_small_050.e3000_r224_in1k` producing $(C_4, C_8, C_{16})$ | `87,568` |
+| **Neck** | `SFILiteFPNNeck` ([`rmr_core/necks/sfi.py`](file:///f:/lightweightcrcn/rmr_core/necks/sfi.py)) | Lateral FPN fusion + sequential HDC (`[1,2,3]`) + $3\times 3$ high-frequency decomposition gating (`use_aspp_gap: false`) | `10,432` |
+| **Fine Carrier Head** | `DWSubpixelMeasureHead` ([`rmr_core/heads.py`](file:///f:/lightweightcrcn/rmr_core/heads.py)) | Depthwise $3\times 3$ separable head + `PixelShuffle(2)` upsampling to Stride-2 $y_0$, Softplus activation, `init_m0: auto` | `2,596` |
+| **Total (Direct Mode)** | `enable_regional_head: false`, `enable_solver: false` | Single-pass continuous measure output at $H/2 \times W/2$ | **`100,596`** |
+
+Optional closed-form regional transport (`ProbabilisticRegionalEvidenceHead` + [`closed_form_mcbpro_transport`](file:///f:/lightweightcrcn/rmr_core/operators/mcbpro.py), `103,226` total params with `sfi_lite` + `dw_subpixel`) is retained specifically for single-variable solver ablations against Direct mode.
+
+---
+
+## 3. Repository Structure
 
 ```text
-lightweightcrcn/
-├── configs/
-│   ├── rmr_v64/            # Champion baseline configurations (MAE 69.03)
-│   ├── rmr_v72/            # Active Track B Stride 2 anchor suite (MAE 70.02)
-│   ├── rmr_research/       # Core historical research configs (regression tested)
-│   └── rmr_v*/             # Historical iteration configs (v2 to v70)
-├── data/
-│   ├── part_A_final/       # ShanghaiTech Part A official benchmark images and GT
-│   ├── part_B_final/       # ShanghaiTech Part B official benchmark images and GT
-│   ├── sha_a_train_all.jsonl # 300 official training samples
-│   └── sha_a_test.jsonl    # 182 official test samples
-├── docs/                   # Authoritative technical documentation and audits
-│   ├── archive/            # Historical design documents and legacy reports
-│   ├── code_explanation/  # 6 modular walkthroughs of architecture, solver, loss, and training
-│   ├── CANONICAL_DATASET_CONFIG_RULES_AND_SPECIFICATIONS.md
-│   ├── CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md
-│   ├── ML_MODEL_DEEP_AUDIT_AND_CODE_REVIEW_PROTOCOL.md
-│   └── TOAN_BO_THANH_PHAN_KIEN_TRUC_MODEL_RMR.md
-├── rmr_core/               # Shared canonical primitives
-│   ├── backbones.py        # MobileNetV4 truncated encoder (reductions 4, 8, 16)
-│   ├── necks/              # RepASPPLite, ASPPLite, RLKHDC, Additive, BiFPN
-│   ├── heads.py            # Fine carrier density heads with analytical priors
-│   ├── operators/          # Box integrals, prefix sums, adjoint transfer, MC-BPRO
-│   ├── dm_loss.py          # Flat & Multi-scale Dirichlet-Multinomial allocation loss
-│   ├── count_loss.py       # Macro Negative-Binomial count loss
-│   └── metrics.py          # NAE, GAME(L) with fractional cell boundary integration
-├── rmr_v3/                 # Active research engine
-│   ├── config/             # Strict YAML schema validation & architecture contracts
-│   ├── losses/             # Orthogonal loss orchestration (DM16, Bayesian, Radon-OT)
-│   ├── model/              # Unified RMR architecture, dual-lattice & solver step
-│   ├── optim/              # Cosine Annealing, SafeProdigy, Schedule-Free factories
-│   ├── regional_head.py    # Probabilistic Regional Evidence Head (Beta-NB)
-│   ├── solver.py           # Unrolled iterative SIRT solver (baseline)
-│   ├── trainer.py          # Core training orchestrator
-│   ├── train.py            # Training entrypoint wrapper
-│   └── eval.py             # Evaluation module (full 182-image benchmark)
-├── tests/                  # Over 1,600 automated unit & regression tests
-├── tools/                  # Analytical CLI tools (profiling, ONNX, error audits)
-├── results/                # Forensic evaluations and benchmark results
-└── rules/                  # Operational rules, invariants, project specs & derivations
-    ├── RULES.md            # Strict operational and engineering rules
-    ├── GEMINI.md           # Operational research invariants & server configuration
-    ├── LUU_Y_THIET_KE_THI_NGHIEM_ANTI_REGRESSION.md # Anti-regression guidelines
-    ├── PROJECT.md          # Project roadmap & champion benchmarks
-    ├── DERIVATION_PACKAGE.md # Mathematical derivations from first principles
-    └── CHANGELOG.md        # Comprehensive project release notes & milestones
+f:\lightweightcrcn
+├── AGENTS.md                        # Repository-wide agent & terminology rules
+├── README.md                        # Overview & quickstart
+├── input_contract.md                # Falsifiable hypotheses (H1–H5) & negative result archive
+├── model_facts.md                   # Exact module parameter breakdown & mechanism audits
+├── rmr_core/                        # Backbones, necks (sfi/hdc/aspp/rep), heads, closed-form operators
+├── rmr_v3/                          # Engine, config schema/validator, losses, trainer & eval CLI
+├── configs/benchmarks/nextgen_sub65/ # Unified cross-dataset & single-variable ablation YAMLs
+├── docs/
+│   ├── SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md
+│   └── CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md
+├── rules/
+│   ├── PROJECT.md                   # Architecture & invariant summary
+│   ├── GEMINI.md                    # Environment & research guidelines
+│   ├── RULES.md                     # Hard engineering & scientific rules
+│   ├── DERIVATION_PACKAGE.md        # Closed-form transport & Beta-NLL derivations
+│   └── CHANGELOG.md                 # Audited version & fix log
+└── tests/                           # Unit & contract tests (core, rmr_v3, rmr_v23)
 ```
 
 ---
 
-## 3. Official Execution Entrypoints
+## 4. Audited Benchmark Summary & Explicit Failure Modes
 
-All training and evaluation workflows are executed via standard Python modules:
+### Verified Existing Benchmark Runs (On-Disk Logs)
+The metrics below come directly from completed evaluation outputs (`runs/`, `runs_fixed/`, `model_facts.md`, and `input_contract.md`). The unified Stride-2 `sfi_lite` configs in [`configs/benchmarks/nextgen_sub65/`](file:///f:/lightweightcrcn/configs/benchmarks/nextgen_sub65/) are validated and **Ready to Train** (no numbers are claimed prior to GPU execution).
 
-### 3.1 Training Entrypoint
-```bash
-# Train champion model (automatic output directory creation):
-python train.py --config configs/rmr_v72/v72_track_b_exp0_v64_anchor_stride2.yaml
+| Benchmark | Audited Config / Run | Output Stride | MAE | RMSE | Notes |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **SHA (182 test)** | Canonical `rmr_canonical_104k_seed42` (`104,390` p) | 4 | `65.62` | `111.32` | `seed7: 72.20` (2-seed mean `68.91 ± 4.65`); Oracle GT-box solver: `4.77` |
+| **SHA (182 test)** | `runs/benchmarks` Pretrained Direct (3-seed) | 4 | `69.46 ± 1.66` | — | `s42: 67.57 / 110.77`, `s1337: 70.19`, `s2024: 70.64`; `b4_no_neck`: `66.24` |
+| **SHA (182 test)** | `runs_fixed` `exp_sha_direct_pretrained_104k` | 4 | `68.05` | `113.47` | `radon_scaled`: `67.73 / 112.37`; `no_neck`: `74.78` |
+| **SHB (316 test)** | `runs_fixed` `exp_shb_direct_scratch_104k` / PT | 4 | `9.24` / `9.63` | `13.92` / `15.37` | `runs` `abl_b3_bg_ratio_005`: `9.41 / 14.12` |
+| **UCF-QNRF (334 test)** | `runs_fixed` `exp_qnrf_direct_pretrained_104k` | 4 | `103.35` | `171.99` | `Bias -0.11`; `runs` `exp_qnrf_crop_768_104k`: `102.10 / 178.47` |
+| **JHU-Crowd++ Val (500)** | `runs_fixed` `exp_jhu_direct_pretrained_104k` | 4 | `58.07` | `217.04` | Official Test (`1,600` imgs, `runs`): `76.58 / 295.07 / NAE 0.415` |
+| **UCF_CC_50 (5-fold CV)** | `runs/benchmarks` Scratch / Pretrained Direct | 4 | `298.65` / `329.99` | — | 5-fold std `± 85.18` (Scratch) / `± 100.63` (Pretrained), `ddof=1` |
 
-# Run on specific GPU in background on Linux workstation:
-CUDA_VISIBLE_DEVICES=0 nohup python train.py \
-  --config configs/rmr_v72/v72_track_b_exp0_v64_anchor_stride2.yaml \
-  > train_v72_exp0.log 2>&1 &
-```
-
-### 3.2 Full Test Evaluation Entrypoint
-```bash
-# Evaluate checkpoint on all 182 test images of ShanghaiTech Part A:
-python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v72/v72_track_b_exp0_v64_anchor_stride2/best_val_mae.pt
-
-# Evaluate with Test-Time Augmentation (TTA with L1 mass conservation):
-python -m rmr_v3.eval --checkpoint runs/sha_a/rmr_v72/v72_track_b_exp0_v64_anchor_stride2/best_val_mae.pt --tta
-```
+### Documented Technical Failure Modes
+1. **Phantom Background Fog ([`results/forensics/full_182_forensic_results.json`](file:///f:/lightweightcrcn/results/forensics/full_182_forensic_results.json))**: `53,528.18` of `81,629.66` predicted mass (`65.57%`) on SHA sits outside $5\times 5$ GT head neighborhoods.
+2. **Softplus Bias Freeze**: Background logits stagnate near $b \approx -5.442$ because convex Softplus gradients vanish exponentially below $z < -6$ against weight decay.
+3. **Dense Undercounting & Regional Pooling Dilution**: Dense SHA images (`n=46`) suffer `132.16` MAE on Pretrained Direct (`runs/benchmarks`); learned `mcbpro` slightly degrades raw `y0` (`65.57` vs `65.23`) due to average pooling inside large boxes.
+4. **Distractor & Corruption Sensitivity**: $4$ JHU distractor negatives produce `185.10` mean phantom count; JPEG `q=10` increases SHA MAE to `132.63`; $0.5\times$ rescaling raises MAE to `116.75`.
+5. **Cross-Dataset Zero-Shot Shift**: Zero-shot `SHA -> SHB` drops to `27.13` MAE (`Bias -17.78`, `runs/eval_sha_on_shb`).
 
 ---
 
-## 4. Official Benchmark Matrix & Verified Experimental Champions
+## 5. Standalone CLI Quickstart
 
-All benchmarks reported below are evaluated strictly on all 182 official test images of ShanghaiTech Part A with zero teacher distillation (100% standalone, 0.0% KD):
+Run tests (Windows PowerShell):
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/core/test_cross_dataset_universality.py tests/core/test_non_aspp_necks.py tests/rmr_v3/test_radon_ot.py tests/rmr_v23/test_rmr_v23.py
+```
 
-| Experiment / Checkpoint Identifier | Track | Params | Stride | Neck | Spatial Allocation Loss | Solver Mode | Val MAE | Val RMSE | Key Significance & Verified Result |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`v69_exp1_track_a_dual_bayesian_radon_ot_1500ep`** | **Track A** | **104,390** | 4 | RepASPPLite | Dual Bay + Radon-OT | mcbpro | **65.33** | **108.39** | **ALL-TIME BEST TRACK A CHAMPION (TTA)** ($\le 104,441$ params) |
-| **`v70_track_b_exp4b_no_solver`** | **Track B** | **122,618** | 2 | RepASPPLite | Flat DM16 | direct (no solver) | **65.69** | **108.08** | **ALL-TIME BEST TRACK B CHAMPION** ($\le 200,000$ params) |
-| **`v69_exp1_track_a_dual_bayesian_radon_ot_1500ep`** | **Track A** | 104,390 | 4 | RepASPPLite | Dual Bay + Radon-OT | mcbpro | **65.82** | **110.47** | Track A Standard Val split |
-| **`v64_champion_synergy_50mae_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Flat DM16 | mcbpro | **69.03** | **118.24** | Verified V64 Anchor Baseline |
-| **`v72_track_b_exp0_v64_anchor_stride2`** | **Track B** | 197,839 | 2 | RepASPPLite | Flat DM16 | mcbpro | **70.02** | **107.86** | Active Track B V72 Reproduction Checkpoint |
-| **`v67_exp4_abl_pure_2loss_no_dm16_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Pure 2-Loss (Bay + Count) | mcbpro | **70.85** | **111.97** | Elimination of Flat DM16 conflict |
-| **`v65_champion_pure_synergy_1500ep`** | **Track B** | 197,839 | 2 | RepASPPLite | Dual Bay + DM16 | mcbpro | 73.12 | 129.54 | Dual Allocation Ablation |
-| **`v63_champion_aspp_subpixel_1500ep`** | **Track B** | 125,786 | 2 | ASPPLite | Flat DM16 | mcbpro | 74.54 | 134.12 | Initial Stride 2 Subpixel Milestone |
+Train the unified Stride-2 `SFILite + DWSubpixel` configuration on SHA (`600` epochs):
+```powershell
+.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
+```
 
----
+Evaluate a trained checkpoint (standard + localization metrics):
+```powershell
+.\.venv\Scripts\python.exe -m rmr_v3.eval --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best.pt --eval-localization
+```
 
-## 5. First-Principles Breakthroughs & Current Frontier
-
-Through exhaustive microscopic-to-macroscopic forensic auditing across all 182 test images and mathematical analysis of loss gradients, the fundamental bottleneck preventing models from achieving Sub-50 MAE has been proven:
-1. **The Dynamic Nash Equilibrium Trap**:
-   Under the composite loss $\mathcal{L} = \lambda_{\text{count}} \mathcal{L}_{\text{count}} + \lambda_{\text{alloc}} \mathcal{L}_{\text{alloc}}$, the network reaches an equilibrium where real crowd peaks receive only $\approx 35.6\%$ of their mass, while the remaining $\approx 64.4\%$ is supplied by an imperceptible background fog ($\approx 0.00124\text{ count/cell}$).
-2. **Gradient Vanishing of Convex Activations**:
-   The Softplus activation $y = \tau \log(1 + e^{z/\tau})$ has an exponentially vanishing derivative $\sigma(z/\tau) \to 0$ for negative background logits $z \approx -7.7$, causing background suppression gradients to vanish by a factor of over $2,000\times$, locking the background bias permanently at $b \approx -5.442$.
-3. **Spatial Averaging Blindness of Regional Head**:
-   Average pooling across large spatial boxes dilutes micro-head signals by $99.5\%$, reducing the Pearson linear correlation of the regional evidence head with ground truth to $r = 0.0521$.
-4. **Resolution Roadmap**:
-   Solving this requires reforming the measure support topology from strictly positive Lebesgue-continuous densities to compact support measures, eliminating the background shortcut and forcing 100% of the crowd mass back onto true head peaks.
+For all 8 unified cross-dataset and ablation commands (SHA, SHB, UCF-QNRF, JHU-Crowd++), see [`docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md`](file:///f:/lightweightcrcn/docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md) and [`docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`](file:///f:/lightweightcrcn/docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md).

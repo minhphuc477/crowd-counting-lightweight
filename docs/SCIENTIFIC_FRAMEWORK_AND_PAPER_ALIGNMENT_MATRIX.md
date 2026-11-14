@@ -1,123 +1,130 @@
-# KHUNG KHOA HỌC & MA TRẬN CĂN CHỈNH BÀI BÁO CHUẨN MỰC
-## Constrained Continuous Radon Measure Recovery for Ultra-Lightweight Crowd Counting ($\le 104\text{k}$ Parameters, 0% KD)
+# Scientific Framework & Paper Alignment Matrix (RMRv3)
 
-> **Tài liệu Định hướng Học thuật Gốc (Canonical Academic Specification)**  
-> **Nguyên tắc cốt lõi:** Toàn bộ bài toán là tối ưu hóa đơn mục tiêu có ràng buộc ngân sách tham số ($\le 104\text{k}$ params, 0% KD), không phải tối ưu đa mục tiêu tiến hóa. Phần đánh giá chi phí - độ chính xác chỉ sử dụng biểu đồ đánh đổi thực nghiệm (*Empirical Complexity-Accuracy Trade-off Plot*: MAE vs Params/FLOPs).  
-> **Tính trung thực khoa học:** Không dùng từ ngữ thổi phồng (zero hype). Trình bày trực diện các hạn chế đã kiểm chứng trên `runs/benchmarks/`, `results/*.json` và `results/forensics/full_182_forensic_results.json`: bias âm `-19.74` (Pretrained) / `-24.00` (Scratch) người/ảnh trên SHA, rò rỉ sương mù nền ngoài vùng $5\times 5$ quanh điểm GT chiếm **65.57%** tổng khối lượng gộp (**`53,528.18 / 81,629.66`**) và **71.27%** theo trung bình từng ảnh (trung vị **73.45%**), Dense MAE trên SHA Pretrained tăng vọt lên **132.16** (gấp **8.07x** Sparse MAE **16.38**), định vị điểm thô (`F1@4px = 0.2955`, `F1@8px = 0.5820`), nhạy cảm với scale `0.5x` (`116.75 MAE`) và `4` ảnh trống JHU cho trung bình **185.10** người ảo, cùng thành phần `radon_ot` chưa chuẩn hóa độ dài chiếu chỉ chiếm ~0.06% tổng loss.
+This document anchors the research formulation, architectural design, baseline positioning, empirical record, and failure-mode disclosure of the **Constrained Radon Measure Recovery (`rmr_v3`)** framework using a four-step survey-driven methodology.
 
 ---
 
-## 1. BẢN CHẤT BÀI TOÁN & CÁC ĐIỂM NGHẼN KỸ THUẬT (PROBLEM STATEMENT & ROOT CAUSES)
+## Step 1: Recent Literature Surveys & Architectural Taxonomy (2024–2025)
 
-### 1.1. Bản Chất Toán Học của Bài Toán Đếm Đám Đông
-Về mặt giải tích và thị giác máy tính, bài toán đếm đám đông không phải là bài toán tối ưu đa mục tiêu. Đây là **bài toán nghịch đảo khôi phục độ đo Radon liên tục (Constrained Radon Measure Recovery)** từ quan sát ảnh 2D bị suy thoái:
-$$b = \mathcal{A}_\pi y + \eta$$
-Trong đó:
-- $y \in \mathcal{M}^+(\Omega)$ là độ đo mật độ thực cần khôi phục trên miền ảnh $\Omega \subset \mathbb{R}^2$.
-- $\mathcal{A}_\pi$ là toán tử chiếu phối cảnh suy thoái (perspective degradation operator).
-- $b$ là quan sát ảnh đầu vào có nhiễu $\eta$.
+Rather than deriving research problems from repository artifacts, the framing is grounded in four recent peer-reviewed crowd counting surveys:
 
-### 1.2. Ba Điểm Nghẽn Cốt Tử Khi Ràng Buộc Ngân Sách Cực Tiểu ($\le 104\text{k}$ Params, 0% KD)
-1. **Rò rỉ khối lượng nền (Background Fog Equilibrium):**
-   Kiểm toán forensic trên 182 ảnh SHA (`results/forensics/full_182_forensic_results.json`, tổng `pred_y0 = 81,629.66`) cho thấy `mean_crowd_ratio_5 = 30.32%` và tổng khối lượng nằm ngoài lân cận $5\times 5$ quanh các điểm GT là `bg_mass_5 = 53,528.18` (**65.57%** tổng khối lượng dự đoán).
-2. **Bẫy bão hòa gradient của hàm Softplus (Softplus Bias Saturation Trap):**
-   Do đạo hàm hàm Softplus suy giảm theo hàm mũ ở miền logit âm ($\sigma(z) \to 0$ khi $z < -6$), gradient suy giảm mạnh dưới tác động weight decay khi cố dập tắt nền rỗng về $0$ tuyệt đối, tạo hiện tượng trì trệ bias và sương mù nền đồng mức.
-3. **Hiện tượng Under-counting và Suy giảm ở cảnh siêu đông (Dense Failure):**
-   Trong cảnh mật độ cực cao ($d < 4\text{px}$), khoảng cách giữa các đầu người nhỏ hơn bước sải đặc trưng đầu ra ($4\text{px}$), gây hiện tượng đếm thiếu có hệ thống: trên SHA Test (Direct Pretrained, seed 42), `Bias = -19.74`, `Sparse MAE = 16.38` ($n=7$), `Moderate MAE = 47.31` ($n=129$), còn `Dense MAE = 132.16` ($n=46$, gấp **8.07 lần** vùng thưa).
+| Survey Reference | Scope & Taxonomy | Acknowledged Field Limitations & Open Problems |
+| :--- | :--- | :--- |
+| **Wang, Zhou, & Chen (2025)**, *IET Image Processing*, `doi:10.1049/ipr2.13328` | Systematically classifies deep crowd counting models into multi-column CNNs, single-column dilated CNNs, attention-augmented CNNs, pure Transformers, and CNN–Transformer hybrids; audits density/point labels, loss functions, and metrics. | Pure ViT encoders suffer quadratic token cost and weak local edge inductive bias; fixed-dilation CNNs struggle with continuous scale variation and non-rigid crowding without dense supervision. |
+| **Cheng, Zhai, Li, & Gao (2025)**, *Meas. Sci. Technol.* 36(7), `doi:10.1088/1361-6501/ada69f` | Focuses specifically on **lightweight crowd counting architectures**, public datasets, parameter/latency budgets, and edge deployment constraints. | High-accuracy SOTA models rely on heavy backbones (`> 10M` params) or teacher-student Knowledge Distillation (KD); standalone ultra-lightweight models (`<= 200k` params, `0%` KD) experience severe accuracy degradation in dense crowds and cluttered scenes. |
+| **Gao et al. (2025)**, *Vicinagearth*, `doi:10.1007/s44336-024-00011-8` | Comprehensive review of 300+ CNN-based density estimation methods, top-performing pipelines, and standardized density-map/evaluation tooling. | Wide variance in ground-truth map construction and loss engineering obscures which performance gains originate from architecture vs. supervision or dataset-specific tuning. |
+| **Supervision Paradigms Survey (2024)** | Covers supervised, semi-supervised, and unsupervised paradigms for crowd counting under point-level supervision. | Point annotations lack spatial extent; translating discrete head points into continuous calibrated mass fields without spatial collapse or background leakage remains mathematically ill-posed. |
 
 ---
 
-## 2. MA TRẬN CĂN CHỈNH KHOA HỌC (THE ALIGNMENT MATRIX)
+## Step 2: Dataset-Agnostic Gaps, Problem Statement, RQs, ROs, & Falsifiable Hypotheses
 
-Bảng căn chỉnh ánh xạ $1-1$ giữa bài toán thực tế, câu hỏi nghiên cứu (RQ), mục tiêu nghiên cứu (RO), phương pháp giải quyết, bằng chứng thực nghiệm và giới hạn kỹ thuật:
+### 2.1 Recognized Field Gaps Addressed
+1. **Gap G1 — Efficiency–Spatial Resolution Conflict (`0%` KD, $\le 105k$ Params)**:
+   Standard ImageNet-pretrained micro-backbones downsample by $4\times$ to $16\times$. At Stride 4 ($128\times 128$ on a $512\times 512$ input), adjacent heads separated by $< 4\text{px}$ coalesce inside single cells. Recovering fine spatial separation without Transformer self-attention or extra multi-branch parameters requires preserving high-frequency boundary cues inside compact multi-scale feature fusion and depthwise sub-pixel upsampling.
+2. **Gap G2 — Ill-Posed Point-to-Measure Equilibrium & Background Fog**:
+   Under composite global-count and point-allocation losses, continuous non-negative heads activated by convex Softplus satisfy count targets by distributing predicted mass onto wide, low-amplitude background plateaus where Softplus derivatives decay exponentially ($\sigma(z/\tau) \to 0$ for $z < -6$), causing gradient starvation against weight decay.
+3. **Gap G3 — Regional Integral Dilution vs. Direct Neural Measure Estimation**:
+   Closing the Radon inverse problem $b = \mathcal{A}_\pi y + \eta$ analytically via closed-form Bregman-Poisson transport (`closed_form_mcbpro_transport`) yields `4.77` MAE on SHA when supplied with Oracle ground-truth box counts (`input_contract.md`), proving mathematical soundness of the operator; however, pooling tiny heads over large boxes dilutes learned regional evidence signals, motivating direct Stride-2 sub-pixel calibration under identical dataset-agnostic priors (`init_m0: auto`).
 
-| Thành phần | RQ1: Giới hạn Băng thông Không gian - Tần số (Spatial Bandwidth & Sampling) | RQ2: Giám sát Bất định Dị phương sai & Rò rỉ Nền (Heteroscedastic Count & Calibration) | RQ3: Khái quát hóa Đa Miền & Thiết lập Tiên nghiệm (Cross-Domain Generalization) |
-| :--- | :--- | :--- | :--- |
-| **Problem Statement** | Khi không dùng mạng Teacher chưng cất tri thức (0% KD), backbone $\approx 87.6\text{k}$ params suy giảm phân giải ở tầng sải thô, trong khi dilated convolutions của ASPP có thể tạo răng cưa không gian (comb-aliasing) ở cụm điểm dày đặc ($d < 4\text{px}$). | Sương mù nền tích tụ **65.57%** khối lượng dự đoán ngoài vùng $5\times 5$ quanh điểm GT; đồng thời loss đếm $L_1$ giả định sai phương sai đồng nhất gây sai số nặng khi tổng số người biến thiên từ hàng chục đến hàng nghìn; `Radon-OT` chưa scale theo chiều dài chiếu khiến tỷ trọng thực tế chỉ ~0.06% loss. | Phân bố mật độ và độ phân giải ảnh biến thiên mạnh giữa SHA, SHB, QNRF, JHU-CROWD++ và UCF_CC_50, đòi hỏi thiết lập tiên nghiệm mật độ $m_0$ và cấu hình resize/crop phù hợp từng miền mà không dùng heuristic phụ thuộc nhãn test. |
-| **Research Question (RQ)** | Cấu trúc cổ mạng nào (ASPP giãn nở `[2,4,8]` + GAP vs nối tắt đơn tỉ lệ DW $3\times 3$ `d=1` No-Neck) dung hòa tốt hơn giữa trường tiếp nhận ngữ cảnh (ảnh thưa/biến cỡ lớn) và tần số xung điểm cao (ảnh siêu đông)? | Hàm hợp lý Negative-Binomial toàn cục (với phân tán $r$) và loss phân bổ Bayes + Sliced Radon-OT cải thiện sai số đếm như thế nào so với $L_1$/MSE truyền thống, và solver lặp phân vùng (`b1`) có cải thiện bản Direct (`enable_solver=false`) hay không? | Đường ống Direct (`enable_solver=false`, $\le 104\text{k}$ params) có duy trì được thứ hạng và độ ổn định xuyên qua 5 tập benchmark chuẩn từ cả hai chế độ From-Scratch và Pretrained hay không? |
-| **Research Objective (RO)** | Đo kiểm định lượng sự đánh đổi giữa **ASPP-Lite (`104,006` params)** và **No-Neck DW $3\times 3$ `d=1` (`102,246` params)** cả ở From-Scratch và Pretrained (kèm cặp đối chứng khắc phục trên SHA/QNRF/JHU), cùng ảnh hưởng bước sải (`stride=2` vs `stride=4`). | Kiểm chứng vai trò độc lập của **Global NB Count Loss (`r=50`, Direct mode)** so với $L_1$ / No-Count, tách riêng tác động của `region_head` (`4,082` params ở idle trong Direct mode; nhánh `b1` SIRT làm xấu MAE), và hiệu chỉnh thang đo `radon_ot_scale_by_length=true`. | Chuẩn hóa đánh giá không ad-hoc split trên 5 tập quốc tế (SHA, SHB, QNRF, JHU Val/Test, UCF_CC_50 5-fold) với cấu hình đồng nhất `configs/benchmarks/` và bổ sung bộ đối chứng khắc phục `configs/benchmarks/remediation/`. |
-| **Proposed Method** | **Subpixel Stride-2 Direct Carrier + Neck Analysis:** Backbone `MobileNetV4-Conv-Small-050` kết hợp ASPP-Lite hoặc nối tắt đơn tỉ lệ `DW 3x3 d=1` (`102,246` params), đầu ra PixelShuffle Stride-2 tạo bản đồ mật độ $1/4$ kích thước ảnh. | **Hybrid Bayesian Point Allocation + Global NB Count:** Phân bổ điểm Bayes (với `bg_ratio` hiệu chỉnh được) + Global Negative Binomial NLL trên tổng ảnh; `Sliced Radon-OT` có công tắc `radon_ot_scale_by_length` để cân bằng thang đo CDF. | **Deterministic Manifest & Scale Protocol:** `init_m0: auto` từ manifest train, resize $\le 1024$ (SHB/SHA) hoặc $\le 2048$ (QNRF/JHU), đánh giá đa seed (`42/1337/2024` trên SHA) và 5-fold CV trên UCF_CC_50. |
-| **Empirical Evidence** | Trên SHA Scratch: No-Neck (`DW 3x3 d=1`, `102,246` params) đạt **66.24 MAE**, vượt ASPP Scratch (**74.29 MAE**). Trên JHU Val Scratch: No-Neck **59.65** vs ASPP **63.63**; QNRF Test Scratch: **108.42** vs **109.80**. Ngược lại trên SHB Scratch (cảnh thưa): ASPP **10.49** tốt hơn No-Neck **10.94**. | NB vượt $L_1$ trên cả 4 dataset (Scratch): JHU **63.63 vs 72.73** ($\Delta = +9.10$); QNRF **109.80 vs 125.65** ($\Delta = +15.85$); SHA **74.29 vs 89.33** ($\Delta = +15.04$); SHB **10.49 vs 11.89** ($\Delta = +1.40$). Trong Direct mode Flagship, solver tắt (`enable_solver=false`) vì nhánh SIRT (`b1`) bị bão hòa phân tán (`disp_sat_high=0.479`, làm xấu SHA Scratch thành **77.48**, QNRF thành **117.41**). | Direct Flagship (`104,006` params) đạt trên Pretrained / Scratch: SHA **67.57** (3-seed mean **$69.46 \pm 1.66$**) / **74.29**; SHB **10.19** (`bg005`: **9.41** Scratch) / **10.49**; QNRF **105.36** / **109.80**; JHU Val **61.72** / **63.63** (JHU Test: **76.58** / **80.88**); UCF_CC_50 5-fold: **$329.99 \pm 100.63$** / **$298.65 \pm 85.18$** (`ddof=1`). |
-| **Limitation & Failure Mode** | Dưới cấu hình mặc định, ASPP giữ lợi thế ở cảnh thưa biến cỡ mạnh (SHB) nhưng kém hơn No-Neck ở mật độ cao (SHA, JHU). Thiếu cặp No-Neck Pretrained trên SHA/QNRF/JHU (đã bổ sung vào `remediation/`). | 1) Direct Flagship giữ `region_head` (`4,082` params) ở trạng thái idle; 2) `radon_ot_scale_by_length=false` làm `train_radon_ot` chỉ ~`0.016-0.038` (~0.06% loss), khiến các mức $\lambda_{\text{radon}} \in \{0.2..2.0\}$ bất phân biệt; 3) `a2_pure_bayesian` trên SHA/QNRF thay đổi $\lambda_{\text{bayes}}$ thành `1.0` thay vì `0.15`. | Trên UCF_CC_50 (50 ảnh cực ít), Pretrained kém hơn Scratch (`329.99` vs `298.65`); một số biến thể Pretrained đang bỏ ngỏ đối chứng (`SHB bg005`, `JHU disp10`, `SHA Gaussian MSE`) và 8 sweep đang chạy dở trên `sweeps_train`. |
+### 2.2 Formal Problem Statement
+Given an image $I \in \mathbb{R}^{3\times H\times W}$ with discrete point annotations $\{p_i\}_{i=1}^N$ and zero external teacher models (`0%` KD), recover a non-negative continuous Radon density field $y \in \mathcal{M}_+(\Omega)$ using $\theta$ with $|\theta| \le 104,441$ trainable parameters and a single unified, dataset-agnostic training configuration, such that total mass $\int_\Omega y(u)\,du \approx N$ and multi-scale linear projections $b = \mathcal{A}_\pi y + \eta$ preserve spatial localization under distribution shift, severe crowding, and image corruptions.
 
----
+### 2.3 Research Questions (RQs) & Objectives (ROs)
 
-## 3. BA ĐÓNG GÓP KHOA HỌC CHUẨN MỰC (CORE SCIENTIFIC CONTRIBUTIONS)
+To ensure first-principles scientific framing independent of internal implementation labels, the RQs are formulated directly from Computer Vision, Spatial Statistics, and Inverse Measure Theory open problems, while ROs specify the controlled codebase realizations used to test them:
 
-1. **Phân tích Thực chứng Kiến trúc Siêu nhẹ $\le 104\text{k}$ Tham số (0% KD):**
-   * Định lượng rạch ròi vai trò backbone `MobileNetV4-Conv-Small-050`, khối cổ mạng ASPP-Lite vs nối tắt `DW 3x3 d=1` (`No-Neck`, `102,246` params), và biến thể thuần Direct không mang trọng số thừa (`Pure-Direct`, `99,924` params) trong chế độ không chưng cất tri thức.
-2. **Giám sát Số lượng Negative-Binomial Toàn cục & Phân tích Sai số Hỗn hợp Loss:**
-   * Chứng minh hàm hợp lý rời rạc Negative-Binomial toàn cục cải thiện đồng loạt từ $+1.40$ đến $+15.85$ MAE trên 4 tập benchmark so với hồi quy $L_1$, đồng thời minh bạch hóa các chế độ thất bại của solver SIRT phân vùng (`b1`) và bẫy tỷ lệ thang đo của `Radon-OT`.
-3. **Khảo sát Thực nghiệm Đa Trung Tâm & Phân tích Đánh đổi Chi phí - Sai số:**
-   * Đánh giá toàn diện trên 5 tập benchmark quốc tế chuẩn (SHA 3-seed, SHB, UCF-QNRF, JHU-CROWD++ Val/Test, UCF_CC_50 5-fold) với profiling FLOPs chính xác bằng `PyTorch FlopCounterMode @ 512x512` (`0.6547 GFLOPs` = `0.327 GMACs`) thay cho ước lượng cũ.
+- **RQ1 (Sub-Pixel Spectral Fusion under Extreme Non-Distilled Capacity)**: Under a strict $\le 105k$ trainable-parameter ceiling with zero teacher distillation, can frequency-decomposed multi-scale feature fusion combined with depthwise sub-pixel upsampling ($H/2 \times W/2$) mitigate dense-head spatial coalescence and quantization error more effectively than coarse Stride-4 dilated context pooling across heterogeneous crowd scales and densities?
+  - **RO1**: Implement single-variable neck and resolution ablations comparing sequential depthwise HDC + high-frequency gating (`SFILiteFPNNeck`) + Stride-2 `DWSubpixelMeasureHead` (`100,596` params) against `HDCLiteFPNNeck`, `ASPPLiteNeck`, and canonical Stride-4 under invariant losses, augmentations, and optimizer schedules.
+- **RQ2 (Regional Integral Rebalancing vs. Direct Continuous Density Estimation)**: When recovering a continuous Radon measure from noisy multi-scale integral predictions alongside point supervision, does closed-form Kullback-Leibler / Bregman measure projection improve counting and localization over direct feedforward density estimation, or does spatial average-pooling dilution within coarse regions cause learned regional integrals to degrade accuracy relative to the direct fine-grid estimate?
+  - **RO2**: Conduct matched Direct vs. learned closed-form transport vs. Oracle ground-truth-integral transport evaluations (`enable_solver: false` vs `enable_solver: true`) under unified supervision to quantify the gap between exact integral physics (`4.77` Oracle MAE) and learned regional evidence.
+- **RQ3 (Dataset-Agnostic Prior Calibration & Reliability Under Distribution Shift)**: Can unified prior-density initialization derived strictly from theoretical resolution scaling ($\times 1/s^2$) paired with combined point-likelihood and 1D Sliced Wasserstein (Radon-OT) supervision sustain multi-seed calibration across sparse, dense, corrupted, and zero-shot cross-domain imagery without per-dataset hyperparameter tuning?
+  - **RO3**: Benchmark one completely identical `nextgen_sub65` configuration (`init_m0: auto`, fixed double-division bug in [`rmr_v3/engine.py`](file:///f:/lightweightcrcn/rmr_v3/engine.py)) identically across SHA, SHB, UCF-QNRF, and JHU-Crowd++, paired with mandatory reporting of localization (`loc_F1`), corruption sensitivity, scale consistency, distractor false positives, and background-fog mass.
 
----
+### 2.4 Falsifiable Working Hypothesis
+> **H_main**: Under one invariant configuration (`<= 104,441` params, `0%` KD, identical `data` augs / `loss` / `lr` / `ema_decay` across datasets), unifying Stride-2 `DWSubpixelMeasureHead` with `SFILiteFPNNeck` (sequential HDC `[1,2,3]` + high-frequency gating, without ASPP GAP) improves dense crowd resolution and localization over Stride-4 ASPP baselines, while Direct estimation avoids learned regional-evidence dilution relative to `mcbpro` (`MAE_direct <= MAE_mcbpro`) unless regional dilution is solved externally.
 
-## 4. DỮ LIỆU THỰC NGHIỆM ĐÃ KIỂM TOÁN (TRÊN `runs/benchmarks/`)
-
-*(Trích xuất trực tiếp từ `runs/benchmarks/**/eval_val/summary.json` và `attribute_breakdown.json` trên nhánh `RMR`; hạt giống mặc định `seed: 42` trừ khi ghi rõ)*
-
-### 4.1. Bảng Tổng Hợp 5 Tập Dữ Liệu Chuẩn Quốc Tế
-
-| Tập Dữ Liệu | Giao thức Đánh giá | Resize Config | Biến thể Mô hình | Tham số | FLOPs (@ 512x512) | MAE | RMSE | NAE | Bias |
-| :--- | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **JHU-CROWD++** | Official Val (500 imgs) | Max $\le 2048$ | Pretrained (Direct) | 104,006 | 0.655 GFLOPs (`0.327G` MACs) | **61.72** | **227.79** | 0.285 | -13.54 |
-| **JHU-CROWD++** | Official Test (`attribute_breakdown.json`) | Max $\le 2048$ | Pretrained (Direct) | 104,006 | 0.655 GFLOPs | **76.58** | **295.07** | 0.415 | — |
-| **JHU-CROWD++** | Official Val (500 imgs) | Max $\le 2048$ | Scratch (Flagship) | 104,006 | 0.655 GFLOPs | **63.63** | **254.78** | 0.259 | -30.77 |
-| **JHU-CROWD++** | Official Test (`attribute_breakdown.json`) | Max $\le 2048$ | Scratch (Flagship) | 104,006 | 0.655 GFLOPs | **80.88** | **311.95** | 0.522 | — |
-| **JHU-CROWD++** | Official Val (500 imgs) | Max $\le 2048$ | No-Neck (Scratch) | **102,246** | **0.654 GFLOPs** | **59.65** | **198.74** | 0.301 | -32.92 |
-| **UCF-QNRF** | Official Test (334 imgs)| Max $\le 2048$ | Pretrained (Direct) | 104,006 | 0.655 GFLOPs | **105.36** | **174.94** | 0.161 | -5.94 |
-| **UCF-QNRF** | Official Test (334 imgs)| Max $\le 2048$ | Scratch (Flagship) | 104,006 | 0.655 GFLOPs | **109.80** | **189.08** | 0.152 | -38.16 |
-| **ShanghaiTech A**| Official Test (182 imgs)| Max $\le 1024$ | Pretrained (Direct, s42) | 104,006 | 0.655 GFLOPs | **67.57** | **110.77** | 0.165 | -19.74 |
-| **ShanghaiTech A**| Official Test (3-Seed: 42/1337/2024)| Max $\le 1024$ | Pretrained (Mean $\pm$ Std) | 104,006 | 0.655 GFLOPs | **69.46 $\pm$ 1.66** | **107.83** | 0.176 | -13.92 |
-| **ShanghaiTech A**| Official Test (182 imgs)| Max $\le 1024$ | Scratch (Flagship) | 104,006 | 0.655 GFLOPs | **74.29** | **118.23** | 0.182 | -24.00 |
-| **ShanghaiTech A**| Official Test (182 imgs)| Max $\le 1024$ | No-Neck (Scratch) | **102,246** | **0.654 GFLOPs** | **66.24** | **102.27** | 0.182 | -15.62 |
-| **ShanghaiTech B**| Official Test (316 imgs)| Max $\le 1024$ | Pretrained (Direct) | 104,006 | 0.655 GFLOPs | **10.19** | **15.88** | 0.084 | -2.33 |
-| **ShanghaiTech B**| Official Test (316 imgs)| Max $\le 1024$ | Scratch (Flagship) | 104,006 | 0.655 GFLOPs | **10.49** | **16.98** | 0.088 | -3.79 |
-| **ShanghaiTech B**| Official Test (316 imgs)| Max $\le 1024$ | BG Ratio 0.05 (Scratch) | 104,006 | 0.655 GFLOPs | **9.41** | **14.12** | 0.080 | -2.52 |
-| **UCF_CC_50** | 5-Fold Cross-Val (`ddof=1`) | Max $\le 1024$ | Scratch (Mean $\pm$ Std) | 104,006 | 0.655 GFLOPs | **298.65 $\pm$ 85.18** | **466.66 $\pm$ 233.43** | 0.431 | -10.54 |
-| **UCF_CC_50** | 5-Fold Cross-Val (`ddof=1`) | Max $\le 1024$ | Pretrained (Mean $\pm$ Std) | 104,006 | 0.655 GFLOPs | **329.99 $\pm$ 100.63** | **492.00 $\pm$ 222.62** | 0.355 | -49.33 |
-
-*(Ghi chú: Độ lệch chuẩn mẫu `ddof=1` trên 5 fold UCF_CC_50 là $\pm 85.18$ [Scratch] và $\pm 100.63$ [Pretrained]; nếu tính `ddof=0` theo quần thể 5 phần tử là $\pm 76.19$ và $\pm 90.00$.)*
+Formal statistical thresholds and falsification triggers ($H_1$–$H_5$) are specified in [`input_contract.md`](file:///f:/lightweightcrcn/input_contract.md).
 
 ---
 
-### 4.2. Bằng Chứng Đối Chứng Giữa Các Giả Thuyết Khoa Học (From-Scratch Controls)
+## Step 3: Evaluation Ecosystem & Peer-Reviewed Baselines
 
-#### Giả Thuyết 1: Giám sát Số lượng Negative-Binomial vs Naive $L_1$
-* **JHU (Val):** Flagship (NB): **63.63** vs. $L_1$ Count (`b1`): **72.73** ($\Delta = +9.10\text{ MAE}$) vs. No Count (`b2`): **69.15**
-* **QNRF:** Flagship (NB): **109.80** vs. $L_1$ Count (`c2`): **125.65** ($\Delta = +15.85\text{ MAE}$) vs. No Count (`c1`): **143.83** ($\Delta = +34.03\text{ MAE}$)
-* **SHA:** Flagship (NB): **74.29** vs. $L_1$ Count (`b3`): **89.33** ($\Delta = +15.04\text{ MAE}$) vs. No Count (`b2`): **79.78**
-* **SHB:** Flagship (NB): **10.49** vs. $L_1$ Count (`c2`): **11.89** ($\Delta = +1.40\text{ MAE}$) vs. No Count (`c1`): **10.90**
+### 3.1 Datasets & Metrics
+- **Benchmarks**: **ShanghaiTech Part A** (`300` train / `182` test), **ShanghaiTech Part B** (`400` train / `316` test), **UCF-QNRF** (`1,201` train / `334` test), **JHU-Crowd++** (`2,272` train / `500` val / `1,600` test w/ Clear, Fog/Haze, Rain, Snow, Distractors), and **UCF_CC_50** (`50` images, 5-fold CV).
+- **Metrics**: MAE, RMSE, NAE, Signed Bias, Density-Tier MAE (Sparse / Moderate / Dense), `GAME(0–3)`, Point Localization `loc_F1@4` & `loc_F1@8`, Trainable Parameters, and GFLOPs, summarized on an **Empirical Complexity-Accuracy Trade-off Plot** (*Biểu đồ đánh đổi thực nghiệm độ phức tạp - độ chính xác*).
 
-#### Giả Thuyết 2: Vai trò của Sliced Radon-OT và Bayesian Likelihood
-* **JHU (Val):** Flagship: **63.63** vs. Pure Bayes (`a2`): **62.50** vs. Pure ROT (`a3`): **74.55** vs. Gaussian MSE (`a5`): **70.80**
-* **QNRF:** Flagship: **109.80** vs. Pure Bayes (`a2`, $\lambda=1.0$): **121.24** vs. Pure ROT (`a3`): **122.68** vs. Gaussian MSE (`a4`): **119.51**
-* **SHA:** Flagship: **74.29** vs. Pure Bayes (`a2`, $\lambda=1.0$): **77.81** vs. Pure ROT (`a3`): **84.54** vs. Gaussian MSE (`a4`): **74.60**
-* **SHB:** Flagship: **10.49** vs. Pure Bayes (`a2`): **10.38** vs. Pure ROT (`a3`): **13.83** vs. Gaussian MSE (`a4`): **11.85**
-* *Lưu ý kiểm toán kỹ thuật:* (1) Pure Radon-OT đạt Bias toàn cục gần 0 nhất trên mọi tập (JHU: $+2.60$, QNRF: $+2.31$, SHA: $+4.76$, SHB: $+4.12$), nhưng khi `radon_ot_scale_by_length=false` (mặc định cũ), giá trị số học của `radon_ot` chỉ đạt ~`0.016-0.038` (~`0.06%-0.14%` tổng loss); (2) `a2_pure_bayesian` trên SHA & QNRF dùng `lambda_bayesian=1.0` thay vì `0.15` nên cần cặp đối chứng sạch (`configs/benchmarks/remediation/`).
+### 3.2 Peer-Reviewed Literature Reference Table (Verified)
 
-#### Giả Thuyết 3: Nối tắt Đơn tỉ lệ DW $3\times 3$ `d=1` (`No-Neck`) vs ASPP Dilated Neck
-* Trên **SHA (Scratch):** `No-Neck` (`102,246` params): **66.24 MAE | 102.27 RMSE** vs. `ASPP Flagship`: **74.29 MAE | 118.23 RMSE**
-* Trên **JHU Val (Scratch):** `No-Neck`: **59.65 MAE | 198.74 RMSE** vs. `ASPP Flagship`: **63.63 MAE | 254.78 RMSE**
-* Trên **QNRF (Scratch):** `No-Neck`: **108.42 MAE | 184.73 RMSE** vs. `ASPP Flagship`: **109.80 MAE | 189.08 RMSE**
-* Trên **SHB (Scratch, mật độ thưa):** `ASPP Flagship`: **10.49 MAE | 16.98 RMSE** vs. `No-Neck`: **10.94 MAE | 18.49 RMSE**
+| Model | Venue / Year | KD | Params | GFLOPs | SHA MAE / RMSE | SHB MAE / RMSE | QNRF MAE / RMSE |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TinyCount** | JRTIP 2024 (non-KD) | 0% | `0.060M` (`60k`) | `0.16` | `78.2 / 120.8` | — | — |
+| **Lw-Count** | TCSVT 2022 | 0% | `0.071M` (`71k`) | — | `69.7 / 100.5` | — | — |
+| **RMRv3 (Canonical Stride-4 Anchor, s42 / 2-seed)** | Codebase Canonical | **0%** | **`104,390`** (`~104k`) | — | **`65.62`** (`68.91 ± 4.65` 2-seed) / `111.32` | — | — |
+| **RMRv3 (Audited Direct `runs_fixed`)** | Audited Suite | **0%** | **`<= 104,441`** | — | `68.05 / 113.47` (`69.46 ± 1.66` `runs` 3-seed) | `9.24 / 13.92` (Scratch) / `9.63 / 15.37` (PT) | `103.35 / 171.99` |
+| **MCNN** | CVPR 2016 | 0% | `0.133M` (`133k`) | `2.80` | `110.2 / —` | — | — |
+| **LSANet** | Neurocomputing 2022 | 0% | `0.200M` (`200k`) | `14.4` | `66.1 / 110.2` | `8.6 / —` | — |
+| **EBC-ZIP-P** | 2025 | 0% | `0.81M` | `6.46` | `71.18 / 109.60` | `8.23 / 12.62` | `96.29 / 161.82` |
+| **EBC-ZIP-N** | 2025 | 0% | `3.36M` | — | `58.86 / 94.63` | — | — |
+| **EBC-ZIP-T** | 2025 | 0% | `10.53M` | — | `56.36 / —` | — | — |
+| **EBC-ZIP-S** | 2025 | 0% | `33.60M` | — | `55.17 / —` | — | — |
+| **EBC-ZIP-B** | 2025 | 0% | `105.60M` | — | `47.81 / —` | — | — |
 
 ---
 
-## 5. ĐỐI CHIẾU VĂN HIẾN & PHÒNG VỆ PHẢN BIỆN (LITERATURE BASELINES & REBUTTAL)
+## Step 4: Verified Empirical Results, Unified Protocol & Explicit Failure Modes
 
-### 5.1. Biểu Đồ Đánh Đổi Thực Nghiệm (Empirical Complexity-Accuracy Trade-off — SHA)
-* So sánh với các mô hình siêu nhẹ độc lập ($\le 200\text{k}$ tham số, không KD, số liệu gốc từ bài báo tương ứng trên ShanghaiTech Part A):
-  - **TinyCount (JRTIP'24):** `0.060M` params, `0.16G` FLOPs, SHA MAE **78.2** (bản không chưng cất; MAE 63.17 chỉ đạt khi dùng chưng cất tri thức LSKD).
-  - **Lw-Count (TCSVT'22):** `0.071M` params, SHA MAE **69.7** / RMSE **100.5**.
-  - **MCNN (CVPR'16):** `0.133M` params, `2.80G` FLOPs, SHA MAE **110.2**.
-  - **LSANet (Neurocomp'22):** `0.200M` params, `14.4G` FLOPs (tại độ phân giải đánh giá của tác giả), SHA MAE **66.1** / RMSE **110.2**.
-* So sánh với nhóm trung bình & nặng (báo cáo đúng độ chênh tham số & FLOPs):
-  - **MobileCount (ECCVW'20):** `3.40M` params, `6.15G` FLOPs, SHA MAE **89.4**.
-  - **CSRNet (CVPR'18):** `16.26M` params, `68.7G` FLOPs (`@ 512`), SHA MAE **68.2**; **BL (ICCV'19):** `21.50M` params, MAE **62.8**; **DM-Count (NeurIPS'20):** `21.50M` params, MAE **59.7**; **P2PNet (ICCV'21):** `19.22M` params, `104.7G` FLOPs, MAE **52.7**; **PET (ICCV'23):** `51.65M` params, MAE **49.3**.
+### 4.1 Audited Existing Runs (`runs/`, `runs_fixed/`, `model_facts.md`, `input_contract.md`)
 
-### 5.2. Lập Luận Phản Biện Sẵn Sàng Trước Reviewer
-1. **Không thổi phồng vượt khung đánh giá:** Thừa nhận `Lw-Count` (`69.7`) và `RMR-104k Pretrained` (3-seed mean `69.46±1.66`, seed42 `67.57`) cạnh tranh trực tiếp với nhau ở ngưỡng ~70 MAE dưới điều kiện 0% KD; lợi thế của RMR nằm ở khung phân tích hàm mất mát có kiểm chứng đa tập dữ liệu (SHA/SHB/QNRF/JHU/UCF_CC_50) và bản Scratch `No-Neck` đạt `66.24` MAE trên SHA / `59.65` trên JHU.
-2. **Về sự khác biệt Scratch vs Pretrained ở No-Neck và bộ thí nghiệm khắc phục:** Đã thiết kế 19 thí nghiệm trong `configs/benchmarks/remediation/` (`0` tham số chết trên cả 19/19 YAML nhờ `enable_regional_head: false` và vá phản hồi `P8/P16->P4` ở `BiFPNLiteNeck` / `PAFPNBiNormNeck` / `HighResPConvFPNNeck`), bao gồm 11 đối chứng `R1–R11` (`98,164` / `99,924` params) và 8 đối chứng neck/subpixel `N1–N8` (`98,178`–`100,581` params).
-3. **Về số lượng 800 epoch trên JHU:** Với 2,272 ảnh huấn luyện, 800 epoch tạo nhiều bước cập nhật hơn đáng kể so với 1,500 epoch trên 300 ảnh của SHA.
+All values below are directly measured from on-disk evaluation outputs and audited contract files:
+
+#### A. Canonical Anchor & Solver Probes (`model_facts.md`, `input_contract.md`)
+- `rmr_canonical_104k_seed42` (Stride-4 `ASPPLite`, `104,390` params): Raw `65.62 / 111.32`, TTA `65.69 / 109.10`; `seed7`: Raw `72.20`, TTA `72.71`; 2-seed mean: `68.91 ± 4.65`.
+- **Oracle Solver Proof (`input_contract.md`)**: `FineHead y0` alone = `65.23 MAE / 108.40 RMSE` vs Full Learned Solver = `65.57 / 111.34` vs Oracle GT-box Solver = `4.77 / 5.78`.
+- **Pure Bayesian vs Dual Loss (`input_contract.md`)**: `abl_no_radon_ot` (`lambda_radon_ot: 0.0`, s42) = `65.74 MAE / 108.27 RMSE` (Dense MAE `123.74` vs Canonical `127.67`).
+
+#### B. Audited `runs/benchmarks/` & `runs_fixed/benchmarks/` Suites
+| Dataset | Suite | Run ID | MAE | RMSE | Notes / Verified Breakdown |
+| :--- | :--- | :--- | :---: | :---: | :--- |
+| **SHA** (182 test) | `runs` | Pretrained Direct (s42) | `67.57` | `110.77` | `NAE 0.1652`, `Bias -19.74`, `GAME1 78.25`, `loc_F1@4 0.2954`, `loc_F1@8 0.5820`, 3-seed (`42/1337/2024`): **`69.46 ± 1.66`** |
+| **SHA** | `runs` | `ablations_sha/b4_no_neck` (`102,246` p) | `66.24` | `102.27` | Exceeded necked `s42` (`67.57`) in `runs`, whereas failed in `runs_fixed` (`74.78`) |
+| **SHA** | `runs_fixed` | `exp_sha_direct_pretrained_104k` | `68.05` | `113.47` | Clean bug-fixed rerun (`exp_sha_pretrained_radon_scaled_104k`: `67.73 / 112.37`; `pafpn_binorm`: `71.65`; `bifpn_lite`: `72.11`; `pconv_fpn`: `76.59`) |
+| **SHB** (316 test) | `runs_fixed` | `exp_shb_direct_scratch_104k` | `9.24` | `13.92` | `exp_shb_direct_pretrained_104k`: `9.63 / 15.37`; `bifpn_lite`: `9.69`; `pafpn_binorm`: `9.75` |
+| **SHB** | `runs` | `abl_b3_bg_ratio_005` | `9.41` | `14.12` | Pretrained Direct: `10.19 / 15.88` (`Bias -2.33`); Scratch Direct: `10.49 / 16.98` |
+| **UCF-QNRF** (334 test) | `runs_fixed` | `exp_qnrf_direct_pretrained_104k` | `103.35` | `171.99` | `Bias -0.11`; `no_neck`: `107.89 / 185.10`; Scratch Direct: `112.96 / 198.34` |
+| **UCF-QNRF** | `runs` | `sweeps_train/exp_qnrf_crop_768_104k` | `102.10` | `178.47` | Pretrained Direct: `105.36 / 174.94` (`Bias -5.94`) |
+| **JHU-Crowd++** Val (500) | `runs_fixed` | `exp_jhu_direct_pretrained_104k` | `58.07` | `217.04` | `disp10`: `59.73 / 231.14`; `no_neck`: `64.81 / 231.46`; Scratch: `65.20 / 227.23` |
+| **JHU-Crowd++** Test (1,600) | `runs` | Pretrained Direct (`attribute_breakdown.json`) | `76.58` | `295.07` | `NAE 0.415`; Clear `71.85` [n=1409], Fog/Haze `100.79` [n=64], Rain `63.35` [n=49], Snow `150.48` [n=78], Distractors `70.74` [n=31] |
+| **UCF_CC_50** (5-fold CV) | `runs` | Scratch / Pretrained Direct | `298.65` / `329.99` | — | Std `± 85.18` (Scratch) / `± 100.63` (Pretrained), `ddof=1` |
+
+#### C. Zero-Shot Cross-Dataset Transfers (`runs/eval_*`)
+| Source -> Target | MAE | RMSE | Signed Bias |
+| :--- | :---: | :---: | :---: |
+| `eval_qnrf_on_shb` | `17.71` | `27.12` | `-12.26` |
+| `eval_qnrf_on_ucf_cc_50` | `349.28` | `549.59` | `+152.57` |
+| `eval_sha_on_shb` | `27.13` | `40.84` | `-17.78` |
+| `eval_sha_on_ucf_cc_50` | `411.44` | `635.68` | `-20.33` |
+
+### 4.2 Unified `nextgen_sub65` Protocol (`configs/benchmarks/nextgen_sub65/`) — [Ready to Train]
+
+All 4 primary cross-dataset runs use **100% identical** data augmentations (`crop_size: 512`, `pad_small_images: true`, `max_size: 2048`, `scale_range: [0.6, 1.4]`), **100% identical** model (`sfi_lite`, `hdc_dilations: [1,2,3]`, `use_aspp_gap: false`, `dw_subpixel`, `output_stride: 2`, `subpixel_stride2: true`, `direct`, `init_m0: auto`, `floor_tau: 0.001` -> **`100,596` params**), **100% identical** loss (`dual_bayesian_radon_ot`, `bayesian_sigma: 8.0`, `bayesian_sigma_max: 8.0`, `radon_ot_scale_by_length: false`, `count_nb_dispersion: 50.0`), and **100% identical** optimizer (`lr: 0.0003`, `backbone_lr_scale: 0.25`, `ema_decay: 0.999`):
+
+| Config File (`configs/benchmarks/nextgen_sub65/`) | Role | Dataset | Epochs | Measured Params | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| `exp_sha_direct_sfi_dw_subpixel_102k.yaml` | Proposed Unified Direct | SHA | 600 | `100,596` | **Ready to Train** |
+| `exp_shb_synergistic_hdc_dw_subpixel_100k.yaml` | Proposed Unified Direct | SHB | 500 | `100,596` | **Ready to Train** |
+| `exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml` | Proposed Unified Direct | QNRF | 300 | `100,596` | **Ready to Train** |
+| `exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml` | Proposed Unified Direct | JHU | 300 | `100,596` | **Ready to Train** |
+| `exp_sha_hdc_mcbpro_subpixel_103k.yaml` | Ablation: `hdc_lite` Neck (Direct) | SHA | 600 | `99,892` | **Ready to Train** |
+| `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 600 | `99,892` | **Ready to Train** |
+| `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 600 | `103,226` | **Ready to Train** |
+| `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 600 | `104,390` | **Ready to Train** |
+
+*(No performance numbers are claimed for these unified Stride-2 `sfi_lite` configs prior to execution; see [`docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md`](file:///f:/lightweightcrcn/docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md) for standalone training commands.)*
+
+### 4.3 Mandatory Failure-Mode & Limitation Registry
+1. **Phantom Background Fog ([`results/forensics/full_182_forensic_results.json`](file:///f:/lightweightcrcn/results/forensics/full_182_forensic_results.json))**: `53,528.18` of `81,629.66` total predicted mass (`65.57%`) on SHA test falls outside $5\times 5$ GT head neighborhoods (`sum_gt = 78,862.0`; mean crowd ratio = `30.32%`).
+2. **Softplus Bias Saturation**: Background logits freeze near $b \approx -5.442$ because convex Softplus slopes vanish exponentially below $z < -6$, equilibrating against weight decay.
+3. **Dense Undercounting & Fine-Structure Attenuation**: Dense SHA scenes (`n=46`) yield `132.16 MAE` on Pretrained Direct (`runs/benchmarks`) and `127.67` on Canonical TTA; snow (`150.48` MAE) and haze (`100.79` MAE) severely degrade JHU test performance.
+4. **Distractors & Image Corruptions**: Mean phantom count reaches `185.10` across `4` JHU distractor negatives; JPEG `q=10` raises SHA MAE from `67.91` to `132.63` ([`results/image_corruptions_sweep.json`](file:///f:/lightweightcrcn/results/image_corruptions_sweep.json)); $0.5\times$ rescaling degrades SHA MAE from `67.57` to `116.75` with `10.68%` mean scale consistency error ([`results/scale_invariance_sweep.json`](file:///f:/lightweightcrcn/results/scale_invariance_sweep.json)).
+5. **Cross-Dataset Zero-Shot Fragility**: Direct transfer without fine-tuning suffers negative bias under density/scale mismatch (`SHA -> SHB`: `27.13 MAE`, `Bias -17.78`).

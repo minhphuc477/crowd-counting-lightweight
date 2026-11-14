@@ -6,6 +6,7 @@ data:
   data_root: data
   crop_size: 512
   pad_small_images: true
+  max_size: 2048
   scale_range:
   - 0.6
   - 1.4
@@ -32,12 +33,13 @@ model:
   subpixel_stride2: true
   subpixel_kernel_size: 3
   head_type: dw_subpixel
+  head_activation: softplus
   feature_width: 32
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
-  backbone_lr_scale: 0.2
-  init_m0: 0.00394075
+  backbone_lr_scale: 0.25
+  init_m0: auto
   neck_type: sfi_lite
   hdc_dilations:
   - 1
@@ -81,22 +83,22 @@ model:
   reliability_weight_min: 0.25
   reliability_weight_max: 4.0
   normalize_reliability_within_scale: true
-  floor_tau: 0.003
+  floor_tau: 0.001
   eps: 1.0e-06
 
 loss:
   output_stride: 2
   allocation_loss_type: dual_bayesian_radon_ot
-  bayesian_sigma: 4.0
+  bayesian_sigma: 8.0
   bayesian_adaptive_sigma: true
   bayesian_sigma_min: 2.0
-  bayesian_sigma_max: 4.0
+  bayesian_sigma_max: 8.0
   bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
   lambda_radon_ot: 0.85
   radon_ot_projections: 4
   radon_ot_norm_ref: 100.0
-  radon_ot_scale_by_length: true
+  radon_ot_scale_by_length: false
   dm_target: dual
   count_loss_mode: nb
   count_nb_dispersion: 50.0
@@ -116,17 +118,18 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 1500
+  epochs: 600
   batch_size: 8
   workers: 4
   pin_memory: true
-  lr: 0.00025
-  backbone_lr_scale: 0.2
+  lr: 0.0003
+  backbone_lr_scale: 0.25
   weight_decay: 0.0001
   warmup_epochs: 15
   min_lr_ratio: 0.20
   grad_clip: 1.0
   amp: true
+  ema_decay: 0.999
   solver_warmup_epochs: 0
   solver_ramp_epochs: 10
   early_stopping: false

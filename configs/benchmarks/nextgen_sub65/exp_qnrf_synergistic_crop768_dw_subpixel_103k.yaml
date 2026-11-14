@@ -4,7 +4,7 @@ data:
   train_manifest: data/qnrf_train.jsonl
   val_manifest: data/qnrf_test.jsonl
   data_root: data
-  crop_size: 768
+  crop_size: 512
   pad_small_images: true
   max_size: 2048
   scale_range:
@@ -33,56 +33,23 @@ model:
   subpixel_stride2: true
   subpixel_kernel_size: 3
   head_type: dw_subpixel
+  head_activation: softplus
   feature_width: 32
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
-  backbone_lr_scale: 0.2
-  init_m0: 0.001498
+  backbone_lr_scale: 0.25
+  init_m0: auto
   neck_type: sfi_lite
   hdc_dilations:
   - 1
   - 2
   - 3
   use_aspp_gap: false
-  enable_regional_head: true
-  region_sizes_px:
-  - 16
-  - 32
-  - 64
-  - 128
-  region_overlap: 0.5
-  include_full_image: false
-  use_diag: false
-  native_scale_pooling: true
-  regional_feature_stats: mean
-  region_head_hidden: 36
-  dynamic_scale_routing: false
-  factorized_scale_routing: false
-  pre_solver_scale_gating: false
-  foreground_gate: false
-  dynamic_trust_gate: false
-  hurdle_head: false
-  enable_solver: true
-  solver_mode: mcbpro
-  mcbpro_deficit_seeding: true
-  mcbpro_valley_power: 2.0
-  mcbpro_reg_threshold: 0.001
-  mcbpro_peak_kernel_size: 5
-  tau_peak: 0.05
-  ratio_clamp_max: 25.0
-  mcbpro_soft_margin_gating: true
-  mcbpro_dense_clamp_min: 1.0
-  mcbpro_dense_threshold: 2.0
-  detach_region_mean_in_solver: false
-  detach_reliability_in_solver: false
-  uniform_reliability: false
-  reliability_mode: snr
-  reliability_rate_std_floor: 0.01
-  reliability_weight_min: 0.25
-  reliability_weight_max: 4.0
-  normalize_reliability_within_scale: true
-  floor_tau: 0.0015
+  enable_regional_head: false
+  enable_solver: false
+  solver_mode: direct
+  floor_tau: 0.001
   eps: 1.0e-06
 
 loss:
@@ -103,10 +70,7 @@ loss:
   count_nb_dispersion: 50.0
   lambda_bayesian: 0.15
   lambda_flat_dm16: 0.0
-  lambda_region_nb: 0.5
-  faithful_regional_nb: true
-  regional_nb_beta: 1.0
-  normalize_beta_weights: true
+  lambda_region_nb: 0.0
   lambda_count: 0.5
   lambda_cell: 0.0
   lambda_hurdle: 0.0
@@ -117,19 +81,18 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 1000
+  epochs: 300
   batch_size: 8
   workers: 4
   pin_memory: true
-  lr: 0.00025
-  backbone_lr_scale: 0.2
+  lr: 0.0003
+  backbone_lr_scale: 0.25
   weight_decay: 0.0001
   warmup_epochs: 15
   min_lr_ratio: 0.20
   grad_clip: 1.0
   amp: true
-  solver_warmup_epochs: 0
-  solver_ramp_epochs: 10
+  ema_decay: 0.999
   early_stopping: false
   patience: 0
   eval_every: 5

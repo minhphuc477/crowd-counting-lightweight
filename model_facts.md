@@ -265,7 +265,7 @@ Bảng đối chiếu toàn diện giữa các tuyên bố trong các báo cáo 
 
 | # | Tuyên bố trong tài liệu / báo cáo trước | Mã nguồn và dữ liệu thực tế tương ứng | Kết luận Dissector |
 |---|---|---|---|
-| 1 | *"Kỷ lục thế giới phân khúc sub-100k params (World record sub-100k: 65.62 MAE)"* | - Số tham số học được thực tế là **104,390 params** (`rmr_v3/model/architecture.py:L101-L106`, `configs/rmr_canonical/rmr_canonical_104k_seed42.yaml:L5`). $104,390 > 100,000$.<br>- **Kiểm toán y văn quốc tế (arXiv:2506.19955, arXiv:2404.07847, PR 2022)**: Hoàn toàn **KHÔNG TỒN TẠI** mô hình nào dưới 100k params đạt MAE 57.2. Tuyên bố cũ về "EBC-ZIP-S (84k params, 57.2 MAE)" là sự nhầm lẫn với mô hình thương mại lớn **ZIP-S có 33.72 triệu tham số**. Mô hình nhỏ nhất của ZIP là ZIP-Pico (810k params) chỉ đạt 71.18 MAE. Mô hình nhỏ nhất từng được peer-reviewed là LSANet (PR 2022) có 200,000 params (0.20M) đạt 66.1 MAE. RMRv3 với 104,390 params đạt 65.62 (S42) / 65.21 (WSD) thực chất là **mô hình đứng đầu thế giới ở phân khúc $\le 104\text{k}$ tham số**. | **ĐÍNH CHÍNH THEO SỰ THẬT Y VĂN**<br>(Mô hình ở mức 104k params; đang dẫn đầu phân khúc sub-200k standalone). |
+| 1 | *"Kỷ lục thế giới phân khúc sub-100k params (World record sub-100k: 65.62 MAE)"* | - Số tham số học được thực tế của Canonical là **104,390 params** (`rmr_v3/model/architecture.py:L101-L106`, `configs/rmr_canonical/rmr_canonical_104k_seed42.yaml:L5`), và unified `nextgen_sub65` Direct là **100,596 params** (`100.6k > 100k`).<br>- **Kiểm toán y văn quốc tế (2022–2025)**: Hoàn toàn **KHÔNG TỒN TẠI** mô hình `84k` nào đạt MAE `57.2`. Các mô hình `EBC-ZIP` (2025) có quy mô `0.81M` (`EBC-ZIP-P`, SHA `71.18`), `3.36M` (`EBC-ZIP-N`, SHA `58.86`), `10.53M` (`EBC-ZIP-T`, SHA `56.36`), `33.60M` (`EBC-ZIP-S`, SHA `55.17`), và `105.60M` (`EBC-ZIP-B`, SHA `47.81`). Trong nhóm standalone `0%` KD $\le 200k$: `TinyCount` (JRTIP 2024, `0.060M`, `0.16 GFLOPs`) đạt `78.2 / 120.8`, `Lw-Count` (TCSVT 2022, `0.071M`) đạt `69.7 / 100.5`, `MCNN` (CVPR 2016, `0.133M`) đạt `110.2`, và `LSANet` (Neurocomputing 2022, `0.200M`) đạt `66.1 / 110.2`. Nghiêm cấm dùng tuyên bố "kỷ lục thế giới" hoặc mọi từ tiếp thị phóng đại. | **ĐÍNH CHÍNH & BỎ NGÔN TỪ PHÓNG ĐẠI**<br>(Định vị khách quan ở phân khúc standalone $0\%$ KD $\le 105k$ params). |
 | 2 | *"Đánh bại SANet (67.0) và sánh ngang TEDnet (64.2)"* | - Seed 42 đạt 65.62 MAE (`summary.json:L2`).<br>- Seed 7 đạt 72.20 MAE (`summary.json:L2`).<br>- Giá trị trung bình 2 seed là **68.91 MAE**.<br>- $68.91 > 67.0$ (kém SANet) và $68.91 > 64.2$ (kém TEDnet). | **KHÔNG KHỚP TRÊN TRUNG BÌNH**<br>(Tuyên bố cherry-picking trên Seed 42 đơn lẻ; trung bình kém cả SANet và TEDnet). |
 | 3 | *"Ablation 3 chứng minh tại sao cần Radon-OT (loại bỏ Radon-OT làm hỏng mô hình)"* | - Ablation 3 (`rmr_abl_no_radon_ot`, `lambda_radon_ot: 0.0`) đạt **65.74 MAE**, **108.27 RMSE**, **123.74 Dense MAE** (`eval_val/summary.json:L2-L31`).<br>- Mô hình Full (Seed 42) đạt **65.62 MAE**, **109.16 RMSE**, **127.67 Dense MAE**.<br>- Ablation 3 có MAE tương đương ($\Delta = 0.12$), nhưng **RMSE tốt hơn** (108.27 vs 109.16) và **Dense MAE tốt hơn** (123.74 vs 127.67). Điểm duy nhất Radon-OT cải thiện là Sparse MAE (15.63 vs 26.23) và Bias (-19.45 vs -24.80). | **KHÔNG KHỚP VỚI NARRATIVE**<br>(Mã nguồn và số liệu chứng minh Radon-OT không cải thiện MAE tổng hay RMSE, chỉ cải thiện bias vùng thưa). |
 | 4 | *"Định lý Radon Null-Space Degeneracy (Radon-OT thuần túy bị suy biến không gian hạt nhân)"* | - Tuyên bố dựa trên 1 lần chạy đơn lẻ của Ablation 2 (`rmr_abl_no_bayesian`, `lambda_bayesian: 0.0`) đạt 79.97 MAE (`eval_val/summary.json:L2`).<br>- Không có định lý hình thức, bổ đề, hoặc chứng minh toán học nào được viết trong mã nguồn hay phụ lục toán học. | **KHÔNG KIỂM CHỨNG ĐƯỢC TỪ TOÁN HỌC**<br>(Chỉ là một quan sát thực nghiệm từ đúng 1 seed đơn lẻ; gọi là định lý là sai lệch học thuật). |
@@ -373,7 +373,7 @@ Sơ đồ quan hệ phụ thuộc giữa các module trong forward pass và trai
    - Fallback: `fine_head` và solver tự động chuyển về cơ chế adjoint đồng nhất không theo tỷ lệ (`rmr_core/operators/mcbpro.py:L39-L42`).
 2. **`solver` bị tắt (`enable_solver: false` hoặc `solver_mode: "direct"`)**:
    - `solve_inverse_measure` bắt điều kiện ở dòng đầu (`rmr_v3/model/solver_step.py:L107-L115`).
-   - Fallback: Trả về trực tiếp bản đồ mật độ mịn $y = y_0$, bỏ qua hoàn toàn việc tính toán bù trừ độ đo. Đây chính là cấu hình vận hành của Track B Stride 2.
+   - Fallback: Trả về trực tiếp bản đồ mật độ mịn $y = y_0$, bỏ qua hoàn toàn việc tính toán bù trừ độ đo (chế độ Direct sử dụng trong bộ cấu hình thống nhất `configs/benchmarks/nextgen_sub65/`).
 3. **`radon_ot` bị tắt (`lambda_radon_ot: 0.0`)**:
    - Trong `compute_single_allocation` (`rmr_v3/losses/allocation.py:L89-L91`), $l_{rot}$ nhân với hệ số 0.0.
    - Fallback: Toàn bộ gradient phân bổ không gian được dẫn truyền bởi `bayesian_loss` ($l_{bay}$). Đây chính là cấu hình của S1 (`rmr_abl_no_radon_ot`).
@@ -414,27 +414,31 @@ Dưới đây là bảng kết quả đầy đủ của 10 mô hình canonical v
 ### Phát hiện 1: Stride 2 là bước nhảy vọt vật lý cho vùng đám đông cực đông (Dense Crowd)
 - **Số liệu kiểm chứng**: Stride 2 đạt TTA RMSE **101.53** (cải thiện **9.7%** so với baseline Stride 4 là 111.32) và Dense MAE **119.48** (cải thiện **7.0%** so với baseline Stride 4 là 128.48, lần đầu tiên vượt ngưỡng 120 trong lịch sử dự án).
 - **Cơ chế vật lý**: Trong ảnh siêu đông ($>1,500$ người), khoảng cách giữa các đầu người thu hẹp xuống dưới 2 px. Lưới Stride 4 ($4 \times 4\text{ px}$) gom nhiều đỉnh đầu vào cùng một ô lưới, gây sụp đổ Voronoi không thể phục hồi. Lưới Stride 2 ($2 \times 2\text{ px}$) bảo toàn độ phân giải không gian, cứu vớt các đỉnh mật độ bị nén bẹp.
-- **Sự đánh đổi**: Sparse MAE tăng nhẹ từ 15.63 lên 20.97 do diện tích lưới tăng gấp 4 lần khiến việc tích tụ nhiễu nền ở vùng thưa tăng lên nếu không có gating thích hợp. Kết hợp Stride 2 với cơ chế lọc nền tốt hơn là chìa khóa mở đường tiến tới sub-50.
+- **Sự đánh đổi**: Sparse MAE tăng nhẹ từ 15.63 lên 20.97 do diện tích lưới tăng gấp 4 lần khiến việc tích tụ nhiễu nền ở vùng thưa tăng lên nếu không có cơ chế lọc nền hoặc phân giải cao tần phù hợp.
 
 ### Phát hiện 2: Cơ chế Gating hiện tại của MC-BPRO gây Bias âm lớn (-19.74 vs -7.81)
 - **Số liệu kiểm chứng**: Khi tắt hoàn toàn solver (Ablation A1), Bias nhảy từ **-19.74** lên **-7.81** (giảm gần 12 điểm thiên lệch âm!).
-- **Cơ chế toán học**: Mặt nạ vùng hiện diện $m_{\text{reg}}(u) = \tanh(b_{\text{density}}(u) / \tau_{\text{reg}})$ với $\tau = 0.001$ và trần cắt gắt gao đã đè nén các rìa cụm người (boundary pixels), vô tình "cắt ngọn" mật độ ở các vùng biên, tạo ra độ lệch âm tích lũy. Khi thiết kế lại cơ chế gating mềm (Soft-Margin Gating) không triệt tiêu vùng biên của đám đông, ta có thể giữ nguyên Sparse MAE (~15–16) mà kéo Bias về quanh $-8$ đến $-10$, từ đó hạ toàn bộ MAE xuống 3–5 điểm!
+- **Cơ chế toán học**: Mặt nạ vùng hiện diện $m_{\text{reg}}(u) = \tanh(b_{\text{density}}(u) / \tau_{\text{reg}})$ với $\tau = 0.001$ và trần cắt gắt gao đã đè nén các rìa cụm người (boundary pixels), vô tình "cắt ngọn" mật độ ở các vùng biên, tạo ra độ lệch âm tích lũy.
 
 ### Phát hiện 3: Scale Router (483 tham số) là dư thừa (Dead Weight)
-- **Số liệu kiểm chứng**: Khi loại bỏ Scale Router (Ablation A3), TTA MAE thậm chí còn cải thiện nhẹ (**65.49 vs 65.69**), Raw MAE gần như bất biến (**65.76 vs 65.62**).
-- **Ý nghĩa kỹ thuật**: Loại bỏ module này giải phóng đúng 483 tham số, cho phép tái đầu tư vào một thang đo vùng chi tiết hơn ($16\text{ px}$) hoặc tăng cường dung lượng cho đầu Stride 2 mà không vi phạm trần ngân sách 104,441 tham số.
+- **Số liệu kiểm chứng**: Khi loại bỏ Scale Router (Ablation A3), TTA MAE giữ nguyên/cải thiện nhẹ (**65.49 vs 65.69**), Raw MAE gần như bất biến (**65.76 vs 65.62**).
+- **Ý nghĩa kỹ thuật**: Loại bỏ module này giải phóng 483 tham số để chuyển sang cấu hình thống nhất không phụ thuộc từng dataset (`configs/benchmarks/nextgen_sub65/`).
 
 ---
 
-## 7. Lộ trình kỹ thuật khả thi tiến gần mục tiêu Sub-50 MAE
+## 7. Unified `nextgen_sub65` Parameter Breakdown (Measured via `make_model(cfg)`)
 
-Dựa trên 3 phát hiện có giá trị thực tiễn và 4 red flags đã được giải quyết triệt để, lộ trình gồm 4 bước ưu tiên:
+Tất cả các cấu hình trong [`configs/benchmarks/nextgen_sub65/`](file:///f:/lightweightcrcn/configs/benchmarks/nextgen_sub65/) đã được kiểm chứng trực tiếp qua `validate_v3_config(cfg)` và `make_model(cfg)` (dưới trần $\le 104,441$ params, `0.0%` KD). Lỗi nhân đôi `0.25 *` trong `rmr_v3/engine.py` đã được sửa để `init_m0: auto` đồng nhất hoàn toàn với `rmr_v3/trainer.py` (`FineMeasureHead` tự chia `4.0` bên trong khi `subpixel_stride2=True`):
 
-1. **Ưu tiên 1 — Khai thác & Kiểm chứng Đa Seed cho Stride 2**:
-   - Chạy kiểm chứng Stride 2 trên 2 seed bổ sung (Seed 7 và Seed 101) để xác lập độ tin cậy thống kê cho RMSE 101.53 và Dense MAE 119.48.
-2. **Ưu tiên 2 — Thiết kế Soft-Margin Evidence Gating cho MC-BPRO**:
-   - Thay thế hàm $\tanh(b / \tau)$ bằng sigmoid biên mềm: $m_{\text{reg}}(u) = \sigma((b(u) - b_{\text{floor}}) / \tau)$ để giải phóng 12 điểm bias âm mà không làm bùng phát nhiễu vùng thưa.
-3. **Ưu tiên 3 — Phối hợp Stride 2 với Regional NB Tăng cường (Hộp 16px)**:
-   - Tái phân bổ 483 tham số từ Scale Router sang đầu suy luận vùng $16\text{ px}$, hỗ trợ lưới Stride 2 phân giải chính xác các cụm siêu đông.
-4. **Ưu tiên 4 — Huấn luyện mô hình tổng hợp hoàn chỉnh (Synergistic Stride-2)**:
-   - Kỳ vọng kỹ thuật: MAE tổng đạt 61–63, Dense MAE đạt 112–115, RMSE đạt 95–99.
+| Configuration Profile (`configs/benchmarks/nextgen_sub65/`) | Role | `encoder` | `fusion` | `fine_head` | `region_head` | `scale_router` | **Total Trainable Params** | `init_m0` (`auto`) & Output |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Unified Direct (`sfi_lite` + `dw_subpixel`, SHA)** (`exp_sha_direct_sfi_dw_subpixel_102k.yaml`) | Proposed Unified Model | `87,568` | `10,432` (`SFILiteFPNNeck`) | `2,596` (`DWSubpixelMeasureHead`) | `0` | `0` | **`100,596`** | `0.015796` (Stride 2) |
+| **Unified Direct (`sfi_lite` + `dw_subpixel`, SHB)** (`exp_shb_synergistic_hdc_dw_subpixel_100k.yaml`) | Proposed Unified Model | `87,568` | `10,432` (`SFILiteFPNNeck`) | `2,596` (`DWSubpixelMeasureHead`) | `0` | `0` | **`100,596`** | `0.002500` (Stride 2) |
+| **Unified Direct (`sfi_lite` + `dw_subpixel`, QNRF)** (`exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml`) | Proposed Unified Model | `87,568` | `10,432` (`SFILiteFPNNeck`) | `2,596` (`DWSubpixelMeasureHead`) | `0` | `0` | **`100,596`** | `0.005988` (Stride 2) |
+| **Unified Direct (`sfi_lite` + `dw_subpixel`, JHU)** (`exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml`) | Proposed Unified Model | `87,568` | `10,432` (`SFILiteFPNNeck`) | `2,596` (`DWSubpixelMeasureHead`) | `0` | `0` | **`100,596`** | `0.005610` (Stride 2) |
+| **SHA Ablation: `hdc_lite` Direct** (`exp_sha_hdc_mcbpro_subpixel_103k.yaml`) | Neck Ablation | `87,568` | `9,728` (`HDCLiteFPNNeck`) | `2,596` | `0` | `0` | **`99,892`** | `0.015796` (Stride 2) |
+| **SHA Ablation: `aspp_lite [1,2,4]` Direct** (`exp_sha_direct_aspp124_dw_subpixel_100k.yaml`) | Neck Ablation | `87,568` | `9,728` (`ASPPLiteNeck`) | `2,596` | `0` | `0` | **`99,892`** | `0.015796` (Stride 2) |
+| **SHA Ablation: `sfi_lite` + Learned `mcbpro`** (`exp_sha_synergistic_mcbpro_subpixel_103k.yaml`) | Solver Ablation | `87,568` | `10,432` (`SFILiteFPNNeck`) | `2,596` | `2,630` | `0` | **`103,226`** | `0.015796` (Stride 2) |
+| **SHA Ablation: Canonical Stride-4 `aspp_lite [2,4,8] + GAP + mcbpro`** (`exp_sha_canonical_stride4_mcbpro_repro_104k.yaml`) | Canonical Baseline | `87,568` | `10,784` (`ASPPLite + GAP`) | `1,473` (`FineMeasureHead`) | `4,082` | `483` | **`104,390`** | `0.015796` (Stride 4) |
+
+*(Tất cả 8 cấu hình trên đang ở trạng thái **Ready to Train**; mọi số liệu MAE/RMSE mới chỉ được ghi nhận sau khi chạy thực nghiệm GPU và kiểm tra `eval_val/summary.json`.)*
