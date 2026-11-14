@@ -119,18 +119,18 @@ All values below are directly measured from on-disk evaluation outputs and audit
 
 All 4 primary cross-dataset runs use **100% identical** data augmentations (`crop_size: 512`, `pad_small_images: true`, `max_size: 2048`, `scale_range: [0.6, 1.4]`), **100% identical** model (`sfi_lite` with orthogonal Laplacian frequency decomposition and context inheritance gating, `hdc_dilations: [1,2,3]`, `use_aspp_gap: false`, `dw_subpixel`, `output_stride: 2`, `subpixel_stride2: true`, `direct`, `init_m0: auto`, `floor_tau: 0.001` -> **`100,596` params**), **100% identical** loss (`dual_bayesian_radon_ot`, `bayesian_sigma: 8.0`, `bayesian_sigma_max: 8.0`, `radon_ot_scale_by_length: false`, `count_nb_dispersion: 50.0`), and **100% identical** optimizer/scheduler (`lr: 0.0003`, `backbone_lr_scale: 0.25`, `warmup_epochs: 15`, `min_lr_ratio: 0.05`, `ema_decay: 0.999`):
 
-| Config File (`configs/benchmarks/nextgen_sub65/`) | Role | Dataset | Epochs | Measured Params | Status |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| `exp_sha_direct_sfi_dw_subpixel_102k.yaml` | Proposed Unified Direct | SHA | 1500 | `100,596` | **Ready to Train** |
-| `exp_shb_synergistic_hdc_dw_subpixel_100k.yaml` | Proposed Unified Direct | SHB | 1500 | `100,596` | **Ready to Train** |
-| `exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml` | Proposed Unified Direct | QNRF | 1000 | `100,596` | **Ready to Train** |
-| `exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml` | Proposed Unified Direct | JHU | 800 | `100,596` | **Ready to Train** |
-| `exp_sha_hdc_mcbpro_subpixel_103k.yaml` | Ablation: `hdc_lite` Neck (Direct) | SHA | 1500 | `99,892` | **Ready to Train** |
-| `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 1500 | `99,892` | **Ready to Train** |
-| `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 1500 | `103,226` | **Ready to Train** |
-| `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | **Ready to Train** |
+| Config File (`configs/benchmarks/nextgen_sub65/`) | Role | Dataset | Epochs (Full) | Measured Params | 600-ep Interim MAE / RMSE | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| `exp_sha_direct_sfi_dw_subpixel_102k.yaml` | Proposed Unified Direct | SHA | 1500 | `100,596` | **`63.98 / 95.69`** (s42, best ep 585/600) | **Training — 1500-ep pending** |
+| `exp_shb_synergistic_hdc_dw_subpixel_100k.yaml` | Proposed Unified Direct | SHB | 1500 | `100,596` | `11.66 / 18.73` (best ep 45/500) | **Training — 1500-ep pending** |
+| `exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml` | Proposed Unified Direct | QNRF | 1000 | `100,596` | `105.61 / 185.84` (best ep 150/300) | **Training — 1000-ep pending** |
+| `exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml` | Proposed Unified Direct | JHU | 800 | `100,596` | `58.93 / 210.21` Val (best ep 115/300) | **Training — 800-ep pending** |
+| `exp_sha_hdc_mcbpro_subpixel_103k.yaml` | Ablation: `hdc_lite` Neck (Direct) | SHA | 1500 | `99,892` | **`64.67 / 98.81`** (best ep 545/600) | **Training — 1500-ep pending** |
+| `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 1500 | `99,892` | `71.13 / 112.06` (best ep 245/600) | **Training — 1500-ep pending** |
+| `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 1500 | `103,226` | **`64.17 / 97.22`** (best ep 385/600) | **Training — 1500-ep pending** |
+| `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | `67.04 / 102.87` (best ep 485/600) | **Training — 1500-ep pending** |
 
-*(No performance numbers are claimed for these unified Stride-2 `sfi_lite` configs prior to execution; see [`docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md`](file:///f:/lightweightcrcn/docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md) for standalone training commands.)*
+*(600-epoch interim results collected with `min_lr_ratio: 0.20`. Full 1500-epoch runs use `min_lr_ratio: 0.05`. Numbers will be updated upon pull of 1500-epoch checkpoints.)*
 
 ### 4.3 Mandatory Failure-Mode & Limitation Registry
 1. **Phantom Background Fog ([`results/forensics/full_182_forensic_results.json`](file:///f:/lightweightcrcn/results/forensics/full_182_forensic_results.json))**: `53,528.18` of `81,629.66` total predicted mass (`65.57%`) on SHA test falls outside $5\times 5$ GT head neighborhoods (`sum_gt = 78,862.0`; mean crowd ratio = `30.32%`).

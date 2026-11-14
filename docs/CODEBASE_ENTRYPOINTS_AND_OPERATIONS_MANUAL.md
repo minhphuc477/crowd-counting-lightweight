@@ -53,22 +53,22 @@ In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation 
 
 ### A. Proposed Unified Cross-Dataset Suite (`SFILiteFPNNeck` + `DWSubpixelMeasureHead`, `100,596` params)
 
-**1. ShanghaiTech Part A (`epochs: 1500`, `lr: 0.0003`, `backbone_scale: 0.20`)**
+**1. ShanghaiTech Part A (`epochs: 1500`, `lr: 0.0003`, `backbone_lr_scale: 0.25`)**
 ```bash
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml -o
 ```
 
-**2. ShanghaiTech Part B (`epochs: 1500`, `lr: 0.0002`, `backbone_scale: 0.10`)**
+**2. ShanghaiTech Part B (`epochs: 1500`, `lr: 0.0003`, `backbone_lr_scale: 0.25`)**
 ```bash
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml -o
 ```
 
-**3. UCF-QNRF (`epochs: 1000`, `lr: 0.0003`, `backbone_scale: 0.20`)**
+**3. UCF-QNRF (`epochs: 1000`, `lr: 0.0003`, `backbone_lr_scale: 0.25`)**
 ```bash
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml -o
 ```
 
-**4. JHU-Crowd++ (`epochs: 800`, `lr: 0.0002`, `backbone_scale: 0.10`)**
+**4. JHU-Crowd++ (`epochs: 800`, `lr: 0.0003`, `backbone_lr_scale: 0.25`)**
 ```bash
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml -o
 ```
