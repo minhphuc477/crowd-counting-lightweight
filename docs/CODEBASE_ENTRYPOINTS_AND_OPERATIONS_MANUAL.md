@@ -95,6 +95,16 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_synergistic
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_canonical_stride4_mcbpro_repro_104k.yaml -o
 ```
 
+**9. Ablation — Pure Bayesian Loss (`lambda_radon_ot: 0.0`, `100,596` params)**
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_pure_bayesian_102k.yaml -o
+```
+
+**10. Ablation — Scratch Training (`pretrained: false`, `100,596` params)**
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_scratch_102k.yaml -o
+```
+
 ---
 
 ## 4. Evaluation & Verification Commands (Linux Bash)
@@ -120,6 +130,8 @@ python -m rmr_v3.eval \
 ```bash
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 1337 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s1337 -o
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 2024 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s2024 -o
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml --seed 1337 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k_s1337 -o
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml --seed 2024 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k_s2024 -o
 ```
 
 ### Core & Loss Unit Tests

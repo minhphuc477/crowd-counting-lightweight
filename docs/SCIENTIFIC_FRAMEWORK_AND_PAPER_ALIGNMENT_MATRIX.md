@@ -129,6 +129,8 @@ All 4 primary cross-dataset runs use **100% identical** data augmentations (`cro
 | `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 1500 | `99,892` | `71.13 / 112.06` (best ep 245/600) | **Training — 1500-ep pending** |
 | `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 1500 | `103,226` | **`64.17 / 97.22`** (best ep 385/600) | **Training — 1500-ep pending** |
 | `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | `67.04 / 102.87` (best ep 485/600) | **Training — 1500-ep pending** |
+| `exp_sha_direct_sfi_pure_bayesian_102k.yaml` | Ablation: Pure Bayesian Loss (`lambda_radon_ot: 0.0`) | SHA | 1500 | `100,596` | — | **Ready to Train** |
+| `exp_sha_direct_sfi_scratch_102k.yaml` | Ablation: Scratch Training (`pretrained: false`) | SHA | 1500 | `100,596` | — | **Ready to Train** |
 
 *(600-epoch interim results collected with `min_lr_ratio: 0.20`. Full 1500-epoch runs use `min_lr_ratio: 0.05`. Numbers will be updated upon pull of 1500-epoch checkpoints.)*
 
