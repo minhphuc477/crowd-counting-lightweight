@@ -1,0 +1,2095 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Unexpected keys (norm_head.num_batches_tracked, classifier.bias, classifier.weight, conv_head.weight, norm_head.bias, norm_head.running_mean, norm_head.running_var, norm_head.weight) found while loading pretrained weights. This may be expected if model is being adapted.
+EMA enabled: decay=0.9990
+
+================================================================================
+  RMR Training Initialized [Dynamic Architecture Engine]
+  Run: v57_track_b_proposed_deep_texture_rn | Parameters: 144,960 / 200,000 budget (72.5% used, +55,040 headroom)
+  Carrier: Stride-2 | Backbone: mobilenetv4_conv_small_050 | Neck: rep_weighted (C=64)
+  Geometry: [32, 64, 128] px (Isotropic, overlap=50%) | Pooling: Spatial Moments (Mean+Std)
+  Solver: Additive RW-SIRT | T=2 | omega=1.0 | Adjoint=Radon-Nikodym | Weighting=Weighted(SNR) | ScaleRouting=Dynamic(K=3)
+  Heads: Regional=Negative-Binomial | Density=FineMeasureHead (Temperature-Calibrated Softplus [tau*softplus(z/tau)])
+  Supervision: Dual-Depth [0.5 Y0 + 0.5 Y] (Anchored Guidance + End-to-End Solver) -> FLAT_DM16
+  Training: Epochs: 650 | Batch Size: 8 | Initial LR: 1.00e-04 | Device: cuda:0
+  Output Directory: runs/sha_a/rmr_v57/v57_track_b_proposed_deep_texture_rn
+================================================================================
+[0001/0650] Loss: 24.4714 [cnt: 19.77, alloc(dm16): 3.353, cell: 0.000, reg_nb: 6.724] | SolvStr: 0.00 | Disp: 50.0 | W_pred: 1.00 | W_solv: 0.33
+[0002/0650] Loss: 25.6139 [cnt: 20.96, alloc(dm16): 3.315, cell: 0.000, reg_nb: 6.709] | SolvStr: 0.00 | Disp: 49.9 | W_pred: 1.00 | W_solv: 0.33
+[0003/0650] Loss: 24.6034 [cnt: 19.91, alloc(dm16): 3.369, cell: 0.000, reg_nb: 6.635] | SolvStr: 0.00 | Disp: 49.7 | W_pred: 1.00 | W_solv: 0.33
+[0004/0650] Loss: 24.5417 [cnt: 19.92, alloc(dm16): 3.301, cell: 0.000, reg_nb: 6.628] | SolvStr: 0.00 | Disp: 49.4 | W_pred: 1.00 | W_solv: 0.33
+
+============================================================================================
+  EPOCH [0005/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 23.7748 [cnt: 19.09, alloc(dm16): 3.369, cell: 0.000, reg_nb: 6.562]
+  Solver / W    : Str: 0.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.00) | W_solv: 0.33
+  Val Metrics   : MAE: 295.86 | RMSE: 391.82 | NAE: 1.083 | Bias: +79.24
+  GAME Hierarchy: G0: 295.86 | G1: 388.71 | G2: 460.44 | G3: 508.12 | Sparse(<=100): 341.92 | Mod(101-500): 263.66 | Dense(>500): 379.17
+  Uncertainty   : Coverage: 50%=71.6%, 80%=75.4%, 95%=83.2% | Median Disp: 48.9
+  Checkpoint    : Current Val MAE: 295.86 | Best Val MAE: inf (Solver ramping: epoch 5/25)
+============================================================================================
+
+[0006/0650] Loss: 24.1197 [cnt: 19.47, alloc(dm16): 3.392, cell: 0.000, reg_nb: 6.307] | SolvStr: 0.05 | Disp: 48.3 | W_pred: 1.00 | W_solv: 0.32
+[0007/0650] Loss: 23.5706 [cnt: 19.02, alloc(dm16): 3.301, cell: 0.000, reg_nb: 6.231] | SolvStr: 0.10 | Disp: 47.0 | W_pred: 1.00 | W_solv: 0.31
+[0008/0650] Loss: 22.0402 [cnt: 17.52, alloc(dm16): 3.329, cell: 0.000, reg_nb: 5.942] | SolvStr: 0.15 | Disp: 45.3 | W_pred: 1.00 | W_solv: 0.29
+[0009/0650] Loss: 21.1452 [cnt: 16.78, alloc(dm16): 3.317, cell: 0.000, reg_nb: 5.236] | SolvStr: 0.20 | Disp: 44.1 | W_pred: 1.00 | W_solv: 0.27
+
+============================================================================================
+  EPOCH [0010/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 19.6304 [cnt: 15.54, alloc(dm16): 3.249, cell: 0.000, reg_nb: 4.213]
+  Solver / W    : Str: 0.25 | E_red: 0.0% | W_pred: 1.00 (std: 0.16) | W_solv: 0.23
+  Val Metrics   : MAE: 296.40 | RMSE: 392.29 | NAE: 1.087 | Bias: +80.47
+  GAME Hierarchy: G0: 296.40 | G1: 389.26 | G2: 460.97 | G3: 508.70 | Sparse(<=100): 342.84 | Mod(101-500): 264.57 | Dense(>500): 378.59
+  Uncertainty   : Coverage: 50%=71.6%, 80%=75.4%, 95%=83.2% | Median Disp: 44.9
+  Checkpoint    : Current Val MAE: 296.40 | Best Val MAE: inf (Solver ramping: epoch 10/25)
+============================================================================================
+
+[0011/0650] Loss: 18.1367 [cnt: 14.18, alloc(dm16): 3.226, cell: 0.000, reg_nb: 3.640] | SolvStr: 0.30 | Disp: 46.0 | W_pred: 1.00 | W_solv: 0.20
+[0012/0650] Loss: 15.6649 [cnt: 11.78, alloc(dm16): 3.199, cell: 0.000, reg_nb: 3.447] | SolvStr: 0.35 | Disp: 46.8 | W_pred: 1.00 | W_solv: 0.18
+[0013/0650] Loss: 15.1285 [cnt: 11.27, alloc(dm16): 3.194, cell: 0.000, reg_nb: 3.312] | SolvStr: 0.40 | Disp: 46.1 | W_pred: 1.00 | W_solv: 0.16
+[0014/0650] Loss: 14.4184 [cnt: 10.70, alloc(dm16): 3.086, cell: 0.000, reg_nb: 3.166] | SolvStr: 0.45 | Disp: 45.3 | W_pred: 1.00 | W_solv: 0.14
+
+============================================================================================
+  EPOCH [0015/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 14.3748 [cnt: 10.70, alloc(dm16): 3.061, cell: 0.000, reg_nb: 3.036]
+  Solver / W    : Str: 0.50 | E_red: 0.0% | W_pred: 1.00 (std: 0.40) | W_solv: 0.13
+  Val Metrics   : MAE: 295.25 | RMSE: 391.11 | NAE: 1.081 | Bias: +78.90
+  GAME Hierarchy: G0: 295.25 | G1: 387.74 | G2: 459.36 | G3: 507.00 | Sparse(<=100): 341.32 | Mod(101-500): 263.04 | Dense(>500): 378.60
+  Uncertainty   : Coverage: 50%=71.9%, 80%=76.4%, 95%=83.2% | Median Disp: 43.1
+  Checkpoint    : Current Val MAE: 295.25 | Best Val MAE: inf (Solver ramping: epoch 15/25)
+============================================================================================
+
+[0016/0650] Loss: 12.5545 [cnt: 8.88, alloc(dm16): 3.076, cell: 0.000, reg_nb: 2.975] | SolvStr: 0.55 | Disp: 42.6 | W_pred: 1.00 | W_solv: 0.13
+[0017/0650] Loss: 13.0121 [cnt: 9.38, alloc(dm16): 3.037, cell: 0.000, reg_nb: 2.929] | SolvStr: 0.60 | Disp: 41.8 | W_pred: 1.00 | W_solv: 0.12
+[0018/0650] Loss: 13.9323 [cnt: 10.19, alloc(dm16): 3.119, cell: 0.000, reg_nb: 3.100] | SolvStr: 0.65 | Disp: 38.8 | W_pred: 1.00 | W_solv: 0.12
+[0019/0650] Loss: 13.4373 [cnt: 9.77, alloc(dm16): 3.055, cell: 0.000, reg_nb: 3.006] | SolvStr: 0.70 | Disp: 36.5 | W_pred: 1.00 | W_solv: 0.12
+
+============================================================================================
+  EPOCH [0020/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 13.2548 [cnt: 9.59, alloc(dm16): 3.065, cell: 0.000, reg_nb: 2.970]
+  Solver / W    : Str: 0.75 | E_red: 0.0% | W_pred: 1.00 (std: 0.30) | W_solv: 0.11
+  Val Metrics   : MAE: 291.85 | RMSE: 387.44 | NAE: 1.065 | Bias: +75.20
+  GAME Hierarchy: G0: 291.85 | G1: 383.39 | G2: 454.58 | G3: 501.98 | Sparse(<=100): 336.59 | Mod(101-500): 258.75 | Dense(>500): 377.87
+  Uncertainty   : Coverage: 50%=73.4%, 80%=78.1%, 95%=83.4% | Median Disp: 34.4
+  Checkpoint    : Current Val MAE: 291.85 | Best Val MAE: inf (Solver ramping: epoch 20/25)
+============================================================================================
+
+[0021/0650] Loss: 11.8363 [cnt: 8.18, alloc(dm16): 3.071, cell: 0.000, reg_nb: 2.874] | SolvStr: 0.80 | Disp: 31.5 | W_pred: 1.00 | W_solv: 0.11
+[0022/0650] Loss: 12.3085 [cnt: 8.70, alloc(dm16): 3.041, cell: 0.000, reg_nb: 2.815] | SolvStr: 0.85 | Disp: 29.6 | W_pred: 1.00 | W_solv: 0.11
+[0023/0650] Loss: 11.7843 [cnt: 8.23, alloc(dm16): 2.983, cell: 0.000, reg_nb: 2.795] | SolvStr: 0.90 | Disp: 27.1 | W_pred: 1.00 | W_solv: 0.10
+[0024/0650] Loss: 12.2288 [cnt: 8.70, alloc(dm16): 2.957, cell: 0.000, reg_nb: 2.786] | SolvStr: 0.95 | Disp: 24.9 | W_pred: 1.00 | W_solv: 0.10
+
+============================================================================================
+  EPOCH [0025/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 11.2648 [cnt: 7.70, alloc(dm16): 2.996, cell: 0.000, reg_nb: 2.771]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.39) | W_solv: 0.10
+  Val Metrics   : MAE: 289.49 | RMSE: 383.99 | NAE: 1.059 | Bias: +78.82
+  GAME Hierarchy: G0: 289.49 | G1: 379.55 | G2: 449.43 | G3: 496.68 | Sparse(<=100): 334.47 | Mod(101-500): 258.11 | Dense(>500): 370.66
+  Uncertainty   : Coverage: 50%=71.9%, 80%=78.1%, 95%=85.0% | Median Disp: 22.2
+  Checkpoint    : Current Val MAE: 289.49 | Best Val MAE: 289.49 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0026/0650] Loss: 11.8151 [cnt: 8.14, alloc(dm16): 3.101, cell: 0.000, reg_nb: 2.835] | SolvStr: 1.00 | Disp: 20.3 | W_pred: 1.00 | W_solv: 0.10
+[0027/0650] Loss: 11.2715 [cnt: 7.65, alloc(dm16): 3.057, cell: 0.000, reg_nb: 2.773] | SolvStr: 1.00 | Disp: 18.7 | W_pred: 1.00 | W_solv: 0.10
+[0028/0650] Loss: 13.3132 [cnt: 9.82, alloc(dm16): 2.928, cell: 0.000, reg_nb: 2.800] | SolvStr: 1.00 | Disp: 15.4 | W_pred: 1.00 | W_solv: 0.10
+[0029/0650] Loss: 12.2366 [cnt: 8.72, alloc(dm16): 2.960, cell: 0.000, reg_nb: 2.747] | SolvStr: 1.00 | Disp: 15.4 | W_pred: 1.00 | W_solv: 0.10
+
+============================================================================================
+  EPOCH [0030/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 12.1957 [cnt: 8.65, alloc(dm16): 2.984, cell: 0.000, reg_nb: 2.759]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.39) | W_solv: 0.10
+  Val Metrics   : MAE: 276.70 | RMSE: 369.97 | NAE: 1.001 | Bias: +69.10
+  GAME Hierarchy: G0: 276.70 | G1: 362.97 | G2: 430.02 | G3: 476.30 | Sparse(<=100): 315.97 | Mod(101-500): 243.07 | Dense(>500): 365.03
+  Uncertainty   : Coverage: 50%=70.2%, 80%=78.3%, 95%=87.9% | Median Disp: 14.0
+  Checkpoint    : Current Val MAE: 276.70 | Best Val MAE: 276.70 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0031/0650] Loss: 11.7978 [cnt: 8.34, alloc(dm16): 2.904, cell: 0.000, reg_nb: 2.700] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.00 | W_solv: 0.10
+[0032/0650] Loss: 11.7847 [cnt: 8.27, alloc(dm16): 2.954, cell: 0.000, reg_nb: 2.739] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.00 | W_solv: 0.10
+[0033/0650] Loss: 11.0678 [cnt: 7.53, alloc(dm16): 2.984, cell: 0.000, reg_nb: 2.721] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.00 | W_solv: 0.10
+[0034/0650] Loss: 11.9116 [cnt: 8.37, alloc(dm16): 2.975, cell: 0.000, reg_nb: 2.775] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 1.00 | W_solv: 0.10
+
+============================================================================================
+  EPOCH [0035/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 12.0625 [cnt: 8.51, alloc(dm16): 2.995, cell: 0.000, reg_nb: 2.750]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.47) | W_solv: 0.11
+  Val Metrics   : MAE: 261.94 | RMSE: 351.51 | NAE: 0.942 | Bias: +67.45
+  GAME Hierarchy: G0: 261.94 | G1: 341.83 | G2: 404.43 | G3: 449.51 | Sparse(<=100): 295.14 | Mod(101-500): 229.13 | Dense(>500): 348.90
+  Uncertainty   : Coverage: 50%=70.8%, 80%=79.2%, 95%=89.6% | Median Disp: 10.1
+  Checkpoint    : Current Val MAE: 261.94 | Best Val MAE: 261.94 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0036/0650] Loss: 11.3089 [cnt: 7.84, alloc(dm16): 2.930, cell: 0.000, reg_nb: 2.673] | SolvStr: 1.00 | Disp: 9.8 | W_pred: 1.00 | W_solv: 0.11
+[0037/0650] Loss: 11.4148 [cnt: 7.96, alloc(dm16): 2.912, cell: 0.000, reg_nb: 2.653] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.00 | W_solv: 0.11
+[0038/0650] Loss: 11.0029 [cnt: 7.50, alloc(dm16): 2.963, cell: 0.000, reg_nb: 2.636] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.00 | W_solv: 0.11
+[0039/0650] Loss: 10.9081 [cnt: 7.35, alloc(dm16): 3.017, cell: 0.000, reg_nb: 2.654] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 1.00 | W_solv: 0.11
+
+============================================================================================
+  EPOCH [0040/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.7507 [cnt: 7.25, alloc(dm16): 2.966, cell: 0.000, reg_nb: 2.626]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.57) | W_solv: 0.11
+  Val Metrics   : MAE: 244.71 | RMSE: 329.86 | NAE: 0.874 | Bias: +64.41
+  GAME Hierarchy: G0: 244.71 | G1: 317.44 | G2: 374.10 | G3: 417.94 | Sparse(<=100): 275.65 | Mod(101-500): 212.71 | Dense(>500): 329.74
+  Uncertainty   : Coverage: 50%=71.3%, 80%=80.5%, 95%=90.8% | Median Disp: 10.0
+  Checkpoint    : Current Val MAE: 244.71 | Best Val MAE: 244.71 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0041/0650] Loss: 11.2281 [cnt: 7.66, alloc(dm16): 3.024, cell: 0.000, reg_nb: 2.670] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.00 | W_solv: 0.12
+[0042/0650] Loss: 11.3567 [cnt: 7.86, alloc(dm16): 2.954, cell: 0.000, reg_nb: 2.656] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.00 | W_solv: 0.12
+[0043/0650] Loss: 10.1912 [cnt: 6.70, alloc(dm16): 2.967, cell: 0.000, reg_nb: 2.596] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.00 | W_solv: 0.12
+[0044/0650] Loss: 11.2501 [cnt: 7.72, alloc(dm16): 2.995, cell: 0.000, reg_nb: 2.640] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.00 | W_solv: 0.12
+
+============================================================================================
+  EPOCH [0045/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 11.4861 [cnt: 7.93, alloc(dm16): 3.019, cell: 0.000, reg_nb: 2.665]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.57) | W_solv: 0.12
+  Val Metrics   : MAE: 215.98 | RMSE: 300.19 | NAE: 0.740 | Bias: +36.95
+  GAME Hierarchy: G0: 215.98 | G1: 283.36 | G2: 335.46 | G3: 377.12 | Sparse(<=100): 230.03 | Mod(101-500): 177.34 | Dense(>500): 322.20
+  Uncertainty   : Coverage: 50%=71.9%, 80%=81.8%, 95%=91.9% | Median Disp: 8.8
+  Checkpoint    : Current Val MAE: 215.98 | Best Val MAE: 215.98 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0046/0650] Loss: 11.6263 [cnt: 8.14, alloc(dm16): 2.955, cell: 0.000, reg_nb: 2.620] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.00 | W_solv: 0.12
+[0047/0650] Loss: 11.2765 [cnt: 7.76, alloc(dm16): 2.988, cell: 0.000, reg_nb: 2.590] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.00 | W_solv: 0.13
+[0048/0650] Loss: 12.2589 [cnt: 8.75, alloc(dm16): 2.967, cell: 0.000, reg_nb: 2.647] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.00 | W_solv: 0.12
+[0049/0650] Loss: 11.6346 [cnt: 8.13, alloc(dm16): 2.964, cell: 0.000, reg_nb: 2.636] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.13
+
+============================================================================================
+  EPOCH [0050/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.2353 [cnt: 6.75, alloc(dm16): 2.958, cell: 0.000, reg_nb: 2.577]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.61) | W_solv: 0.13
+  Val Metrics   : MAE: 201.00 | RMSE: 280.42 | NAE: 0.697 | Bias: +48.67
+  GAME Hierarchy: G0: 201.00 | G1: 263.99 | G2: 311.82 | G3: 353.63 | Sparse(<=100): 219.02 | Mod(101-500): 168.86 | Dense(>500): 288.39
+  Uncertainty   : Coverage: 50%=73.0%, 80%=83.6%, 95%=92.9% | Median Disp: 9.1
+  Checkpoint    : Current Val MAE: 201.00 | Best Val MAE: 201.00 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0051/0650] Loss: 10.3590 [cnt: 6.86, alloc(dm16): 2.980, cell: 0.000, reg_nb: 2.564] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.14
+[0052/0650] Loss: 10.2995 [cnt: 6.81, alloc(dm16): 2.973, cell: 0.000, reg_nb: 2.545] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.14
+[0053/0650] Loss: 10.6928 [cnt: 7.16, alloc(dm16): 3.004, cell: 0.000, reg_nb: 2.580] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.15
+[0054/0650] Loss: 11.0934 [cnt: 7.62, alloc(dm16): 2.947, cell: 0.000, reg_nb: 2.577] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.00 | W_solv: 0.15
+
+============================================================================================
+  EPOCH [0055/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.7810 [cnt: 7.27, alloc(dm16): 2.985, cell: 0.000, reg_nb: 2.582]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.72) | W_solv: 0.17
+  Val Metrics   : MAE: 187.71 | RMSE: 263.87 | NAE: 0.634 | Bias: +46.81
+  GAME Hierarchy: G0: 187.71 | G1: 246.41 | G2: 291.01 | G3: 331.98 | Sparse(<=100): 185.42 | Mod(101-500): 155.95 | Dense(>500): 277.14
+  Uncertainty   : Coverage: 50%=74.2%, 80%=85.9%, 95%=93.9% | Median Disp: 7.7
+  Checkpoint    : Current Val MAE: 187.71 | Best Val MAE: 187.71 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0056/0650] Loss: 11.0629 [cnt: 7.58, alloc(dm16): 2.962, cell: 0.000, reg_nb: 2.563] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.01 | W_solv: 0.16
+[0057/0650] Loss: 10.2744 [cnt: 6.80, alloc(dm16): 2.958, cell: 0.000, reg_nb: 2.540] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.16
+[0058/0650] Loss: 10.6983 [cnt: 7.21, alloc(dm16): 2.961, cell: 0.000, reg_nb: 2.568] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.17
+[0059/0650] Loss: 10.6724 [cnt: 7.21, alloc(dm16): 2.939, cell: 0.000, reg_nb: 2.567] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.17
+
+============================================================================================
+  EPOCH [0060/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.8498 [cnt: 7.39, alloc(dm16): 2.941, cell: 0.000, reg_nb: 2.561]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.70) | W_solv: 0.18
+  Val Metrics   : MAE: 180.89 | RMSE: 250.33 | NAE: 0.608 | Bias: +64.01
+  GAME Hierarchy: G0: 180.89 | G1: 235.78 | G2: 275.55 | G3: 316.02 | Sparse(<=100): 169.25 | Mod(101-500): 152.55 | Dense(>500): 262.13
+  Uncertainty   : Coverage: 50%=75.8%, 80%=88.3%, 95%=95.2% | Median Disp: 7.6
+  Checkpoint    : Current Val MAE: 180.89 | Best Val MAE: 180.89 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0061/0650] Loss: 11.2882 [cnt: 7.77, alloc(dm16): 2.988, cell: 0.000, reg_nb: 2.620] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.18
+[0062/0650] Loss: 10.4870 [cnt: 7.08, alloc(dm16): 2.898, cell: 0.000, reg_nb: 2.502] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.18
+[0063/0650] Loss: 10.5538 [cnt: 7.09, alloc(dm16): 2.941, cell: 0.000, reg_nb: 2.553] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.19
+[0064/0650] Loss: 10.2552 [cnt: 6.76, alloc(dm16): 2.979, cell: 0.000, reg_nb: 2.549] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.19
+
+============================================================================================
+  EPOCH [0065/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.7399 [cnt: 7.26, alloc(dm16): 2.957, cell: 0.000, reg_nb: 2.572]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.56) | W_solv: 0.19
+  Val Metrics   : MAE: 155.73 | RMSE: 233.74 | NAE: 0.488 | Bias: +18.03
+  GAME Hierarchy: G0: 155.73 | G1: 206.67 | G2: 245.35 | G3: 284.52 | Sparse(<=100): 138.27 | Mod(101-500): 117.86 | Dense(>500): 264.56
+  Uncertainty   : Coverage: 50%=76.6%, 80%=89.3%, 95%=95.4% | Median Disp: 8.0
+  Checkpoint    : Current Val MAE: 155.73 | Best Val MAE: 155.73 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0066/0650] Loss: 10.3828 [cnt: 6.93, alloc(dm16): 2.941, cell: 0.000, reg_nb: 2.524] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.01 | W_solv: 0.19
+[0067/0650] Loss: 10.4610 [cnt: 6.93, alloc(dm16): 3.000, cell: 0.000, reg_nb: 2.581] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.19
+[0068/0650] Loss: 10.4851 [cnt: 7.02, alloc(dm16): 2.952, cell: 0.000, reg_nb: 2.533] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.20
+[0069/0650] Loss: 10.6342 [cnt: 7.27, alloc(dm16): 2.852, cell: 0.000, reg_nb: 2.531] | SolvStr: 1.00 | Disp: 7.6 | W_pred: 1.01 | W_solv: 0.20
+
+============================================================================================
+  EPOCH [0070/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 12.2189 [cnt: 8.73, alloc(dm16): 2.952, cell: 0.000, reg_nb: 2.610]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.73) | W_solv: 0.20
+  Val Metrics   : MAE: 151.42 | RMSE: 214.78 | NAE: 0.476 | Bias: +51.71
+  GAME Hierarchy: G0: 151.42 | G1: 195.19 | G2: 230.76 | G3: 271.47 | Sparse(<=100): 127.18 | Mod(101-500): 121.10 | Dense(>500): 240.14
+  Uncertainty   : Coverage: 50%=79.3%, 80%=91.6%, 95%=96.7% | Median Disp: 8.5
+  Checkpoint    : Current Val MAE: 151.42 | Best Val MAE: 151.42 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0071/0650] Loss: 9.6188 [cnt: 6.17, alloc(dm16): 2.936, cell: 0.000, reg_nb: 2.519] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.20
+[0072/0650] Loss: 10.7703 [cnt: 7.32, alloc(dm16): 2.926, cell: 0.000, reg_nb: 2.573] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.20
+[0073/0650] Loss: 10.2406 [cnt: 6.80, alloc(dm16): 2.922, cell: 0.000, reg_nb: 2.537] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.20
+[0074/0650] Loss: 10.3547 [cnt: 6.87, alloc(dm16): 2.968, cell: 0.000, reg_nb: 2.545] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.20
+
+============================================================================================
+  EPOCH [0075/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.9812 [cnt: 6.55, alloc(dm16): 2.918, cell: 0.000, reg_nb: 2.492]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.72) | W_solv: 0.20
+  Val Metrics   : MAE: 171.97 | RMSE: 233.36 | NAE: 0.578 | Bias: +100.27
+  GAME Hierarchy: G0: 171.97 | G1: 213.76 | G2: 246.71 | G3: 287.02 | Sparse(<=100): 150.99 | Mod(101-500): 152.44 | Dense(>500): 229.94
+  Uncertainty   : Coverage: 50%=79.2%, 80%=91.9%, 95%=97.0% | Median Disp: 8.4
+  Checkpoint    : Current Val MAE: 171.97 | Best Val MAE: 151.42
+============================================================================================
+
+[0076/0650] Loss: 9.9565 [cnt: 6.51, alloc(dm16): 2.928, cell: 0.000, reg_nb: 2.550] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.21
+[0077/0650] Loss: 10.4399 [cnt: 7.04, alloc(dm16): 2.877, cell: 0.000, reg_nb: 2.543] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.21
+[0078/0650] Loss: 10.1552 [cnt: 6.73, alloc(dm16): 2.917, cell: 0.000, reg_nb: 2.512] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.21
+[0079/0650] Loss: 10.7548 [cnt: 7.19, alloc(dm16): 3.043, cell: 0.000, reg_nb: 2.556] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.21
+
+============================================================================================
+  EPOCH [0080/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.9851 [cnt: 7.53, alloc(dm16): 2.933, cell: 0.000, reg_nb: 2.535]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.71) | W_solv: 0.21
+  Val Metrics   : MAE: 150.70 | RMSE: 216.47 | NAE: 0.476 | Bias: +63.02
+  GAME Hierarchy: G0: 150.70 | G1: 191.08 | G2: 223.45 | G3: 262.83 | Sparse(<=100): 115.41 | Mod(101-500): 125.43 | Dense(>500): 226.95
+  Uncertainty   : Coverage: 50%=80.7%, 80%=92.6%, 95%=97.2% | Median Disp: 7.6
+  Checkpoint    : Current Val MAE: 150.70 | Best Val MAE: 150.70 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0081/0650] Loss: 9.9143 [cnt: 6.46, alloc(dm16): 2.940, cell: 0.000, reg_nb: 2.522] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.01 | W_solv: 0.21
+[0082/0650] Loss: 9.7744 [cnt: 6.32, alloc(dm16): 2.943, cell: 0.000, reg_nb: 2.498] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.21
+[0083/0650] Loss: 9.9178 [cnt: 6.51, alloc(dm16): 2.906, cell: 0.000, reg_nb: 2.469] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.00 | W_solv: 0.21
+[0084/0650] Loss: 10.0035 [cnt: 6.54, alloc(dm16): 2.963, cell: 0.000, reg_nb: 2.480] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.00 | W_solv: 0.21
+
+============================================================================================
+  EPOCH [0085/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.0903 [cnt: 6.65, alloc(dm16): 2.934, cell: 0.000, reg_nb: 2.503]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.81) | W_solv: 0.21
+  Val Metrics   : MAE: 139.61 | RMSE: 211.61 | NAE: 0.414 | Bias: +37.71
+  GAME Hierarchy: G0: 139.61 | G1: 180.19 | G2: 213.38 | G3: 252.46 | Sparse(<=100): 92.28 | Mod(101-500): 108.02 | Dense(>500): 235.40
+  Uncertainty   : Coverage: 50%=81.5%, 80%=92.7%, 95%=97.1% | Median Disp: 8.7
+  Checkpoint    : Current Val MAE: 139.61 | Best Val MAE: 139.61 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0086/0650] Loss: 10.1986 [cnt: 6.75, alloc(dm16): 2.932, cell: 0.000, reg_nb: 2.531] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.22
+[0087/0650] Loss: 10.6169 [cnt: 7.11, alloc(dm16): 2.977, cell: 0.000, reg_nb: 2.593] | SolvStr: 1.00 | Disp: 7.7 | W_pred: 1.00 | W_solv: 0.21
+[0088/0650] Loss: 10.3360 [cnt: 6.87, alloc(dm16): 2.952, cell: 0.000, reg_nb: 2.537] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 0.99 | W_solv: 0.21
+[0089/0650] Loss: 9.7478 [cnt: 6.30, alloc(dm16): 2.936, cell: 0.000, reg_nb: 2.496] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.01 | W_solv: 0.22
+
+============================================================================================
+  EPOCH [0090/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.4813 [cnt: 7.10, alloc(dm16): 2.875, cell: 0.000, reg_nb: 2.489]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.71) | W_solv: 0.21
+  Val Metrics   : MAE: 207.90 | RMSE: 279.47 | NAE: 0.637 | Bias: +160.53
+  GAME Hierarchy: G0: 207.90 | G1: 237.30 | G2: 266.44 | G3: 302.99 | Sparse(<=100): 110.82 | Mod(101-500): 179.85 | Dense(>500): 301.33
+  Uncertainty   : Coverage: 50%=81.7%, 80%=93.7%, 95%=98.0% | Median Disp: 8.0
+  Checkpoint    : Current Val MAE: 207.90 | Best Val MAE: 139.61
+============================================================================================
+
+[0091/0650] Loss: 10.2038 [cnt: 6.73, alloc(dm16): 2.963, cell: 0.000, reg_nb: 2.512] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.22
+[0092/0650] Loss: 9.9813 [cnt: 6.52, alloc(dm16): 2.950, cell: 0.000, reg_nb: 2.486] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 0.99 | W_solv: 0.21
+[0093/0650] Loss: 10.5351 [cnt: 7.09, alloc(dm16): 2.934, cell: 0.000, reg_nb: 2.514] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.01 | W_solv: 0.22
+[0094/0650] Loss: 10.1955 [cnt: 6.69, alloc(dm16): 2.985, cell: 0.000, reg_nb: 2.545] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 1.01 | W_solv: 0.22
+
+============================================================================================
+  EPOCH [0095/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.8710 [cnt: 6.44, alloc(dm16): 2.926, cell: 0.000, reg_nb: 2.480]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.78) | W_solv: 0.22
+  Val Metrics   : MAE: 165.67 | RMSE: 233.23 | NAE: 0.503 | Bias: +112.75
+  GAME Hierarchy: G0: 165.67 | G1: 196.40 | G2: 227.25 | G3: 266.01 | Sparse(<=100): 101.00 | Mod(101-500): 139.85 | Dense(>500): 247.90
+  Uncertainty   : Coverage: 50%=82.5%, 80%=94.2%, 95%=98.3% | Median Disp: 8.4
+  Checkpoint    : Current Val MAE: 165.67 | Best Val MAE: 139.61
+============================================================================================
+
+[0096/0650] Loss: 10.1234 [cnt: 6.81, alloc(dm16): 2.814, cell: 0.000, reg_nb: 2.452] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.01 | W_solv: 0.22
+[0097/0650] Loss: 10.0230 [cnt: 6.58, alloc(dm16): 2.939, cell: 0.000, reg_nb: 2.482] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.01 | W_solv: 0.22
+[0098/0650] Loss: 10.2688 [cnt: 6.78, alloc(dm16): 2.968, cell: 0.000, reg_nb: 2.532] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.23
+[0099/0650] Loss: 9.8460 [cnt: 6.40, alloc(dm16): 2.945, cell: 0.000, reg_nb: 2.476] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.22
+
+============================================================================================
+  EPOCH [0100/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.3944 [cnt: 5.96, alloc(dm16): 2.933, cell: 0.000, reg_nb: 2.464]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.76) | W_solv: 0.22
+  Val Metrics   : MAE: 133.70 | RMSE: 203.66 | NAE: 0.375 | Bias: +60.43
+  GAME Hierarchy: G0: 133.70 | G1: 167.09 | G2: 200.47 | G3: 239.06 | Sparse(<=100): 57.81 | Mod(101-500): 105.24 | Dense(>500): 225.06
+  Uncertainty   : Coverage: 50%=83.6%, 80%=94.6%, 95%=98.3% | Median Disp: 7.9
+  Checkpoint    : Current Val MAE: 133.70 | Best Val MAE: 133.70 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0101/0650] Loss: 10.5882 [cnt: 7.21, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.504] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.01 | W_solv: 0.23
+[0102/0650] Loss: 9.6125 [cnt: 6.17, alloc(dm16): 2.935, cell: 0.000, reg_nb: 2.480] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.24
+[0103/0650] Loss: 9.4896 [cnt: 6.18, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.421] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.23
+[0104/0650] Loss: 9.7406 [cnt: 6.36, alloc(dm16): 2.889, cell: 0.000, reg_nb: 2.430] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.23
+
+============================================================================================
+  EPOCH [0105/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 10.0067 [cnt: 6.57, alloc(dm16): 2.930, cell: 0.000, reg_nb: 2.495]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.91) | W_solv: 0.24
+  Val Metrics   : MAE: 169.34 | RMSE: 243.71 | NAE: 0.506 | Bias: +122.87
+  GAME Hierarchy: G0: 169.34 | G1: 198.57 | G2: 231.26 | G3: 269.96 | Sparse(<=100): 86.39 | Mod(101-500): 139.09 | Dense(>500): 266.78
+  Uncertainty   : Coverage: 50%=83.7%, 80%=95.0%, 95%=98.7% | Median Disp: 9.7
+  Checkpoint    : Current Val MAE: 169.34 | Best Val MAE: 133.70
+============================================================================================
+
+[0106/0650] Loss: 10.1415 [cnt: 6.72, alloc(dm16): 2.917, cell: 0.000, reg_nb: 2.491] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.23
+[0107/0650] Loss: 9.5248 [cnt: 6.12, alloc(dm16): 2.901, cell: 0.000, reg_nb: 2.449] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.01 | W_solv: 0.24
+[0108/0650] Loss: 10.3325 [cnt: 6.87, alloc(dm16): 2.955, cell: 0.000, reg_nb: 2.507] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.01 | W_solv: 0.25
+[0109/0650] Loss: 9.7353 [cnt: 6.32, alloc(dm16): 2.905, cell: 0.000, reg_nb: 2.486] | SolvStr: 1.00 | Disp: 7.6 | W_pred: 1.02 | W_solv: 0.26
+
+============================================================================================
+  EPOCH [0110/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.7312 [cnt: 6.31, alloc(dm16): 2.906, cell: 0.000, reg_nb: 2.513]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.84) | W_solv: 0.26
+  Val Metrics   : MAE: 174.44 | RMSE: 250.96 | NAE: 0.515 | Bias: +130.39
+  GAME Hierarchy: G0: 174.44 | G1: 202.52 | G2: 234.08 | G3: 272.28 | Sparse(<=100): 85.44 | Mod(101-500): 143.17 | Dense(>500): 275.68
+  Uncertainty   : Coverage: 50%=83.6%, 80%=95.1%, 95%=98.7% | Median Disp: 7.9
+  Checkpoint    : Current Val MAE: 174.44 | Best Val MAE: 133.70
+============================================================================================
+
+[0111/0650] Loss: 9.7154 [cnt: 6.28, alloc(dm16): 2.931, cell: 0.000, reg_nb: 2.479] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.26
+[0112/0650] Loss: 10.0381 [cnt: 6.61, alloc(dm16): 2.920, cell: 0.000, reg_nb: 2.497] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.27
+[0113/0650] Loss: 9.9413 [cnt: 6.48, alloc(dm16): 2.950, cell: 0.000, reg_nb: 2.524] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.27
+[0114/0650] Loss: 9.7997 [cnt: 6.40, alloc(dm16): 2.894, cell: 0.000, reg_nb: 2.499] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.01 | W_solv: 0.28
+
+============================================================================================
+  EPOCH [0115/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.9771 [cnt: 6.53, alloc(dm16): 2.942, cell: 0.000, reg_nb: 2.493]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.75) | W_solv: 0.28
+  Val Metrics   : MAE: 109.52 | RMSE: 187.10 | NAE: 0.280 | Bias: -3.14
+  GAME Hierarchy: G0: 109.52 | G1: 140.68 | G2: 173.74 | G3: 212.27 | Sparse(<=100): 45.31 | Mod(101-500): 73.11 | Dense(>500): 221.40
+  Uncertainty   : Coverage: 50%=83.4%, 80%=94.3%, 95%=98.1% | Median Disp: 8.1
+  Checkpoint    : Current Val MAE: 109.52 | Best Val MAE: 109.52 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0116/0650] Loss: 9.6424 [cnt: 6.20, alloc(dm16): 2.938, cell: 0.000, reg_nb: 2.453] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.29
+[0117/0650] Loss: 9.4122 [cnt: 6.01, alloc(dm16): 2.899, cell: 0.000, reg_nb: 2.450] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.32
+[0118/0650] Loss: 9.4620 [cnt: 6.00, alloc(dm16): 2.965, cell: 0.000, reg_nb: 2.440] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.32
+[0119/0650] Loss: 10.3509 [cnt: 6.89, alloc(dm16): 2.942, cell: 0.000, reg_nb: 2.527] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.30
+
+============================================================================================
+  EPOCH [0120/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.2611 [cnt: 5.82, alloc(dm16): 2.942, cell: 0.000, reg_nb: 2.455]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.75) | W_solv: 0.31
+  Val Metrics   : MAE: 132.31 | RMSE: 200.68 | NAE: 0.358 | Bias: +60.29
+  GAME Hierarchy: G0: 132.31 | G1: 158.85 | G2: 191.51 | G3: 231.02 | Sparse(<=100): 54.75 | Mod(101-500): 98.20 | Dense(>500): 239.76
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.9%, 95%=98.5% | Median Disp: 8.5
+  Checkpoint    : Current Val MAE: 132.31 | Best Val MAE: 109.52
+============================================================================================
+
+[0121/0650] Loss: 9.6024 [cnt: 6.15, alloc(dm16): 2.942, cell: 0.000, reg_nb: 2.487] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.01 | W_solv: 0.34
+[0122/0650] Loss: 9.3406 [cnt: 5.98, alloc(dm16): 2.864, cell: 0.000, reg_nb: 2.413] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.01 | W_solv: 0.34
+[0123/0650] Loss: 9.5262 [cnt: 6.11, alloc(dm16): 2.914, cell: 0.000, reg_nb: 2.453] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.02 | W_solv: 0.37
+[0124/0650] Loss: 9.9941 [cnt: 6.56, alloc(dm16): 2.924, cell: 0.000, reg_nb: 2.499] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 0.99 | W_solv: 0.36
+
+============================================================================================
+  EPOCH [0125/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.8696 [cnt: 6.44, alloc(dm16): 2.918, cell: 0.000, reg_nb: 2.501]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.85) | W_solv: 0.38
+  Val Metrics   : MAE: 103.37 | RMSE: 173.70 | NAE: 0.265 | Bias: +2.67
+  GAME Hierarchy: G0: 103.37 | G1: 136.05 | G2: 170.73 | G3: 211.45 | Sparse(<=100): 42.91 | Mod(101-500): 69.64 | Dense(>500): 207.16
+  Uncertainty   : Coverage: 50%=83.7%, 80%=94.4%, 95%=98.2% | Median Disp: 7.7
+  Checkpoint    : Current Val MAE: 103.37 | Best Val MAE: 103.37 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0126/0650] Loss: 9.4046 [cnt: 6.03, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.455] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.37
+[0127/0650] Loss: 9.2238 [cnt: 5.87, alloc(dm16): 2.860, cell: 0.000, reg_nb: 2.401] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 0.97 | W_solv: 0.35
+[0128/0650] Loss: 10.4772 [cnt: 7.10, alloc(dm16): 2.870, cell: 0.000, reg_nb: 2.500] | SolvStr: 1.00 | Disp: 7.5 | W_pred: 1.01 | W_solv: 0.40
+[0129/0650] Loss: 9.7858 [cnt: 6.37, alloc(dm16): 2.913, cell: 0.000, reg_nb: 2.455] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.01 | W_solv: 0.40
+
+============================================================================================
+  EPOCH [0130/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.4428 [cnt: 6.07, alloc(dm16): 2.878, cell: 0.000, reg_nb: 2.437]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.91) | W_solv: 0.41
+  Val Metrics   : MAE: 104.66 | RMSE: 165.13 | NAE: 0.283 | Bias: +23.75
+  GAME Hierarchy: G0: 104.66 | G1: 135.41 | G2: 167.11 | G3: 208.11 | Sparse(<=100): 51.41 | Mod(101-500): 75.92 | Dense(>500): 193.34
+  Uncertainty   : Coverage: 50%=84.5%, 80%=95.2%, 95%=98.6% | Median Disp: 8.2
+  Checkpoint    : Current Val MAE: 104.66 | Best Val MAE: 103.37
+============================================================================================
+
+[0131/0650] Loss: 9.4027 [cnt: 6.01, alloc(dm16): 2.891, cell: 0.000, reg_nb: 2.454] | SolvStr: 1.00 | Disp: 7.6 | W_pred: 1.00 | W_solv: 0.39
+[0132/0650] Loss: 9.8341 [cnt: 6.41, alloc(dm16): 2.902, cell: 0.000, reg_nb: 2.548] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.02 | W_solv: 0.45
+[0133/0650] Loss: 9.8191 [cnt: 6.41, alloc(dm16): 2.911, cell: 0.000, reg_nb: 2.440] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 0.99 | W_solv: 0.40
+[0134/0650] Loss: 9.3437 [cnt: 5.95, alloc(dm16): 2.884, cell: 0.000, reg_nb: 2.487] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.44
+
+============================================================================================
+  EPOCH [0135/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.5094 [cnt: 6.12, alloc(dm16): 2.892, cell: 0.000, reg_nb: 2.456]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.85) | W_solv: 0.42
+  Val Metrics   : MAE: 104.12 | RMSE: 166.93 | NAE: 0.281 | Bias: +26.31
+  GAME Hierarchy: G0: 104.12 | G1: 133.11 | G2: 165.01 | G3: 205.62 | Sparse(<=100): 47.54 | Mod(101-500): 76.75 | Dense(>500): 189.49
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.0%, 95%=98.5% | Median Disp: 8.0
+  Checkpoint    : Current Val MAE: 104.12 | Best Val MAE: 103.37
+============================================================================================
+
+[0136/0650] Loss: 9.6677 [cnt: 6.21, alloc(dm16): 2.954, cell: 0.000, reg_nb: 2.491] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.41
+[0137/0650] Loss: 9.5081 [cnt: 6.09, alloc(dm16): 2.917, cell: 0.000, reg_nb: 2.450] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.45
+[0138/0650] Loss: 9.6594 [cnt: 6.30, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.437] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 0.98 | W_solv: 0.43
+[0139/0650] Loss: 9.5633 [cnt: 6.15, alloc(dm16): 2.918, cell: 0.000, reg_nb: 2.423] | SolvStr: 1.00 | Disp: 7.7 | W_pred: 0.99 | W_solv: 0.44
+
+============================================================================================
+  EPOCH [0140/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.9468 [cnt: 5.56, alloc(dm16): 2.898, cell: 0.000, reg_nb: 2.402]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.82) | W_solv: 0.44
+  Val Metrics   : MAE: 164.08 | RMSE: 238.21 | NAE: 0.474 | Bias: +135.89
+  GAME Hierarchy: G0: 164.08 | G1: 187.52 | G2: 218.06 | G3: 256.64 | Sparse(<=100): 78.61 | Mod(101-500): 132.94 | Dense(>500): 264.40
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.8%, 95%=99.0% | Median Disp: 8.3
+  Checkpoint    : Current Val MAE: 164.08 | Best Val MAE: 103.37
+============================================================================================
+
+[0141/0650] Loss: 9.3912 [cnt: 6.02, alloc(dm16): 2.882, cell: 0.000, reg_nb: 2.399] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.02 | W_solv: 0.46
+[0142/0650] Loss: 9.3081 [cnt: 5.91, alloc(dm16): 2.898, cell: 0.000, reg_nb: 2.437] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.01 | W_solv: 0.46
+[0143/0650] Loss: 9.4167 [cnt: 6.04, alloc(dm16): 2.873, cell: 0.000, reg_nb: 2.471] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 0.97 | W_solv: 0.45
+[0144/0650] Loss: 9.2914 [cnt: 5.87, alloc(dm16): 2.924, cell: 0.000, reg_nb: 2.442] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 1.02 | W_solv: 0.47
+
+============================================================================================
+  EPOCH [0145/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.8881 [cnt: 6.47, alloc(dm16): 2.902, cell: 0.000, reg_nb: 2.509]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.89) | W_solv: 0.47
+  Val Metrics   : MAE: 138.92 | RMSE: 208.50 | NAE: 0.376 | Bias: +87.73
+  GAME Hierarchy: G0: 138.92 | G1: 161.33 | G2: 190.41 | G3: 229.27 | Sparse(<=100): 56.76 | Mod(101-500): 103.65 | Dense(>500): 250.32
+  Uncertainty   : Coverage: 50%=85.0%, 80%=95.7%, 95%=98.8% | Median Disp: 8.0
+  Checkpoint    : Current Val MAE: 138.92 | Best Val MAE: 103.37
+============================================================================================
+
+[0146/0650] Loss: 9.6280 [cnt: 6.21, alloc(dm16): 2.912, cell: 0.000, reg_nb: 2.484] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.01 | W_solv: 0.49
+[0147/0650] Loss: 8.9649 [cnt: 5.63, alloc(dm16): 2.841, cell: 0.000, reg_nb: 2.396] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.47
+[0148/0650] Loss: 9.2971 [cnt: 5.94, alloc(dm16): 2.870, cell: 0.000, reg_nb: 2.395] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.02 | W_solv: 0.49
+[0149/0650] Loss: 9.4315 [cnt: 6.04, alloc(dm16): 2.886, cell: 0.000, reg_nb: 2.490] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.02 | W_solv: 0.49
+
+============================================================================================
+  EPOCH [0150/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.0469 [cnt: 5.63, alloc(dm16): 2.923, cell: 0.000, reg_nb: 2.407]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.79) | W_solv: 0.48
+  Val Metrics   : MAE: 123.46 | RMSE: 190.07 | NAE: 0.331 | Bias: +62.35
+  GAME Hierarchy: G0: 123.46 | G1: 146.18 | G2: 176.96 | G3: 217.53 | Sparse(<=100): 47.83 | Mod(101-500): 92.04 | Dense(>500): 223.10
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.4%, 95%=98.7% | Median Disp: 9.3
+  Checkpoint    : Current Val MAE: 123.46 | Best Val MAE: 103.37
+============================================================================================
+
+[0151/0650] Loss: 9.4855 [cnt: 6.04, alloc(dm16): 2.940, cell: 0.000, reg_nb: 2.499] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.00 | W_solv: 0.51
+[0152/0650] Loss: 9.4161 [cnt: 6.10, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.436] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.01 | W_solv: 0.50
+[0153/0650] Loss: 9.1527 [cnt: 5.80, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.435] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 0.98 | W_solv: 0.47
+[0154/0650] Loss: 9.3454 [cnt: 5.94, alloc(dm16): 2.907, cell: 0.000, reg_nb: 2.456] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.01 | W_solv: 0.47
+
+============================================================================================
+  EPOCH [0155/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.3808 [cnt: 5.99, alloc(dm16): 2.891, cell: 0.000, reg_nb: 2.437]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.99) | W_solv: 0.54
+  Val Metrics   : MAE: 158.78 | RMSE: 229.88 | NAE: 0.448 | Bias: +123.42
+  GAME Hierarchy: G0: 158.78 | G1: 181.16 | G2: 209.04 | G3: 247.25 | Sparse(<=100): 66.61 | Mod(101-500): 125.76 | Dense(>500): 265.43
+  Uncertainty   : Coverage: 50%=84.8%, 80%=95.7%, 95%=98.9% | Median Disp: 8.9
+  Checkpoint    : Current Val MAE: 158.78 | Best Val MAE: 103.37
+============================================================================================
+
+[0156/0650] Loss: 9.6373 [cnt: 6.23, alloc(dm16): 2.892, cell: 0.000, reg_nb: 2.516] | SolvStr: 1.00 | Disp: 7.7 | W_pred: 1.01 | W_solv: 0.48
+[0157/0650] Loss: 9.1464 [cnt: 5.74, alloc(dm16): 2.904, cell: 0.000, reg_nb: 2.448] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.02 | W_solv: 0.50
+[0158/0650] Loss: 9.5853 [cnt: 6.16, alloc(dm16): 2.915, cell: 0.000, reg_nb: 2.506] | SolvStr: 1.00 | Disp: 7.2 | W_pred: 1.00 | W_solv: 0.53
+[0159/0650] Loss: 9.2361 [cnt: 5.86, alloc(dm16): 2.877, cell: 0.000, reg_nb: 2.456] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.52
+
+============================================================================================
+  EPOCH [0160/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.3008 [cnt: 5.89, alloc(dm16): 2.914, cell: 0.000, reg_nb: 2.422]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.83) | W_solv: 0.51
+  Val Metrics   : MAE: 125.04 | RMSE: 197.79 | NAE: 0.308 | Bias: +48.47
+  GAME Hierarchy: G0: 125.04 | G1: 143.93 | G2: 172.91 | G3: 212.10 | Sparse(<=100): 25.51 | Mod(101-500): 86.83 | Dense(>500): 247.32
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.4% | Median Disp: 8.2
+  Checkpoint    : Current Val MAE: 125.04 | Best Val MAE: 103.37
+============================================================================================
+
+[0161/0650] Loss: 9.1363 [cnt: 5.74, alloc(dm16): 2.898, cell: 0.000, reg_nb: 2.419] | SolvStr: 1.00 | Disp: 7.1 | W_pred: 1.01 | W_solv: 0.53
+[0162/0650] Loss: 9.2907 [cnt: 5.90, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.442] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.50
+[0163/0650] Loss: 9.6015 [cnt: 6.13, alloc(dm16): 2.966, cell: 0.000, reg_nb: 2.477] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.02 | W_solv: 0.53
+[0164/0650] Loss: 9.6791 [cnt: 6.22, alloc(dm16): 2.947, cell: 0.000, reg_nb: 2.519] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.52
+
+============================================================================================
+  EPOCH [0165/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.9251 [cnt: 5.51, alloc(dm16): 2.918, cell: 0.000, reg_nb: 2.410]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.85) | W_solv: 0.52
+  Val Metrics   : MAE: 119.08 | RMSE: 193.70 | NAE: 0.293 | Bias: +36.76
+  GAME Hierarchy: G0: 119.08 | G1: 139.19 | G2: 168.01 | G3: 207.41 | Sparse(<=100): 23.36 | Mod(101-500): 83.26 | Dense(>500): 234.11
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.8%, 95%=98.4% | Median Disp: 7.6
+  Checkpoint    : Current Val MAE: 119.08 | Best Val MAE: 103.37
+============================================================================================
+
+[0166/0650] Loss: 9.1049 [cnt: 5.72, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.409] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.51
+[0167/0650] Loss: 9.3201 [cnt: 5.93, alloc(dm16): 2.894, cell: 0.000, reg_nb: 2.414] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.01 | W_solv: 0.51
+[0168/0650] Loss: 9.0504 [cnt: 5.68, alloc(dm16): 2.881, cell: 0.000, reg_nb: 2.386] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.01 | W_solv: 0.54
+[0169/0650] Loss: 8.6932 [cnt: 5.39, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.357] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.02 | W_solv: 0.52
+
+============================================================================================
+  EPOCH [0170/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.1870 [cnt: 5.80, alloc(dm16): 2.892, cell: 0.000, reg_nb: 2.433]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.95) | W_solv: 0.55
+  Val Metrics   : MAE: 98.37 | RMSE: 170.24 | NAE: 0.243 | Bias: -20.74
+  GAME Hierarchy: G0: 98.37 | G1: 127.62 | G2: 155.79 | G3: 192.90 | Sparse(<=100): 39.67 | Mod(101-500): 62.85 | Dense(>500): 206.91
+  Uncertainty   : Coverage: 50%=83.4%, 80%=94.7%, 95%=98.4% | Median Disp: 8.3
+  Checkpoint    : Current Val MAE: 98.37 | Best Val MAE: 98.37 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0171/0650] Loss: 9.0492 [cnt: 5.67, alloc(dm16): 2.892, cell: 0.000, reg_nb: 2.401] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.00 | W_solv: 0.53
+[0172/0650] Loss: 9.2700 [cnt: 5.85, alloc(dm16): 2.923, cell: 0.000, reg_nb: 2.426] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.55
+[0173/0650] Loss: 9.1801 [cnt: 5.78, alloc(dm16): 2.903, cell: 0.000, reg_nb: 2.404] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 0.99 | W_solv: 0.51
+[0174/0650] Loss: 8.9735 [cnt: 5.61, alloc(dm16): 2.865, cell: 0.000, reg_nb: 2.428] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.00 | W_solv: 0.56
+
+============================================================================================
+  EPOCH [0175/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.5093 [cnt: 6.06, alloc(dm16): 2.946, cell: 0.000, reg_nb: 2.486]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.85) | W_solv: 0.55
+  Val Metrics   : MAE: 105.04 | RMSE: 172.97 | NAE: 0.273 | Bias: +25.64
+  GAME Hierarchy: G0: 105.04 | G1: 131.17 | G2: 160.65 | G3: 199.24 | Sparse(<=100): 36.95 | Mod(101-500): 75.45 | Dense(>500): 198.40
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.2%, 95%=98.6% | Median Disp: 8.1
+  Checkpoint    : Current Val MAE: 105.04 | Best Val MAE: 98.37
+============================================================================================
+
+[0176/0650] Loss: 8.8760 [cnt: 5.48, alloc(dm16): 2.904, cell: 0.000, reg_nb: 2.428] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.00 | W_solv: 0.54
+[0177/0650] Loss: 9.0803 [cnt: 5.70, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.383] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.01 | W_solv: 0.56
+[0178/0650] Loss: 9.3371 [cnt: 5.99, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.406] | SolvStr: 1.00 | Disp: 7.3 | W_pred: 1.01 | W_solv: 0.54
+[0179/0650] Loss: 9.1083 [cnt: 5.73, alloc(dm16): 2.881, cell: 0.000, reg_nb: 2.420] | SolvStr: 1.00 | Disp: 7.6 | W_pred: 1.00 | W_solv: 0.54
+
+============================================================================================
+  EPOCH [0180/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.0257 [cnt: 5.59, alloc(dm16): 2.936, cell: 0.000, reg_nb: 2.424]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 1.01) | W_solv: 0.58
+  Val Metrics   : MAE: 112.07 | RMSE: 185.13 | NAE: 0.282 | Bias: +34.10
+  GAME Hierarchy: G0: 112.07 | G1: 134.09 | G2: 161.70 | G3: 201.75 | Sparse(<=100): 28.21 | Mod(101-500): 79.35 | Dense(>500): 216.56
+  Uncertainty   : Coverage: 50%=83.8%, 80%=94.8%, 95%=98.5% | Median Disp: 7.6
+  Checkpoint    : Current Val MAE: 112.07 | Best Val MAE: 98.37
+============================================================================================
+
+[0181/0650] Loss: 8.8328 [cnt: 5.49, alloc(dm16): 2.861, cell: 0.000, reg_nb: 2.378] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.02 | W_solv: 0.53
+[0182/0650] Loss: 9.2256 [cnt: 5.85, alloc(dm16): 2.883, cell: 0.000, reg_nb: 2.420] | SolvStr: 1.00 | Disp: 9.2 | W_pred: 1.00 | W_solv: 0.54
+[0183/0650] Loss: 8.8852 [cnt: 5.51, alloc(dm16): 2.890, cell: 0.000, reg_nb: 2.358] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.01 | W_solv: 0.54
+[0184/0650] Loss: 9.1246 [cnt: 5.72, alloc(dm16): 2.910, cell: 0.000, reg_nb: 2.407] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.01 | W_solv: 0.52
+
+============================================================================================
+  EPOCH [0185/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.2209 [cnt: 5.84, alloc(dm16): 2.881, cell: 0.000, reg_nb: 2.461]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.77) | W_solv: 0.52
+  Val Metrics   : MAE: 117.51 | RMSE: 189.56 | NAE: 0.298 | Bias: +52.43
+  GAME Hierarchy: G0: 117.51 | G1: 139.20 | G2: 166.63 | G3: 207.49 | Sparse(<=100): 28.75 | Mod(101-500): 85.28 | Dense(>500): 221.40
+  Uncertainty   : Coverage: 50%=83.9%, 80%=95.0%, 95%=98.6% | Median Disp: 8.2
+  Checkpoint    : Current Val MAE: 117.51 | Best Val MAE: 98.37
+============================================================================================
+
+[0186/0650] Loss: 9.3751 [cnt: 5.96, alloc(dm16): 2.916, cell: 0.000, reg_nb: 2.455] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 0.99 | W_solv: 0.56
+[0187/0650] Loss: 8.9258 [cnt: 5.55, alloc(dm16): 2.881, cell: 0.000, reg_nb: 2.404] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.52
+[0188/0650] Loss: 8.8828 [cnt: 5.46, alloc(dm16): 2.925, cell: 0.000, reg_nb: 2.429] | SolvStr: 1.00 | Disp: 7.7 | W_pred: 0.99 | W_solv: 0.54
+[0189/0650] Loss: 9.3419 [cnt: 5.93, alloc(dm16): 2.902, cell: 0.000, reg_nb: 2.471] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.55
+
+============================================================================================
+  EPOCH [0190/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.9624 [cnt: 5.51, alloc(dm16): 2.952, cell: 0.000, reg_nb: 2.441]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.84) | W_solv: 0.54
+  Val Metrics   : MAE: 94.91 | RMSE: 159.18 | NAE: 0.241 | Bias: -6.89
+  GAME Hierarchy: G0: 94.91 | G1: 120.92 | G2: 149.70 | G3: 188.75 | Sparse(<=100): 34.34 | Mod(101-500): 65.71 | Dense(>500): 186.01
+  Uncertainty   : Coverage: 50%=82.9%, 80%=94.1%, 95%=98.1% | Median Disp: 8.5
+  Checkpoint    : Current Val MAE: 94.91 | Best Val MAE: 94.91 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0191/0650] Loss: 8.8101 [cnt: 5.41, alloc(dm16): 2.907, cell: 0.000, reg_nb: 2.390] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.00 | W_solv: 0.59
+[0192/0650] Loss: 8.8312 [cnt: 5.45, alloc(dm16): 2.891, cell: 0.000, reg_nb: 2.387] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.00 | W_solv: 0.55
+[0193/0650] Loss: 8.7644 [cnt: 5.46, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.349] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 0.99 | W_solv: 0.57
+[0194/0650] Loss: 8.8998 [cnt: 5.51, alloc(dm16): 2.899, cell: 0.000, reg_nb: 2.420] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.00 | W_solv: 0.56
+
+============================================================================================
+  EPOCH [0195/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.8780 [cnt: 5.54, alloc(dm16): 2.854, cell: 0.000, reg_nb: 2.344]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.92) | W_solv: 0.58
+  Val Metrics   : MAE: 102.18 | RMSE: 158.66 | NAE: 0.292 | Bias: +36.87
+  GAME Hierarchy: G0: 102.18 | G1: 128.39 | G2: 159.13 | G3: 198.75 | Sparse(<=100): 57.69 | Mod(101-500): 79.99 | Dense(>500): 171.18
+  Uncertainty   : Coverage: 50%=83.7%, 80%=94.9%, 95%=98.6% | Median Disp: 8.9
+  Checkpoint    : Current Val MAE: 102.18 | Best Val MAE: 94.91
+============================================================================================
+
+[0196/0650] Loss: 8.9486 [cnt: 5.57, alloc(dm16): 2.887, cell: 0.000, reg_nb: 2.411] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.02 | W_solv: 0.58
+[0197/0650] Loss: 9.1769 [cnt: 5.75, alloc(dm16): 2.933, cell: 0.000, reg_nb: 2.430] | SolvStr: 1.00 | Disp: 7.8 | W_pred: 1.00 | W_solv: 0.57
+[0198/0650] Loss: 8.9405 [cnt: 5.60, alloc(dm16): 2.859, cell: 0.000, reg_nb: 2.370] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.01 | W_solv: 0.55
+[0199/0650] Loss: 8.7954 [cnt: 5.42, alloc(dm16): 2.886, cell: 0.000, reg_nb: 2.398] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.02 | W_solv: 0.56
+
+============================================================================================
+  EPOCH [0200/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.6396 [cnt: 5.32, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.340]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.82) | W_solv: 0.52
+  Val Metrics   : MAE: 111.15 | RMSE: 173.01 | NAE: 0.309 | Bias: +56.22
+  GAME Hierarchy: G0: 111.15 | G1: 135.64 | G2: 166.30 | G3: 205.55 | Sparse(<=100): 48.97 | Mod(101-500): 86.33 | Dense(>500): 190.19
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.3%, 95%=98.7% | Median Disp: 8.8
+  Checkpoint    : Current Val MAE: 111.15 | Best Val MAE: 94.91
+============================================================================================
+
+[0201/0650] Loss: 8.7195 [cnt: 5.38, alloc(dm16): 2.859, cell: 0.000, reg_nb: 2.362] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.55
+[0202/0650] Loss: 8.8089 [cnt: 5.51, alloc(dm16): 2.814, cell: 0.000, reg_nb: 2.367] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.01 | W_solv: 0.56
+[0203/0650] Loss: 8.8242 [cnt: 5.42, alloc(dm16): 2.918, cell: 0.000, reg_nb: 2.391] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.58
+[0204/0650] Loss: 9.0327 [cnt: 5.64, alloc(dm16): 2.903, cell: 0.000, reg_nb: 2.379] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.02 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0205/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.9119 [cnt: 5.55, alloc(dm16): 2.874, cell: 0.000, reg_nb: 2.372]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.90) | W_solv: 0.56
+  Val Metrics   : MAE: 156.20 | RMSE: 243.58 | NAE: 0.415 | Bias: +124.96
+  GAME Hierarchy: G0: 156.20 | G1: 178.68 | G2: 206.40 | G3: 243.33 | Sparse(<=100): 50.23 | Mod(101-500): 117.80 | Dense(>500): 280.00
+  Uncertainty   : Coverage: 50%=84.0%, 80%=95.6%, 95%=99.0% | Median Disp: 8.6
+  Checkpoint    : Current Val MAE: 156.20 | Best Val MAE: 94.91
+============================================================================================
+
+[0206/0650] Loss: 8.8185 [cnt: 5.45, alloc(dm16): 2.884, cell: 0.000, reg_nb: 2.388] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 0.99 | W_solv: 0.55
+[0207/0650] Loss: 8.9767 [cnt: 5.59, alloc(dm16): 2.887, cell: 0.000, reg_nb: 2.421] | SolvStr: 1.00 | Disp: 9.2 | W_pred: 1.00 | W_solv: 0.54
+[0208/0650] Loss: 8.7147 [cnt: 5.39, alloc(dm16): 2.844, cell: 0.000, reg_nb: 2.367] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.54
+[0209/0650] Loss: 8.9897 [cnt: 5.62, alloc(dm16): 2.875, cell: 0.000, reg_nb: 2.406] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 0.99 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0210/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.9296 [cnt: 5.62, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.387]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.94) | W_solv: 0.56
+  Val Metrics   : MAE: 121.36 | RMSE: 195.44 | NAE: 0.332 | Bias: +79.93
+  GAME Hierarchy: G0: 121.36 | G1: 146.32 | G2: 178.78 | G3: 217.88 | Sparse(<=100): 54.00 | Mod(101-500): 91.19 | Dense(>500): 216.21
+  Uncertainty   : Coverage: 50%=84.5%, 80%=95.6%, 95%=99.0% | Median Disp: 9.4
+  Checkpoint    : Current Val MAE: 121.36 | Best Val MAE: 94.91
+============================================================================================
+
+[0211/0650] Loss: 8.9907 [cnt: 5.66, alloc(dm16): 2.849, cell: 0.000, reg_nb: 2.365] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.01 | W_solv: 0.57
+[0212/0650] Loss: 8.8380 [cnt: 5.48, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.376] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.01 | W_solv: 0.58
+[0213/0650] Loss: 8.7097 [cnt: 5.37, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.379] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 0.99 | W_solv: 0.59
+[0214/0650] Loss: 8.8478 [cnt: 5.44, alloc(dm16): 2.911, cell: 0.000, reg_nb: 2.421] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.01 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0215/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.8976 [cnt: 5.55, alloc(dm16): 2.864, cell: 0.000, reg_nb: 2.387]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.95) | W_solv: 0.57
+  Val Metrics   : MAE: 97.63 | RMSE: 155.22 | NAE: 0.272 | Bias: +36.39
+  GAME Hierarchy: G0: 97.63 | G1: 124.44 | G2: 157.47 | G3: 196.61 | Sparse(<=100): 43.20 | Mod(101-500): 75.49 | Dense(>500): 168.01
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.2%, 95%=98.7% | Median Disp: 7.8
+  Checkpoint    : Current Val MAE: 97.63 | Best Val MAE: 94.91
+============================================================================================
+
+[0216/0650] Loss: 8.6762 [cnt: 5.35, alloc(dm16): 2.846, cell: 0.000, reg_nb: 2.343] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.00 | W_solv: 0.57
+[0217/0650] Loss: 8.7264 [cnt: 5.37, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.386] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.56
+[0218/0650] Loss: 8.8068 [cnt: 5.44, alloc(dm16): 2.880, cell: 0.000, reg_nb: 2.401] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 0.99 | W_solv: 0.57
+[0219/0650] Loss: 9.0484 [cnt: 5.64, alloc(dm16): 2.913, cell: 0.000, reg_nb: 2.444] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.01 | W_solv: 0.58
+
+============================================================================================
+  EPOCH [0220/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.0416 [cnt: 5.67, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.468]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.94) | W_solv: 0.55
+  Val Metrics   : MAE: 123.52 | RMSE: 192.89 | NAE: 0.331 | Bias: +75.52
+  GAME Hierarchy: G0: 123.52 | G1: 146.86 | G2: 175.19 | G3: 213.68 | Sparse(<=100): 45.44 | Mod(101-500): 93.79 | Dense(>500): 218.75
+  Uncertainty   : Coverage: 50%=84.6%, 80%=95.7%, 95%=99.0% | Median Disp: 7.7
+  Checkpoint    : Current Val MAE: 123.52 | Best Val MAE: 94.91
+============================================================================================
+
+[0221/0650] Loss: 8.9253 [cnt: 5.49, alloc(dm16): 2.932, cell: 0.000, reg_nb: 2.445] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.01 | W_solv: 0.57
+[0222/0650] Loss: 8.8733 [cnt: 5.52, alloc(dm16): 2.856, cell: 0.000, reg_nb: 2.413] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.01 | W_solv: 0.56
+[0223/0650] Loss: 9.0155 [cnt: 5.61, alloc(dm16): 2.907, cell: 0.000, reg_nb: 2.431] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.02 | W_solv: 0.60
+[0224/0650] Loss: 8.7152 [cnt: 5.34, alloc(dm16): 2.896, cell: 0.000, reg_nb: 2.367] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 1.01 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0225/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.0126 [cnt: 5.60, alloc(dm16): 2.920, cell: 0.000, reg_nb: 2.415]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.87) | W_solv: 0.59
+  Val Metrics   : MAE: 123.35 | RMSE: 198.70 | NAE: 0.302 | Bias: +60.72
+  GAME Hierarchy: G0: 123.35 | G1: 141.41 | G2: 169.33 | G3: 208.90 | Sparse(<=100): 24.63 | Mod(101-500): 86.40 | Dense(>500): 241.99
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.9%, 95%=98.7% | Median Disp: 8.8
+  Checkpoint    : Current Val MAE: 123.35 | Best Val MAE: 94.91
+============================================================================================
+
+[0226/0650] Loss: 8.7498 [cnt: 5.43, alloc(dm16): 2.832, cell: 0.000, reg_nb: 2.366] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.60
+[0227/0650] Loss: 8.6690 [cnt: 5.30, alloc(dm16): 2.884, cell: 0.000, reg_nb: 2.369] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.02 | W_solv: 0.59
+[0228/0650] Loss: 8.6728 [cnt: 5.33, alloc(dm16): 2.861, cell: 0.000, reg_nb: 2.380] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 0.99 | W_solv: 0.60
+[0229/0650] Loss: 8.6845 [cnt: 5.30, alloc(dm16): 2.891, cell: 0.000, reg_nb: 2.393] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.01 | W_solv: 0.59
+
+============================================================================================
+  EPOCH [0230/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.8742 [cnt: 5.53, alloc(dm16): 2.860, cell: 0.000, reg_nb: 2.383]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.92) | W_solv: 0.62
+  Val Metrics   : MAE: 117.52 | RMSE: 186.42 | NAE: 0.296 | Bias: +58.79
+  GAME Hierarchy: G0: 117.52 | G1: 137.19 | G2: 165.67 | G3: 204.59 | Sparse(<=100): 26.74 | Mod(101-500): 85.97 | Dense(>500): 219.82
+  Uncertainty   : Coverage: 50%=83.8%, 80%=94.9%, 95%=98.7% | Median Disp: 9.6
+  Checkpoint    : Current Val MAE: 117.52 | Best Val MAE: 94.91
+============================================================================================
+
+[0231/0650] Loss: 8.7763 [cnt: 5.38, alloc(dm16): 2.915, cell: 0.000, reg_nb: 2.371] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.01 | W_solv: 0.59
+[0232/0650] Loss: 8.8523 [cnt: 5.51, alloc(dm16): 2.854, cell: 0.000, reg_nb: 2.396] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.03 | W_solv: 0.64
+[0233/0650] Loss: 8.6936 [cnt: 5.38, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.01 | W_solv: 0.62
+[0234/0650] Loss: 8.5764 [cnt: 5.19, alloc(dm16): 2.899, cell: 0.000, reg_nb: 2.382] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.00 | W_solv: 0.61
+
+============================================================================================
+  EPOCH [0235/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.7382 [cnt: 5.41, alloc(dm16): 2.849, cell: 0.000, reg_nb: 2.345]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.86) | W_solv: 0.58
+  Val Metrics   : MAE: 111.67 | RMSE: 177.23 | NAE: 0.287 | Bias: +52.46
+  GAME Hierarchy: G0: 111.67 | G1: 131.27 | G2: 159.78 | G3: 198.65 | Sparse(<=100): 29.70 | Mod(101-500): 82.55 | Dense(>500): 205.80
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.9%, 95%=98.7% | Median Disp: 9.8
+  Checkpoint    : Current Val MAE: 111.67 | Best Val MAE: 94.91
+============================================================================================
+
+[0236/0650] Loss: 8.8331 [cnt: 5.54, alloc(dm16): 2.814, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.01 | W_solv: 0.56
+[0237/0650] Loss: 8.6809 [cnt: 5.25, alloc(dm16): 2.947, cell: 0.000, reg_nb: 2.374] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.00 | W_solv: 0.57
+[0238/0650] Loss: 8.8465 [cnt: 5.52, alloc(dm16): 2.843, cell: 0.000, reg_nb: 2.379] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.61
+[0239/0650] Loss: 8.5017 [cnt: 5.18, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.330] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0240/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4270 [cnt: 5.15, alloc(dm16): 2.808, cell: 0.000, reg_nb: 2.292]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.89) | W_solv: 0.58
+  Val Metrics   : MAE: 102.95 | RMSE: 168.13 | NAE: 0.264 | Bias: +31.73
+  GAME Hierarchy: G0: 102.95 | G1: 125.67 | G2: 154.71 | G3: 192.98 | Sparse(<=100): 28.67 | Mod(101-500): 75.32 | Dense(>500): 191.75
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.1%, 95%=98.8% | Median Disp: 8.3
+  Checkpoint    : Current Val MAE: 102.95 | Best Val MAE: 94.91
+============================================================================================
+
+[0241/0650] Loss: 9.0687 [cnt: 5.70, alloc(dm16): 2.877, cell: 0.000, reg_nb: 2.393] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.01 | W_solv: 0.61
+[0242/0650] Loss: 8.6974 [cnt: 5.35, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.363] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 1.02 | W_solv: 0.59
+[0243/0650] Loss: 8.5534 [cnt: 5.20, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.355] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.57
+[0244/0650] Loss: 8.6507 [cnt: 5.30, alloc(dm16): 2.875, cell: 0.000, reg_nb: 2.316] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 1.00 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0245/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.8113 [cnt: 5.46, alloc(dm16): 2.866, cell: 0.000, reg_nb: 2.380]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.99) | W_solv: 0.61
+  Val Metrics   : MAE: 125.30 | RMSE: 194.40 | NAE: 0.316 | Bias: +71.86
+  GAME Hierarchy: G0: 125.30 | G1: 144.83 | G2: 170.97 | G3: 208.58 | Sparse(<=100): 24.92 | Mod(101-500): 92.88 | Dense(>500): 231.49
+  Uncertainty   : Coverage: 50%=83.9%, 80%=95.0%, 95%=98.7% | Median Disp: 8.5
+  Checkpoint    : Current Val MAE: 125.30 | Best Val MAE: 94.91
+============================================================================================
+
+[0246/0650] Loss: 8.7794 [cnt: 5.40, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.363] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.59
+[0247/0650] Loss: 8.9708 [cnt: 5.58, alloc(dm16): 2.902, cell: 0.000, reg_nb: 2.403] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.02 | W_solv: 0.59
+[0248/0650] Loss: 8.7598 [cnt: 5.42, alloc(dm16): 2.860, cell: 0.000, reg_nb: 2.356] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.60
+[0249/0650] Loss: 8.4458 [cnt: 5.13, alloc(dm16): 2.843, cell: 0.000, reg_nb: 2.309] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.01 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0250/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.7530 [cnt: 5.44, alloc(dm16): 2.831, cell: 0.000, reg_nb: 2.363]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.84) | W_solv: 0.56
+  Val Metrics   : MAE: 112.15 | RMSE: 181.00 | NAE: 0.274 | Bias: +43.27
+  GAME Hierarchy: G0: 112.15 | G1: 130.39 | G2: 157.80 | G3: 196.34 | Sparse(<=100): 19.43 | Mod(101-500): 79.65 | Dense(>500): 217.39
+  Uncertainty   : Coverage: 50%=83.0%, 80%=94.3%, 95%=98.5% | Median Disp: 8.4
+  Checkpoint    : Current Val MAE: 112.15 | Best Val MAE: 94.91
+============================================================================================
+
+[0251/0650] Loss: 8.9554 [cnt: 5.56, alloc(dm16): 2.913, cell: 0.000, reg_nb: 2.348] | SolvStr: 1.00 | Disp: 9.8 | W_pred: 1.03 | W_solv: 0.61
+[0252/0650] Loss: 8.7154 [cnt: 5.38, alloc(dm16): 2.855, cell: 0.000, reg_nb: 2.338] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 0.98 | W_solv: 0.59
+[0253/0650] Loss: 8.6408 [cnt: 5.25, alloc(dm16): 2.909, cell: 0.000, reg_nb: 2.356] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.61
+[0254/0650] Loss: 8.8743 [cnt: 5.53, alloc(dm16): 2.861, cell: 0.000, reg_nb: 2.364] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0255/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5734 [cnt: 5.29, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.331]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.93) | W_solv: 0.59
+  Val Metrics   : MAE: 109.83 | RMSE: 174.58 | NAE: 0.271 | Bias: +38.20
+  GAME Hierarchy: G0: 109.83 | G1: 127.03 | G2: 154.25 | G3: 192.95 | Sparse(<=100): 25.01 | Mod(101-500): 78.05 | Dense(>500): 211.87
+  Uncertainty   : Coverage: 50%=83.1%, 80%=94.7%, 95%=98.6% | Median Disp: 9.0
+  Checkpoint    : Current Val MAE: 109.83 | Best Val MAE: 94.91
+============================================================================================
+
+[0256/0650] Loss: 8.6604 [cnt: 5.30, alloc(dm16): 2.881, cell: 0.000, reg_nb: 2.355] | SolvStr: 1.00 | Disp: 9.9 | W_pred: 1.00 | W_solv: 0.63
+[0257/0650] Loss: 8.6932 [cnt: 5.40, alloc(dm16): 2.810, cell: 0.000, reg_nb: 2.347] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.02 | W_solv: 0.64
+[0258/0650] Loss: 8.7822 [cnt: 5.42, alloc(dm16): 2.868, cell: 0.000, reg_nb: 2.395] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.01 | W_solv: 0.59
+[0259/0650] Loss: 8.8732 [cnt: 5.56, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.01 | W_solv: 0.57
+
+============================================================================================
+  EPOCH [0260/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5207 [cnt: 5.25, alloc(dm16): 2.794, cell: 0.000, reg_nb: 2.340]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.98) | W_solv: 0.62
+  Val Metrics   : MAE: 116.74 | RMSE: 173.62 | NAE: 0.320 | Bias: +66.15
+  GAME Hierarchy: G0: 116.74 | G1: 136.73 | G2: 163.58 | G3: 201.15 | Sparse(<=100): 45.28 | Mod(101-500): 91.80 | Dense(>500): 197.58
+  Uncertainty   : Coverage: 50%=84.0%, 80%=95.1%, 95%=98.8% | Median Disp: 8.4
+  Checkpoint    : Current Val MAE: 116.74 | Best Val MAE: 94.91
+============================================================================================
+
+[0261/0650] Loss: 8.5966 [cnt: 5.25, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.340] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 0.99 | W_solv: 0.58
+[0262/0650] Loss: 8.9143 [cnt: 5.58, alloc(dm16): 2.851, cell: 0.000, reg_nb: 2.367] | SolvStr: 1.00 | Disp: 8.1 | W_pred: 1.01 | W_solv: 0.60
+[0263/0650] Loss: 8.9216 [cnt: 5.49, alloc(dm16): 2.939, cell: 0.000, reg_nb: 2.416] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 0.99 | W_solv: 0.62
+[0264/0650] Loss: 8.5178 [cnt: 5.19, alloc(dm16): 2.842, cell: 0.000, reg_nb: 2.359] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.03 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0265/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5667 [cnt: 5.27, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.295]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.96) | W_solv: 0.62
+  Val Metrics   : MAE: 132.78 | RMSE: 193.57 | NAE: 0.367 | Bias: +92.67
+  GAME Hierarchy: G0: 132.78 | G1: 153.40 | G2: 180.91 | G3: 217.99 | Sparse(<=100): 54.42 | Mod(101-500): 103.31 | Dense(>500): 227.36
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.4%, 95%=98.9% | Median Disp: 9.1
+  Checkpoint    : Current Val MAE: 132.78 | Best Val MAE: 94.91
+============================================================================================
+
+[0266/0650] Loss: 8.8719 [cnt: 5.46, alloc(dm16): 2.915, cell: 0.000, reg_nb: 2.406] | SolvStr: 1.00 | Disp: 9.2 | W_pred: 1.01 | W_solv: 0.61
+[0267/0650] Loss: 8.6097 [cnt: 5.30, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.361] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 1.00 | W_solv: 0.60
+[0268/0650] Loss: 8.8027 [cnt: 5.43, alloc(dm16): 2.884, cell: 0.000, reg_nb: 2.389] | SolvStr: 1.00 | Disp: 9.9 | W_pred: 0.99 | W_solv: 0.60
+[0269/0650] Loss: 8.7194 [cnt: 5.40, alloc(dm16): 2.826, cell: 0.000, reg_nb: 2.386] | SolvStr: 1.00 | Disp: 8.0 | W_pred: 0.99 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0270/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5162 [cnt: 5.19, alloc(dm16): 2.854, cell: 0.000, reg_nb: 2.310]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.94) | W_solv: 0.61
+  Val Metrics   : MAE: 128.62 | RMSE: 186.93 | NAE: 0.356 | Bias: +88.14
+  GAME Hierarchy: G0: 128.62 | G1: 150.35 | G2: 179.62 | G3: 217.04 | Sparse(<=100): 52.15 | Mod(101-500): 100.08 | Dense(>500): 220.29
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.5%, 95%=99.0% | Median Disp: 9.2
+  Checkpoint    : Current Val MAE: 128.62 | Best Val MAE: 94.91
+============================================================================================
+
+[0271/0650] Loss: 8.6127 [cnt: 5.31, alloc(dm16): 2.824, cell: 0.000, reg_nb: 2.351] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.01 | W_solv: 0.63
+[0272/0650] Loss: 8.8702 [cnt: 5.58, alloc(dm16): 2.811, cell: 0.000, reg_nb: 2.327] | SolvStr: 1.00 | Disp: 8.8 | W_pred: 0.99 | W_solv: 0.62
+[0273/0650] Loss: 8.6302 [cnt: 5.33, alloc(dm16): 2.824, cell: 0.000, reg_nb: 2.357] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.03 | W_solv: 0.62
+[0274/0650] Loss: 8.5912 [cnt: 5.31, alloc(dm16): 2.801, cell: 0.000, reg_nb: 2.322] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.00 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0275/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4516 [cnt: 5.15, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.328]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.89) | W_solv: 0.60
+  Val Metrics   : MAE: 122.69 | RMSE: 177.96 | NAE: 0.339 | Bias: +76.67
+  GAME Hierarchy: G0: 122.69 | G1: 144.29 | G2: 173.29 | G3: 210.43 | Sparse(<=100): 45.79 | Mod(101-500): 96.43 | Dense(>500): 208.04
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.3%, 95%=98.9% | Median Disp: 9.7
+  Checkpoint    : Current Val MAE: 122.69 | Best Val MAE: 94.91
+============================================================================================
+
+[0276/0650] Loss: 8.7659 [cnt: 5.40, alloc(dm16): 2.878, cell: 0.000, reg_nb: 2.380] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.00 | W_solv: 0.61
+[0277/0650] Loss: 8.6077 [cnt: 5.26, alloc(dm16): 2.878, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.00 | W_solv: 0.62
+[0278/0650] Loss: 8.6195 [cnt: 5.30, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.352] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.00 | W_solv: 0.61
+[0279/0650] Loss: 8.7329 [cnt: 5.30, alloc(dm16): 2.942, cell: 0.000, reg_nb: 2.409] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.01 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0280/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.7811 [cnt: 5.48, alloc(dm16): 2.824, cell: 0.000, reg_nb: 2.347]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.96) | W_solv: 0.63
+  Val Metrics   : MAE: 113.99 | RMSE: 169.47 | NAE: 0.308 | Bias: +60.70
+  GAME Hierarchy: G0: 113.99 | G1: 136.04 | G2: 164.90 | G3: 202.82 | Sparse(<=100): 36.34 | Mod(101-500): 88.59 | Dense(>500): 197.05
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.1%, 95%=98.8% | Median Disp: 9.2
+  Checkpoint    : Current Val MAE: 113.99 | Best Val MAE: 94.91
+============================================================================================
+
+[0281/0650] Loss: 8.6169 [cnt: 5.33, alloc(dm16): 2.808, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 8.3 | W_pred: 1.00 | W_solv: 0.56
+[0282/0650] Loss: 8.5756 [cnt: 5.28, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.02 | W_solv: 0.59
+[0283/0650] Loss: 8.3743 [cnt: 5.11, alloc(dm16): 2.791, cell: 0.000, reg_nb: 2.318] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.01 | W_solv: 0.63
+[0284/0650] Loss: 8.6623 [cnt: 5.33, alloc(dm16): 2.846, cell: 0.000, reg_nb: 2.371] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.01 | W_solv: 0.58
+
+============================================================================================
+  EPOCH [0285/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5796 [cnt: 5.27, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.349]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.93) | W_solv: 0.65
+  Val Metrics   : MAE: 125.00 | RMSE: 184.50 | NAE: 0.347 | Bias: +86.02
+  GAME Hierarchy: G0: 125.00 | G1: 147.41 | G2: 176.20 | G3: 213.03 | Sparse(<=100): 49.58 | Mod(101-500): 99.47 | Dense(>500): 208.07
+  Uncertainty   : Coverage: 50%=84.5%, 80%=95.5%, 95%=99.0% | Median Disp: 11.2
+  Checkpoint    : Current Val MAE: 125.00 | Best Val MAE: 94.91
+============================================================================================
+
+[0286/0650] Loss: 8.5434 [cnt: 5.23, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.358] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.03 | W_solv: 0.65
+[0287/0650] Loss: 8.5650 [cnt: 5.26, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.367] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.60
+[0288/0650] Loss: 8.5427 [cnt: 5.16, alloc(dm16): 2.900, cell: 0.000, reg_nb: 2.380] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.01 | W_solv: 0.62
+[0289/0650] Loss: 8.5893 [cnt: 5.28, alloc(dm16): 2.836, cell: 0.000, reg_nb: 2.328] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.03 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0290/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4781 [cnt: 5.16, alloc(dm16): 2.842, cell: 0.000, reg_nb: 2.328]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.00) | W_solv: 0.62
+  Val Metrics   : MAE: 113.11 | RMSE: 169.71 | NAE: 0.328 | Bias: +60.96
+  GAME Hierarchy: G0: 113.11 | G1: 137.12 | G2: 165.86 | G3: 203.76 | Sparse(<=100): 60.22 | Mod(101-500): 91.03 | Dense(>500): 183.08
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.2%, 95%=98.8% | Median Disp: 9.3
+  Checkpoint    : Current Val MAE: 113.11 | Best Val MAE: 94.91
+============================================================================================
+
+[0291/0650] Loss: 8.7234 [cnt: 5.31, alloc(dm16): 2.919, cell: 0.000, reg_nb: 2.402] | SolvStr: 1.00 | Disp: 9.8 | W_pred: 1.00 | W_solv: 0.63
+[0292/0650] Loss: 8.5841 [cnt: 5.24, alloc(dm16): 2.872, cell: 0.000, reg_nb: 2.328] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.00 | W_solv: 0.58
+[0293/0650] Loss: 8.5729 [cnt: 5.25, alloc(dm16): 2.849, cell: 0.000, reg_nb: 2.341] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.62
+[0294/0650] Loss: 8.8180 [cnt: 5.50, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.364] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 0.99 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0295/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 9.0550 [cnt: 5.69, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.390]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.91) | W_solv: 0.62
+  Val Metrics   : MAE: 134.25 | RMSE: 200.45 | NAE: 0.368 | Bias: +94.34
+  GAME Hierarchy: G0: 134.25 | G1: 155.03 | G2: 182.09 | G3: 219.72 | Sparse(<=100): 51.25 | Mod(101-500): 103.09 | Dense(>500): 234.28
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.3%, 95%=98.9% | Median Disp: 9.7
+  Checkpoint    : Current Val MAE: 134.25 | Best Val MAE: 94.91
+============================================================================================
+
+[0296/0650] Loss: 8.7109 [cnt: 5.39, alloc(dm16): 2.836, cell: 0.000, reg_nb: 2.360] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.00 | W_solv: 0.61
+[0297/0650] Loss: 8.7842 [cnt: 5.47, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.343] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.63
+[0298/0650] Loss: 8.7331 [cnt: 5.37, alloc(dm16): 2.875, cell: 0.000, reg_nb: 2.394] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.01 | W_solv: 0.62
+[0299/0650] Loss: 8.6699 [cnt: 5.41, alloc(dm16): 2.786, cell: 0.000, reg_nb: 2.329] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 0.97 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0300/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5040 [cnt: 5.17, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.346]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.98 (std: 1.00) | W_solv: 0.62
+  Val Metrics   : MAE: 130.64 | RMSE: 199.56 | NAE: 0.360 | Bias: +96.38
+  GAME Hierarchy: G0: 130.64 | G1: 152.42 | G2: 179.82 | G3: 216.75 | Sparse(<=100): 49.49 | Mod(101-500): 102.17 | Dense(>500): 222.85
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.3%, 95%=98.9% | Median Disp: 9.4
+  Checkpoint    : Current Val MAE: 130.64 | Best Val MAE: 94.91
+============================================================================================
+
+[0301/0650] Loss: 8.5890 [cnt: 5.30, alloc(dm16): 2.814, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 9.8 | W_pred: 1.02 | W_solv: 0.60
+[0302/0650] Loss: 8.8113 [cnt: 5.45, alloc(dm16): 2.865, cell: 0.000, reg_nb: 2.408] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.02 | W_solv: 0.64
+[0303/0650] Loss: 8.6657 [cnt: 5.26, alloc(dm16): 2.920, cell: 0.000, reg_nb: 2.396] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 0.99 | W_solv: 0.61
+[0304/0650] Loss: 8.5505 [cnt: 5.28, alloc(dm16): 2.804, cell: 0.000, reg_nb: 2.295] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.01 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0305/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.7317 [cnt: 5.35, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.384]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.04) | W_solv: 0.65
+  Val Metrics   : MAE: 104.70 | RMSE: 169.49 | NAE: 0.276 | Bias: +43.11
+  GAME Hierarchy: G0: 104.70 | G1: 124.03 | G2: 151.67 | G3: 190.46 | Sparse(<=100): 34.69 | Mod(101-500): 80.09 | Dense(>500): 184.37
+  Uncertainty   : Coverage: 50%=82.5%, 80%=94.3%, 95%=98.5% | Median Disp: 10.5
+  Checkpoint    : Current Val MAE: 104.70 | Best Val MAE: 94.91
+============================================================================================
+
+[0306/0650] Loss: 8.4766 [cnt: 5.17, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.342] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.02 | W_solv: 0.61
+[0307/0650] Loss: 8.7355 [cnt: 5.39, alloc(dm16): 2.859, cell: 0.000, reg_nb: 2.378] | SolvStr: 1.00 | Disp: 8.2 | W_pred: 1.00 | W_solv: 0.58
+[0308/0650] Loss: 8.3870 [cnt: 5.06, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.342] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 0.98 | W_solv: 0.57
+[0309/0650] Loss: 8.6108 [cnt: 5.29, alloc(dm16): 2.850, cell: 0.000, reg_nb: 2.314] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.01 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0310/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5697 [cnt: 5.25, alloc(dm16): 2.838, cell: 0.000, reg_nb: 2.337]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.91) | W_solv: 0.62
+  Val Metrics   : MAE: 100.04 | RMSE: 157.59 | NAE: 0.285 | Bias: +44.15
+  GAME Hierarchy: G0: 100.04 | G1: 126.27 | G2: 154.81 | G3: 193.53 | Sparse(<=100): 48.79 | Mod(101-500): 80.89 | Dense(>500): 161.56
+  Uncertainty   : Coverage: 50%=83.8%, 80%=95.0%, 95%=98.9% | Median Disp: 10.0
+  Checkpoint    : Current Val MAE: 100.04 | Best Val MAE: 94.91
+============================================================================================
+
+[0311/0650] Loss: 8.5918 [cnt: 5.26, alloc(dm16): 2.843, cell: 0.000, reg_nb: 2.372] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.02 | W_solv: 0.61
+[0312/0650] Loss: 8.5662 [cnt: 5.26, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.00 | W_solv: 0.61
+[0313/0650] Loss: 8.4185 [cnt: 5.11, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.335] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.61
+[0314/0650] Loss: 8.4686 [cnt: 5.16, alloc(dm16): 2.835, cell: 0.000, reg_nb: 2.331] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0315/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5088 [cnt: 5.24, alloc(dm16): 2.795, cell: 0.000, reg_nb: 2.328]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.89) | W_solv: 0.58
+  Val Metrics   : MAE: 106.39 | RMSE: 171.36 | NAE: 0.284 | Bias: +51.61
+  GAME Hierarchy: G0: 106.39 | G1: 128.17 | G2: 157.41 | G3: 195.56 | Sparse(<=100): 36.75 | Mod(101-500): 81.42 | Dense(>500): 187.02
+  Uncertainty   : Coverage: 50%=83.6%, 80%=95.0%, 95%=98.9% | Median Disp: 8.6
+  Checkpoint    : Current Val MAE: 106.39 | Best Val MAE: 94.91
+============================================================================================
+
+[0316/0650] Loss: 8.4116 [cnt: 5.12, alloc(dm16): 2.820, cell: 0.000, reg_nb: 2.313] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.02 | W_solv: 0.63
+[0317/0650] Loss: 8.4444 [cnt: 5.11, alloc(dm16): 2.850, cell: 0.000, reg_nb: 2.357] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 0.99 | W_solv: 0.62
+[0318/0650] Loss: 8.3841 [cnt: 5.07, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.338] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.02 | W_solv: 0.62
+[0319/0650] Loss: 8.7326 [cnt: 5.42, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.364] | SolvStr: 1.00 | Disp: 9.9 | W_pred: 1.00 | W_solv: 0.61
+
+============================================================================================
+  EPOCH [0320/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4047 [cnt: 5.09, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.313]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.96) | W_solv: 0.62
+  Val Metrics   : MAE: 118.67 | RMSE: 177.79 | NAE: 0.340 | Bias: +77.55
+  GAME Hierarchy: G0: 118.67 | G1: 143.99 | G2: 171.37 | G3: 208.85 | Sparse(<=100): 51.96 | Mod(101-500): 97.64 | Dense(>500): 187.81
+  Uncertainty   : Coverage: 50%=84.0%, 80%=95.2%, 95%=98.9% | Median Disp: 8.7
+  Checkpoint    : Current Val MAE: 118.67 | Best Val MAE: 94.91
+============================================================================================
+
+[0321/0650] Loss: 8.6390 [cnt: 5.34, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.301] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.61
+[0322/0650] Loss: 8.6549 [cnt: 5.30, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.345] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.02 | W_solv: 0.63
+[0323/0650] Loss: 8.5482 [cnt: 5.25, alloc(dm16): 2.822, cell: 0.000, reg_nb: 2.318] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.02 | W_solv: 0.64
+[0324/0650] Loss: 8.5424 [cnt: 5.22, alloc(dm16): 2.852, cell: 0.000, reg_nb: 2.327] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.02 | W_solv: 0.61
+
+============================================================================================
+  EPOCH [0325/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5354 [cnt: 5.23, alloc(dm16): 2.822, cell: 0.000, reg_nb: 2.359]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.91) | W_solv: 0.63
+  Val Metrics   : MAE: 124.17 | RMSE: 187.14 | NAE: 0.344 | Bias: +86.68
+  GAME Hierarchy: G0: 124.17 | G1: 145.84 | G2: 172.89 | G3: 209.71 | Sparse(<=100): 46.99 | Mod(101-500): 97.96 | Dense(>500): 209.41
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.4%, 95%=98.9% | Median Disp: 10.9
+  Checkpoint    : Current Val MAE: 124.17 | Best Val MAE: 94.91
+============================================================================================
+
+[0326/0650] Loss: 8.6879 [cnt: 5.33, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.413] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.01 | W_solv: 0.65
+[0327/0650] Loss: 8.7188 [cnt: 5.43, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.03 | W_solv: 0.65
+[0328/0650] Loss: 8.4553 [cnt: 5.17, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.00 | W_solv: 0.62
+[0329/0650] Loss: 8.4004 [cnt: 5.05, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.331] | SolvStr: 1.00 | Disp: 11.0 | W_pred: 1.00 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0330/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5801 [cnt: 5.29, alloc(dm16): 2.811, cell: 0.000, reg_nb: 2.350]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.04 (std: 0.93) | W_solv: 0.66
+  Val Metrics   : MAE: 103.46 | RMSE: 155.08 | NAE: 0.303 | Bias: +56.53
+  GAME Hierarchy: G0: 103.46 | G1: 130.61 | G2: 158.44 | G3: 196.28 | Sparse(<=100): 50.94 | Mod(101-500): 85.75 | Dense(>500): 161.13
+  Uncertainty   : Coverage: 50%=84.6%, 80%=95.4%, 95%=99.0% | Median Disp: 10.2
+  Checkpoint    : Current Val MAE: 103.46 | Best Val MAE: 94.91
+============================================================================================
+
+[0331/0650] Loss: 8.6018 [cnt: 5.32, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.334] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.00 | W_solv: 0.62
+[0332/0650] Loss: 8.6445 [cnt: 5.31, alloc(dm16): 2.855, cell: 0.000, reg_nb: 2.334] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.02 | W_solv: 0.64
+[0333/0650] Loss: 8.4886 [cnt: 5.16, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.00 | W_solv: 0.61
+[0334/0650] Loss: 8.5148 [cnt: 5.16, alloc(dm16): 2.870, cell: 0.000, reg_nb: 2.381] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0335/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.6717 [cnt: 5.32, alloc(dm16): 2.864, cell: 0.000, reg_nb: 2.389]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.93) | W_solv: 0.63
+  Val Metrics   : MAE: 97.49 | RMSE: 155.70 | NAE: 0.253 | Bias: +27.63
+  GAME Hierarchy: G0: 97.49 | G1: 117.88 | G2: 145.12 | G3: 183.03 | Sparse(<=100): 28.77 | Mod(101-500): 71.93 | Dense(>500): 179.63
+  Uncertainty   : Coverage: 50%=83.4%, 80%=94.7%, 95%=98.7% | Median Disp: 9.0
+  Checkpoint    : Current Val MAE: 97.49 | Best Val MAE: 94.91
+============================================================================================
+
+[0336/0650] Loss: 8.5937 [cnt: 5.21, alloc(dm16): 2.902, cell: 0.000, reg_nb: 2.351] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 1.00 | W_solv: 0.60
+[0337/0650] Loss: 8.5684 [cnt: 5.22, alloc(dm16): 2.865, cell: 0.000, reg_nb: 2.360] | SolvStr: 1.00 | Disp: 7.4 | W_pred: 0.99 | W_solv: 0.59
+[0338/0650] Loss: 8.5113 [cnt: 5.18, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.354] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.02 | W_solv: 0.65
+[0339/0650] Loss: 8.6265 [cnt: 5.32, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.341] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.02 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0340/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5982 [cnt: 5.25, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.349]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.98) | W_solv: 0.65
+  Val Metrics   : MAE: 113.10 | RMSE: 174.86 | NAE: 0.286 | Bias: +50.86
+  GAME Hierarchy: G0: 113.10 | G1: 132.64 | G2: 158.04 | G3: 195.62 | Sparse(<=100): 26.13 | Mod(101-500): 82.42 | Dense(>500): 212.37
+  Uncertainty   : Coverage: 50%=83.7%, 80%=94.9%, 95%=98.6% | Median Disp: 11.4
+  Checkpoint    : Current Val MAE: 113.10 | Best Val MAE: 94.91
+============================================================================================
+
+[0341/0650] Loss: 8.6155 [cnt: 5.27, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.339] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.63
+[0342/0650] Loss: 8.6183 [cnt: 5.21, alloc(dm16): 2.917, cell: 0.000, reg_nb: 2.407] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.02 | W_solv: 0.65
+[0343/0650] Loss: 8.4468 [cnt: 5.12, alloc(dm16): 2.850, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.02 | W_solv: 0.62
+[0344/0650] Loss: 8.3607 [cnt: 5.10, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.264] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0345/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4650 [cnt: 5.15, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.376]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.96) | W_solv: 0.63
+  Val Metrics   : MAE: 90.18 | RMSE: 152.91 | NAE: 0.219 | Bias: -10.43
+  GAME Hierarchy: G0: 90.18 | G1: 112.71 | G2: 137.31 | G3: 173.78 | Sparse(<=100): 19.83 | Mod(101-500): 61.95 | Dense(>500): 180.02
+  Uncertainty   : Coverage: 50%=82.5%, 80%=93.9%, 95%=98.3% | Median Disp: 10.6
+  Checkpoint    : Current Val MAE: 90.18 | Best Val MAE: 90.18 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0346/0650] Loss: 8.4860 [cnt: 5.16, alloc(dm16): 2.849, cell: 0.000, reg_nb: 2.340] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.03 | W_solv: 0.66
+[0347/0650] Loss: 8.6539 [cnt: 5.26, alloc(dm16): 2.894, cell: 0.000, reg_nb: 2.423] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.02 | W_solv: 0.65
+[0348/0650] Loss: 8.5002 [cnt: 5.17, alloc(dm16): 2.850, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.02 | W_solv: 0.63
+[0349/0650] Loss: 8.5214 [cnt: 5.22, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 9.1 | W_pred: 1.03 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0350/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4487 [cnt: 5.13, alloc(dm16): 2.842, cell: 0.000, reg_nb: 2.324]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.89) | W_solv: 0.61
+  Val Metrics   : MAE: 89.09 | RMSE: 150.31 | NAE: 0.223 | Bias: -2.90
+  GAME Hierarchy: G0: 89.09 | G1: 112.19 | G2: 136.50 | G3: 173.26 | Sparse(<=100): 23.54 | Mod(101-500): 62.94 | Dense(>500): 172.40
+  Uncertainty   : Coverage: 50%=82.4%, 80%=93.9%, 95%=98.3% | Median Disp: 10.2
+  Checkpoint    : Current Val MAE: 89.09 | Best Val MAE: 89.09 >>> [NEW BEST CHECKPOINT SAVED] <<<
+============================================================================================
+
+[0351/0650] Loss: 8.4900 [cnt: 5.16, alloc(dm16): 2.852, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.02 | W_solv: 0.66
+[0352/0650] Loss: 8.5906 [cnt: 5.30, alloc(dm16): 2.813, cell: 0.000, reg_nb: 2.313] | SolvStr: 1.00 | Disp: 7.9 | W_pred: 1.00 | W_solv: 0.61
+[0353/0650] Loss: 8.2561 [cnt: 4.96, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.313] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.01 | W_solv: 0.63
+[0354/0650] Loss: 8.4443 [cnt: 5.12, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.336] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.00 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0355/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4809 [cnt: 5.15, alloc(dm16): 2.846, cell: 0.000, reg_nb: 2.344]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.86) | W_solv: 0.58
+  Val Metrics   : MAE: 108.05 | RMSE: 175.59 | NAE: 0.264 | Bias: +34.48
+  GAME Hierarchy: G0: 108.05 | G1: 128.45 | G2: 153.47 | G3: 191.25 | Sparse(<=100): 15.50 | Mod(101-500): 76.48 | Dense(>500): 210.65
+  Uncertainty   : Coverage: 50%=82.9%, 80%=94.1%, 95%=98.4% | Median Disp: 9.7
+  Checkpoint    : Current Val MAE: 108.05 | Best Val MAE: 89.09
+============================================================================================
+
+[0356/0650] Loss: 8.5900 [cnt: 5.27, alloc(dm16): 2.847, cell: 0.000, reg_nb: 2.318] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 0.99 | W_solv: 0.63
+[0357/0650] Loss: 8.4829 [cnt: 5.18, alloc(dm16): 2.833, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.01 | W_solv: 0.62
+[0358/0650] Loss: 8.3635 [cnt: 5.03, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.315] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.03 | W_solv: 0.66
+[0359/0650] Loss: 8.5441 [cnt: 5.15, alloc(dm16): 2.908, cell: 0.000, reg_nb: 2.359] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.00 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0360/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5960 [cnt: 5.26, alloc(dm16): 2.855, cell: 0.000, reg_nb: 2.359]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.92) | W_solv: 0.62
+  Val Metrics   : MAE: 95.87 | RMSE: 152.51 | NAE: 0.242 | Bias: +19.93
+  GAME Hierarchy: G0: 95.87 | G1: 117.12 | G2: 142.48 | G3: 180.00 | Sparse(<=100): 20.59 | Mod(101-500): 69.81 | Dense(>500): 180.41
+  Uncertainty   : Coverage: 50%=83.0%, 80%=94.1%, 95%=98.4% | Median Disp: 11.8
+  Checkpoint    : Current Val MAE: 95.87 | Best Val MAE: 89.09
+============================================================================================
+
+[0361/0650] Loss: 8.5205 [cnt: 5.15, alloc(dm16): 2.886, cell: 0.000, reg_nb: 2.369] | SolvStr: 1.00 | Disp: 9.4 | W_pred: 1.01 | W_solv: 0.62
+[0362/0650] Loss: 8.4978 [cnt: 5.21, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.304] | SolvStr: 1.00 | Disp: 11.0 | W_pred: 1.02 | W_solv: 0.63
+[0363/0650] Loss: 8.4420 [cnt: 5.14, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.315] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.03 | W_solv: 0.65
+[0364/0650] Loss: 8.3377 [cnt: 5.11, alloc(dm16): 2.758, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.02 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0365/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2473 [cnt: 4.99, alloc(dm16): 2.786, cell: 0.000, reg_nb: 2.305]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.96) | W_solv: 0.64
+  Val Metrics   : MAE: 109.84 | RMSE: 168.11 | NAE: 0.281 | Bias: +50.24
+  GAME Hierarchy: G0: 109.84 | G1: 129.58 | G2: 155.26 | G3: 192.42 | Sparse(<=100): 25.04 | Mod(101-500): 82.13 | Dense(>500): 200.47
+  Uncertainty   : Coverage: 50%=83.5%, 80%=94.7%, 95%=98.7% | Median Disp: 9.4
+  Checkpoint    : Current Val MAE: 109.84 | Best Val MAE: 89.09
+============================================================================================
+
+[0366/0650] Loss: 8.5069 [cnt: 5.21, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.323] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.03 | W_solv: 0.64
+[0367/0650] Loss: 8.4387 [cnt: 5.14, alloc(dm16): 2.823, cell: 0.000, reg_nb: 2.324] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.03 | W_solv: 0.66
+[0368/0650] Loss: 8.6006 [cnt: 5.26, alloc(dm16): 2.854, cell: 0.000, reg_nb: 2.361] | SolvStr: 1.00 | Disp: 10.7 | W_pred: 1.01 | W_solv: 0.65
+[0369/0650] Loss: 8.4284 [cnt: 5.14, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.311] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.04 | W_solv: 0.67
+
+============================================================================================
+  EPOCH [0370/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2115 [cnt: 4.94, alloc(dm16): 2.806, cell: 0.000, reg_nb: 2.279]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.96) | W_solv: 0.64
+  Val Metrics   : MAE: 116.33 | RMSE: 178.58 | NAE: 0.309 | Bias: +71.93
+  GAME Hierarchy: G0: 116.33 | G1: 138.43 | G2: 165.89 | G3: 202.79 | Sparse(<=100): 35.15 | Mod(101-500): 89.29 | Dense(>500): 204.52
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.3%, 95%=99.0% | Median Disp: 11.1
+  Checkpoint    : Current Val MAE: 116.33 | Best Val MAE: 89.09
+============================================================================================
+
+[0371/0650] Loss: 8.6999 [cnt: 5.37, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.352] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.01 | W_solv: 0.64
+[0372/0650] Loss: 8.5089 [cnt: 5.22, alloc(dm16): 2.813, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 9.2 | W_pred: 1.02 | W_solv: 0.66
+[0373/0650] Loss: 8.3819 [cnt: 5.08, alloc(dm16): 2.833, cell: 0.000, reg_nb: 2.291] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.02 | W_solv: 0.62
+[0374/0650] Loss: 8.4800 [cnt: 5.20, alloc(dm16): 2.803, cell: 0.000, reg_nb: 2.340] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0375/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.8226 [cnt: 5.44, alloc(dm16): 2.894, cell: 0.000, reg_nb: 2.366]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.95) | W_solv: 0.65
+  Val Metrics   : MAE: 100.16 | RMSE: 156.76 | NAE: 0.260 | Bias: +38.01
+  GAME Hierarchy: G0: 100.16 | G1: 120.35 | G2: 147.67 | G3: 184.98 | Sparse(<=100): 25.39 | Mod(101-500): 74.90 | Dense(>500): 182.38
+  Uncertainty   : Coverage: 50%=83.7%, 80%=94.8%, 95%=98.7% | Median Disp: 11.5
+  Checkpoint    : Current Val MAE: 100.16 | Best Val MAE: 89.09
+============================================================================================
+
+[0376/0650] Loss: 8.3309 [cnt: 5.06, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.304] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.01 | W_solv: 0.62
+[0377/0650] Loss: 8.4500 [cnt: 5.14, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.365] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.02 | W_solv: 0.64
+[0378/0650] Loss: 8.5112 [cnt: 5.24, alloc(dm16): 2.803, cell: 0.000, reg_nb: 2.301] | SolvStr: 1.00 | Disp: 11.0 | W_pred: 1.02 | W_solv: 0.63
+[0379/0650] Loss: 8.3674 [cnt: 5.07, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 1.02 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0380/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5600 [cnt: 5.22, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.353]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.95) | W_solv: 0.66
+  Val Metrics   : MAE: 98.39 | RMSE: 147.78 | NAE: 0.267 | Bias: +39.95
+  GAME Hierarchy: G0: 98.39 | G1: 119.91 | G2: 146.46 | G3: 184.12 | Sparse(<=100): 33.72 | Mod(101-500): 76.44 | Dense(>500): 169.76
+  Uncertainty   : Coverage: 50%=84.0%, 80%=95.1%, 95%=98.9% | Median Disp: 10.5
+  Checkpoint    : Current Val MAE: 98.39 | Best Val MAE: 89.09
+============================================================================================
+
+[0381/0650] Loss: 8.3449 [cnt: 5.08, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.292] | SolvStr: 1.00 | Disp: 9.2 | W_pred: 1.02 | W_solv: 0.63
+[0382/0650] Loss: 8.3232 [cnt: 5.04, alloc(dm16): 2.810, cell: 0.000, reg_nb: 2.314] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.65
+[0383/0650] Loss: 8.2211 [cnt: 4.95, alloc(dm16): 2.806, cell: 0.000, reg_nb: 2.290] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.01 | W_solv: 0.62
+[0384/0650] Loss: 8.4287 [cnt: 5.13, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.307] | SolvStr: 1.00 | Disp: 12.6 | W_pred: 1.03 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0385/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4348 [cnt: 5.17, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.316]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.92) | W_solv: 0.63
+  Val Metrics   : MAE: 102.23 | RMSE: 155.13 | NAE: 0.270 | Bias: +47.42
+  GAME Hierarchy: G0: 102.23 | G1: 123.13 | G2: 150.09 | G3: 187.72 | Sparse(<=100): 28.22 | Mod(101-500): 77.92 | Dense(>500): 181.67
+  Uncertainty   : Coverage: 50%=83.9%, 80%=95.0%, 95%=98.9% | Median Disp: 9.5
+  Checkpoint    : Current Val MAE: 102.23 | Best Val MAE: 89.09
+============================================================================================
+
+[0386/0650] Loss: 8.3215 [cnt: 5.04, alloc(dm16): 2.808, cell: 0.000, reg_nb: 2.298] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.03 | W_solv: 0.62
+[0387/0650] Loss: 8.5214 [cnt: 5.22, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.308] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.01 | W_solv: 0.64
+[0388/0650] Loss: 8.3494 [cnt: 5.08, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.343] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 0.99 | W_solv: 0.64
+[0389/0650] Loss: 8.4914 [cnt: 5.26, alloc(dm16): 2.762, cell: 0.000, reg_nb: 2.303] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.00 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0390/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5657 [cnt: 5.29, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.313]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.87) | W_solv: 0.62
+  Val Metrics   : MAE: 99.79 | RMSE: 150.41 | NAE: 0.265 | Bias: +40.42
+  GAME Hierarchy: G0: 99.79 | G1: 121.86 | G2: 147.15 | G3: 184.71 | Sparse(<=100): 30.03 | Mod(101-500): 76.75 | Dense(>500): 175.05
+  Uncertainty   : Coverage: 50%=84.0%, 80%=95.0%, 95%=98.8% | Median Disp: 9.5
+  Checkpoint    : Current Val MAE: 99.79 | Best Val MAE: 89.09
+============================================================================================
+
+[0391/0650] Loss: 8.3550 [cnt: 5.04, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.336] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.01 | W_solv: 0.62
+[0392/0650] Loss: 8.5895 [cnt: 5.31, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.353] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.00 | W_solv: 0.61
+[0393/0650] Loss: 8.2891 [cnt: 5.02, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.281] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.03 | W_solv: 0.64
+[0394/0650] Loss: 8.4118 [cnt: 5.10, alloc(dm16): 2.838, cell: 0.000, reg_nb: 2.335] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 0.99 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0395/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3701 [cnt: 5.06, alloc(dm16): 2.842, cell: 0.000, reg_nb: 2.307]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.96) | W_solv: 0.63
+  Val Metrics   : MAE: 103.91 | RMSE: 160.16 | NAE: 0.270 | Bias: +46.22
+  GAME Hierarchy: G0: 103.91 | G1: 124.83 | G2: 149.98 | G3: 186.86 | Sparse(<=100): 24.20 | Mod(101-500): 79.00 | Dense(>500): 185.89
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.9%, 95%=98.7% | Median Disp: 11.0
+  Checkpoint    : Current Val MAE: 103.91 | Best Val MAE: 89.09
+============================================================================================
+
+[0396/0650] Loss: 8.2627 [cnt: 4.99, alloc(dm16): 2.802, cell: 0.000, reg_nb: 2.287] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.01 | W_solv: 0.62
+[0397/0650] Loss: 8.5462 [cnt: 5.27, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.303] | SolvStr: 1.00 | Disp: 10.7 | W_pred: 1.03 | W_solv: 0.64
+[0398/0650] Loss: 8.4074 [cnt: 5.09, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.311] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.01 | W_solv: 0.62
+[0399/0650] Loss: 8.5635 [cnt: 5.22, alloc(dm16): 2.865, cell: 0.000, reg_nb: 2.350] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.01 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0400/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3075 [cnt: 4.96, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.334]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.91) | W_solv: 0.64
+  Val Metrics   : MAE: 122.11 | RMSE: 183.77 | NAE: 0.309 | Bias: +75.00
+  GAME Hierarchy: G0: 122.11 | G1: 142.27 | G2: 167.43 | G3: 203.40 | Sparse(<=100): 23.20 | Mod(101-500): 90.45 | Dense(>500): 225.94
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.1%, 95%=98.8% | Median Disp: 11.2
+  Checkpoint    : Current Val MAE: 122.11 | Best Val MAE: 89.09
+============================================================================================
+
+[0401/0650] Loss: 8.3474 [cnt: 5.06, alloc(dm16): 2.816, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 12.0 | W_pred: 1.03 | W_solv: 0.63
+[0402/0650] Loss: 8.4722 [cnt: 5.14, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.357] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.01 | W_solv: 0.64
+[0403/0650] Loss: 8.3575 [cnt: 5.08, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.272] | SolvStr: 1.00 | Disp: 9.9 | W_pred: 1.01 | W_solv: 0.63
+[0404/0650] Loss: 8.2753 [cnt: 4.98, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.307] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 0.98 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0405/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3555 [cnt: 5.07, alloc(dm16): 2.818, cell: 0.000, reg_nb: 2.278]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.81) | W_solv: 0.60
+  Val Metrics   : MAE: 102.24 | RMSE: 156.60 | NAE: 0.273 | Bias: +41.36
+  GAME Hierarchy: G0: 102.24 | G1: 125.78 | G2: 150.62 | G3: 188.22 | Sparse(<=100): 32.23 | Mod(101-500): 78.73 | Dense(>500): 178.81
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.7% | Median Disp: 10.8
+  Checkpoint    : Current Val MAE: 102.24 | Best Val MAE: 89.09
+============================================================================================
+
+[0406/0650] Loss: 8.3697 [cnt: 5.10, alloc(dm16): 2.805, cell: 0.000, reg_nb: 2.272] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.65
+[0407/0650] Loss: 8.4155 [cnt: 5.08, alloc(dm16): 2.859, cell: 0.000, reg_nb: 2.330] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.00 | W_solv: 0.65
+[0408/0650] Loss: 8.4238 [cnt: 5.09, alloc(dm16): 2.864, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 9.9 | W_pred: 1.01 | W_solv: 0.64
+[0409/0650] Loss: 8.4773 [cnt: 5.13, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.328] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0410/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4729 [cnt: 5.15, alloc(dm16): 2.850, cell: 0.000, reg_nb: 2.320]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.91) | W_solv: 0.61
+  Val Metrics   : MAE: 114.38 | RMSE: 168.40 | NAE: 0.318 | Bias: +71.18
+  GAME Hierarchy: G0: 114.38 | G1: 137.36 | G2: 162.41 | G3: 199.02 | Sparse(<=100): 40.60 | Mod(101-500): 91.70 | Dense(>500): 189.20
+  Uncertainty   : Coverage: 50%=84.6%, 80%=95.3%, 95%=98.9% | Median Disp: 9.4
+  Checkpoint    : Current Val MAE: 114.38 | Best Val MAE: 89.09
+============================================================================================
+
+[0411/0650] Loss: 8.3233 [cnt: 5.04, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.303] | SolvStr: 1.00 | Disp: 12.7 | W_pred: 1.00 | W_solv: 0.66
+[0412/0650] Loss: 8.5667 [cnt: 5.26, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.322] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 0.99 | W_solv: 0.65
+[0413/0650] Loss: 8.3418 [cnt: 5.10, alloc(dm16): 2.771, cell: 0.000, reg_nb: 2.280] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.01 | W_solv: 0.64
+[0414/0650] Loss: 8.3718 [cnt: 5.08, alloc(dm16): 2.820, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 0.98 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0415/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3176 [cnt: 5.01, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.339]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.89) | W_solv: 0.64
+  Val Metrics   : MAE: 108.34 | RMSE: 166.12 | NAE: 0.286 | Bias: +59.72
+  GAME Hierarchy: G0: 108.34 | G1: 131.19 | G2: 156.51 | G3: 193.10 | Sparse(<=100): 32.56 | Mod(101-500): 82.23 | Dense(>500): 193.07
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.2%, 95%=98.9% | Median Disp: 12.4
+  Checkpoint    : Current Val MAE: 108.34 | Best Val MAE: 89.09
+============================================================================================
+
+[0416/0650] Loss: 8.3150 [cnt: 5.04, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.278] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 1.02 | W_solv: 0.64
+[0417/0650] Loss: 8.2976 [cnt: 5.03, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.305] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.02 | W_solv: 0.64
+[0418/0650] Loss: 8.3632 [cnt: 5.09, alloc(dm16): 2.804, cell: 0.000, reg_nb: 2.287] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.01 | W_solv: 0.64
+[0419/0650] Loss: 8.3792 [cnt: 5.03, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.351] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.02 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0420/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4285 [cnt: 5.12, alloc(dm16): 2.841, cell: 0.000, reg_nb: 2.307]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.93) | W_solv: 0.65
+  Val Metrics   : MAE: 105.74 | RMSE: 161.48 | NAE: 0.281 | Bias: +49.19
+  GAME Hierarchy: G0: 105.74 | G1: 128.73 | G2: 154.43 | G3: 190.61 | Sparse(<=100): 30.22 | Mod(101-500): 81.22 | Dense(>500): 185.97
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.0%, 95%=98.7% | Median Disp: 12.9
+  Checkpoint    : Current Val MAE: 105.74 | Best Val MAE: 89.09
+============================================================================================
+
+[0421/0650] Loss: 8.3757 [cnt: 5.06, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.325] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.01 | W_solv: 0.65
+[0422/0650] Loss: 8.5441 [cnt: 5.20, alloc(dm16): 2.864, cell: 0.000, reg_nb: 2.339] | SolvStr: 1.00 | Disp: 12.6 | W_pred: 1.00 | W_solv: 0.64
+[0423/0650] Loss: 8.3486 [cnt: 5.00, alloc(dm16): 2.869, cell: 0.000, reg_nb: 2.346] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.01 | W_solv: 0.64
+[0424/0650] Loss: 8.3101 [cnt: 5.05, alloc(dm16): 2.791, cell: 0.000, reg_nb: 2.289] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0425/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2523 [cnt: 4.99, alloc(dm16): 2.786, cell: 0.000, reg_nb: 2.306]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.04) | W_solv: 0.67
+  Val Metrics   : MAE: 119.39 | RMSE: 174.74 | NAE: 0.322 | Bias: +78.00
+  GAME Hierarchy: G0: 119.39 | G1: 140.17 | G2: 164.31 | G3: 199.99 | Sparse(<=100): 38.10 | Mod(101-500): 93.51 | Dense(>500): 204.32
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.4%, 95%=99.0% | Median Disp: 12.1
+  Checkpoint    : Current Val MAE: 119.39 | Best Val MAE: 89.09
+============================================================================================
+
+[0426/0650] Loss: 8.2178 [cnt: 4.92, alloc(dm16): 2.831, cell: 0.000, reg_nb: 2.295] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.00 | W_solv: 0.59
+[0427/0650] Loss: 8.5569 [cnt: 5.23, alloc(dm16): 2.856, cell: 0.000, reg_nb: 2.314] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 0.99 | W_solv: 0.63
+[0428/0650] Loss: 8.3643 [cnt: 5.06, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.330] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 0.99 | W_solv: 0.62
+[0429/0650] Loss: 8.4581 [cnt: 5.14, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.02 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0430/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3131 [cnt: 5.04, alloc(dm16): 2.805, cell: 0.000, reg_nb: 2.269]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.03) | W_solv: 0.66
+  Val Metrics   : MAE: 108.46 | RMSE: 164.95 | NAE: 0.283 | Bias: +55.77
+  GAME Hierarchy: G0: 108.46 | G1: 128.97 | G2: 152.98 | G3: 189.08 | Sparse(<=100): 28.10 | Mod(101-500): 82.47 | Dense(>500): 193.58
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.1%, 95%=98.8% | Median Disp: 11.8
+  Checkpoint    : Current Val MAE: 108.46 | Best Val MAE: 89.09
+============================================================================================
+
+[0431/0650] Loss: 8.4349 [cnt: 5.13, alloc(dm16): 2.823, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.01 | W_solv: 0.66
+[0432/0650] Loss: 8.2596 [cnt: 5.02, alloc(dm16): 2.765, cell: 0.000, reg_nb: 2.302] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.01 | W_solv: 0.64
+[0433/0650] Loss: 8.3804 [cnt: 5.09, alloc(dm16): 2.813, cell: 0.000, reg_nb: 2.335] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.03 | W_solv: 0.67
+[0434/0650] Loss: 8.2540 [cnt: 4.95, alloc(dm16): 2.833, cell: 0.000, reg_nb: 2.297] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0435/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4384 [cnt: 5.12, alloc(dm16): 2.842, cell: 0.000, reg_nb: 2.343]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.93) | W_solv: 0.62
+  Val Metrics   : MAE: 103.10 | RMSE: 156.15 | NAE: 0.272 | Bias: +47.58
+  GAME Hierarchy: G0: 103.10 | G1: 124.19 | G2: 148.18 | G3: 184.65 | Sparse(<=100): 27.72 | Mod(101-500): 79.39 | Dense(>500): 181.08
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.8%, 95%=98.6% | Median Disp: 12.2
+  Checkpoint    : Current Val MAE: 103.10 | Best Val MAE: 89.09
+============================================================================================
+
+[0436/0650] Loss: 8.5091 [cnt: 5.14, alloc(dm16): 2.882, cell: 0.000, reg_nb: 2.371] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.02 | W_solv: 0.65
+[0437/0650] Loss: 8.2229 [cnt: 4.96, alloc(dm16): 2.798, cell: 0.000, reg_nb: 2.288] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.00 | W_solv: 0.63
+[0438/0650] Loss: 8.3092 [cnt: 4.99, alloc(dm16): 2.847, cell: 0.000, reg_nb: 2.289] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.00 | W_solv: 0.60
+[0439/0650] Loss: 8.3603 [cnt: 5.08, alloc(dm16): 2.804, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.03 | W_solv: 0.68
+
+============================================================================================
+  EPOCH [0440/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3983 [cnt: 5.06, alloc(dm16): 2.856, cell: 0.000, reg_nb: 2.343]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.94) | W_solv: 0.65
+  Val Metrics   : MAE: 102.95 | RMSE: 158.25 | NAE: 0.272 | Bias: +47.87
+  GAME Hierarchy: G0: 102.95 | G1: 124.98 | G2: 150.48 | G3: 187.08 | Sparse(<=100): 27.97 | Mod(101-500): 78.81 | Dense(>500): 182.07
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.1%, 95%=98.8% | Median Disp: 10.7
+  Checkpoint    : Current Val MAE: 102.95 | Best Val MAE: 89.09
+============================================================================================
+
+[0441/0650] Loss: 8.2889 [cnt: 4.98, alloc(dm16): 2.835, cell: 0.000, reg_nb: 2.330] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.02 | W_solv: 0.64
+[0442/0650] Loss: 8.3535 [cnt: 5.03, alloc(dm16): 2.845, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.02 | W_solv: 0.63
+[0443/0650] Loss: 8.4525 [cnt: 5.12, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.307] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.01 | W_solv: 0.63
+[0444/0650] Loss: 8.3216 [cnt: 5.02, alloc(dm16): 2.821, cell: 0.000, reg_nb: 2.332] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0445/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4347 [cnt: 5.12, alloc(dm16): 2.831, cell: 0.000, reg_nb: 2.342]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.03) | W_solv: 0.64
+  Val Metrics   : MAE: 102.67 | RMSE: 155.96 | NAE: 0.271 | Bias: +42.11
+  GAME Hierarchy: G0: 102.67 | G1: 125.22 | G2: 150.68 | G3: 186.88 | Sparse(<=100): 30.22 | Mod(101-500): 77.62 | Dense(>500): 183.96
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.0%, 95%=98.7% | Median Disp: 8.9
+  Checkpoint    : Current Val MAE: 102.67 | Best Val MAE: 89.09
+============================================================================================
+
+[0446/0650] Loss: 8.3286 [cnt: 5.02, alloc(dm16): 2.835, cell: 0.000, reg_nb: 2.319] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.03 | W_solv: 0.67
+[0447/0650] Loss: 8.5463 [cnt: 5.25, alloc(dm16): 2.810, cell: 0.000, reg_nb: 2.365] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.02 | W_solv: 0.63
+[0448/0650] Loss: 8.2307 [cnt: 4.95, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.311] | SolvStr: 1.00 | Disp: 13.1 | W_pred: 1.02 | W_solv: 0.67
+[0449/0650] Loss: 8.3500 [cnt: 5.05, alloc(dm16): 2.831, cell: 0.000, reg_nb: 2.302] | SolvStr: 1.00 | Disp: 11.0 | W_pred: 1.01 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0450/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3689 [cnt: 5.04, alloc(dm16): 2.849, cell: 0.000, reg_nb: 2.325]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 1.06) | W_solv: 0.65
+  Val Metrics   : MAE: 117.25 | RMSE: 172.54 | NAE: 0.310 | Bias: +73.21
+  GAME Hierarchy: G0: 117.25 | G1: 138.19 | G2: 161.94 | G3: 197.21 | Sparse(<=100): 33.21 | Mod(101-500): 89.97 | Dense(>500): 206.55
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.2%, 95%=98.8% | Median Disp: 10.5
+  Checkpoint    : Current Val MAE: 117.25 | Best Val MAE: 89.09
+============================================================================================
+
+[0451/0650] Loss: 8.2403 [cnt: 4.93, alloc(dm16): 2.841, cell: 0.000, reg_nb: 2.312] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.02 | W_solv: 0.67
+[0452/0650] Loss: 8.4120 [cnt: 5.07, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.322] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.01 | W_solv: 0.67
+[0453/0650] Loss: 8.3169 [cnt: 5.06, alloc(dm16): 2.781, cell: 0.000, reg_nb: 2.312] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.01 | W_solv: 0.63
+[0454/0650] Loss: 8.4112 [cnt: 5.07, alloc(dm16): 2.865, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 13.6 | W_pred: 1.01 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0455/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4572 [cnt: 5.12, alloc(dm16): 2.861, cell: 0.000, reg_nb: 2.346]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.98) | W_solv: 0.66
+  Val Metrics   : MAE: 119.94 | RMSE: 176.03 | NAE: 0.319 | Bias: +79.11
+  GAME Hierarchy: G0: 119.94 | G1: 141.30 | G2: 164.77 | G3: 200.00 | Sparse(<=100): 34.69 | Mod(101-500): 92.40 | Dense(>500): 210.15
+  Uncertainty   : Coverage: 50%=84.5%, 80%=95.3%, 95%=98.9% | Median Disp: 10.9
+  Checkpoint    : Current Val MAE: 119.94 | Best Val MAE: 89.09
+============================================================================================
+
+[0456/0650] Loss: 8.3266 [cnt: 4.99, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.324] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.00 | W_solv: 0.61
+[0457/0650] Loss: 8.3908 [cnt: 5.05, alloc(dm16): 2.868, cell: 0.000, reg_nb: 2.296] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 1.00 | W_solv: 0.64
+[0458/0650] Loss: 8.2318 [cnt: 4.97, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.250] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.02 | W_solv: 0.67
+[0459/0650] Loss: 8.4607 [cnt: 5.15, alloc(dm16): 2.831, cell: 0.000, reg_nb: 2.359] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0460/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4039 [cnt: 5.11, alloc(dm16): 2.821, cell: 0.000, reg_nb: 2.323]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.95) | W_solv: 0.64
+  Val Metrics   : MAE: 99.20 | RMSE: 153.08 | NAE: 0.256 | Bias: +37.10
+  GAME Hierarchy: G0: 99.20 | G1: 120.74 | G2: 145.67 | G3: 181.88 | Sparse(<=100): 25.84 | Mod(101-500): 73.08 | Dense(>500): 183.62
+  Uncertainty   : Coverage: 50%=83.8%, 80%=94.7%, 95%=98.6% | Median Disp: 9.8
+  Checkpoint    : Current Val MAE: 99.20 | Best Val MAE: 89.09
+============================================================================================
+
+[0461/0650] Loss: 8.3939 [cnt: 5.07, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.318] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.02 | W_solv: 0.65
+[0462/0650] Loss: 8.3506 [cnt: 5.01, alloc(dm16): 2.863, cell: 0.000, reg_nb: 2.346] | SolvStr: 1.00 | Disp: 12.6 | W_pred: 1.02 | W_solv: 0.65
+[0463/0650] Loss: 8.3248 [cnt: 5.02, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.300] | SolvStr: 1.00 | Disp: 13.0 | W_pred: 1.01 | W_solv: 0.64
+[0464/0650] Loss: 8.3109 [cnt: 4.97, alloc(dm16): 2.866, cell: 0.000, reg_nb: 2.308] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 0.97 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0465/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3216 [cnt: 5.02, alloc(dm16): 2.832, cell: 0.000, reg_nb: 2.296]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.96) | W_solv: 0.67
+  Val Metrics   : MAE: 103.75 | RMSE: 158.65 | NAE: 0.268 | Bias: +45.62
+  GAME Hierarchy: G0: 103.75 | G1: 125.17 | G2: 149.58 | G3: 185.88 | Sparse(<=100): 26.96 | Mod(101-500): 76.84 | Dense(>500): 190.92
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.9%, 95%=98.8% | Median Disp: 13.1
+  Checkpoint    : Current Val MAE: 103.75 | Best Val MAE: 89.09
+============================================================================================
+
+[0466/0650] Loss: 8.3893 [cnt: 5.10, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.301] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 0.99 | W_solv: 0.64
+[0467/0650] Loss: 8.2797 [cnt: 4.98, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 1.00 | W_solv: 0.62
+[0468/0650] Loss: 8.4179 [cnt: 5.11, alloc(dm16): 2.823, cell: 0.000, reg_nb: 2.365] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.02 | W_solv: 0.68
+[0469/0650] Loss: 8.3779 [cnt: 5.08, alloc(dm16): 2.826, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.02 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0470/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3323 [cnt: 5.04, alloc(dm16): 2.820, cell: 0.000, reg_nb: 2.310]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.90) | W_solv: 0.59
+  Val Metrics   : MAE: 108.88 | RMSE: 162.84 | NAE: 0.295 | Bias: +63.23
+  GAME Hierarchy: G0: 108.88 | G1: 130.71 | G2: 155.02 | G3: 191.21 | Sparse(<=100): 38.67 | Mod(101-500): 84.24 | Dense(>500): 188.67
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.1%, 95%=98.9% | Median Disp: 9.3
+  Checkpoint    : Current Val MAE: 108.88 | Best Val MAE: 89.09
+============================================================================================
+
+[0471/0650] Loss: 8.3254 [cnt: 5.05, alloc(dm16): 2.802, cell: 0.000, reg_nb: 2.290] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.01 | W_solv: 0.66
+[0472/0650] Loss: 8.3702 [cnt: 5.02, alloc(dm16): 2.868, cell: 0.000, reg_nb: 2.358] | SolvStr: 1.00 | Disp: 10.3 | W_pred: 0.97 | W_solv: 0.62
+[0473/0650] Loss: 8.3229 [cnt: 5.01, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.325] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.01 | W_solv: 0.62
+[0474/0650] Loss: 8.5015 [cnt: 5.15, alloc(dm16): 2.872, cell: 0.000, reg_nb: 2.363] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.02 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0475/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3209 [cnt: 5.02, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.332]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.92) | W_solv: 0.63
+  Val Metrics   : MAE: 111.93 | RMSE: 165.28 | NAE: 0.303 | Bias: +66.24
+  GAME Hierarchy: G0: 111.93 | G1: 133.88 | G2: 158.33 | G3: 193.70 | Sparse(<=100): 31.49 | Mod(101-500): 87.96 | Dense(>500): 191.40
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.0%, 95%=98.8% | Median Disp: 9.1
+  Checkpoint    : Current Val MAE: 111.93 | Best Val MAE: 89.09
+============================================================================================
+
+[0476/0650] Loss: 8.1909 [cnt: 4.92, alloc(dm16): 2.798, cell: 0.000, reg_nb: 2.300] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.03 | W_solv: 0.64
+[0477/0650] Loss: 8.3695 [cnt: 5.03, alloc(dm16): 2.866, cell: 0.000, reg_nb: 2.332] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.00 | W_solv: 0.61
+[0478/0650] Loss: 8.3719 [cnt: 5.08, alloc(dm16): 2.816, cell: 0.000, reg_nb: 2.308] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.00 | W_solv: 0.66
+[0479/0650] Loss: 8.4261 [cnt: 5.16, alloc(dm16): 2.788, cell: 0.000, reg_nb: 2.319] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.00 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0480/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2736 [cnt: 4.97, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.303]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.97) | W_solv: 0.67
+  Val Metrics   : MAE: 102.59 | RMSE: 154.16 | NAE: 0.274 | Bias: +51.53
+  GAME Hierarchy: G0: 102.59 | G1: 124.52 | G2: 148.72 | G3: 185.60 | Sparse(<=100): 29.78 | Mod(101-500): 79.09 | Dense(>500): 179.57
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.7% | Median Disp: 12.2
+  Checkpoint    : Current Val MAE: 102.59 | Best Val MAE: 89.09
+============================================================================================
+
+[0481/0650] Loss: 8.2970 [cnt: 5.01, alloc(dm16): 2.823, cell: 0.000, reg_nb: 2.285] | SolvStr: 1.00 | Disp: 14.2 | W_pred: 1.00 | W_solv: 0.63
+[0482/0650] Loss: 8.1640 [cnt: 4.90, alloc(dm16): 2.797, cell: 0.000, reg_nb: 2.279] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 1.01 | W_solv: 0.66
+[0483/0650] Loss: 8.4801 [cnt: 5.13, alloc(dm16): 2.870, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.02 | W_solv: 0.64
+[0484/0650] Loss: 8.2782 [cnt: 5.00, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.298] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.02 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0485/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2853 [cnt: 4.96, alloc(dm16): 2.846, cell: 0.000, reg_nb: 2.326]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.99) | W_solv: 0.66
+  Val Metrics   : MAE: 102.40 | RMSE: 154.23 | NAE: 0.271 | Bias: +49.06
+  GAME Hierarchy: G0: 102.40 | G1: 124.87 | G2: 149.65 | G3: 186.21 | Sparse(<=100): 27.92 | Mod(101-500): 78.10 | Dense(>500): 181.86
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.8%, 95%=98.7% | Median Disp: 10.7
+  Checkpoint    : Current Val MAE: 102.40 | Best Val MAE: 89.09
+============================================================================================
+
+[0486/0650] Loss: 8.3430 [cnt: 4.99, alloc(dm16): 2.870, cell: 0.000, reg_nb: 2.342] | SolvStr: 1.00 | Disp: 12.9 | W_pred: 1.03 | W_solv: 0.68
+[0487/0650] Loss: 8.2630 [cnt: 4.94, alloc(dm16): 2.851, cell: 0.000, reg_nb: 2.292] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.03 | W_solv: 0.67
+[0488/0650] Loss: 8.2877 [cnt: 5.01, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.296] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.00 | W_solv: 0.64
+[0489/0650] Loss: 8.4623 [cnt: 5.08, alloc(dm16): 2.904, cell: 0.000, reg_nb: 2.336] | SolvStr: 1.00 | Disp: 12.6 | W_pred: 1.01 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0490/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1405 [cnt: 4.85, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.276]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.91) | W_solv: 0.64
+  Val Metrics   : MAE: 100.62 | RMSE: 151.44 | NAE: 0.266 | Bias: +45.71
+  GAME Hierarchy: G0: 100.62 | G1: 122.54 | G2: 147.68 | G3: 184.52 | Sparse(<=100): 27.49 | Mod(101-500): 76.56 | Dense(>500): 179.20
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.7%, 95%=98.7% | Median Disp: 12.2
+  Checkpoint    : Current Val MAE: 100.62 | Best Val MAE: 89.09
+============================================================================================
+
+[0491/0650] Loss: 8.2800 [cnt: 4.98, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.322] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.01 | W_solv: 0.61
+[0492/0650] Loss: 8.3295 [cnt: 5.06, alloc(dm16): 2.794, cell: 0.000, reg_nb: 2.325] | SolvStr: 1.00 | Disp: 13.5 | W_pred: 1.02 | W_solv: 0.66
+[0493/0650] Loss: 8.2588 [cnt: 5.04, alloc(dm16): 2.754, cell: 0.000, reg_nb: 2.269] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.02 | W_solv: 0.63
+[0494/0650] Loss: 8.3904 [cnt: 5.05, alloc(dm16): 2.856, cell: 0.000, reg_nb: 2.356] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 1.02 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0495/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5371 [cnt: 5.30, alloc(dm16): 2.763, cell: 0.000, reg_nb: 2.334]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.98) | W_solv: 0.61
+  Val Metrics   : MAE: 99.80 | RMSE: 147.46 | NAE: 0.279 | Bias: +40.83
+  GAME Hierarchy: G0: 99.80 | G1: 125.19 | G2: 149.86 | G3: 186.73 | Sparse(<=100): 42.76 | Mod(101-500): 78.13 | Dense(>500): 169.24
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.1%, 95%=98.8% | Median Disp: 9.6
+  Checkpoint    : Current Val MAE: 99.80 | Best Val MAE: 89.09
+============================================================================================
+
+[0496/0650] Loss: 8.2769 [cnt: 5.02, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.293] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 0.99 | W_solv: 0.65
+[0497/0650] Loss: 8.3150 [cnt: 5.03, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.265] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.02 | W_solv: 0.67
+[0498/0650] Loss: 8.2734 [cnt: 4.96, alloc(dm16): 2.838, cell: 0.000, reg_nb: 2.314] | SolvStr: 1.00 | Disp: 12.8 | W_pred: 1.01 | W_solv: 0.65
+[0499/0650] Loss: 8.3312 [cnt: 5.09, alloc(dm16): 2.768, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 13.1 | W_pred: 1.00 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0500/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2890 [cnt: 4.99, alloc(dm16): 2.822, cell: 0.000, reg_nb: 2.311]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.97) | W_solv: 0.64
+  Val Metrics   : MAE: 97.33 | RMSE: 149.70 | NAE: 0.252 | Bias: +30.08
+  GAME Hierarchy: G0: 97.33 | G1: 119.89 | G2: 144.29 | G3: 181.06 | Sparse(<=100): 22.01 | Mod(101-500): 72.31 | Dense(>500): 178.94
+  Uncertainty   : Coverage: 50%=83.5%, 80%=94.4%, 95%=98.5% | Median Disp: 9.8
+  Checkpoint    : Current Val MAE: 97.33 | Best Val MAE: 89.09
+============================================================================================
+
+[0501/0650] Loss: 8.2021 [cnt: 4.97, alloc(dm16): 2.771, cell: 0.000, reg_nb: 2.249] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.02 | W_solv: 0.66
+[0502/0650] Loss: 8.2904 [cnt: 4.98, alloc(dm16): 2.834, cell: 0.000, reg_nb: 2.304] | SolvStr: 1.00 | Disp: 14.2 | W_pred: 1.00 | W_solv: 0.63
+[0503/0650] Loss: 8.2699 [cnt: 5.00, alloc(dm16): 2.798, cell: 0.000, reg_nb: 2.326] | SolvStr: 1.00 | Disp: 12.9 | W_pred: 1.02 | W_solv: 0.66
+[0504/0650] Loss: 8.4309 [cnt: 5.15, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.349] | SolvStr: 1.00 | Disp: 9.3 | W_pred: 1.03 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0505/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2603 [cnt: 4.93, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.342]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.87) | W_solv: 0.64
+  Val Metrics   : MAE: 93.39 | RMSE: 143.43 | NAE: 0.249 | Bias: +28.24
+  GAME Hierarchy: G0: 93.39 | G1: 118.92 | G2: 143.97 | G3: 180.30 | Sparse(<=100): 26.61 | Mod(101-500): 71.91 | Dense(>500): 163.78
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.7%, 95%=98.6% | Median Disp: 11.1
+  Checkpoint    : Current Val MAE: 93.39 | Best Val MAE: 89.09
+============================================================================================
+
+[0506/0650] Loss: 8.2490 [cnt: 5.01, alloc(dm16): 2.780, cell: 0.000, reg_nb: 2.264] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.00 | W_solv: 0.61
+[0507/0650] Loss: 8.4017 [cnt: 5.12, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.302] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.02 | W_solv: 0.65
+[0508/0650] Loss: 8.3649 [cnt: 5.03, alloc(dm16): 2.855, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.02 | W_solv: 0.63
+[0509/0650] Loss: 8.4065 [cnt: 5.06, alloc(dm16): 2.867, cell: 0.000, reg_nb: 2.331] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.00 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0510/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3210 [cnt: 5.05, alloc(dm16): 2.806, cell: 0.000, reg_nb: 2.292]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.95) | W_solv: 0.65
+  Val Metrics   : MAE: 100.04 | RMSE: 148.05 | NAE: 0.268 | Bias: +39.58
+  GAME Hierarchy: G0: 100.04 | G1: 123.75 | G2: 148.53 | G3: 184.70 | Sparse(<=100): 29.06 | Mod(101-500): 77.51 | Dense(>500): 174.04
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.8%, 95%=98.7% | Median Disp: 11.9
+  Checkpoint    : Current Val MAE: 100.04 | Best Val MAE: 89.09
+============================================================================================
+
+[0511/0650] Loss: 8.2918 [cnt: 4.96, alloc(dm16): 2.860, cell: 0.000, reg_nb: 2.308] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.00 | W_solv: 0.65
+[0512/0650] Loss: 8.3162 [cnt: 4.98, alloc(dm16): 2.856, cell: 0.000, reg_nb: 2.327] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 1.02 | W_solv: 0.66
+[0513/0650] Loss: 8.4261 [cnt: 5.12, alloc(dm16): 2.826, cell: 0.000, reg_nb: 2.335] | SolvStr: 1.00 | Disp: 14.3 | W_pred: 1.01 | W_solv: 0.62
+[0514/0650] Loss: 8.3139 [cnt: 5.00, alloc(dm16): 2.839, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.01 | W_solv: 0.60
+
+============================================================================================
+  EPOCH [0515/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1909 [cnt: 4.91, alloc(dm16): 2.821, cell: 0.000, reg_nb: 2.271]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 0.90) | W_solv: 0.63
+  Val Metrics   : MAE: 105.94 | RMSE: 157.32 | NAE: 0.285 | Bias: +56.11
+  GAME Hierarchy: G0: 105.94 | G1: 129.03 | G2: 153.88 | G3: 189.78 | Sparse(<=100): 31.57 | Mod(101-500): 81.90 | Dense(>500): 184.68
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.8% | Median Disp: 8.7
+  Checkpoint    : Current Val MAE: 105.94 | Best Val MAE: 89.09
+============================================================================================
+
+[0516/0650] Loss: 8.3945 [cnt: 5.06, alloc(dm16): 2.859, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 13.2 | W_pred: 1.01 | W_solv: 0.66
+[0517/0650] Loss: 8.3171 [cnt: 4.98, alloc(dm16): 2.860, cell: 0.000, reg_nb: 2.321] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.63
+[0518/0650] Loss: 8.2895 [cnt: 4.94, alloc(dm16): 2.871, cell: 0.000, reg_nb: 2.318] | SolvStr: 1.00 | Disp: 13.9 | W_pred: 1.02 | W_solv: 0.65
+[0519/0650] Loss: 8.3796 [cnt: 5.09, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.323] | SolvStr: 1.00 | Disp: 13.5 | W_pred: 1.01 | W_solv: 0.66
+
+============================================================================================
+  EPOCH [0520/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2618 [cnt: 5.00, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.282]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.89) | W_solv: 0.64
+  Val Metrics   : MAE: 106.71 | RMSE: 156.90 | NAE: 0.287 | Bias: +58.51
+  GAME Hierarchy: G0: 106.71 | G1: 128.98 | G2: 154.61 | G3: 190.05 | Sparse(<=100): 30.51 | Mod(101-500): 83.28 | Dense(>500): 184.01
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.9% | Median Disp: 12.5
+  Checkpoint    : Current Val MAE: 106.71 | Best Val MAE: 89.09
+============================================================================================
+
+[0521/0650] Loss: 8.3360 [cnt: 4.98, alloc(dm16): 2.876, cell: 0.000, reg_nb: 2.326] | SolvStr: 1.00 | Disp: 12.5 | W_pred: 1.02 | W_solv: 0.65
+[0522/0650] Loss: 8.2223 [cnt: 4.92, alloc(dm16): 2.829, cell: 0.000, reg_nb: 2.322] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.01 | W_solv: 0.63
+[0523/0650] Loss: 8.3690 [cnt: 5.05, alloc(dm16): 2.843, cell: 0.000, reg_nb: 2.326] | SolvStr: 1.00 | Disp: 13.3 | W_pred: 1.03 | W_solv: 0.66
+[0524/0650] Loss: 8.3415 [cnt: 5.06, alloc(dm16): 2.810, cell: 0.000, reg_nb: 2.325] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0525/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5045 [cnt: 5.17, alloc(dm16): 2.851, cell: 0.000, reg_nb: 2.376]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.96) | W_solv: 0.65
+  Val Metrics   : MAE: 100.38 | RMSE: 150.62 | NAE: 0.269 | Bias: +46.69
+  GAME Hierarchy: G0: 100.38 | G1: 122.52 | G2: 147.35 | G3: 183.32 | Sparse(<=100): 30.80 | Mod(101-500): 77.09 | Dense(>500): 176.31
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.8% | Median Disp: 13.3
+  Checkpoint    : Current Val MAE: 100.38 | Best Val MAE: 89.09
+============================================================================================
+
+[0526/0650] Loss: 8.2938 [cnt: 5.01, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.319] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.01 | W_solv: 0.62
+[0527/0650] Loss: 8.3590 [cnt: 5.03, alloc(dm16): 2.854, cell: 0.000, reg_nb: 2.323] | SolvStr: 1.00 | Disp: 13.3 | W_pred: 1.01 | W_solv: 0.67
+[0528/0650] Loss: 8.2732 [cnt: 5.02, alloc(dm16): 2.787, cell: 0.000, reg_nb: 2.257] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.00 | W_solv: 0.64
+[0529/0650] Loss: 8.3373 [cnt: 5.04, alloc(dm16): 2.821, cell: 0.000, reg_nb: 2.308] | SolvStr: 1.00 | Disp: 13.8 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0530/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3276 [cnt: 5.06, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.305]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.86) | W_solv: 0.62
+  Val Metrics   : MAE: 119.44 | RMSE: 173.51 | NAE: 0.322 | Bias: +77.92
+  GAME Hierarchy: G0: 119.44 | G1: 140.47 | G2: 164.68 | G3: 199.23 | Sparse(<=100): 32.35 | Mod(101-500): 93.16 | Dense(>500): 206.39
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.8% | Median Disp: 10.3
+  Checkpoint    : Current Val MAE: 119.44 | Best Val MAE: 89.09
+============================================================================================
+
+[0531/0650] Loss: 8.2146 [cnt: 4.94, alloc(dm16): 2.805, cell: 0.000, reg_nb: 2.297] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.01 | W_solv: 0.62
+[0532/0650] Loss: 8.1674 [cnt: 4.95, alloc(dm16): 2.758, cell: 0.000, reg_nb: 2.262] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.03 | W_solv: 0.63
+[0533/0650] Loss: 8.2867 [cnt: 5.01, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.309] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 0.99 | W_solv: 0.60
+[0534/0650] Loss: 8.2848 [cnt: 5.01, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.282] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0535/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1387 [cnt: 4.89, alloc(dm16): 2.784, cell: 0.000, reg_nb: 2.291]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.91) | W_solv: 0.63
+  Val Metrics   : MAE: 109.75 | RMSE: 162.38 | NAE: 0.296 | Bias: +61.80
+  GAME Hierarchy: G0: 109.75 | G1: 131.00 | G2: 155.55 | G3: 190.98 | Sparse(<=100): 33.51 | Mod(101-500): 85.24 | Dense(>500): 190.09
+  Uncertainty   : Coverage: 50%=84.1%, 80%=95.0%, 95%=98.8% | Median Disp: 11.8
+  Checkpoint    : Current Val MAE: 109.75 | Best Val MAE: 89.09
+============================================================================================
+
+[0536/0650] Loss: 8.2935 [cnt: 4.96, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.332] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.01 | W_solv: 0.66
+[0537/0650] Loss: 8.3149 [cnt: 5.02, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.328] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.02 | W_solv: 0.65
+[0538/0650] Loss: 8.3942 [cnt: 5.10, alloc(dm16): 2.819, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.00 | W_solv: 0.61
+[0539/0650] Loss: 8.2979 [cnt: 4.98, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.327] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0540/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3407 [cnt: 5.00, alloc(dm16): 2.866, cell: 0.000, reg_nb: 2.324]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.92) | W_solv: 0.65
+  Val Metrics   : MAE: 99.35 | RMSE: 150.62 | NAE: 0.263 | Bias: +44.04
+  GAME Hierarchy: G0: 99.35 | G1: 122.13 | G2: 146.80 | G3: 182.93 | Sparse(<=100): 25.03 | Mod(101-500): 76.54 | Dense(>500): 174.63
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.9%, 95%=98.8% | Median Disp: 14.0
+  Checkpoint    : Current Val MAE: 99.35 | Best Val MAE: 89.09
+============================================================================================
+
+[0541/0650] Loss: 8.3166 [cnt: 5.01, alloc(dm16): 2.836, cell: 0.000, reg_nb: 2.314] | SolvStr: 1.00 | Disp: 12.0 | W_pred: 1.01 | W_solv: 0.62
+[0542/0650] Loss: 8.2257 [cnt: 4.95, alloc(dm16): 2.804, cell: 0.000, reg_nb: 2.297] | SolvStr: 1.00 | Disp: 12.4 | W_pred: 0.98 | W_solv: 0.63
+[0543/0650] Loss: 8.4240 [cnt: 5.15, alloc(dm16): 2.802, cell: 0.000, reg_nb: 2.286] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.00 | W_solv: 0.65
+[0544/0650] Loss: 8.1927 [cnt: 4.90, alloc(dm16): 2.821, cell: 0.000, reg_nb: 2.284] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.00 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0545/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3630 [cnt: 5.09, alloc(dm16): 2.799, cell: 0.000, reg_nb: 2.330]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.01) | W_solv: 0.65
+  Val Metrics   : MAE: 105.86 | RMSE: 157.81 | NAE: 0.284 | Bias: +57.79
+  GAME Hierarchy: G0: 105.86 | G1: 128.80 | G2: 153.76 | G3: 189.70 | Sparse(<=100): 28.62 | Mod(101-500): 81.97 | Dense(>500): 184.61
+  Uncertainty   : Coverage: 50%=84.5%, 80%=95.2%, 95%=98.9% | Median Disp: 10.1
+  Checkpoint    : Current Val MAE: 105.86 | Best Val MAE: 89.09
+============================================================================================
+
+[0546/0650] Loss: 8.2477 [cnt: 4.95, alloc(dm16): 2.832, cell: 0.000, reg_nb: 2.275] | SolvStr: 1.00 | Disp: 8.7 | W_pred: 1.01 | W_solv: 0.63
+[0547/0650] Loss: 8.4884 [cnt: 5.18, alloc(dm16): 2.829, cell: 0.000, reg_nb: 2.330] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.01 | W_solv: 0.64
+[0548/0650] Loss: 8.2931 [cnt: 5.02, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.312] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 0.99 | W_solv: 0.65
+[0549/0650] Loss: 8.3164 [cnt: 5.04, alloc(dm16): 2.802, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 11.8 | W_pred: 1.03 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0550/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2890 [cnt: 4.97, alloc(dm16): 2.843, cell: 0.000, reg_nb: 2.329]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 1.00) | W_solv: 0.68
+  Val Metrics   : MAE: 97.07 | RMSE: 148.80 | NAE: 0.252 | Bias: +34.99
+  GAME Hierarchy: G0: 97.07 | G1: 118.75 | G2: 142.83 | G3: 178.87 | Sparse(<=100): 23.38 | Mod(101-500): 72.36 | Dense(>500): 177.57
+  Uncertainty   : Coverage: 50%=83.7%, 80%=94.5%, 95%=98.6% | Median Disp: 13.9
+  Checkpoint    : Current Val MAE: 97.07 | Best Val MAE: 89.09
+============================================================================================
+
+[0551/0650] Loss: 8.2277 [cnt: 4.95, alloc(dm16): 2.810, cell: 0.000, reg_nb: 2.303] | SolvStr: 1.00 | Disp: 12.7 | W_pred: 1.02 | W_solv: 0.65
+[0552/0650] Loss: 8.3531 [cnt: 5.00, alloc(dm16): 2.868, cell: 0.000, reg_nb: 2.381] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.01 | W_solv: 0.61
+[0553/0650] Loss: 8.1297 [cnt: 4.89, alloc(dm16): 2.769, cell: 0.000, reg_nb: 2.280] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 0.99 | W_solv: 0.65
+[0554/0650] Loss: 8.3309 [cnt: 5.06, alloc(dm16): 2.796, cell: 0.000, reg_nb: 2.305] | SolvStr: 1.00 | Disp: 9.5 | W_pred: 0.99 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0555/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3501 [cnt: 5.08, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.342]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.83) | W_solv: 0.63
+  Val Metrics   : MAE: 100.10 | RMSE: 151.68 | NAE: 0.263 | Bias: +45.04
+  GAME Hierarchy: G0: 100.10 | G1: 122.27 | G2: 147.44 | G3: 183.45 | Sparse(<=100): 26.25 | Mod(101-500): 75.26 | Dense(>500): 181.01
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.8% | Median Disp: 11.1
+  Checkpoint    : Current Val MAE: 100.10 | Best Val MAE: 89.09
+============================================================================================
+
+[0556/0650] Loss: 8.1866 [cnt: 4.91, alloc(dm16): 2.804, cell: 0.000, reg_nb: 2.284] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.01 | W_solv: 0.65
+[0557/0650] Loss: 8.2406 [cnt: 4.99, alloc(dm16): 2.784, cell: 0.000, reg_nb: 2.298] | SolvStr: 1.00 | Disp: 12.1 | W_pred: 1.03 | W_solv: 0.66
+[0558/0650] Loss: 8.3059 [cnt: 5.04, alloc(dm16): 2.791, cell: 0.000, reg_nb: 2.329] | SolvStr: 1.00 | Disp: 8.5 | W_pred: 1.01 | W_solv: 0.63
+[0559/0650] Loss: 8.2492 [cnt: 5.00, alloc(dm16): 2.775, cell: 0.000, reg_nb: 2.307] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.01 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0560/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3792 [cnt: 5.09, alloc(dm16): 2.814, cell: 0.000, reg_nb: 2.330]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.99) | W_solv: 0.64
+  Val Metrics   : MAE: 100.92 | RMSE: 151.41 | NAE: 0.273 | Bias: +47.97
+  GAME Hierarchy: G0: 100.92 | G1: 124.37 | G2: 149.56 | G3: 185.69 | Sparse(<=100): 31.64 | Mod(101-500): 78.51 | Dense(>500): 174.29
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.1%, 95%=98.9% | Median Disp: 10.1
+  Checkpoint    : Current Val MAE: 100.92 | Best Val MAE: 89.09
+============================================================================================
+
+[0561/0650] Loss: 8.1751 [cnt: 4.89, alloc(dm16): 2.815, cell: 0.000, reg_nb: 2.299] | SolvStr: 1.00 | Disp: 13.5 | W_pred: 1.00 | W_solv: 0.63
+[0562/0650] Loss: 8.3374 [cnt: 5.03, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.293] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.03 | W_solv: 0.63
+[0563/0650] Loss: 8.3535 [cnt: 5.09, alloc(dm16): 2.794, cell: 0.000, reg_nb: 2.292] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.01 | W_solv: 0.65
+[0564/0650] Loss: 8.2930 [cnt: 5.04, alloc(dm16): 2.787, cell: 0.000, reg_nb: 2.300] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.00 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0565/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.5347 [cnt: 5.20, alloc(dm16): 2.863, cell: 0.000, reg_nb: 2.285]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.99 (std: 0.98) | W_solv: 0.63
+  Val Metrics   : MAE: 99.16 | RMSE: 150.32 | NAE: 0.259 | Bias: +40.22
+  GAME Hierarchy: G0: 99.16 | G1: 120.72 | G2: 145.52 | G3: 181.67 | Sparse(<=100): 22.84 | Mod(101-500): 74.87 | Dense(>500): 178.90
+  Uncertainty   : Coverage: 50%=84.0%, 80%=94.8%, 95%=98.7% | Median Disp: 10.3
+  Checkpoint    : Current Val MAE: 99.16 | Best Val MAE: 89.09
+============================================================================================
+
+[0566/0650] Loss: 8.2227 [cnt: 4.98, alloc(dm16): 2.769, cell: 0.000, reg_nb: 2.293] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.02 | W_solv: 0.65
+[0567/0650] Loss: 8.3166 [cnt: 5.06, alloc(dm16): 2.789, cell: 0.000, reg_nb: 2.298] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.02 | W_solv: 0.65
+[0568/0650] Loss: 8.2724 [cnt: 4.97, alloc(dm16): 2.824, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 10.6 | W_pred: 1.00 | W_solv: 0.63
+[0569/0650] Loss: 8.2730 [cnt: 4.96, alloc(dm16): 2.841, cell: 0.000, reg_nb: 2.319] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 0.99 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0570/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3450 [cnt: 4.98, alloc(dm16): 2.884, cell: 0.000, reg_nb: 2.339]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.04) | W_solv: 0.65
+  Val Metrics   : MAE: 99.73 | RMSE: 148.76 | NAE: 0.264 | Bias: +42.38
+  GAME Hierarchy: G0: 99.73 | G1: 121.19 | G2: 145.92 | G3: 182.06 | Sparse(<=100): 29.00 | Mod(101-500): 75.83 | Dense(>500): 177.51
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.9%, 95%=98.8% | Median Disp: 13.0
+  Checkpoint    : Current Val MAE: 99.73 | Best Val MAE: 89.09
+============================================================================================
+
+[0571/0650] Loss: 8.2045 [cnt: 4.90, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.329] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.01 | W_solv: 0.65
+[0572/0650] Loss: 8.2300 [cnt: 4.98, alloc(dm16): 2.779, cell: 0.000, reg_nb: 2.276] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 1.00 | W_solv: 0.65
+[0573/0650] Loss: 8.4566 [cnt: 5.13, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.321] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.02 | W_solv: 0.67
+[0574/0650] Loss: 8.3902 [cnt: 5.11, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.277] | SolvStr: 1.00 | Disp: 11.0 | W_pred: 1.02 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0575/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2258 [cnt: 4.92, alloc(dm16): 2.828, cell: 0.000, reg_nb: 2.320]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.98) | W_solv: 0.66
+  Val Metrics   : MAE: 98.51 | RMSE: 148.67 | NAE: 0.259 | Bias: +38.07
+  GAME Hierarchy: G0: 98.51 | G1: 121.15 | G2: 145.31 | G3: 181.56 | Sparse(<=100): 25.77 | Mod(101-500): 74.57 | Dense(>500): 176.71
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.8%, 95%=98.7% | Median Disp: 10.4
+  Checkpoint    : Current Val MAE: 98.51 | Best Val MAE: 89.09
+============================================================================================
+
+[0576/0650] Loss: 8.1873 [cnt: 4.92, alloc(dm16): 2.795, cell: 0.000, reg_nb: 2.293] | SolvStr: 1.00 | Disp: 8.9 | W_pred: 1.02 | W_solv: 0.61
+[0577/0650] Loss: 8.1602 [cnt: 4.85, alloc(dm16): 2.844, cell: 0.000, reg_nb: 2.281] | SolvStr: 1.00 | Disp: 13.7 | W_pred: 0.99 | W_solv: 0.63
+[0578/0650] Loss: 8.2613 [cnt: 4.97, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.319] | SolvStr: 1.00 | Disp: 11.6 | W_pred: 1.02 | W_solv: 0.64
+[0579/0650] Loss: 8.3107 [cnt: 5.02, alloc(dm16): 2.826, cell: 0.000, reg_nb: 2.291] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.02 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0580/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3142 [cnt: 5.04, alloc(dm16): 2.798, cell: 0.000, reg_nb: 2.329]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.92) | W_solv: 0.65
+  Val Metrics   : MAE: 108.92 | RMSE: 163.85 | NAE: 0.282 | Bias: +56.33
+  GAME Hierarchy: G0: 108.92 | G1: 130.15 | G2: 154.06 | G3: 189.50 | Sparse(<=100): 24.02 | Mod(101-500): 81.65 | Dense(>500): 198.31
+  Uncertainty   : Coverage: 50%=84.2%, 80%=94.9%, 95%=98.7% | Median Disp: 11.5
+  Checkpoint    : Current Val MAE: 108.92 | Best Val MAE: 89.09
+============================================================================================
+
+[0581/0650] Loss: 8.3412 [cnt: 4.97, alloc(dm16): 2.892, cell: 0.000, reg_nb: 2.350] | SolvStr: 1.00 | Disp: 12.4 | W_pred: 1.03 | W_solv: 0.65
+[0582/0650] Loss: 8.3323 [cnt: 5.04, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.320] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 0.97 | W_solv: 0.60
+[0583/0650] Loss: 8.3221 [cnt: 5.02, alloc(dm16): 2.833, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 11.9 | W_pred: 1.01 | W_solv: 0.65
+[0584/0650] Loss: 8.5356 [cnt: 5.17, alloc(dm16): 2.879, cell: 0.000, reg_nb: 2.362] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 0.99 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0585/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4765 [cnt: 5.16, alloc(dm16): 2.848, cell: 0.000, reg_nb: 2.302]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.98 (std: 0.95) | W_solv: 0.62
+  Val Metrics   : MAE: 93.43 | RMSE: 143.09 | NAE: 0.245 | Bias: +28.25
+  GAME Hierarchy: G0: 93.43 | G1: 116.24 | G2: 141.05 | G3: 177.45 | Sparse(<=100): 26.48 | Mod(101-500): 70.03 | Dense(>500): 169.24
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.8%, 95%=98.7% | Median Disp: 10.6
+  Checkpoint    : Current Val MAE: 93.43 | Best Val MAE: 89.09
+============================================================================================
+
+[0586/0650] Loss: 8.2758 [cnt: 5.02, alloc(dm16): 2.796, cell: 0.000, reg_nb: 2.241] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.01 | W_solv: 0.63
+[0587/0650] Loss: 8.1776 [cnt: 4.90, alloc(dm16): 2.813, cell: 0.000, reg_nb: 2.288] | SolvStr: 1.00 | Disp: 11.7 | W_pred: 1.02 | W_solv: 0.66
+[0588/0650] Loss: 8.0995 [cnt: 4.87, alloc(dm16): 2.772, cell: 0.000, reg_nb: 2.236] | SolvStr: 1.00 | Disp: 10.8 | W_pred: 1.00 | W_solv: 0.64
+[0589/0650] Loss: 8.2951 [cnt: 4.94, alloc(dm16): 2.882, cell: 0.000, reg_nb: 2.336] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 0.99 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0590/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2176 [cnt: 4.96, alloc(dm16): 2.787, cell: 0.000, reg_nb: 2.288]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.01) | W_solv: 0.65
+  Val Metrics   : MAE: 105.50 | RMSE: 156.36 | NAE: 0.285 | Bias: +55.88
+  GAME Hierarchy: G0: 105.50 | G1: 128.60 | G2: 153.78 | G3: 189.41 | Sparse(<=100): 30.80 | Mod(101-500): 82.34 | Dense(>500): 181.83
+  Uncertainty   : Coverage: 50%=84.3%, 80%=95.1%, 95%=98.9% | Median Disp: 12.9
+  Checkpoint    : Current Val MAE: 105.50 | Best Val MAE: 89.09
+============================================================================================
+
+[0591/0650] Loss: 8.1654 [cnt: 4.90, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.238] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.00 | W_solv: 0.63
+[0592/0650] Loss: 8.3641 [cnt: 5.06, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.01 | W_solv: 0.63
+[0593/0650] Loss: 8.3061 [cnt: 5.00, alloc(dm16): 2.832, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.02 | W_solv: 0.65
+[0594/0650] Loss: 8.2352 [cnt: 4.95, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.309] | SolvStr: 1.00 | Disp: 12.8 | W_pred: 0.99 | W_solv: 0.62
+
+============================================================================================
+  EPOCH [0595/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4612 [cnt: 5.19, alloc(dm16): 2.797, cell: 0.000, reg_nb: 2.326]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.93) | W_solv: 0.64
+  Val Metrics   : MAE: 105.98 | RMSE: 157.34 | NAE: 0.284 | Bias: +55.51
+  GAME Hierarchy: G0: 105.98 | G1: 128.43 | G2: 153.47 | G3: 188.90 | Sparse(<=100): 29.48 | Mod(101-500): 82.07 | Dense(>500): 184.65
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.9% | Median Disp: 12.8
+  Checkpoint    : Current Val MAE: 105.98 | Best Val MAE: 89.09
+============================================================================================
+
+[0596/0650] Loss: 8.3141 [cnt: 5.04, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.333] | SolvStr: 1.00 | Disp: 8.6 | W_pred: 0.99 | W_solv: 0.61
+[0597/0650] Loss: 8.3945 [cnt: 5.07, alloc(dm16): 2.845, cell: 0.000, reg_nb: 2.325] | SolvStr: 1.00 | Disp: 13.6 | W_pred: 1.02 | W_solv: 0.65
+[0598/0650] Loss: 8.4732 [cnt: 5.16, alloc(dm16): 2.838, cell: 0.000, reg_nb: 2.327] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.01 | W_solv: 0.63
+[0599/0650] Loss: 8.3479 [cnt: 5.02, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.323] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.03 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0600/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3039 [cnt: 4.99, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.318]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 1.05) | W_solv: 0.66
+  Val Metrics   : MAE: 95.02 | RMSE: 144.48 | NAE: 0.252 | Bias: +34.78
+  GAME Hierarchy: G0: 95.02 | G1: 117.52 | G2: 142.61 | G3: 178.94 | Sparse(<=100): 27.74 | Mod(101-500): 71.95 | Dense(>500): 169.96
+  Uncertainty   : Coverage: 50%=83.9%, 80%=94.8%, 95%=98.8% | Median Disp: 10.7
+  Checkpoint    : Current Val MAE: 95.02 | Best Val MAE: 89.09
+============================================================================================
+
+[0601/0650] Loss: 8.3183 [cnt: 4.94, alloc(dm16): 2.895, cell: 0.000, reg_nb: 2.357] | SolvStr: 1.00 | Disp: 13.1 | W_pred: 1.02 | W_solv: 0.62
+[0602/0650] Loss: 8.2319 [cnt: 4.97, alloc(dm16): 2.792, cell: 0.000, reg_nb: 2.288] | SolvStr: 1.00 | Disp: 10.0 | W_pred: 1.02 | W_solv: 0.61
+[0603/0650] Loss: 8.2745 [cnt: 5.00, alloc(dm16): 2.803, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 8.4 | W_pred: 0.99 | W_solv: 0.60
+[0604/0650] Loss: 8.2174 [cnt: 4.93, alloc(dm16): 2.812, cell: 0.000, reg_nb: 2.303] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.01 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0605/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4081 [cnt: 5.12, alloc(dm16): 2.817, cell: 0.000, reg_nb: 2.299]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 0.99) | W_solv: 0.65
+  Val Metrics   : MAE: 105.26 | RMSE: 156.22 | NAE: 0.284 | Bias: +56.42
+  GAME Hierarchy: G0: 105.26 | G1: 127.62 | G2: 152.41 | G3: 188.57 | Sparse(<=100): 31.60 | Mod(101-500): 81.77 | Dense(>500): 182.35
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.9% | Median Disp: 10.9
+  Checkpoint    : Current Val MAE: 105.26 | Best Val MAE: 89.09
+============================================================================================
+
+[0606/0650] Loss: 8.2510 [cnt: 5.02, alloc(dm16): 2.760, cell: 0.000, reg_nb: 2.275] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.02 | W_solv: 0.67
+[0607/0650] Loss: 8.3299 [cnt: 5.02, alloc(dm16): 2.835, cell: 0.000, reg_nb: 2.296] | SolvStr: 1.00 | Disp: 11.5 | W_pred: 1.03 | W_solv: 0.67
+[0608/0650] Loss: 8.3170 [cnt: 4.98, alloc(dm16): 2.851, cell: 0.000, reg_nb: 2.369] | SolvStr: 1.00 | Disp: 13.7 | W_pred: 1.01 | W_solv: 0.64
+[0609/0650] Loss: 8.2509 [cnt: 4.99, alloc(dm16): 2.785, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 12.2 | W_pred: 1.02 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0610/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2816 [cnt: 4.97, alloc(dm16): 2.840, cell: 0.000, reg_nb: 2.300]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 0.97) | W_solv: 0.64
+  Val Metrics   : MAE: 91.65 | RMSE: 143.10 | NAE: 0.231 | Bias: +17.54
+  GAME Hierarchy: G0: 91.65 | G1: 113.43 | G2: 137.27 | G3: 173.90 | Sparse(<=100): 19.60 | Mod(101-500): 65.54 | Dense(>500): 175.82
+  Uncertainty   : Coverage: 50%=83.2%, 80%=94.2%, 95%=98.5% | Median Disp: 12.4
+  Checkpoint    : Current Val MAE: 91.65 | Best Val MAE: 89.09
+============================================================================================
+
+[0611/0650] Loss: 8.3499 [cnt: 5.02, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.309] | SolvStr: 1.00 | Disp: 12.7 | W_pred: 1.03 | W_solv: 0.66
+[0612/0650] Loss: 8.3644 [cnt: 5.02, alloc(dm16): 2.866, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 12.4 | W_pred: 1.02 | W_solv: 0.66
+[0613/0650] Loss: 8.3264 [cnt: 5.03, alloc(dm16): 2.825, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 10.5 | W_pred: 0.99 | W_solv: 0.64
+[0614/0650] Loss: 8.2606 [cnt: 4.98, alloc(dm16): 2.809, cell: 0.000, reg_nb: 2.311] | SolvStr: 1.00 | Disp: 12.8 | W_pred: 1.01 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0615/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.3438 [cnt: 4.99, alloc(dm16): 2.874, cell: 0.000, reg_nb: 2.336]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.98) | W_solv: 0.63
+  Val Metrics   : MAE: 95.34 | RMSE: 147.70 | NAE: 0.243 | Bias: +30.88
+  GAME Hierarchy: G0: 95.34 | G1: 116.81 | G2: 141.24 | G3: 177.51 | Sparse(<=100): 19.05 | Mod(101-500): 70.13 | Dense(>500): 177.65
+  Uncertainty   : Coverage: 50%=83.6%, 80%=94.6%, 95%=98.6% | Median Disp: 11.4
+  Checkpoint    : Current Val MAE: 95.34 | Best Val MAE: 89.09
+============================================================================================
+
+[0616/0650] Loss: 8.3147 [cnt: 4.99, alloc(dm16): 2.857, cell: 0.000, reg_nb: 2.304] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 0.97 | W_solv: 0.62
+[0617/0650] Loss: 8.2528 [cnt: 4.93, alloc(dm16): 2.853, cell: 0.000, reg_nb: 2.307] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.00 | W_solv: 0.66
+[0618/0650] Loss: 8.3549 [cnt: 5.10, alloc(dm16): 2.791, cell: 0.000, reg_nb: 2.287] | SolvStr: 1.00 | Disp: 10.9 | W_pred: 1.01 | W_solv: 0.61
+[0619/0650] Loss: 8.3053 [cnt: 5.03, alloc(dm16): 2.807, cell: 0.000, reg_nb: 2.271] | SolvStr: 1.00 | Disp: 11.3 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0620/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1803 [cnt: 4.94, alloc(dm16): 2.778, cell: 0.000, reg_nb: 2.269]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.04 (std: 0.90) | W_solv: 0.66
+  Val Metrics   : MAE: 105.63 | RMSE: 156.96 | NAE: 0.281 | Bias: +56.88
+  GAME Hierarchy: G0: 105.63 | G1: 127.41 | G2: 152.14 | G3: 187.70 | Sparse(<=100): 28.53 | Mod(101-500): 81.21 | Dense(>500): 185.86
+  Uncertainty   : Coverage: 50%=84.4%, 80%=95.1%, 95%=98.9% | Median Disp: 11.7
+  Checkpoint    : Current Val MAE: 105.63 | Best Val MAE: 89.09
+============================================================================================
+
+[0621/0650] Loss: 8.5387 [cnt: 5.22, alloc(dm16): 2.841, cell: 0.000, reg_nb: 2.313] | SolvStr: 1.00 | Disp: 12.0 | W_pred: 1.02 | W_solv: 0.66
+[0622/0650] Loss: 8.3196 [cnt: 5.08, alloc(dm16): 2.764, cell: 0.000, reg_nb: 2.311] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 0.98 | W_solv: 0.63
+[0623/0650] Loss: 8.3234 [cnt: 5.03, alloc(dm16): 2.823, cell: 0.000, reg_nb: 2.292] | SolvStr: 1.00 | Disp: 10.2 | W_pred: 0.99 | W_solv: 0.64
+[0624/0650] Loss: 8.3441 [cnt: 5.00, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.356] | SolvStr: 1.00 | Disp: 13.0 | W_pred: 1.00 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0625/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1873 [cnt: 4.89, alloc(dm16): 2.827, cell: 0.000, reg_nb: 2.304]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.00 (std: 1.00) | W_solv: 0.64
+  Val Metrics   : MAE: 100.55 | RMSE: 152.08 | NAE: 0.262 | Bias: +42.76
+  GAME Hierarchy: G0: 100.55 | G1: 122.36 | G2: 146.32 | G3: 182.08 | Sparse(<=100): 23.61 | Mod(101-500): 75.59 | Dense(>500): 182.26
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.7% | Median Disp: 10.4
+  Checkpoint    : Current Val MAE: 100.55 | Best Val MAE: 89.09
+============================================================================================
+
+[0626/0650] Loss: 8.2172 [cnt: 4.98, alloc(dm16): 2.772, cell: 0.000, reg_nb: 2.259] | SolvStr: 1.00 | Disp: 13.0 | W_pred: 0.98 | W_solv: 0.62
+[0627/0650] Loss: 8.2023 [cnt: 4.98, alloc(dm16): 2.759, cell: 0.000, reg_nb: 2.268] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.01 | W_solv: 0.65
+[0628/0650] Loss: 8.4003 [cnt: 5.04, alloc(dm16): 2.880, cell: 0.000, reg_nb: 2.344] | SolvStr: 1.00 | Disp: 10.4 | W_pred: 1.01 | W_solv: 0.65
+[0629/0650] Loss: 8.2516 [cnt: 4.93, alloc(dm16): 2.851, cell: 0.000, reg_nb: 2.296] | SolvStr: 1.00 | Disp: 9.6 | W_pred: 1.02 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0630/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.4638 [cnt: 5.12, alloc(dm16): 2.862, cell: 0.000, reg_nb: 2.362]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.03 (std: 1.02) | W_solv: 0.67
+  Val Metrics   : MAE: 106.07 | RMSE: 159.51 | NAE: 0.277 | Bias: +52.84
+  GAME Hierarchy: G0: 106.07 | G1: 127.73 | G2: 152.26 | G3: 187.87 | Sparse(<=100): 25.60 | Mod(101-500): 80.37 | Dense(>500): 190.39
+  Uncertainty   : Coverage: 50%=84.2%, 80%=95.0%, 95%=98.8% | Median Disp: 12.0
+  Checkpoint    : Current Val MAE: 106.07 | Best Val MAE: 89.09
+============================================================================================
+
+[0631/0650] Loss: 8.2401 [cnt: 4.93, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.310] | SolvStr: 1.00 | Disp: 11.1 | W_pred: 1.01 | W_solv: 0.62
+[0632/0650] Loss: 8.2452 [cnt: 4.97, alloc(dm16): 2.805, cell: 0.000, reg_nb: 2.283] | SolvStr: 1.00 | Disp: 12.5 | W_pred: 1.01 | W_solv: 0.65
+[0633/0650] Loss: 8.1402 [cnt: 4.88, alloc(dm16): 2.801, cell: 0.000, reg_nb: 2.260] | SolvStr: 1.00 | Disp: 13.3 | W_pred: 0.99 | W_solv: 0.65
+[0634/0650] Loss: 8.3419 [cnt: 5.05, alloc(dm16): 2.820, cell: 0.000, reg_nb: 2.294] | SolvStr: 1.00 | Disp: 14.1 | W_pred: 1.01 | W_solv: 0.64
+
+============================================================================================
+  EPOCH [0635/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.1643 [cnt: 4.89, alloc(dm16): 2.803, cell: 0.000, reg_nb: 2.287]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.04 (std: 1.05) | W_solv: 0.68
+  Val Metrics   : MAE: 102.79 | RMSE: 154.91 | NAE: 0.267 | Bias: +44.92
+  GAME Hierarchy: G0: 102.79 | G1: 125.61 | G2: 149.54 | G3: 185.50 | Sparse(<=100): 22.97 | Mod(101-500): 77.45 | Dense(>500): 185.98
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.9%, 95%=98.7% | Median Disp: 12.3
+  Checkpoint    : Current Val MAE: 102.79 | Best Val MAE: 89.09
+============================================================================================
+
+[0636/0650] Loss: 8.3157 [cnt: 5.04, alloc(dm16): 2.800, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 9.7 | W_pred: 1.01 | W_solv: 0.63
+[0637/0650] Loss: 8.2795 [cnt: 4.97, alloc(dm16): 2.837, cell: 0.000, reg_nb: 2.299] | SolvStr: 1.00 | Disp: 11.2 | W_pred: 1.04 | W_solv: 0.64
+[0638/0650] Loss: 8.2436 [cnt: 5.00, alloc(dm16): 2.774, cell: 0.000, reg_nb: 2.295] | SolvStr: 1.00 | Disp: 12.9 | W_pred: 1.01 | W_solv: 0.66
+[0639/0650] Loss: 8.2844 [cnt: 5.01, alloc(dm16): 2.803, cell: 0.000, reg_nb: 2.285] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.00 | W_solv: 0.63
+
+============================================================================================
+  EPOCH [0640/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2500 [cnt: 4.93, alloc(dm16): 2.839, cell: 0.000, reg_nb: 2.327]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 0.98 (std: 0.94) | W_solv: 0.63
+  Val Metrics   : MAE: 100.24 | RMSE: 149.26 | NAE: 0.268 | Bias: +45.73
+  GAME Hierarchy: G0: 100.24 | G1: 123.05 | G2: 147.27 | G3: 182.88 | Sparse(<=100): 28.12 | Mod(101-500): 77.15 | Dense(>500): 175.97
+  Uncertainty   : Coverage: 50%=84.3%, 80%=94.9%, 95%=98.8% | Median Disp: 13.6
+  Checkpoint    : Current Val MAE: 100.24 | Best Val MAE: 89.09
+============================================================================================
+
+[0641/0650] Loss: 8.3403 [cnt: 5.05, alloc(dm16): 2.815, cell: 0.000, reg_nb: 2.317] | SolvStr: 1.00 | Disp: 11.4 | W_pred: 1.04 | W_solv: 0.67
+[0642/0650] Loss: 8.3790 [cnt: 5.05, alloc(dm16): 2.858, cell: 0.000, reg_nb: 2.287] | SolvStr: 1.00 | Disp: 10.1 | W_pred: 1.01 | W_solv: 0.61
+[0643/0650] Loss: 8.2201 [cnt: 4.91, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.341] | SolvStr: 1.00 | Disp: 9.0 | W_pred: 0.97 | W_solv: 0.61
+[0644/0650] Loss: 8.1467 [cnt: 4.92, alloc(dm16): 2.762, cell: 0.000, reg_nb: 2.257] | SolvStr: 1.00 | Disp: 10.7 | W_pred: 1.00 | W_solv: 0.65
+
+============================================================================================
+  EPOCH [0645/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2268 [cnt: 4.98, alloc(dm16): 2.788, cell: 0.000, reg_nb: 2.258]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.02 (std: 1.06) | W_solv: 0.66
+  Val Metrics   : MAE: 98.33 | RMSE: 146.96 | NAE: 0.261 | Bias: +40.61
+  GAME Hierarchy: G0: 98.33 | G1: 120.65 | G2: 145.26 | G3: 181.25 | Sparse(<=100): 27.77 | Mod(101-500): 74.81 | Dense(>500): 175.01
+  Uncertainty   : Coverage: 50%=84.1%, 80%=94.8%, 95%=98.8% | Median Disp: 11.1
+  Checkpoint    : Current Val MAE: 98.33 | Best Val MAE: 89.09
+============================================================================================
+
+[0646/0650] Loss: 8.4248 [cnt: 5.06, alloc(dm16): 2.890, cell: 0.000, reg_nb: 2.337] | SolvStr: 1.00 | Disp: 12.0 | W_pred: 1.01 | W_solv: 0.62
+[0647/0650] Loss: 8.1010 [cnt: 4.90, alloc(dm16): 2.740, cell: 0.000, reg_nb: 2.260] | SolvStr: 1.00 | Disp: 12.9 | W_pred: 1.04 | W_solv: 0.66
+[0648/0650] Loss: 8.2518 [cnt: 5.04, alloc(dm16): 2.750, cell: 0.000, reg_nb: 2.271] | SolvStr: 1.00 | Disp: 12.0 | W_pred: 1.00 | W_solv: 0.61
+[0649/0650] Loss: 8.2306 [cnt: 4.92, alloc(dm16): 2.835, cell: 0.000, reg_nb: 2.306] | SolvStr: 1.00 | Disp: 12.3 | W_pred: 1.01 | W_solv: 0.61
+
+============================================================================================
+  EPOCH [0650/0650] PERIODIC EVALUATION (182 test samples)
+--------------------------------------------------------------------------------------------
+  Train Loss    : 8.2514 [cnt: 4.95, alloc(dm16): 2.830, cell: 0.000, reg_nb: 2.310]
+  Solver / W    : Str: 1.00 | E_red: 0.0% | W_pred: 1.01 (std: 0.89) | W_solv: 0.62
+  Val Metrics   : MAE: 110.43 | RMSE: 161.58 | NAE: 0.295 | Bias: +64.73
+  GAME Hierarchy: G0: 110.43 | G1: 132.31 | G2: 156.81 | G3: 191.80 | Sparse(<=100): 30.07 | Mod(101-500): 85.60 | Dense(>500): 192.28
+  Uncertainty   : Coverage: 50%=84.6%, 80%=95.2%, 95%=98.9% | Median Disp: 9.2
+  Checkpoint    : Current Val MAE: 110.43 | Best Val MAE: 89.09
+============================================================================================
+
