@@ -214,6 +214,8 @@ class FineMeasureHead(nn.Module):
             self.temp_softplus
             or self.scale_conditioned
             or self.density_curvature
+            or getattr(self, "floor_tau", 0.0) > 0.0
+            or getattr(self, "density_adaptive_scale", False)
             or getattr(self, "head_activation", "softplus") in ("relu", "compact_c1")
         )
         if is_activated:
