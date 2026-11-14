@@ -63,7 +63,7 @@ loss:
 train:
   epochs: 1500
   batch_size: 8
-  workers: 4
+  workers: 2
   pin_memory: true
   weight_decay: 0.0001
   warmup_epochs: 20
