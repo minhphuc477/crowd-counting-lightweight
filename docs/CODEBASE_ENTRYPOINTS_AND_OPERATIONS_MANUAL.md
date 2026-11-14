@@ -46,11 +46,11 @@ python -m rmr_v3.eval --checkpoint CHECKPOINT [--manifest MANIFEST] [--output-di
 
 ## 3. Standalone CLI Commands (`configs/benchmarks/nextgen_sub65/`)
 
-In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation scripts exist. Copy and execute individual commands directly. All configs enforce $\le 104,441$ trainable params, $0\%$ Knowledge Distillation, and unified hyperparameters (`crop_size: 512`, `init_m0: auto`, `bayesian_sigma: 8.0`, `radon_ot_scale_by_length: false`, `lr: 0.0003`, `ema_decay: 0.999`).
+In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation scripts exist. Copy and execute individual commands directly. All configs enforce $\le 104,441$ trainable params, $0\%$ Knowledge Distillation, and unified hyperparameters (`crop_size: 512`, `init_m0: auto`, `bayesian_sigma: 8.0`, `radon_ot_scale_by_length: false`, `lr: 0.0003`, `min_lr_ratio: 0.05`, `ema_decay: 0.999`).
 
 ### A. Proposed Unified Cross-Dataset Suite (`SFILiteFPNNeck` + `DWSubpixelMeasureHead`, `100,596` params)
 
-**1. ShanghaiTech Part A (`epochs: 600`)**
+**1. ShanghaiTech Part A (`epochs: 1500`)**
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
 ```
@@ -58,7 +58,7 @@ In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation 
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
 ```
 
-**2. ShanghaiTech Part B (`epochs: 500`)**
+**2. ShanghaiTech Part B (`epochs: 1500`)**
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml
 ```
@@ -66,7 +66,7 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml
 ```
 
-**3. UCF-QNRF (`epochs: 300`)**
+**3. UCF-QNRF (`epochs: 1000`)**
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml
 ```
@@ -74,7 +74,7 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml
 ```
 
-**4. JHU-Crowd++ (`epochs: 300`)**
+**4. JHU-Crowd++ (`epochs: 800`)**
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml
 ```
@@ -82,7 +82,7 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergisti
 python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml
 ```
 
-### B. Single-Variable Ablation Suite on SHA (`epochs: 600`)
+### B. Single-Variable Ablation Suite on SHA (`epochs: 1500`)
 
 **5. Ablation — `HDCLiteFPNNeck` Direct (`99,892` params)**
 ```powershell
@@ -112,7 +112,7 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.eval `
   --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml `
-  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best.pt `
+  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best_val_mae.pt `
   --eval-localization
 ```
 
@@ -120,7 +120,7 @@ python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.eval `
   --config configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml `
-  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/best.pt `
+  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/best_val_mae.pt `
   --manifest data/jhu_test.jsonl `
   --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/eval_test
 ```

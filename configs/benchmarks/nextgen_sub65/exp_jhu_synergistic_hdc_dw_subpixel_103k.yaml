@@ -81,7 +81,7 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 300
+  epochs: 800
   batch_size: 8
   workers: 4
   pin_memory: true
@@ -89,7 +89,7 @@ train:
   backbone_lr_scale: 0.25
   weight_decay: 0.0001
   warmup_epochs: 15
-  min_lr_ratio: 0.20
+  min_lr_ratio: 0.05
   grad_clip: 1.0
   amp: true
   ema_decay: 0.999

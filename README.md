@@ -84,14 +84,14 @@ Run tests (Windows PowerShell):
 .\.venv\Scripts\python.exe -m pytest tests/core/test_cross_dataset_universality.py tests/core/test_non_aspp_necks.py tests/rmr_v3/test_radon_ot.py tests/rmr_v23/test_rmr_v23.py
 ```
 
-Train the unified Stride-2 `SFILite + DWSubpixel` configuration on SHA (`600` epochs):
+Train the unified Stride-2 `SFILite + DWSubpixel` configuration on SHA (`1500` epochs):
 ```powershell
 .\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
 ```
 
 Evaluate a trained checkpoint (standard + localization metrics):
 ```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.eval --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best.pt --eval-localization
+.\.venv\Scripts\python.exe -m rmr_v3.eval --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best_val_mae.pt --eval-localization
 ```
 
 For all 8 unified cross-dataset and ablation commands (SHA, SHB, UCF-QNRF, JHU-Crowd++), see [`docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md`](file:///f:/lightweightcrcn/docs/CODEBASE_ENTRYPOINTS_AND_OPERATIONS_MANUAL.md) and [`docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md`](file:///f:/lightweightcrcn/docs/SCIENTIFIC_FRAMEWORK_AND_PAPER_ALIGNMENT_MATRIX.md).
