@@ -46,92 +46,83 @@ python -m rmr_v3.eval --checkpoint CHECKPOINT [--manifest MANIFEST] [--output-di
 
 ## 3. Standalone CLI Commands (`configs/benchmarks/nextgen_sub65/`)
 
-In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation scripts exist. Copy and execute individual commands directly. All configs enforce $\le 104,441$ trainable params, $0\%$ Knowledge Distillation, and unified hyperparameters (`crop_size: 512`, `init_m0: auto`, `bayesian_sigma: 8.0`, `radon_ot_scale_by_length: false`, `lr: 0.0003`, `min_lr_ratio: 0.05`, `ema_decay: 0.999`).
+In compliance with repository rules (`AGENTS.md` Rule 2), zero batch automation scripts exist. Copy and execute individual standalone Linux Bash commands directly. All configs enforce $\le 104,441$ trainable params, $0\%$ Knowledge Distillation, and unified hyperparameters (`crop_size: 512`, `init_m0: auto`, `bayesian_sigma: 8.0`, `radon_ot_scale_by_length: false`, `min_lr_ratio: 0.05`, `ema_decay: 0.999`).
+
+> [!NOTE]
+> The `-o` (`--overwrite`) flag is included so that rerunning on existing directories proceeds cleanly without raising directory-conflict errors.
 
 ### A. Proposed Unified Cross-Dataset Suite (`SFILiteFPNNeck` + `DWSubpixelMeasureHead`, `100,596` params)
 
-**1. ShanghaiTech Part A (`epochs: 1500`)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
-```
+**1. ShanghaiTech Part A (`epochs: 1500`, `lr: 0.0003`, `backbone_scale: 0.20`)**
 ```bash
-python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml -o
 ```
 
-**2. ShanghaiTech Part B (`epochs: 1500`)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml
-```
+**2. ShanghaiTech Part B (`epochs: 1500`, `lr: 0.0002`, `backbone_scale: 0.10`)**
 ```bash
-python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_shb_synergistic_hdc_dw_subpixel_100k.yaml -o
 ```
 
-**3. UCF-QNRF (`epochs: 1000`)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml
-```
+**3. UCF-QNRF (`epochs: 1000`, `lr: 0.0003`, `backbone_scale: 0.20`)**
 ```bash
-python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml -o
 ```
 
-**4. JHU-Crowd++ (`epochs: 800`)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml
-```
+**4. JHU-Crowd++ (`epochs: 800`, `lr: 0.0002`, `backbone_scale: 0.10`)**
 ```bash
-python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml -o
 ```
 
 ### B. Single-Variable Ablation Suite on SHA (`epochs: 1500`)
 
 **5. Ablation — `HDCLiteFPNNeck` Direct (`99,892` params)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_hdc_mcbpro_subpixel_103k.yaml
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_hdc_mcbpro_subpixel_103k.yaml -o
 ```
 
 **6. Ablation — `ASPPLiteNeck` `[1,2,4]` Direct (`99,892` params)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_aspp124_dw_subpixel_100k.yaml
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_aspp124_dw_subpixel_100k.yaml -o
 ```
 
 **7. Ablation — Learned `mcbpro` Solver w/ `SFILiteFPNNeck` (`103,226` params)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_synergistic_mcbpro_subpixel_103k.yaml
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_synergistic_mcbpro_subpixel_103k.yaml -o
 ```
 
 **8. Ablation — Canonical Stride-4 `ASPPLite+GAP+MCBPRO` (`104,390` params)**
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_canonical_stride4_mcbpro_repro_104k.yaml
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_canonical_stride4_mcbpro_repro_104k.yaml -o
 ```
 
 ---
 
-## 4. Evaluation & Verification Commands
+## 4. Evaluation & Verification Commands (Linux Bash)
 
 ### Evaluate on Target Split + Localization
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.eval `
-  --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml `
-  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best_val_mae.pt `
+```bash
+python -m rmr_v3.eval \
+  --config configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml \
+  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k/best_val_mae.pt \
   --eval-localization
 ```
 
 ### Evaluate JHU-Crowd++ Official Test Split (`jhu_test.jsonl`)
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.eval `
-  --config configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml `
-  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/best_val_mae.pt `
-  --manifest data/jhu_test.jsonl `
+```bash
+python -m rmr_v3.eval \
+  --config configs/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml \
+  --checkpoint runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/best_val_mae.pt \
+  --manifest data/jhu_test.jsonl \
   --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_jhu_synergistic_hdc_dw_subpixel_103k/eval_test
 ```
 
 ### Multi-Seed Verification (`seed 1337` / `2024`)
-```powershell
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 1337 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s1337
-.\.venv\Scripts\python.exe -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 2024 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s2024
+```bash
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 1337 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s1337 -o
+python -m rmr_v3.trainer -c configs/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k.yaml --seed 2024 --output-dir runs_fixed/benchmarks/nextgen_sub65/exp_sha_direct_sfi_dw_subpixel_102k_s2024 -o
 ```
 
 ### Core & Loss Unit Tests
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/core/test_cross_dataset_universality.py tests/core/test_non_aspp_necks.py tests/rmr_v3/test_radon_ot.py tests/rmr_v23/test_rmr_v23.py
+```bash
+python -m pytest tests/core/test_cross_dataset_universality.py tests/core/test_non_aspp_necks.py tests/rmr_v3/test_radon_ot.py tests/rmr_v23/test_rmr_v23.py
 ```

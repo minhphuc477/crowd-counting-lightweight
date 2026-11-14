@@ -402,6 +402,8 @@ def build_fine_head(
             temp_softplus=temp_softplus,
             floor_tau=floor_tau,
             head_activation=head_activation,
+            density_adaptive_scale=density_adaptive_scale,
+            density_scale_gamma=density_scale_gamma,
         )
     if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3"):
         raise ValueError(

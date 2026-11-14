@@ -74,6 +74,23 @@ class SFILiteFPNNeck(nn.Module):
         nn.init.zeros_(gate_proj.bias)
 
     @staticmethod
+    def _local_simam_gate(x: torch.Tensor, kernel_size: int = 7, eps: float = 1e-4) -> torch.Tensor:
+        """Parameter-free local neuro-energy attention gate (SimAM, Yang et al. ICML 2021).
+        
+        Evaluates the local visual saliency/anomaly score per neuron:
+            e_inv = (x - mu)^2 / (4 * (sigma^2 + eps))
+            s_simam = 2 * (sigmoid(e_inv) - 0.5) in [0, 1]
+        Shift-invariant and parameter-free (0 extra weights).
+        """
+        k = int(kernel_size)
+        pad = k // 2
+        mu = F.avg_pool2d(x, kernel_size=k, stride=1, padding=pad, count_include_pad=False)
+        x_diff = x - mu
+        var = F.avg_pool2d(x_diff.square(), kernel_size=k, stride=1, padding=pad, count_include_pad=False)
+        e_inv = x_diff.square() / (4.0 * (var + eps))
+        return 2.0 * (torch.sigmoid(e_inv) - 0.5)
+
+    @staticmethod
     def decompose_frequency(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Decompose feature map into smooth low-frequency base and Laplacian HF impulse residual."""
         x_lf = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
@@ -113,7 +130,9 @@ class SFILiteFPNNeck(nn.Module):
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )
         gate4 = self.selective_gate(l4_lf + up8_to_4)
-        f4 = l4 + self.gamma_hf * self.hf_enhance(l4_hf) + gate4 * up8_to_4
+        simam_gate = self._local_simam_gate(l4_hf)
+        hf_gated = self.hf_enhance(l4_hf) * gate4 * (1.0 + simam_gate)
+        f4 = l4 + self.gamma_hf * hf_gated + gate4 * up8_to_4
         p4 = self.ref4(f4)
 
         return p4, p8, p16

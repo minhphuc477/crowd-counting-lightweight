@@ -38,7 +38,7 @@ model:
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
-  backbone_lr_scale: 0.25
+  backbone_lr_scale: 0.1
   init_m0: auto
   neck_type: sfi_lite
   hdc_dilations:
@@ -49,7 +49,9 @@ model:
   enable_regional_head: false
   enable_solver: false
   solver_mode: direct
-  floor_tau: 0.001
+  floor_tau: 0.002
+  density_adaptive_scale: true
+  density_scale_gamma: 0.25
   eps: 1.0e-06
 
 loss:
@@ -85,8 +87,8 @@ train:
   batch_size: 8
   workers: 4
   pin_memory: true
-  lr: 0.0003
-  backbone_lr_scale: 0.25
+  lr: 0.0002
+  backbone_lr_scale: 0.1
   weight_decay: 0.0001
   warmup_epochs: 15
   min_lr_ratio: 0.05

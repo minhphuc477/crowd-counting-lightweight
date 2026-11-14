@@ -6,7 +6,7 @@
 # Ablation Hypothesis:
 # Single-variable comparison against Exp 1: Tests higher feature contrast blending weight
 # mcbpro_feat_energy_weight: 0.50 (vs 0.25 in Exp 1 and 0.0 in Exp 0).
-# Establishes the exact Pareto sensitivity curve across blending weights under density gating.
+# Establishes the exact trade-off sensitivity curve across blending weights under density gating.
 seed: 42
 data:
   train_manifest: data/sha_a_train_all.jsonl

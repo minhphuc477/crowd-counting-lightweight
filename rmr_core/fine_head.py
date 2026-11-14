@@ -92,6 +92,8 @@ class ResidualDilatedFineHead(nn.Module):
         temp_softplus: bool = True,
         floor_tau: float = 0.0,
         head_activation: str = "softplus",
+        density_adaptive_scale: bool = False,
+        density_scale_gamma: float = 0.0,
     ) -> None:
         super().__init__()
         self.width = int(width)
@@ -101,6 +103,8 @@ class ResidualDilatedFineHead(nn.Module):
         self.head_activation = str(head_activation).lower()
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         self.temp_softplus = bool(temp_softplus)
+        self.density_adaptive_scale = bool(density_adaptive_scale)
+        self.density_scale_gamma = float(density_scale_gamma)
 
         # 1. Stacked Dilated Depthwise Residual Blocks
         blocks: list[nn.Module] = []
@@ -231,6 +235,11 @@ class ResidualDilatedFineHead(nn.Module):
 
         if self.floor_tau > 0.0:
             y_base = _smooth_floor(y_base, self.floor_tau)
+
+        if self.density_adaptive_scale:
+            gamma_val = max(float(self.density_scale_gamma), 0.0)
+            y_base = y_base * (1.0 + gamma_val * F.relu(z))
+
         return y_base
 
     def forward(

@@ -272,3 +272,73 @@ def test_validator_accepts_new_necks_and_rejects_typos() -> None:
 
     with pytest.raises(ValueError, match="head_type"):
         validate_v3_config({"model": {"head_type": "unknown_head_typo"}})
+
+
+def test_sfi_lite_simam_shift_equivariance_and_sample_isolation() -> None:
+    """SFILiteFPNNeck with local SimAM gate must preserve shift equivariance and sample isolation."""
+    from rmr_core.necks.sfi import SFILiteFPNNeck
+
+    torch.manual_seed(42)
+    neck = SFILiteFPNNeck(in_channels=(16, 32, 48), width=32, use_gap=False).eval()
+
+    c4_a = torch.zeros(1, 16, 128, 128)
+    c8_a = torch.zeros(1, 32, 64, 64)
+    c16_a = torch.zeros(1, 48, 32, 32)
+    c4_a[:, :, 32:48, 32:48] = torch.randn(1, 16, 16, 16)
+    c8_a[:, :, 16:24, 16:24] = torch.randn(1, 32, 8, 8)
+    c16_a[:, :, 8:12, 8:12] = torch.randn(1, 48, 4, 4)
+
+    c4_b = torch.roll(c4_a, shifts=(16, 24), dims=(-2, -1))
+    c8_b = torch.roll(c8_a, shifts=(8, 12), dims=(-2, -1))
+    c16_b = torch.roll(c16_a, shifts=(4, 6), dims=(-2, -1))
+
+    with torch.no_grad():
+        p4_a, p8_a, p16_a = neck(c4_a, c8_a, c16_a)
+        p4_b, p8_b, p16_b = neck(c4_b, c8_b, c16_b)
+
+    patch_a = p4_a[:, :, 32:48, 32:48]
+    patch_b = p4_b[:, :, 48:64, 56:72]
+    diff = (patch_a - patch_b).abs().max().item()
+    assert diff < 2e-3, f"SFILiteFPNNeck broke shift equivariance: diff={diff}"
+
+    # Sample isolation check
+    neck.train()
+    c4 = torch.randn(2, 16, 64, 64, requires_grad=True)
+    c8 = torch.randn(2, 32, 32, 32, requires_grad=True)
+    c16 = torch.randn(2, 48, 16, 16, requires_grad=True)
+    p4, p8, p16 = neck(c4, c8, c16)
+    loss = p4[0].sum()
+    loss.backward()
+    assert c4.grad is not None
+    assert c4.grad[0].abs().sum().item() > 0.0
+    assert c4.grad[1].abs().max().item() == 0.0, "Cross-sample leakage detected in SFILiteFPNNeck!"
+
+
+def test_density_adaptive_scale_convex_boost() -> None:
+    """Density adaptive scale must not affect negative/zero logits and must scale positive logits super-linearly."""
+    head = build_fine_head(
+        width=32,
+        density_adaptive_scale=True,
+        density_scale_gamma=0.25,
+        floor_tau=0.001,
+        subpixel_stride2=False,
+    )
+    # Negative logit (background)
+    z_neg = torch.tensor([-5.0])
+    y_neg = head.activate(z_neg)
+    y_neg_plain = head.activate(z_neg)
+    assert torch.allclose(y_neg, y_neg_plain)
+
+    # Positive logit (dense peak)
+    z_pos = torch.tensor([4.0])
+    head_plain = build_fine_head(
+        width=32,
+        density_adaptive_scale=False,
+        floor_tau=0.001,
+        subpixel_stride2=False,
+    )
+    y_pos_scaled = head.activate(z_pos)
+    y_pos_plain = head_plain.activate(z_pos)
+    # y = y_plain * (1 + 0.25 * 4.0) = 2.0 * y_plain
+    assert torch.allclose(y_pos_scaled, 2.0 * y_pos_plain, rtol=1e-3)
+
