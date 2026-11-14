@@ -39,6 +39,9 @@ from .rep_fpn import (
     RepDWBlock7x7,
     RepWeightedFPNNeck,
 )
+from .sfi import (
+    SFILiteFPNNeck,
+)
 
 __all__ = [
     "ASPPLiteFPNNeck",
@@ -58,6 +61,7 @@ __all__ = [
     "RepASPPLiteNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
+    "SFILiteFPNNeck",
     "StaticFastNormalizedFusion",
     "StripMultiKernelContext",
     "TinyIR",

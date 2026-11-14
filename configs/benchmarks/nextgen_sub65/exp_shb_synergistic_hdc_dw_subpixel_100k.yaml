@@ -38,7 +38,7 @@ model:
   pretrained: true
   backbone_lr_scale: 0.25
   init_m0: 0.0025
-  neck_type: hdc_lite
+  neck_type: sfi_lite
   hdc_dilations:
   - 1
   - 2

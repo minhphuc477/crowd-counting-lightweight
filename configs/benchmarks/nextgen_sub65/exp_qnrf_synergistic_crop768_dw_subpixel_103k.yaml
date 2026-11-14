@@ -39,11 +39,11 @@ model:
   pretrained: true
   backbone_lr_scale: 0.2
   init_m0: 0.001498
-  neck_type: aspp_lite
-  aspp_dilations:
+  neck_type: sfi_lite
+  hdc_dilations:
   - 1
   - 2
-  - 4
+  - 3
   use_aspp_gap: false
   enable_regional_head: true
   region_sizes_px:
@@ -56,7 +56,7 @@ model:
   use_diag: false
   native_scale_pooling: true
   regional_feature_stats: mean
-  region_head_hidden: 42
+  region_head_hidden: 36
   dynamic_scale_routing: false
   factorized_scale_routing: false
   pre_solver_scale_gating: false

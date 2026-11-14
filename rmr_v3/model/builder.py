@@ -14,6 +14,7 @@ from rmr_core.necks import (
     RLKHDCFPNNeck,
     RepASPPLiteNeck,
     RepWeightedFPNNeck,
+    SFILiteFPNNeck,
 )
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
 from rmr_core.operators import RegionSet
@@ -56,6 +57,14 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             use_gap=cfg.use_aspp_gap,
             aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "add"),
         )
+    if cfg.neck_type == "sfi_lite":
+        return SFILiteFPNNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            hdc_dilations=cfg.hdc_dilations,
+            use_gap=cfg.use_aspp_gap,
+            aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "gate"),
+        )
     if cfg.neck_type == "rlk_hdc":
         return RLKHDCFPNNeck(
             in_channels=in_channels,
@@ -93,7 +102,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
         return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
     raise ValueError(
         f"Unsupported neck_type: '{cfg.neck_type}'. "
-        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'rlk_hdc', 'rep_weighted', "
+        "Must be 'additive', 'aspp_lite', 'hdc_lite', 'sfi_lite', 'rlk_hdc', 'rep_weighted', "
         "'rep_aspp_lite', 'bifpn_lite', 'pafpn_binorm', or 'pconv_fpn'."
     )
 
