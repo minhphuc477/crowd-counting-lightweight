@@ -1,22 +1,14 @@
 {
-  "SHA": {
-    "dataset": "SHA",
-    "num_samples": 182,
-    "mean_psnr_db": 25.4,
-    "std_psnr_db": 8.97,
-    "mean_ssim": 0.6137,
-    "std_ssim": 0.2534,
-    "MAE": 67.49,
-    "RMSE": 110.74
-  },
-  "SHB": {
+  "shb": {
     "dataset": "SHB",
+    "manifest": "shb_test.jsonl",
     "num_samples": 316,
-    "mean_psnr_db": 19.36,
-    "std_psnr_db": 3.6,
-    "mean_ssim": 0.7899,
-    "std_ssim": 0.0559,
-    "MAE": 10.28,
-    "RMSE": 15.93
+    "mean_psnr_db": 19.36322717352085,
+    "std_psnr_db": 3.598610134718239,
+    "mean_ssim": 0.7898345435080283,
+    "std_ssim": 0.05580925274147861,
+    "MAE": 10.29098601582684,
+    "RMSE": 15.934590960306629,
+    "elapsed_sec": 29.66
   }
 }
