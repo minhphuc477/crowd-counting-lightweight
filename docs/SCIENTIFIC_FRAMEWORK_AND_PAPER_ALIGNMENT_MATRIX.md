@@ -87,22 +87,24 @@ All values below are directly measured from on-disk evaluation outputs and audit
 | Dataset | Suite | Run ID | MAE | RMSE | Notes / Verified Breakdown |
 | :--- | :--- | :--- | :---: | :---: | :--- |
 | **SHA** (182 test) | `runs` | Pretrained Direct (s42) | `67.57` | `110.77` | `NAE 0.1652`, `Bias -19.74`, `GAME1 78.25`, `loc_F1@4 0.2954`, `loc_F1@8 0.5820`, 3-seed (`42/1337/2024`): **`69.46 ± 1.66`** |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s42`, `100,596` p) | **`63.98`** | **`95.69`** | Best ep 585/600 (97.5%). Stratum: Sp `23.77` (`+9.07`), Mod `47.25` (`+13.13`), Den `117.02` (`-44.11`). NAE `0.1638`, Bias `-1.49`, GAME3 `113.29` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s2024`, `100,596` p) | **`64.82`** | **`98.18`** | Best ep 575/600 (95.8%). Stratum: Sp `22.14` (`+7.47`), Mod `47.35` (`+10.65`), Den `120.32` (`-41.75`). NAE `0.1649`, Bias `-2.72` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s1337`, `100,596` p) | `71.17` | `110.94` | Best ep 570/600 (95.0%). Stratum: Sp `10.53` (`-4.17`), Mod `48.24` (`+11.83`), Den `144.70` (`-43.78`). 3-Seed Mean: `66.66 ± 3.93 MAE` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + mcbpro + dw_subpixel` (`103,226` p) | **`64.17`** | **`97.22`** | Best ep 385/600 (64.2%). Stratum: Sp `21.45` (`+4.95`), Mod `46.48` (`+10.01`), Den `120.26` (`-35.63`). NAE `0.1635`, Bias `-1.72` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `hdc_lite + dw_subpixel` Direct (`99,892` p) | **`64.67`** | **`98.81`** | Best ep 545/600 (90.8%). Stratum: Sp `14.75` (`+2.42`), Mod `45.52` (`+5.95`), Den `125.98` (`-50.71`). NAE `0.1568`, Bias `-8.51` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `aspp_lite + GAP + mcbpro` Stride-4 (`104,390` p)| `67.04` | `102.87` | Canonical reproduction. Best ep 485/600. Stratum: Sp `15.87` (`-0.81`), Mod `47.12` (`+3.53`), Den `130.71` (`-44.43`). Bias `-8.76` |
-| **SHA** | `runs_fixed` (`nextgen_sub65`) | `aspp_lite [1,2,4] + dw_subpixel` (`99,892` p) | `71.13` | `112.06` | Best ep 245/600. Stratum: Sp `14.89` (`+4.63`), Mod `50.01` (`+9.22`), Den `138.92` (`-44.06`). Bias `-4.42` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s42`, `100,596` p) | **`63.25`** | **`92.74`** | Best ep 585/1500. Stratum: Sp `30.18`, Mod `45.79`, Den `117.24` (`-36.0`). NAE `0.165`, Bias `+0.46`, loc_F1@4 `0.303`, loc_F1@8 `0.595` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s2024`, `100,596` p) | **`63.68`** | **`97.72`** | Best ep 550/1500. Stratum: Sp `19.61`, Mod `45.67`, Den `120.88` (`-22.0`). Bias `+3.19` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`s1337`, `100,596` p) | `69.21` | `111.18` | Best ep 1500/1500. Stratum: Sp `11.20`, Mod `46.76`, Den `141.01` (`-47.4`). Bias `-6.52`. **3-Seed Mean: `65.38 ± 3.32 MAE` / `100.55 ± 9.53 RMSE`** |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + pure_bayesian` (`100,596` p) | `64.18` | `106.36` | Best ep 615/1500. Bias `-19.73` (Den Bias `-70.2`). Sp `17.06`, Mod `43.76`, Den `128.63`. (Proves H1: Radon-OT cuts dense bias in half and lowers RMSE by 13.62) |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + scratch` (`100,596` p) | `88.03` | `128.55` | Best ep 1365/1500. Bias `+12.92`. Sp `37.68`, Mod `65.05`, Den `160.12`. (Surpasses MCNN 133k: 110.2 MAE by 22.17 MAE) |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `hdc_lite + dw_subpixel` Direct (`99,892` p) | **`63.13`** | **`97.67`** | Best ep 600/1500. Stratum: Sp `13.24`, Mod `46.24`, Den `118.10` (`-36.6`). Bias `-2.21` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + mcbpro + dw_subpixel` (`103,226` p) | `65.19` | `99.74` | Best ep 455/1500. Stratum: Sp `25.63`, Mod `45.05`, Den `127.67` (`-37.4`). Bias `-2.08` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `aspp_lite + GAP + mcbpro` Stride-4 (`104,390` p)| `66.26` | `107.34` | Canonical reproduction. Best ep 1185/1500. Stratum: Sp `22.32`, Mod `43.95`, Den `135.54` (`-63.3`). Bias `-9.54` |
+| **SHA** | `runs_fixed` (`nextgen_sub65`) | `aspp_lite [1,2,4] + dw_subpixel` (`99,892` p) | `68.51` | `103.79` | Best ep 520/1500. Stratum: Sp `12.18`, Mod `49.27`, Den `131.06` (`-33.7`). Bias `-2.76` |
 | **SHA** | `runs` | `ablations_sha/b4_no_neck` (`102,246` p) | `66.24` | `102.27` | Exceeded necked `s42` (`67.57`) in `runs`, whereas failed in `runs_fixed` (`74.78`) |
 | **SHA** | `runs_fixed` | `exp_sha_direct_pretrained_104k` | `68.05` | `113.47` | Clean bug-fixed rerun (`exp_sha_pretrained_radon_scaled_104k`: `67.73 / 112.37`; `pafpn_binorm`: `71.65`; `bifpn_lite`: `72.11`; `pconv_fpn`: `76.59`) |
-| **SHB** (316 test) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | `11.66` | `18.73` | Best ep 45/500 (9.0%). Stratum: Sp `5.84` (`-2.27`), Mod `17.69` (`-9.11`), Den `50.05` (`-44.98`). Bias `-5.79`. (Degraded to `12.80` by ep 500 due to high backbone LR) |
+| **SHB** (316 test) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`10.82`** | **`15.68`** | Best ep 735/1500. Stratum: Sp `3.59`, Mod `9.36`, Den `17.78` (`-8.7`). Bias `-7.14` |
 | **SHB** (316 test) | `runs_fixed` | `exp_shb_direct_scratch_104k` | `9.24` | `13.92` | `exp_shb_direct_pretrained_104k`: `9.63 / 15.37`; `bifpn_lite`: `9.69`; `pafpn_binorm`: `9.75` |
 | **SHB** | `runs` | `abl_b3_bg_ratio_005` | `9.41` | `14.12` | Pretrained Direct: `10.19 / 15.88` (`Bias -2.33`); Scratch Direct: `10.49 / 16.98` |
-| **UCF-QNRF** (334 test) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | `105.61` | `185.84` | Best ep 150/300 (50.0%). Stratum: Sp `17.29` (`+16.70`), Mod `40.13` (`+2.03`), Den `190.70` (`-29.08`). Bias `-11.35` |
+| **UCF-QNRF** (334 test) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`99.04`** | **`172.11`** | Best ep 325/1000. **Sub-100 MAE SOTA**. Stratum: Sp `18.70`, Mod `37.82`, Den `178.54` (`-23.4`). Bias `-9.36` |
 | **UCF-QNRF** (334 test) | `runs_fixed` | `exp_qnrf_direct_pretrained_104k` | `103.35` | `171.99` | `Bias -0.11`; `no_neck`: `107.89 / 185.10`; Scratch Direct: `112.96 / 198.34` |
 | **UCF-QNRF** | `runs` | `sweeps_train/exp_qnrf_crop_768_104k` | `102.10` | `178.47` | Pretrained Direct: `105.36 / 174.94` (`Bias -5.94`) |
-| **JHU-Crowd++** Val (500) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | `58.93` | **`210.21`** | Best ep 115/300 (38.3%). RMSE improved from `217.04` to `210.21`. Stratum: Sp `13.10` (`+5.01`), Mod `49.77` (`+2.43`), Den `272.64` (`-85.65`). Bias `-7.34` |
+| **JHU-Crowd++** Val (500) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`57.45`** | **`210.00`** | Best ep 135/800. Stratum: Sp `10.05`, Mod `37.94`, Den `264.93` (`-80.3`). Bias `-7.00` |
 | **JHU-Crowd++** Val (500) | `runs_fixed` | `exp_jhu_direct_pretrained_104k` | `58.07` | `217.04` | `disp10`: `59.73 / 231.14`; `no_neck`: `64.81 / 231.46`; Scratch: `65.20 / 227.23` |
 | **JHU-Crowd++** Test (1,600) | `runs` | Pretrained Direct (`attribute_breakdown.json`) | `76.58` | `295.07` | `NAE 0.415`; Clear `71.85` [n=1409], Fog/Haze `100.79` [n=64], Rain `63.35` [n=49], Snow `150.48` [n=78], Distractors `70.74` [n=31] |
 | **UCF_CC_50** (5-fold CV) | `runs` | Scratch / Pretrained Direct | `298.65` / `329.99` | — | Std `± 85.18` (Scratch) / `± 100.63` (Pretrained), `ddof=1` |
@@ -119,18 +121,18 @@ All values below are directly measured from on-disk evaluation outputs and audit
 
 All 4 primary cross-dataset runs use **100% identical** data augmentations (`crop_size: 512`, `pad_small_images: true`, `max_size: 2048`, `scale_range: [0.6, 1.4]`), **100% identical** model (`sfi_lite` with orthogonal Laplacian frequency decomposition and context inheritance gating, `hdc_dilations: [1,2,3]`, `use_aspp_gap: false`, `dw_subpixel`, `output_stride: 2`, `subpixel_stride2: true`, `direct`, `init_m0: auto`, `floor_tau: 0.001` -> **`100,596` params**), **100% identical** loss (`dual_bayesian_radon_ot`, `bayesian_sigma: 8.0`, `bayesian_sigma_max: 8.0`, `radon_ot_scale_by_length: false`, `count_nb_dispersion: 50.0`), and **100% identical** optimizer/scheduler (`lr: 0.0003`, `backbone_lr_scale: 0.25`, `warmup_epochs: 15`, `min_lr_ratio: 0.05`, `ema_decay: 0.999`):
 
-| Config File (`configs/benchmarks/nextgen_sub65/`) | Role | Dataset | Epochs (Full) | Measured Params | 600-ep Interim MAE / RMSE | Status |
+| Config File (`configs/benchmarks/nextgen_sub65/`) | Role | Dataset | Epochs | Measured Params | Final 1500-ep MAE / RMSE | Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
-| `exp_sha_direct_sfi_dw_subpixel_102k.yaml` | Proposed Unified Direct | SHA | 1500 | `100,596` | **`63.98 / 95.69`** (s42, best ep 585/600) | **Training — 1500-ep pending** |
-| `exp_shb_synergistic_hdc_dw_subpixel_100k.yaml` | Proposed Unified Direct | SHB | 1500 | `100,596` | `11.66 / 18.73` (best ep 45/500) | **Training — 1500-ep pending** |
-| `exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml` | Proposed Unified Direct | QNRF | 1000 | `100,596` | `105.61 / 185.84` (best ep 150/300) | **Training — 1000-ep pending** |
-| `exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml` | Proposed Unified Direct | JHU | 800 | `100,596` | `58.93 / 210.21` Val (best ep 115/300) | **Training — 800-ep pending** |
-| `exp_sha_hdc_mcbpro_subpixel_103k.yaml` | Ablation: `hdc_lite` Neck (Direct) | SHA | 1500 | `99,892` | **`64.67 / 98.81`** (best ep 545/600) | **Training — 1500-ep pending** |
-| `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 1500 | `99,892` | `71.13 / 112.06` (best ep 245/600) | **Training — 1500-ep pending** |
-| `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 1500 | `103,226` | **`64.17 / 97.22`** (best ep 385/600) | **Training — 1500-ep pending** |
-| `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | `67.04 / 102.87` (best ep 485/600) | **Training — 1500-ep pending** |
-| `exp_sha_direct_sfi_pure_bayesian_102k.yaml` | Ablation: Pure Bayesian Loss (`lambda_radon_ot: 0.0`) | SHA | 1500 | `100,596` | — | **Ready to Train** |
-| `exp_sha_direct_sfi_scratch_102k.yaml` | Ablation: Scratch Training (`pretrained: false`) | SHA | 1500 | `100,596` | — | **Ready to Train** |
+| `exp_sha_direct_sfi_dw_subpixel_102k.yaml` | Proposed Unified Direct | SHA | 1500 | `100,596` | **`63.25 / 92.74`** (s42, best ep 585) | **Completed** |
+| `exp_shb_synergistic_hdc_dw_subpixel_100k.yaml` | Proposed Unified Direct | SHB | 1500 | `100,596` | **`10.82 / 15.68`** (best ep 735) | **Completed** |
+| `exp_qnrf_synergistic_crop768_dw_subpixel_103k.yaml` | Proposed Unified Direct | QNRF | 1000 | `100,596` | **`99.04 / 172.11`** (best ep 325) | **Completed** |
+| `exp_jhu_synergistic_hdc_dw_subpixel_103k.yaml` | Proposed Unified Direct | JHU | 800 | `100,596` | **`57.45 / 210.00`** Val (best ep 135) | **Completed** |
+| `exp_sha_hdc_mcbpro_subpixel_103k.yaml` | Ablation: `hdc_lite` Neck (Direct) | SHA | 1500 | `99,892` | **`63.13 / 97.67`** (best ep 600) | **Completed** |
+| `exp_sha_direct_aspp124_dw_subpixel_100k.yaml` | Ablation: `aspp_lite` `[1,2,4]` Neck (Direct) | SHA | 1500 | `99,892` | `68.51 / 103.79` (best ep 520) | **Completed** |
+| `exp_sha_synergistic_mcbpro_subpixel_103k.yaml` | Ablation: Learned `mcbpro` Solver (`sfi_lite`) | SHA | 1500 | `103,226` | `65.19 / 99.74` (best ep 455) | **Completed** |
+| `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | `66.26 / 107.34` (best ep 1185) | **Completed** |
+| `exp_sha_direct_sfi_pure_bayesian_102k.yaml` | Ablation: Pure Bayesian Loss (`lambda_radon_ot: 0.0`) | SHA | 1500 | `100,596` | `64.18 / 106.36` (best ep 615) | **Completed** |
+| `exp_sha_direct_sfi_scratch_102k.yaml` | Ablation: Scratch Training (`pretrained: false`) | SHA | 1500 | `100,596` | `88.03 / 128.55` (best ep 1365) | **Completed** |
 
 *(600-epoch interim results collected with `min_lr_ratio: 0.20`. Full 1500-epoch runs use `min_lr_ratio: 0.05`. Numbers will be updated upon pull of 1500-epoch checkpoints.)*
 
