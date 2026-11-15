@@ -106,6 +106,7 @@ All values below are directly measured from on-disk evaluation outputs and audit
 | **UCF-QNRF** | `runs` | `sweeps_train/exp_qnrf_crop_768_104k` | `102.10` | `178.47` | Pretrained Direct: `105.36 / 174.94` (`Bias -5.94`) |
 | **JHU-Crowd++** Val (500) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`57.45`** | **`210.00`** | Best ep 135/800. Stratum: Sp `10.05`, Mod `37.94`, Den `264.93` (`-80.3`). Bias `-7.00` |
 | **JHU-Crowd++** Val (500) | `runs_fixed` | `exp_jhu_direct_pretrained_104k` | `58.07` | `217.04` | `disp10`: `59.73 / 231.14`; `no_neck`: `64.81 / 231.46`; Scratch: `65.20 / 227.23` |
+| **JHU-Crowd++** Test (1,600) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`75.45`** | **`296.61`** | Official Test. `NAE 0.543`, `Bias -16.52`, `GAME1 92.49`, `GAME2 104.68`, `GAME3 122.60`, Sp `12.87`, Mod `36.68`, Den `340.91` |
 | **JHU-Crowd++** Test (1,600) | `runs` | Pretrained Direct (`attribute_breakdown.json`) | `76.58` | `295.07` | `NAE 0.415`; Clear `71.85` [n=1409], Fog/Haze `100.79` [n=64], Rain `63.35` [n=49], Snow `150.48` [n=78], Distractors `70.74` [n=31] |
 | **UCF_CC_50** (5-fold CV) | `runs` | Scratch / Pretrained Direct | `298.65` / `329.99` | — | Std `± 85.18` (Scratch) / `± 100.63` (Pretrained), `ddof=1` |
 
