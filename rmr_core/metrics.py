@@ -190,6 +190,54 @@ def density_stratified_mae(rows: list[dict]) -> dict[str, float]:
     return out
 
 
+def compute_psnr(
+    pred: np.ndarray,
+    target: np.ndarray,
+    data_range: float | None = None,
+) -> float:
+    """Peak Signal-to-Noise Ratio (PSNR) between density maps in decibels (dB).
+
+    Follows canonical crowd counting convention (CSRNet CVPR 2018, MCNN CVPR 2016):
+    PSNR = 10 * log10(MAX^2 / MSE)
+    """
+    p = np.asarray(pred, dtype=np.float64)
+    t = np.asarray(target, dtype=np.float64)
+    mse = float(np.mean((p - t) ** 2))
+    if mse <= 1e-15:
+        return float("inf")
+    if data_range is None:
+        data_range = float(np.max(t) - np.min(t))
+    if data_range <= 1e-12:
+        return 0.0
+    return float(10.0 * np.log10((data_range ** 2) / mse))
+
+
+def compute_ssim(
+    pred: np.ndarray,
+    target: np.ndarray,
+    data_range: float | None = None,
+    win_size: int = 11,
+) -> float:
+    """Structural Similarity Index Measure (SSIM) between density maps.
+
+    Measures structural preservation, local luminance, and contrast.
+    """
+    from skimage.metrics import structural_similarity
+    p = np.asarray(pred, dtype=np.float64)
+    t = np.asarray(target, dtype=np.float64)
+    if data_range is None:
+        data_range = float(np.max(t) - np.min(t))
+    if data_range <= 1e-12:
+        return 1.0 if np.allclose(p, t, atol=1e-6) else 0.0
+    min_dim = min(p.shape[-2], p.shape[-1])
+    eff_win_size = min(win_size, min_dim)
+    if eff_win_size % 2 == 0:
+        eff_win_size -= 1
+    if eff_win_size < 3:
+        return float("nan")
+    return float(structural_similarity(t, p, data_range=data_range, win_size=eff_win_size))
+
+
 from .spatial_analysis import (
     compute_count_confidence_interval,
     compute_crowd_risk_index,
@@ -206,7 +254,9 @@ __all__ = [
     "compute_game_exact_points",
     "compute_mae",
     "compute_nae",
+    "compute_psnr",
     "compute_rmse",
+    "compute_ssim",
     "compute_wmae",
     "count_from_map",
     "density_stratified_mae",
