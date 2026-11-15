@@ -75,7 +75,7 @@ def extract_subpixel_peaks(
     points = []
     scores = []
     kept_yx: list[tuple[int, int]] = []
-    for y0, x0 in zip(y_sorted, x_sorted, strict=False):
+    for y0, x0 in zip(y_sorted, x_sorted):
         if any(abs(y0 - ky) <= pad and abs(x0 - kx) <= pad for ky, kx in kept_yx):
             continue
         kept_yx.append((y0, x0))
