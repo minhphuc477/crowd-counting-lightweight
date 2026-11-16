@@ -26,7 +26,16 @@
       "low_light (lum=1)": 912,
       "normal (lum=2)": 1410
     },
-    "missing_images_on_disk": 3109
+    "missing_images_on_disk": 0,
+    "resolution": {
+      "min_width": 259,
+      "max_width": 19044,
+      "min_height": 194,
+      "max_height": 6202,
+      "median_width": 3264,
+      "median_height": 2160,
+      "median_aspect_ratio": 1.5
+    }
   },
   "val": {
     "split": "nwpu_val",
@@ -55,7 +64,16 @@
       "low_light (lum=1)": 146,
       "normal (lum=2)": 229
     },
-    "missing_images_on_disk": 500
+    "missing_images_on_disk": 0,
+    "resolution": {
+      "min_width": 640,
+      "max_width": 10800,
+      "min_height": 384,
+      "max_height": 6720,
+      "median_width": 2880,
+      "median_height": 1993,
+      "median_aspect_ratio": 1.5
+    }
   },
   "test": {
     "split": "nwpu_test",
@@ -84,6 +102,15 @@
       "low_light (lum=1)": 442,
       "normal (lum=2)": 678
     },
-    "missing_images_on_disk": 1500
+    "missing_images_on_disk": 0,
+    "resolution": {
+      "min_width": 260,
+      "max_width": 9443,
+      "min_height": 194,
+      "max_height": 6720,
+      "median_width": 3456,
+      "median_height": 2278,
+      "median_aspect_ratio": 1.5
+    }
   }
 }
