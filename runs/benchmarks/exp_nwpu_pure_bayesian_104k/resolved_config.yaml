@@ -80,7 +80,7 @@ train:
   amp: true
   early_stopping: false
   patience: 0
-  eval_every: 10
+  eval_every: 5
   deterministic: true
 eval:
   density_bins:
