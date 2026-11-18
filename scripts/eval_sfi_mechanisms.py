@@ -116,13 +116,23 @@ def main() -> None:
         entropy_vals: list[float] = []
         norm_entropy_vals: list[float] = []
 
-        # Load optional bounding boxes directly from manifest if present
+        # Load optional bounding boxes directly from manifest and rescale to match max_size-capped image
         manifest_boxes: list[torch.Tensor | None] = []
         with open(manifest_path, "r", encoding="utf-8") as mf:
             for line in mf:
                 item = json.loads(line)
                 bxs = item.get("boxes")
-                manifest_boxes.append(torch.tensor(bxs, dtype=torch.float32) if bxs else None)
+                if bxs:
+                    b_t = torch.tensor(bxs, dtype=torch.float32)
+                    pts_orig = item.get("points")
+                    if pts_orig:
+                        p_t = torch.tensor(pts_orig, dtype=torch.float32)
+                        orig_max = float(p_t.abs().max().item()) if p_t.numel() > 0 else 0.0
+                    else:
+                        orig_max = 0.0
+                    manifest_boxes.append((b_t, orig_max))  # type: ignore[arg-type]
+                else:
+                    manifest_boxes.append(None)
 
         with torch.no_grad():
             for i in range(n_eval):
@@ -136,7 +146,15 @@ def main() -> None:
 
                 images_list.append(img)
                 pts_list.append(pts)
-                boxes_list.append(manifest_boxes[i] if i < len(manifest_boxes) else None)
+                b_entry = manifest_boxes[i] if i < len(manifest_boxes) else None
+                if b_entry is not None:
+                    b_t, orig_max = b_entry  # type: ignore[misc]
+                    if orig_max > 0.0 and pts.numel() > 0:
+                        scale_ratio = float(pts.abs().max().item()) / orig_max
+                        b_t = b_t * scale_ratio
+                    boxes_list.append(b_t)
+                else:
+                    boxes_list.append(None)
                 pred_maps.append(y_pred)
 
                 err = pred_cnt - gt_cnt

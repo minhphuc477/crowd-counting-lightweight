@@ -181,7 +181,9 @@ def gate_response_analysis(
             if g4 is None:
                 continue
 
-            g_mean_spatial = g4[0].mean(dim=0).cpu()  # [H/4, W/4]
+            g_mean_spatial = g4[0].mean(dim=0).cpu()  # [H/4, W/4] or [1, 1] for channel-only gates (SE)
+            if l4 is not None and g_mean_spatial.shape != l4.shape[-2:]:
+                g_mean_spatial = g_mean_spatial.expand(l4.shape[-2], l4.shape[-1])
             n_gt = int(pts.shape[0]) if pts is not None and pts.numel() > 0 else 0
             if n_gt <= sparse_max:
                 img_regimes["sparse"].append(float(g_mean_spatial.mean().item()))
