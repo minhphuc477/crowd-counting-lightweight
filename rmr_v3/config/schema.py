@@ -77,6 +77,7 @@ ALLOWED_MODEL_KEYS = {
     "ratio_clamp_min", "dsr_fw_power", "dsr_fw_unit_mass", "dsr_fw_tau_z_floor",
     "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
     "enable_regional_head",
+    "sfi_norm_free_hf", "sfi_use_hdc_proj", "sfi_hdc_proj_groups",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -128,6 +129,7 @@ ALLOWED_LOSS_KEYS = {
     # Scale-Normalized Voronoi-Poisson Loss additions
     "lambda_sn_vp", "sn_vp_lambda_center", "sn_vp_lambda_global",
     "sn_vp_chunk_size", "sn_vp_norm_mode", "sn_vp_norm_ref",
+    "empty_scene_full_weight",
 }
 
 ALLOWED_TRAIN_KEYS = {

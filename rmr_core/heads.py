@@ -54,11 +54,14 @@ class FineMeasureHead(nn.Module):
         head_blocks: int = 1,
         icnr_init: bool = False,
         pre_shuffle_kernel_size: int = 1,
+        dsimr_mode: bool = False,
     ):
         super().__init__()
         self.head_activation = str(head_activation).lower()
         self.scale_prior_boost = float(scale_prior_boost)
         self.subpixel_stride2 = bool(subpixel_stride2)
+        self.dsimr_mode = bool(dsimr_mode) and self.subpixel_stride2
+        self._last_dsimr_state: tuple[torch.Tensor, torch.Tensor] | None = None
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
         blocks = []
@@ -71,6 +74,7 @@ class FineMeasureHead(nn.Module):
         final_conv: nn.Conv2d = self.body[-1]  # type: ignore[assignment]
         nn.init.normal_(final_conv.weight, std=0.01 / float(pre_k))
         m0 = math.log1p(math.exp(float(init_bias)))
+        self.adaptive_scale_ref: float = 0.0
 
         if self.subpixel_stride2:
             if icnr_init:
@@ -79,15 +83,37 @@ class FineMeasureHead(nn.Module):
                     eps = torch.empty(final_conv.weight.shape, dtype=torch.float32).normal_(0.0, 1e-4, generator=gen)
                     final_conv.weight.copy_(final_conv.weight[:1].repeat(4, 1, 1, 1) + eps.to(final_conv.weight))
             self.pixel_shuffle: nn.PixelShuffle | None = nn.PixelShuffle(upscale_factor=2)
-            if self.head_activation == "relu":
-                nn.init.constant_(final_conv.bias, m0 / 4.0)
-            elif self.head_activation == "compact_c1":
-                nn.init.constant_(final_conv.bias, _compact_c1_inverse(m0 / 4.0, self.floor_tau))
+            if self.dsimr_mode:
+                # Decoupled Support-and-Intensity Measure Recovery (DSIMR):
+                # Channel 0: support gate logit z_s (init +2.0 -> s0 ~ 0.8808),
+                # Channel 1: positive cell intensity logit z_lambda calibrated for Step-0 parity.
+                self.dsimr_proj: nn.Conv2d | None = nn.Conv2d(width, 2, kernel_size=1, bias=True)
+                nn.init.normal_(self.dsimr_proj.weight, std=0.01)
+                nn.init.zeros_(final_conv.bias)
+                s0 = 1.0 / (1.0 + math.exp(-2.0))
+                target_sub = (m0 / 4.0) / s0
+                if self.head_activation == "relu":
+                    b_lambda = target_sub
+                elif self.head_activation == "compact_c1":
+                    b_lambda = _compact_c1_inverse(target_sub, self.floor_tau)
+                else:
+                    b_lambda = _softplus_inverse(target_sub + 0.5 * self.floor_tau)
+                    self.adaptive_scale_ref = float(b_lambda) + math.log(4.0)
+                with torch.no_grad():
+                    self.dsimr_proj.bias.copy_(torch.tensor([2.0, float(b_lambda)], dtype=torch.float32))
             else:
-                init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
-                nn.init.constant_(final_conv.bias, init_bias_stride2)
+                self.dsimr_proj = None
+                if self.head_activation == "relu":
+                    nn.init.constant_(final_conv.bias, m0 / 4.0)
+                elif self.head_activation == "compact_c1":
+                    nn.init.constant_(final_conv.bias, _compact_c1_inverse(m0 / 4.0, self.floor_tau))
+                else:
+                    init_bias_stride2 = _softplus_inverse(m0 / 4.0 + 0.5 * self.floor_tau)
+                    nn.init.constant_(final_conv.bias, init_bias_stride2)
+                    self.adaptive_scale_ref = float(init_bias_stride2) + math.log(4.0)
         else:
             self.pixel_shuffle = None
+            self.dsimr_proj = None
             if self.head_activation == "relu":
                 nn.init.constant_(final_conv.bias, m0)
             elif self.head_activation == "compact_c1":
@@ -126,15 +152,29 @@ class FineMeasureHead(nn.Module):
             self.scale_beta = nn.Parameter(torch.zeros(int(num_scales)))
             self.scale_gamma = nn.Parameter(torch.zeros(int(num_scales)))
 
+    def _apply_dsimr_modulation(self, y_intensity: torch.Tensor) -> torch.Tensor:
+        """Apply Decoupled Support-and-Intensity sub-pixel partition M_2 = PixelShuffle(s * alpha)."""
+        if (
+            getattr(self, "dsimr_mode", False)
+            and getattr(self, "_last_dsimr_state", None) is not None
+            and self.pixel_shuffle is not None
+        ):
+            z_s, alpha = self._last_dsimr_state
+            self._last_dsimr_state = None
+            support_gate = torch.sigmoid(z_s)
+            m2 = self.pixel_shuffle(support_gate * alpha)
+            return y_intensity * m2
+        return y_intensity
+
     def activate(
         self,
         z: torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        scale_ref = float(getattr(self, "adaptive_scale_ref", 0.0))
         if getattr(self, "head_activation", "softplus") == "relu":
-            return F.relu(z)
-
-        if self.scale_conditioned and scale_weights is not None:
+            y_out = F.relu(z)
+        elif self.scale_conditioned and scale_weights is not None:
             if scale_weights.shape[-2:] != z.shape[-2:]:
                 scale_weights = F.interpolate(
                     scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
@@ -153,9 +193,9 @@ class FineMeasureHead(nn.Module):
                     g_val = self.density_scale_gamma.clamp_min(0.0)
                 else:
                     g_val = max(float(self.density_scale_gamma), 0.0)
-                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
+                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff - scale_ref))
             if self.density_curvature:
-                return _apply_curvature(
+                y_out = _apply_curvature(
                     y_base,
                     self.curvature_alpha,
                     curv_scale=self.curv_scale,
@@ -165,25 +205,29 @@ class FineMeasureHead(nn.Module):
                     gate_beta=self.curvature_gate_beta,
                     curvature_pade=getattr(self, "curvature_pade", False),
                 )
-            return y_base
+            else:
+                y_out = y_base
+        else:
+            y_out = _density_activate(
+                z,
+                temp_softplus=self.temp_softplus,
+                tau=getattr(self, "tau", None),
+                density_curvature=self.density_curvature,
+                curvature_alpha=getattr(self, "curvature_alpha", None),
+                gated_density_curvature=self.gated_density_curvature,
+                curvature_dense_threshold=self.curvature_dense_threshold,
+                curvature_gate_beta=self.curvature_gate_beta,
+                curvature_pool_kernel=self.curvature_pool_kernel,
+                curv_scale=self.curv_scale,
+                floor_tau=getattr(self, "floor_tau", 0.0),
+                density_adaptive_scale=self.density_adaptive_scale,
+                density_scale_gamma=self.density_scale_gamma,
+                adaptive_scale_ref=scale_ref,
+                curvature_pade=getattr(self, "curvature_pade", False),
+                head_activation=getattr(self, "head_activation", "softplus"),
+            )
 
-        return _density_activate(
-            z,
-            temp_softplus=self.temp_softplus,
-            tau=getattr(self, "tau", None),
-            density_curvature=self.density_curvature,
-            curvature_alpha=getattr(self, "curvature_alpha", None),
-            gated_density_curvature=self.gated_density_curvature,
-            curvature_dense_threshold=self.curvature_dense_threshold,
-            curvature_gate_beta=self.curvature_gate_beta,
-            curvature_pool_kernel=self.curvature_pool_kernel,
-            curv_scale=self.curv_scale,
-            floor_tau=getattr(self, "floor_tau", 0.0),
-            density_adaptive_scale=self.density_adaptive_scale,
-            density_scale_gamma=self.density_scale_gamma,
-            curvature_pade=getattr(self, "curvature_pade", False),
-            head_activation=getattr(self, "head_activation", "softplus"),
-        )
+        return self._apply_dsimr_modulation(y_out)
 
     def forward_logits(
         self,
@@ -193,9 +237,20 @@ class FineMeasureHead(nn.Module):
         """Compute raw pre-activation logit field z0 with scale prior boost."""
         if isinstance(f, tuple):
             f = f[0]
-        z = self.body(f)
-        if self.subpixel_stride2 and self.pixel_shuffle is not None:
-            z = self.pixel_shuffle(z)
+        if getattr(self, "dsimr_mode", False) and getattr(self, "dsimr_proj", None) is not None and self.pixel_shuffle is not None:
+            h4 = self.body[:-1](f)
+            z_sub = self.body[-1](h4)
+            alpha = 4.0 * F.softmax(z_sub, dim=1)
+            dsimr_out = self.dsimr_proj(h4)  # type: ignore[misc]
+            z_s = dsimr_out[:, 0:1]
+            z_lambda = dsimr_out[:, 1:2]
+            self._last_dsimr_state = (z_s, alpha)
+            z = self.pixel_shuffle(z_lambda.expand(-1, 4, -1, -1))
+        else:
+            self._last_dsimr_state = None
+            z = self.body(f)
+            if self.subpixel_stride2 and self.pixel_shuffle is not None:
+                z = self.pixel_shuffle(z)
         if scale_weights is not None and getattr(self, "scale_prior_boost", 0.0) > 0.0:
             sw_b = scale_weights if scale_weights.shape[-2:] == z.shape[-2:] else F.interpolate(
                 scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
@@ -216,6 +271,7 @@ class FineMeasureHead(nn.Module):
             or self.density_curvature
             or getattr(self, "floor_tau", 0.0) > 0.0
             or getattr(self, "density_adaptive_scale", False)
+            or getattr(self, "dsimr_mode", False)
             or getattr(self, "head_activation", "softplus") in ("relu", "compact_c1")
         )
         if is_activated:
@@ -403,10 +459,10 @@ def build_fine_head(
             floor_tau=floor_tau,
             head_activation=head_activation,
         )
-    if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3"):
+    if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3", "dsimr_subpixel"):
         raise ValueError(
             f"Unsupported head_type: '{head_type}'. "
-            "Must be 'standard', 'residual_dilated', 'first_principles', 'rd_finehead', 'dw_subpixel', or 'subpixel_k3'."
+            "Must be 'standard', 'residual_dilated', 'first_principles', 'rd_finehead', 'dw_subpixel', 'subpixel_k3', or 'dsimr_subpixel'."
         )
     kw = {
         "width": width,
@@ -427,7 +483,8 @@ def build_fine_head(
     }
     if scale_conditioned_fine_head:
         return ScaleConditionedFineHead(num_scales=num_scales, **kw)
-    is_dw_subpixel = head_type_l in ("dw_subpixel", "subpixel_k3")
+    is_dsimr = head_type_l == "dsimr_subpixel"
+    is_dw_subpixel = head_type_l in ("dw_subpixel", "subpixel_k3", "dsimr_subpixel")
     return FineMeasureHead(
         scale_conditioned=scale_conditioned_prior,
         num_scales=num_scales,
@@ -436,5 +493,6 @@ def build_fine_head(
         head_blocks=head_blocks,
         icnr_init=is_dw_subpixel,
         pre_shuffle_kernel_size=max(3, int(subpixel_kernel_size)) if is_dw_subpixel else 1,
+        dsimr_mode=is_dsimr,
         **kw,
     )

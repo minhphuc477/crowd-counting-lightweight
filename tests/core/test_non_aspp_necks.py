@@ -314,3 +314,129 @@ def test_sfi_lite_shift_equivariance_and_sample_isolation() -> None:
     assert c4.grad[1].abs().max().item() == 0.0, "Cross-sample leakage detected in SFILiteFPNNeck!"
 
 
+def test_sfi_v2_norm_free_hf_exact_zero_fixed_point_and_no_bg_blowup() -> None:
+    """Verify SFI-v2 norm-free zero-bias HF branch preserves exact zero fixed point and avoids 1/sigma_bg blow-up."""
+    from rmr_core.necks.sfi import SFILiteFPNNeck
+
+    torch.manual_seed(7)
+    neck_v2 = SFILiteFPNNeck(
+        in_channels=(16, 32, 48),
+        width=32,
+        use_gap=False,
+        norm_free_hf=True,
+        use_hdc_proj=True,
+        hdc_proj_groups=2,
+    ).eval()
+    neck_legacy = SFILiteFPNNeck(
+        in_channels=(16, 32, 48),
+        width=32,
+        use_gap=False,
+        norm_free_hf=False,
+        use_hdc_proj=False,
+    ).eval()
+
+    with torch.no_grad():
+        # Exact zero fixed point on flat high-frequency residual
+        zero_hf = torch.zeros(1, 32, 32, 32)
+        out_v2_zero = torch.tanh(neck_v2.hf_enhance(zero_hf))
+        assert out_v2_zero.abs().max().item() == 0.0
+
+        # Tiny background sensor ripple (~1e-4) must remain bounded (~1e-4), NOT blown up by 1/sigma_bg
+        bg_ripple = torch.randn(1, 32, 32, 32) * 1e-4
+        out_v2_ripple = neck_v2.gamma_hf * torch.tanh(neck_v2.hf_enhance(bg_ripple))
+        out_leg_ripple = neck_legacy.gamma_hf * neck_legacy.hf_enhance(bg_ripple)
+        assert out_v2_ripple.abs().max().item() < 1e-3, (
+            f"Norm-free HF branch blew up background ripple: {out_v2_ripple.abs().max().item()}"
+        )
+        assert out_leg_ripple.abs().max().item() > 50.0 * out_v2_ripple.abs().max().item()
+
+        # Verify P16 grouped proj + balanced HDC scaling preserves shift equivariance & finite outputs
+        c4 = torch.randn(2, 16, 64, 64)
+        c8 = torch.randn(2, 32, 32, 32)
+        c16 = torch.randn(2, 48, 16, 16)
+        p4, p8, p16 = neck_v2(c4, c8, c16)
+        assert p4.shape == (2, 32, 64, 64) and p8.shape == (2, 32, 32, 32) and p16.shape == (2, 32, 16, 16)
+        assert torch.isfinite(p4).all() and torch.isfinite(p8).all() and torch.isfinite(p16).all()
+
+
+def test_dsimr_subpixel_head_measure_conservation_and_step0_prior() -> None:
+    """Verify DSIMR Sub-Pixel head Step-0 calibration, exact coarse-to-fine conservation, prior-shifted scaling, and params."""
+    m0 = 0.015763
+    init_bias = math.log(math.expm1(m0))
+    head = build_fine_head(
+        width=32,
+        init_bias=init_bias,
+        temp_softplus=False,
+        subpixel_stride2=True,
+        floor_tau=0.001,
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+        head_activation="softplus",
+        head_type="dsimr_subpixel",
+        subpixel_kernel_size=3,
+    ).eval()
+
+    assert isinstance(head, FineMeasureHead) and head.dsimr_mode is True
+    assert head.adaptive_scale_ref < -3.5, "Prior-shifted adaptive_scale_ref must stay in active sub-zero regime"
+
+    # Zero features verify Step-0 prior density (m0 / 4.0)
+    with torch.no_grad():
+        feats_zero = torch.zeros(1, 32, 16, 16)
+        y_zero = head(feats_zero)
+        expected = m0 / 4.0
+        assert abs(y_zero.mean().item() - expected) < 5e-4, f"DSIMR Step-0 mean {y_zero.mean().item():.6f} != {expected:.6f}"
+
+        # Coarse-to-fine measure conservation: 2x2 sum equals 4 * s(u) * Lambda(u)
+        feats_rand = torch.randn(2, 32, 16, 16)
+        h4 = head.body[:-1](feats_rand)
+        z_sub = head.body[-1](h4)
+        alpha = 4.0 * torch.softmax(z_sub, dim=1)
+        assert torch.allclose(alpha.sum(dim=1, keepdim=True), torch.full((2, 1, 16, 16), 4.0), atol=1e-5)
+
+        y_rand = head(feats_rand)
+        assert (y_rand >= 0.0).all() and torch.isfinite(y_rand).all()
+        cell_sums = torch.nn.functional.avg_pool2d(y_rand, kernel_size=2, stride=2) * 4.0
+        dsimr_proj = head.dsimr_proj(h4)
+        s = torch.sigmoid(dsimr_proj[:, 0:1])
+        z_lam = dsimr_proj[:, 1:2]
+        y_lam = torch.nn.functional.softplus(z_lam)
+        tau_s2 = head.floor_tau
+        y_lam = torch.where(y_lam > tau_s2, y_lam - 0.5 * tau_s2, y_lam.square() / (2.0 * tau_s2))
+        y_lam = y_lam * (1.0 + 0.15 * torch.relu(z_lam - head.adaptive_scale_ref))
+        expected_cell_sum = 4.0 * s * y_lam
+        assert torch.allclose(cell_sums, expected_cell_sum, atol=1e-5)
+
+    # Full RMRv3 integration: param ceiling 101,174 <= 104,441 & zero dead gradients
+    cfg = RMRv3Config(
+        pretrained=False,
+        output_stride=2,
+        subpixel_stride2=True,
+        subpixel_kernel_size=3,
+        feature_width=32,
+        max_trainable_params=104441,
+        neck_type="sfi_lite",
+        sfi_norm_free_hf=True,
+        sfi_use_hdc_proj=True,
+        sfi_hdc_proj_groups=2,
+        head_type="dsimr_subpixel",
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+        enable_regional_head=False,
+        enable_solver=False,
+        solver_mode="direct",
+        floor_tau=0.001,
+    )
+    model = RMRv3(cfg).train()
+    total_params = _count_params(model)
+    assert total_params <= 104441, f"Parameter ceiling exceeded: {total_params}"
+    x = torch.randn(2, 3, 128, 128)
+    out = model(x)
+    out.y.sum().backward()
+    dead = [
+        name for name, p in model.named_parameters()
+        if p.requires_grad and (p.grad is None or p.grad.abs().sum().item() == 0.0)
+    ]
+    assert dead == [], f"Dead zero-grad params in SFI-v2 + DSIMR: {dead}"
+
+
+

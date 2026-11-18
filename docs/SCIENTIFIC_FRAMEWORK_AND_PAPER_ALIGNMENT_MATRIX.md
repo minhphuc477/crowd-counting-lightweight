@@ -59,7 +59,8 @@ Formal statistical thresholds and falsification triggers ($H_1$–$H_5$) are spe
 | Model | Venue / Year | KD | Params | GFLOPs | SHA MAE / RMSE | SHB MAE / RMSE | QNRF MAE / RMSE |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **TinyCount** | JRTIP 2024 (non-KD) | 0% | `0.060M` (`60k`) | `0.16` | `78.2 / 120.8` | — | — |
-| **Lw-Count** | TCSVT 2022 | 0% | `0.071M` (`71k`) | — | `69.7 / 100.5` | — | — |
+| **Lw-Count** | TCSVT 2022 | 0% | `0.071M` (`71k`) | — | `69.7 / 100.5` | `10.1 / 12.4` | `149.7 / 238.4` |
+| **Zhao et al.** (`arXiv:2510.13250`) | arXiv 2025 | 0% | `0.150M` (`150k`) | `1.32` | `63.4 / 106.3` | `7.3 / 11.2` | `104.1 / 172.2` |
 | **RMRv3 (Canonical Stride-4 Anchor, s42 / 2-seed)** | Codebase Canonical | **0%** | **`104,390`** (`~104k`) | — | **`65.62`** (`68.91 ± 4.65` 2-seed) / `111.32` | — | — |
 | **RMRv3 (Audited Direct `runs_fixed`)** | Audited Suite | **0%** | **`<= 104,441`** | — | `68.05 / 113.47` (`69.46 ± 1.66` `runs` 3-seed) | `9.24 / 13.92` (Scratch) / `9.63 / 15.37` (PT) | `103.35 / 171.99` |
 | **MCNN** | CVPR 2016 | 0% | `0.133M` (`133k`) | `2.80` | `110.2 / —` | — | — |
@@ -108,6 +109,11 @@ All values below are directly measured from on-disk evaluation outputs and audit
 | **JHU-Crowd++** Val (500) | `runs_fixed` | `exp_jhu_direct_pretrained_104k` | `58.07` | `217.04` | `disp10`: `59.73 / 231.14`; `no_neck`: `64.81 / 231.46`; Scratch: `65.20 / 227.23` |
 | **JHU-Crowd++** Test (1,600) | `runs_fixed` (`nextgen_sub65`) | `sfi_lite + dw_subpixel` (`100,596` p) | **`75.45`** | **`296.61`** | Official Test. `NAE 0.543`, `Bias -16.52`, `GAME1 92.49`, `GAME2 104.68`, `GAME3 122.60`, Sp `12.87`, Mod `36.68`, Den `340.91` |
 | **JHU-Crowd++** Test (1,600) | `runs` | Pretrained Direct (`attribute_breakdown.json`) | `76.58` | `295.07` | `NAE 0.415`; Clear `71.85` [n=1409], Fog/Haze `100.79` [n=64], Rain `63.35` [n=49], Snow `150.48` [n=78], Distractors `70.74` [n=31] |
+| **NWPU-Crowd** Val (500) | `runs` (`aspp_lite`) | `exp_nwpu_bg_ratio010_104k` (`99,924` p) | **`86.30`** | **`342.94`** | `229` ep (`best 175`). `NAE 0.2136`, `Bias -36.44`, Neg(`N=35`) `68.01`, Ext(`>2000`) `1428.46` |
+| **NWPU-Crowd** Val (500) | `runs` (`aspp_lite`) | `exp_nwpu_no_photometric_104k` (`99,924` p) | `93.65` | `483.81` | `244` ep (`best 195`). `NAE 0.2181`, Neg(`N=35`) **`21.15`**, Night `21.15` |
+| **NWPU-Crowd** Val (500) | `runs` (`aspp_lite`) | `exp_nwpu_direct_pretrained_104k` (`99,924` p) | `94.92` | `453.49` | `231` ep (`best 165`). `NAE 0.2490`, Neg(`N=35`) `34.64`, Sp `11.25`, Den `150.25`, Ext `1729.16` |
+| **NWPU-Crowd** Val (500) | `runs` (`aspp_lite`) | `exp_nwpu_pure_bayesian_104k` (`99,924` p) | `96.54` | `610.09` | `224` ep (`best 220`). Proves Radon-OT cuts NWPU RMSE by **`156.60`** |
+| **NWPU-Crowd** Val (500) | `runs` (`aspp_lite`) | `exp_nwpu_gaussian_mse_104k` (`99,924` p) | `110.81` | `537.85` | `225` ep (`best 170`). `NAE 0.7904`; Neg `75.44`, Sp `39.99`, Den `175.97` |
 | **UCF_CC_50** (5-fold CV) | `runs` | Scratch / Pretrained Direct | `298.65` / `329.99` | — | Std `± 85.18` (Scratch) / `± 100.63` (Pretrained), `ddof=1` |
 
 #### C. Zero-Shot Cross-Dataset Transfers (`runs/eval_*`)
@@ -134,6 +140,12 @@ All 4 primary cross-dataset runs use **100% identical** data augmentations (`cro
 | `exp_sha_canonical_stride4_mcbpro_repro_104k.yaml` | Ablation: Canonical Stride-4 `ASPPLite+GAP+MCBPRO` | SHA | 1500 | `104,390` | `66.26 / 107.34` (best ep 1185) | **Completed** |
 | `exp_sha_direct_sfi_pure_bayesian_102k.yaml` | Ablation: Pure Bayesian Loss (`lambda_radon_ot: 0.0`) | SHA | 1500 | `100,596` | `64.18 / 106.36` (best ep 615) | **Completed** |
 | `exp_sha_direct_sfi_scratch_102k.yaml` | Ablation: Scratch Training (`pretrained: false`) | SHA | 1500 | `100,596` | `88.03 / 128.55` (best ep 1365) | **Completed** |
+| `exp_sha_sfi_v2_normfree_dw_subpixel_101k.yaml` | Ablation: `SFI-v2` Norm-Free HF + Grouped $P_{16}$ (`dw_subpixel`) | SHA | 1500 | `101,108` | — | **Ready to Train** |
+| `exp_sha_sfi_v2_dsimr_subpixel_101k.yaml` | Proposed `SFI-v2` + `DSIMR` Sub-Pixel (`dsimr_subpixel`) | SHA | 1500 | `101,174` | — | **Ready to Train** |
+| `exp_shb_sfi_v2_dsimr_subpixel_101k.yaml` | Proposed `SFI-v2` + `DSIMR` Sub-Pixel (`dsimr_subpixel`) | SHB | 1500 | `101,174` | — | **Ready to Train** |
+| `exp_qnrf_sfi_v2_dsimr_subpixel_101k.yaml` | Proposed `SFI-v2` + `DSIMR` Sub-Pixel (`dsimr_subpixel`) | QNRF | 1000 | `101,174` | — | **Ready to Train** |
+| `exp_jhu_sfi_v2_dsimr_subpixel_101k.yaml` | Proposed `SFI-v2` + `DSIMR` Sub-Pixel (`dsimr_subpixel`) | JHU | 800 | `101,174` | — | **Ready to Train** |
+| `exp_nwpu_sfi_v2_dsimr_subpixel_101k.yaml` | Proposed `SFI-v2` + `DSIMR` (`bg_ratio=0.10`, `empty_full_weight`) | NWPU | 800 | `101,174` | — | **Ready to Train** |
 
 *(600-epoch interim results collected with `min_lr_ratio: 0.20`. Full 1500-epoch runs use `min_lr_ratio: 0.05`. Numbers will be updated upon pull of 1500-epoch checkpoints.)*
 

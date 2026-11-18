@@ -96,6 +96,16 @@ def compute_single_allocation(
                 l_rot = torch.zeros((), device=inp.device, dtype=inp.dtype)
             comps[-888], comps[-999] = l_rot, l_bay
             loss_val = float(cfg.lambda_bayesian) * l_bay + lam_rot * l_rot
+            if bool(getattr(cfg, "empty_scene_full_weight", False)) and lam_rot > 0.0 and points is not None:
+                empty_indices = [
+                    idx for idx in range(inp.shape[0])
+                    if idx >= len(points) or points[idx] is None or points[idx].numel() == 0
+                ]
+                if empty_indices:
+                    empty_mass_mean = (
+                        inp[empty_indices, 0].float().flatten(1).sum(dim=1).sum() / float(max(inp.shape[0], 1))
+                    )
+                    loss_val = loss_val + lam_rot * empty_mass_mean
         elif cfg.allocation_loss_type == "radon_ot":
             rot_proj = int(getattr(cfg, "radon_ot_projections", 4))
             rot_ref = float(getattr(cfg, "radon_ot_norm_ref", 100.0))

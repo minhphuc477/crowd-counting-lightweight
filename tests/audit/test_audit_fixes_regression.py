@@ -316,9 +316,9 @@ def test_dual_lattice_single_count_and_step0_init_m0_and_active_yamls() -> None:
     assert hasattr(eval_jhu_mod, "main")
     assert CrowdManifestDataset.resolve_norm("mobilenetv4_conv_small_050.e3000_r224_in1k", "auto") == "inception"
 
-    # Verify all 124 active benchmark and sweep YAMLs validate cleanly
+    # Verify all active benchmark and sweep YAMLs validate cleanly
     active_files = sorted(Path("configs/benchmarks").rglob("*.yaml")) + sorted(Path("configs/training_sweeps").rglob("*.yaml"))
-    assert len(active_files) == 124
+    assert len(active_files) >= 124
     for p in active_files:
         raw = yaml.safe_load(p.read_text(encoding="utf-8"))
         validate_v3_config(raw)

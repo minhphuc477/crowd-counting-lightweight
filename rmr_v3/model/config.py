@@ -50,6 +50,9 @@ class RMRv3Config:
     hdc_dilations: tuple[int, ...] = (1, 2, 3)
     use_fast_norm_fusion: bool = True
     aspp_gap_mode: str = "add"
+    sfi_norm_free_hf: bool = False
+    sfi_use_hdc_proj: bool = False
+    sfi_hdc_proj_groups: int = 2
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)

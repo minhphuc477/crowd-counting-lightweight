@@ -96,6 +96,7 @@ def _density_activate(
     floor_tau: float = 0.0,
     density_adaptive_scale: bool = False,
     density_scale_gamma: torch.Tensor | float = 0.0,
+    adaptive_scale_ref: float = 0.0,
     curvature_pade: bool = False,
     head_activation: str = "softplus",
 ) -> torch.Tensor:
@@ -121,7 +122,7 @@ def _density_activate(
             if isinstance(density_scale_gamma, torch.Tensor)
             else max(float(density_scale_gamma), 0.0)
         )
-        y_base = y_base * (1.0 + gamma_val * F.relu(z))
+        y_base = y_base * (1.0 + gamma_val * F.relu(z - float(adaptive_scale_ref)))
 
     if density_curvature and curvature_alpha is not None:
         return _apply_curvature(

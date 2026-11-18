@@ -64,6 +64,9 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             hdc_dilations=cfg.hdc_dilations,
             use_gap=cfg.use_aspp_gap,
             aspp_gap_mode=getattr(cfg, "aspp_gap_mode", "gate"),
+            norm_free_hf=bool(getattr(cfg, "sfi_norm_free_hf", False)),
+            use_hdc_proj=bool(getattr(cfg, "sfi_use_hdc_proj", False)),
+            hdc_proj_groups=int(getattr(cfg, "sfi_hdc_proj_groups", 2)),
         )
     if cfg.neck_type == "rlk_hdc":
         return RLKHDCFPNNeck(

@@ -28,11 +28,17 @@ class SFILiteFPNNeck(nn.Module):
         hdc_dilations: tuple[int, ...] = (1, 2, 3),
         use_gap: bool = False,
         aspp_gap_mode: str = "gate",
+        norm_free_hf: bool = False,
+        use_hdc_proj: bool = False,
+        hdc_proj_groups: int = 2,
     ) -> None:
         super().__init__()
         c4, c8, c16 = in_channels
         self.width = int(width)
         self.use_gap = bool(use_gap)
+        self.norm_free_hf = bool(norm_free_hf)
+        self.use_hdc_proj = bool(use_hdc_proj)
+        self.hdc_proj_groups = max(1, int(hdc_proj_groups))
         self.aspp_gap_mode = str(aspp_gap_mode).lower().strip()
         if self.aspp_gap_mode not in ("add", "gate"):
             raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
@@ -44,6 +50,12 @@ class SFILiteFPNNeck(nn.Module):
         self.hdc_blocks = nn.ModuleList([
             DepthwiseDilated(self.width, dilation=d) for d in hdc_dilations
         ])
+        if self.use_hdc_proj:
+            groups = self.hdc_proj_groups if (self.width % self.hdc_proj_groups == 0) else 1
+            self.hdc_proj: nn.Module | None = ConvGNAct(self.width, self.width, k=1, groups=groups)
+        else:
+            self.hdc_proj = None
+
         if self.use_gap:
             self.aspp_gap: nn.Sequential | None = nn.Sequential(
                 nn.AdaptiveAvgPool2d(1),
@@ -58,8 +70,20 @@ class SFILiteFPNNeck(nn.Module):
         self.ref8 = DSResidual(self.width)
         self.ref4 = DSResidual(self.width)
 
-        # High-frequency impulse enhancer on Laplacian residual L4_hf
-        self.hf_enhance = DepthwiseDilated(self.width, dilation=1)
+        # High-frequency impulse enhancer on Laplacian residual L4_hf.
+        # When norm_free_hf=True, uses strictly zero-bias, norm-free DWConv to preserve exact
+        # zero fixed point on flat/sparse backgrounds and eliminate 1/sigma_bg variance blow-up.
+        if self.norm_free_hf:
+            self.hf_enhance: nn.Module = nn.Conv2d(
+                self.width,
+                self.width,
+                kernel_size=3,
+                padding=1,
+                groups=self.width,
+                bias=False,
+            )
+        else:
+            self.hf_enhance = DepthwiseDilated(self.width, dilation=1)
         self.gamma_hf = nn.Parameter(torch.full((1, self.width, 1, 1), 0.5))
 
         # Spatially selective context inheritance gate G4(x) in (0, 1)
@@ -93,6 +117,9 @@ class SFILiteFPNNeck(nn.Module):
             h = block(h)
             hdc_accum = hdc_accum + h
 
+        if self.use_hdc_proj:
+            hdc_accum = hdc_accum * (1.0 / float(max(len(self.hdc_blocks), 1)))
+
         if self.aspp_gap is not None:
             gap_vec = self.aspp_gap(l16)
             gap_broadcast = gap_vec.unsqueeze(-1).unsqueeze(-1)
@@ -101,7 +128,10 @@ class SFILiteFPNNeck(nn.Module):
             else:
                 hdc_accum = hdc_accum + gap_broadcast
 
-        p16 = self.ref16(l16 + hdc_accum)
+        p16_in = l16 + hdc_accum
+        if self.hdc_proj is not None:
+            p16_in = self.hdc_proj(p16_in)
+        p16 = self.ref16(p16_in)
 
         up16_to_8 = F.interpolate(
             p16, size=l8.shape[-2:], mode="bilinear", align_corners=False
@@ -113,7 +143,11 @@ class SFILiteFPNNeck(nn.Module):
             p8, size=l4.shape[-2:], mode="bilinear", align_corners=False
         )
         gate4 = self.selective_gate(l4_lf + up8_to_4)
-        f4 = l4 + self.gamma_hf * self.hf_enhance(l4_hf) + gate4 * up8_to_4
+        if self.norm_free_hf:
+            hf_term = self.gamma_hf * gate4 * torch.tanh(self.hf_enhance(l4_hf))
+        else:
+            hf_term = self.gamma_hf * self.hf_enhance(l4_hf)
+        f4 = l4 + hf_term + gate4 * up8_to_4
         p4 = self.ref4(f4)
 
         return p4, p8, p16

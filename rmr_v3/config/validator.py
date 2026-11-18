@@ -76,7 +76,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")
         if "head_type" in m_cfg and m_cfg["head_type"] is not None:
             ht = str(m_cfg["head_type"]).lower().strip()
-            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3")
+            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel")
             if ht not in valid_heads:
                 raise ValueError(f"head_type must be one of {valid_heads}, got {m_cfg['head_type']!r}")
         if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
