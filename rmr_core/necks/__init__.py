@@ -42,6 +42,9 @@ from .rep_fpn import (
 from .sfi import (
     SFILiteFPNNeck,
 )
+from .frankenstein import (
+    FrankensteinSOTALiteNeck,
+)
 
 __all__ = [
     "ASPPLiteFPNNeck",
@@ -53,6 +56,7 @@ __all__ = [
     "CoordinateAttention",
     "DSResidual",
     "DepthwiseDilated",
+    "FrankensteinSOTALiteNeck",
     "HDCLiteFPNNeck",
     "HighResPConvFPNNeck",
     "PAFPNBiNormNeck",

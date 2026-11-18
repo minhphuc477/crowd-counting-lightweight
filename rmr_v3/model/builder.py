@@ -8,6 +8,7 @@ from rmr_core.necks import (
     AdditiveFPNNeck,
     ASPPLiteFPNNeck,
     BiFPNLiteNeck,
+    FrankensteinSOTALiteNeck,
     HDCLiteFPNNeck,
     HighResPConvFPNNeck,
     PAFPNBiNormNeck,
@@ -67,6 +68,17 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             norm_free_hf=bool(getattr(cfg, "sfi_norm_free_hf", False)),
             use_hdc_proj=bool(getattr(cfg, "sfi_use_hdc_proj", False)),
             hdc_proj_groups=int(getattr(cfg, "sfi_hdc_proj_groups", 2)),
+            use_laplacian=bool(getattr(cfg, "sfi_use_laplacian", True)),
+            use_selective_gate=bool(getattr(cfg, "sfi_use_selective_gate", True)),
+            use_hdc=bool(getattr(cfg, "sfi_use_hdc", True)),
+            decomp_mode=str(getattr(cfg, "sfi_decomp_mode", "laplacian")),
+            gate_mode=str(getattr(cfg, "sfi_gate_mode", "selective")),
+            hf_norm_mode=str(getattr(cfg, "sfi_hf_norm_mode", "none")),
+        )
+    if cfg.neck_type == "frankenstein_lite":
+        return FrankensteinSOTALiteNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
         )
     if cfg.neck_type == "rlk_hdc":
         return RLKHDCFPNNeck(

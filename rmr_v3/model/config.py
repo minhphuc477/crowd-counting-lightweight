@@ -53,6 +53,12 @@ class RMRv3Config:
     sfi_norm_free_hf: bool = False
     sfi_use_hdc_proj: bool = False
     sfi_hdc_proj_groups: int = 2
+    sfi_use_laplacian: bool = True
+    sfi_use_selective_gate: bool = True
+    sfi_use_hdc: bool = True
+    sfi_decomp_mode: str = "laplacian"
+    sfi_gate_mode: str = "selective"
+    sfi_hf_norm_mode: str = "none"
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)

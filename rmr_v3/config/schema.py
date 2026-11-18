@@ -78,6 +78,8 @@ ALLOWED_MODEL_KEYS = {
     "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
     "enable_regional_head",
     "sfi_norm_free_hf", "sfi_use_hdc_proj", "sfi_hdc_proj_groups",
+    "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
+    "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode",
 }
 
 ALLOWED_LOSS_KEYS = {
