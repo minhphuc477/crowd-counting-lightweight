@@ -1,0 +1,69 @@
+{
+  "config": "configs/experiments_pr_sfi/axis_a_v4_full_sfi_v2.yaml",
+  "checkpoint": "runs_fixed/experiments_pr_sfi/axis_a_v4_full_sfi_v2/best_val_mae.pt",
+  "trainable_params": 101174,
+  "fps_512": 469.46,
+  "erf_p4": {
+    "r50_px": 58.37,
+    "r95_px": 135.12
+  },
+  "counting": {
+    "num_samples": 182,
+    "mae": 67.3407,
+    "rmse": 100.9134,
+    "bias": 4.2394
+  },
+  "mechanisms": {
+    "hf_preservation_ratio": 0.21738884618425686,
+    "mean_peak_sharpness": 0.07720889474636625,
+    "mean_spatial_entropy": 8.990533579836836,
+    "mean_normalized_entropy": 0.7742098497009752,
+    "gate_response": {
+      "available": true,
+      "image_level": {
+        "sparse": {
+          "mean": 0.5046615472861699,
+          "std": 0.005224510174847393,
+          "n": 7
+        },
+        "medium": {
+          "mean": 0.502513529025307,
+          "std": 0.003273518101296858,
+          "n": 129
+        },
+        "dense": {
+          "mean": 0.4994084543508032,
+          "std": 0.0026667800633855474,
+          "n": 46
+        }
+      },
+      "local_patch_level": {
+        "bg": {
+          "mean": 0.4957568388391327,
+          "std": 0.005444383659591422,
+          "n": 182
+        },
+        "sparse_fg": {
+          "mean": 0.5146512449770183,
+          "std": 0.010045293086902978,
+          "n": 182
+        },
+        "dense_fg": {
+          "mean": 0.5078580860387195,
+          "std": 0.011232605933351236,
+          "n": 176
+        }
+      },
+      "mean_hf_preservation_ratio": 0.21738884618425686
+    },
+    "per_size_mae": {
+      "size_source": "knn_proxy",
+      "small_lt16_mae": 0.37936110227224956,
+      "small_count": 40221,
+      "medium_16_32_mae": 0.3989382278474892,
+      "medium_count": 26695,
+      "large_gt32_mae": 0.35604367051295416,
+      "large_count": 11946
+    }
+  }
+}
