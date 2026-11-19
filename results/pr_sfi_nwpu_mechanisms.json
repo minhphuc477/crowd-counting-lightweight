@@ -1,0 +1,69 @@
+{
+  "config": "configs/benchmarks/exp_nwpu_sfi_v2_dsimr_subpixel_101k.yaml",
+  "checkpoint": "runs/benchmarks/exp_nwpu_sfi_v2_dsimr_subpixel_101k/best_val_mae.pt",
+  "trainable_params": 101174,
+  "fps_512": 505.87,
+  "erf_p4": {
+    "r50_px": 73.24,
+    "r95_px": 140.65
+  },
+  "counting": {
+    "num_samples": 500,
+    "mae": 100.0772,
+    "rmse": 605.5571,
+    "bias": -28.9713
+  },
+  "mechanisms": {
+    "hf_preservation_ratio": 0.13275495104861096,
+    "mean_peak_sharpness": 0.037018211634814974,
+    "mean_spatial_entropy": 9.198701835155488,
+    "mean_normalized_entropy": 0.6892524587384372,
+    "gate_response": {
+      "available": true,
+      "image_level": {
+        "sparse": {
+          "mean": 0.5030743405634527,
+          "std": 0.0024916965725459935,
+          "n": 181
+        },
+        "medium": {
+          "mean": 0.5048084013066437,
+          "std": 0.0023711182714293124,
+          "n": 229
+        },
+        "dense": {
+          "mean": 0.5139142215251923,
+          "std": 0.005855534469751252,
+          "n": 90
+        }
+      },
+      "local_patch_level": {
+        "bg": {
+          "mean": 0.5030306081175804,
+          "std": 0.0031230676150179318,
+          "n": 500
+        },
+        "sparse_fg": {
+          "mean": 0.5317548483930609,
+          "std": 0.007680328270134088,
+          "n": 465
+        },
+        "dense_fg": {
+          "mean": 0.5534270512547722,
+          "std": 0.010679914807875706,
+          "n": 374
+        }
+      },
+      "mean_hf_preservation_ratio": 0.13275495104861096
+    },
+    "per_size_mae": {
+      "size_source": "gt_boxes",
+      "small_lt16_mae": 0.4798376617298247,
+      "small_count": 137696,
+      "medium_16_32_mae": 0.3809785930934189,
+      "medium_count": 41231,
+      "large_gt32_mae": 0.37708720523696393,
+      "large_count": 17311
+    }
+  }
+}
