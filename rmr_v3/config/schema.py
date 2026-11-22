@@ -79,7 +79,7 @@ ALLOWED_MODEL_KEYS = {
     "enable_regional_head",
     "sfi_norm_free_hf", "sfi_use_hdc_proj", "sfi_hdc_proj_groups",
     "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
-    "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode",
+    "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode", "sfi_hf_gate_mode",
 }
 
 ALLOWED_LOSS_KEYS = {

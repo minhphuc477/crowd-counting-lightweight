@@ -38,6 +38,7 @@ class SFILiteFPNNeck(nn.Module):
         decomp_mode: str = "laplacian",
         gate_mode: str = "selective",
         hf_norm_mode: str = "none",
+        hf_gate_mode: str = "coupled",
     ) -> None:
         super().__init__()
         c4, c8, c16 = in_channels
@@ -51,6 +52,7 @@ class SFILiteFPNNeck(nn.Module):
         self.decomp_mode = str(decomp_mode).lower().strip()
         self.gate_mode = str(gate_mode).lower().strip() if use_selective_gate else "additive"
         self.hf_norm_mode = str(hf_norm_mode).lower().strip()
+        self.hf_gate_mode = str(hf_gate_mode).lower().strip()
         if self.gate_mode == "none":
             self.gate_mode = "additive"
         self.use_selective_gate = self.gate_mode != "additive"
@@ -64,6 +66,8 @@ class SFILiteFPNNeck(nn.Module):
             raise ValueError(f"Unsupported gate_mode: '{self.gate_mode}'")
         if self.hf_norm_mode not in ("none", "gn", "bn", "bias"):
             raise ValueError(f"Unsupported hf_norm_mode: '{self.hf_norm_mode}'")
+        if self.hf_gate_mode not in ("coupled", "complementary", "none"):
+            raise ValueError(f"Unsupported hf_gate_mode: '{self.hf_gate_mode}'")
 
         # Optional mechanism-capture hooks for Layer-4 evaluation (disabled during training)
         self._capture_mechanisms: bool = False
@@ -301,7 +305,12 @@ class SFILiteFPNNeck(nn.Module):
             is_norm_free_act = self.norm_free_hf or (self.hf_norm_mode in ("gn", "bn", "bias"))
             if is_norm_free_act:
                 hf_raw = torch.tanh(self.hf_enhance(l4_hf))
-                hf_term = (self.gamma_hf * gate4 * hf_raw) if gate4 is not None else (self.gamma_hf * hf_raw)
+                if gate4 is not None and self.hf_gate_mode == "complementary":
+                    hf_term = self.gamma_hf * (1.0 - gate4) * hf_raw
+                elif gate4 is not None and self.hf_gate_mode == "coupled":
+                    hf_term = self.gamma_hf * gate4 * hf_raw
+                else:
+                    hf_term = self.gamma_hf * hf_raw
             else:
                 hf_term = self.gamma_hf * self.hf_enhance(l4_hf)
             f4 = fused_base + hf_term

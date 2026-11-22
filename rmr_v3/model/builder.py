@@ -74,6 +74,7 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             decomp_mode=str(getattr(cfg, "sfi_decomp_mode", "laplacian")),
             gate_mode=str(getattr(cfg, "sfi_gate_mode", "selective")),
             hf_norm_mode=str(getattr(cfg, "sfi_hf_norm_mode", "none")),
+            hf_gate_mode=str(getattr(cfg, "sfi_hf_gate_mode", "coupled")),
         )
     if cfg.neck_type == "frankenstein_lite":
         return FrankensteinSOTALiteNeck(

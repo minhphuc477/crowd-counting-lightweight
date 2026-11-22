@@ -82,3 +82,84 @@ def test_mechanism_metrics_suite_on_sfi_and_frankenstein() -> None:
     erf_res = compute_erf(model, input_shape=(1, 3, 128, 128), target_layer="p4", num_samples=2)
     assert 0.0 < erf_res["r50_px"] <= erf_res["r95_px"]
     assert erf_res["erf_map"].shape == (128, 128)
+
+
+def test_sfi_complementary_hf_gate_invariants() -> None:
+    """Verify complementary HF gating adds 0 params, preserves exact zero fixed point, and decouples LF/HF polarity."""
+    import pytest
+    from rmr_core.necks.sfi import SFILiteFPNNeck
+    from rmr_v3.config.validator import validate_v3_config
+
+    torch.manual_seed(7)
+    base_kwargs = dict(
+        pretrained=False,
+        output_stride=2,
+        subpixel_stride2=True,
+        subpixel_kernel_size=3,
+        feature_width=32,
+        max_trainable_params=104441,
+        neck_type="sfi_lite",
+        sfi_norm_free_hf=True,
+        sfi_use_hdc_proj=True,
+        sfi_hdc_proj_groups=2,
+        use_aspp_gap=False,
+        head_type="dsimr_subpixel",
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+        enable_regional_head=False,
+        enable_solver=False,
+        solver_mode="direct",
+    )
+    m_coupled = RMRv3(RMRv3Config(**base_kwargs, sfi_hf_gate_mode="coupled"))
+    m_comp = RMRv3(RMRv3Config(**base_kwargs, sfi_hf_gate_mode="complementary"))
+    p_coupled = sum(p.numel() for p in m_coupled.parameters() if p.requires_grad)
+    p_comp = sum(p.numel() for p in m_comp.parameters() if p.requires_grad)
+    assert p_coupled == p_comp == 101174
+
+    # 1. Exact zero fixed point on flat spatial inputs (zero HF residual -> hf_term == 0)
+    neck = SFILiteFPNNeck(
+        in_channels=(16, 32, 48),
+        width=32,
+        norm_free_hf=True,
+        use_hdc_proj=True,
+        hf_gate_mode="complementary",
+    ).eval()
+    with torch.no_grad():
+        assert torch.tanh(neck.hf_enhance(torch.zeros(1, 32, 32, 32))).abs().max().item() == 0.0  # type: ignore[arg-type]
+        _, flat_hf = neck.decompose_frequency(torch.ones(1, 32, 32, 32) * 0.37)
+        assert flat_hf[:, :, 1:-1, 1:-1].abs().max().item() == 0.0
+        assert torch.tanh(neck.hf_enhance(flat_hf))[:, :, 2:-2, 2:-2].abs().max().item() == 0.0  # type: ignore[arg-type]
+
+    # 2. Complementary polarity: gate4 -> 1 passes up8_to_4 and blocks HF; gate4 -> 0 blocks up8_to_4 and passes HF
+    c4_hf = torch.randn(1, 16, 32, 32)
+    c8_a, c16_a = torch.randn(1, 32, 16, 16), torch.randn(1, 48, 8, 8)
+    c8_b, c16_b = torch.randn(1, 32, 16, 16), torch.randn(1, 48, 8, 8)
+    gate_proj = neck.selective_gate[-2]  # type: ignore[index]
+
+    with torch.no_grad():
+        # Case gate4 -> 1
+        gate_proj.weight.zero_()
+        gate_proj.bias.fill_(100.0)
+        neck.gamma_hf.fill_(1.0)  # type: ignore[union-attr]
+        out_g1_hf1, _, _ = neck(c4_hf, c8_a, c16_a)
+        neck.gamma_hf.fill_(0.0)  # type: ignore[union-attr]
+        out_g1_hf0, _, _ = neck(c4_hf, c8_a, c16_a)
+        out_g1_ctx_b, _, _ = neck(c4_hf, c8_b, c16_b)
+        assert (out_g1_hf1 - out_g1_hf0).abs().max() < 1e-6
+        assert (out_g1_hf0 - out_g1_ctx_b).abs().max() > 1e-2
+
+        # Case gate4 -> 0
+        gate_proj.bias.fill_(-100.0)
+        neck.gamma_hf.fill_(1.0)  # type: ignore[union-attr]
+        out_g0_hf1, _, _ = neck(c4_hf, c8_a, c16_a)
+        neck.gamma_hf.fill_(0.0)  # type: ignore[union-attr]
+        out_g0_hf0, _, _ = neck(c4_hf, c8_a, c16_a)
+        out_g0_ctx_b, _, _ = neck(c4_hf, c8_b, c16_b)
+        assert (out_g0_hf1 - out_g0_hf0).abs().max() > 1e-2
+        assert (out_g0_hf0 - out_g0_ctx_b).abs().max() < 1e-6
+
+    # 3. Validation errors for invalid hf_gate_mode
+    with pytest.raises(ValueError, match="Unsupported hf_gate_mode"):
+        SFILiteFPNNeck(hf_gate_mode="invalid_mode")
+    with pytest.raises(ValueError, match="sfi_hf_gate_mode"):
+        validate_v3_config({"model": {"sfi_hf_gate_mode": "invalid_mode"}})

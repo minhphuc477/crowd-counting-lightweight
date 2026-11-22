@@ -74,6 +74,12 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             )
             if nt not in valid_necks:
                 raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")
+        if "sfi_hf_gate_mode" in m_cfg and m_cfg["sfi_hf_gate_mode"] is not None:
+            hfgm = str(m_cfg["sfi_hf_gate_mode"]).lower().strip()
+            if hfgm not in ("coupled", "complementary", "none"):
+                raise ValueError(
+                    f"sfi_hf_gate_mode must be 'coupled', 'complementary', or 'none', got {m_cfg['sfi_hf_gate_mode']!r}"
+                )
         if "head_type" in m_cfg and m_cfg["head_type"] is not None:
             ht = str(m_cfg["head_type"]).lower().strip()
             valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel")

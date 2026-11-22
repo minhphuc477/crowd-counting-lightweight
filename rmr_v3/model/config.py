@@ -59,6 +59,7 @@ class RMRv3Config:
     sfi_decomp_mode: str = "laplacian"
     sfi_gate_mode: str = "selective"
     sfi_hf_norm_mode: str = "none"
+    sfi_hf_gate_mode: str = "coupled"
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)
