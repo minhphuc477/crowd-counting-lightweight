@@ -1,94 +1,58 @@
 {
-  "generated_at": "2026-11-22T18:36:42.952828+00:00",
+  "generated_at": "2026-11-22T19:02:06.338279+00:00",
   "nodes": {
     "rmr_core_heads_finemeasurehead": {
       "code_fingerprint": "0a26281e7a051c0fa8e20c41f3ddbce3f8aea481e718f4149d945488f24051b0",
       "label": "FineMeasureHead",
-      "last": "2026-11-22T18:36:39.775179+00:00",
+      "last": "2026-11-22T19:02:05.291954+00:00",
       "provenance": [
         {
-          "date": "2026-11-22T18:36:39.775179+00:00",
+          "date": "2026-11-22T19:02:05.291954+00:00",
           "outcome": "useful",
-          "q": "What is the main structural mismatch in the codebase identified by Graphify?"
-        },
-        {
-          "date": "2026-11-22T18:36:38.441169+00:00",
-          "outcome": "useful",
-          "q": "Where does SFI-v2 + DSIMR provide unambiguous architectural gain?"
-        },
-        {
-          "date": "2026-11-22T18:36:37.549507+00:00",
-          "outcome": "useful",
-          "q": "Why did single-seed Axis A on SHA show V2 No Gate (64.05) and Frankenstein (63.92) beating V4 Full SFI-v2 (67.35)?"
+          "q": "What is the single invariant hyperparameter baseline for clean nextgen_sub65 runs?"
         }
       ],
-      "score": 2.999996499,
+      "score": 0.99999972,
       "source_file": "rmr_core/heads.py",
-      "status": "preferred",
-      "uses": 3
-    },
-    "rmr_core_necks_frankenstein_frankensteinsotaliteneck": {
-      "code_fingerprint": "1b120360c71ecbba29cd4400f1212d50a8f8fd1d4b92befff3bf9fd2af8f05a4",
-      "label": "FrankensteinSOTALiteNeck",
-      "last": "2026-11-22T18:36:37.549507+00:00",
-      "provenance": [
-        {
-          "date": "2026-11-22T18:36:37.549507+00:00",
-          "outcome": "useful",
-          "q": "Why did single-seed Axis A on SHA show V2 No Gate (64.05) and Frankenstein (63.92) beating V4 Full SFI-v2 (67.35)?"
-        }
-      ],
-      "score": 0.999998555,
-      "source_file": "rmr_core/necks/frankenstein.py",
       "status": "tentative",
       "uses": 1
     },
     "rmr_core_necks_sfi_sfilitefpnneck": {
       "code_fingerprint": "ed9478f3ffae15a177968acf2b877ed8b190cc3eb39495c8877d18117da668c0",
       "label": "SFILiteFPNNeck",
-      "last": "2026-11-22T18:36:39.775179+00:00",
+      "last": "2026-11-22T19:02:05.291954+00:00",
       "neg": 1,
       "provenance": [
         {
-          "date": "2026-11-22T18:36:39.775179+00:00",
+          "date": "2026-11-22T19:02:05.291954+00:00",
           "outcome": "useful",
-          "q": "What is the main structural mismatch in the codebase identified by Graphify?"
+          "q": "What is the single invariant hyperparameter baseline for clean nextgen_sub65 runs?"
         },
         {
-          "date": "2026-11-22T18:36:38.441169+00:00",
-          "outcome": "useful",
-          "q": "Where does SFI-v2 + DSIMR provide unambiguous architectural gain?"
-        },
-        {
-          "date": "2026-11-22T18:36:37.549507+00:00",
-          "outcome": "useful",
-          "q": "Why did single-seed Axis A on SHA show V2 No Gate (64.05) and Frankenstein (63.92) beating V4 Full SFI-v2 (67.35)?"
-        },
-        {
-          "date": "2026-11-22T18:36:36.855753+00:00",
+          "date": "2026-11-22T19:02:04.886291+00:00",
           "outcome": "corrected",
-          "q": "Why did sfi_v2_matrix drop sharply on SHB (15.54 vs 9.53), NWPU (87.72 vs 81.17), and JHU (61.17 vs 58.77)?"
+          "q": "Why did gate4 collapse around 0.50 in SFILiteFPNNeck and why did axis_a_v2_no_gate beat V4 on SHA?"
         }
       ],
-      "score": 1.999998129,
+      "score": 1.08e-07,
       "source_file": "rmr_core/necks/sfi.py",
       "status": "contested",
-      "uses": 3,
+      "uses": 1,
       "verdict": "useful"
     },
-    "rmr_v3_model_architecture_rmrv3": {
-      "code_fingerprint": "267e5900ea87fa28d2066f912295edd7ce2ba93a0fe2c6c4e6ca0850573490fe",
-      "label": "RMRv3",
-      "last": "2026-11-22T18:36:39.775179+00:00",
+    "rmr_v3_model_config_rmrv3config": {
+      "code_fingerprint": "77b087a82d0959ef8a82381ab03a88377c5c7c667d9e331b38bcea519e41a788",
+      "label": "RMRv3Config",
+      "last": "2026-11-22T19:02:05.291954+00:00",
       "provenance": [
         {
-          "date": "2026-11-22T18:36:39.775179+00:00",
+          "date": "2026-11-22T19:02:05.291954+00:00",
           "outcome": "useful",
-          "q": "What is the main structural mismatch in the codebase identified by Graphify?"
+          "q": "What is the single invariant hyperparameter baseline for clean nextgen_sub65 runs?"
         }
       ],
-      "score": 0.99999915,
-      "source_file": "rmr_v3/model/architecture.py",
+      "score": 0.99999972,
+      "source_file": "rmr_v3/model/config.py",
       "status": "tentative",
       "uses": 1
     }
