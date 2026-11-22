@@ -1,0 +1,17 @@
+runs/
+runs_fixed/
+data/
+checkpoints/
+.venv/
+logs/
+.cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pt
+*.pth
+*.onnx
+*.png
+*.jpg
+*.jpeg
+*.csv
