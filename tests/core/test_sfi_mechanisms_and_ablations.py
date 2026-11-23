@@ -163,3 +163,54 @@ def test_sfi_complementary_hf_gate_invariants() -> None:
         SFILiteFPNNeck(hf_gate_mode="invalid_mode")
     with pytest.raises(ValueError, match="sfi_hf_gate_mode"):
         validate_v3_config({"model": {"sfi_hf_gate_mode": "invalid_mode"}})
+
+
+def test_lfi_sub100k_no_gate_invariants() -> None:
+    """Verify Option-1 LFI-Lite + DSIMR stays strictly <100k params with zero dead gradients."""
+    torch.manual_seed(11)
+    cfg = RMRv3Config(
+        pretrained=False,
+        output_stride=2,
+        subpixel_stride2=True,
+        subpixel_kernel_size=3,
+        feature_width=32,
+        max_trainable_params=104441,
+        neck_type="sfi_lite",
+        sfi_norm_free_hf=True,
+        sfi_use_hdc_proj=True,
+        sfi_hdc_proj_groups=2,
+        sfi_use_selective_gate=False,
+        use_aspp_gap=False,
+        head_type="dsimr_subpixel",
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+        enable_regional_head=False,
+        enable_solver=False,
+        solver_mode="direct",
+    )
+    model = RMRv3(cfg)
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert params == 99766
+    assert params < 100000
+    assert model.fusion.selective_gate is None
+
+    # Forward + backward sanity: zero dead trainable parameters
+    x = torch.randn(2, 3, 128, 128)
+    out = model(x)
+    y0 = out["y0"] if isinstance(out, dict) else out
+    y0.sum().backward()
+    for name, p in model.named_parameters():
+        if p.requires_grad:
+            assert p.grad is not None, f"Dead gradient on {name}"
+            assert torch.isfinite(p.grad).all(), f"Non-finite gradient on {name}"
+
+    # Gate capture reports unavailable while HF ratio stays valid
+    gate_res = gate_response_analysis(
+        model,
+        [torch.randn(3, 128, 128), torch.randn(3, 128, 128)],
+        [torch.empty((0, 2)), torch.rand(40, 2) * 128.0],
+        sparse_max=10.0,
+        dense_min=30.0,
+    )
+    assert gate_res["available"] is False
+    assert torch.isfinite(torch.tensor(gate_res["mean_hf_preservation_ratio"]))

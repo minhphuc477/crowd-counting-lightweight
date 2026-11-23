@@ -1,0 +1,104 @@
+{
+  "results": [
+    {
+      "config": "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+      "name": "exp_sha_lfi_dsimr_99k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99766,
+      "total_params": 99766,
+      "device": "cpu",
+      "profiles": {
+        "512x512": {
+          "macs": 344473600,
+          "m_macs": 344.47,
+          "gflops": 0.6889,
+          "latency_ms": 53.61,
+          "fps": 18.65
+        },
+        "1024x1024": {
+          "macs": 1377894400,
+          "m_macs": 1377.89,
+          "gflops": 2.7558,
+          "latency_ms": 115.211,
+          "fps": 8.68
+        }
+      }
+    },
+    {
+      "config": "configs/benchmarks/sfi_v3_complementary/exp_sha_sfi_v3_comp_101k.yaml",
+      "name": "exp_sha_sfi_v3_comp_101k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 101174,
+      "total_params": 101174,
+      "device": "cpu",
+      "profiles": {
+        "512x512": {
+          "macs": 365969408,
+          "m_macs": 365.97,
+          "gflops": 0.7319,
+          "latency_ms": 52.378,
+          "fps": 19.09
+        },
+        "1024x1024": {
+          "macs": 1463877632,
+          "m_macs": 1463.88,
+          "gflops": 2.9278,
+          "latency_ms": 106.401,
+          "fps": 9.4
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_a_v0_additive.yaml",
+      "name": "axis_a_v0_additive",
+      "neck_type": "additive",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 98870,
+      "total_params": 98870,
+      "device": "cpu",
+      "profiles": {
+        "512x512": {
+          "macs": 339230720,
+          "m_macs": 339.23,
+          "gflops": 0.6785,
+          "latency_ms": 39.477,
+          "fps": 25.33
+        },
+        "1024x1024": {
+          "macs": 1356922880,
+          "m_macs": 1356.92,
+          "gflops": 2.7138,
+          "latency_ms": 78.039,
+          "fps": 12.81
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_c_frankenstein_sota_lite.yaml",
+      "name": "axis_c_frankenstein_sota_lite",
+      "neck_type": "frankenstein_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99763,
+      "total_params": 99763,
+      "device": "cpu",
+      "profiles": {
+        "512x512": {
+          "macs": 350929408,
+          "m_macs": 350.93,
+          "gflops": 0.7019,
+          "latency_ms": 57.519,
+          "fps": 17.39
+        },
+        "1024x1024": {
+          "macs": 1403716096,
+          "m_macs": 1403.72,
+          "gflops": 2.8074,
+          "latency_ms": 134.601,
+          "fps": 7.43
+        }
+      }
+    }
+  ]
+}
