@@ -1,0 +1,104 @@
+{
+  "results": [
+    {
+      "config": "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+      "name": "exp_sha_lfi_dsimr_99k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99766,
+      "total_params": 99766,
+      "device": "cuda",
+      "profiles": {
+        "512x512": {
+          "macs": 344473600,
+          "m_macs": 344.47,
+          "gflops": 0.6889,
+          "latency_ms": 2.253,
+          "fps": 443.78
+        },
+        "1024x1024": {
+          "macs": 1377894400,
+          "m_macs": 1377.89,
+          "gflops": 2.7558,
+          "latency_ms": 2.35,
+          "fps": 425.45
+        }
+      }
+    },
+    {
+      "config": "configs/benchmarks/sfi_v3_complementary/exp_sha_sfi_v3_comp_101k.yaml",
+      "name": "exp_sha_sfi_v3_comp_101k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 101174,
+      "total_params": 101174,
+      "device": "cuda",
+      "profiles": {
+        "512x512": {
+          "macs": 365969408,
+          "m_macs": 365.97,
+          "gflops": 0.7319,
+          "latency_ms": 3.663,
+          "fps": 273.03
+        },
+        "1024x1024": {
+          "macs": 1463877632,
+          "m_macs": 1463.88,
+          "gflops": 2.9278,
+          "latency_ms": 3.438,
+          "fps": 290.89
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_a_v0_additive.yaml",
+      "name": "axis_a_v0_additive",
+      "neck_type": "additive",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 98870,
+      "total_params": 98870,
+      "device": "cuda",
+      "profiles": {
+        "512x512": {
+          "macs": 339230720,
+          "m_macs": 339.23,
+          "gflops": 0.6785,
+          "latency_ms": 2.455,
+          "fps": 407.41
+        },
+        "1024x1024": {
+          "macs": 1356922880,
+          "m_macs": 1356.92,
+          "gflops": 2.7138,
+          "latency_ms": 1.901,
+          "fps": 526.16
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_c_frankenstein_sota_lite.yaml",
+      "name": "axis_c_frankenstein_sota_lite",
+      "neck_type": "frankenstein_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99763,
+      "total_params": 99763,
+      "device": "cuda",
+      "profiles": {
+        "512x512": {
+          "macs": 350929408,
+          "m_macs": 350.93,
+          "gflops": 0.7019,
+          "latency_ms": 3.608,
+          "fps": 277.13
+        },
+        "1024x1024": {
+          "macs": 1403716096,
+          "m_macs": 1403.72,
+          "gflops": 2.8074,
+          "latency_ms": 5.161,
+          "fps": 193.75
+        }
+      }
+    }
+  ]
+}
