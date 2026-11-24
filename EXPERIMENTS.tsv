@@ -1,0 +1,13 @@
+commit	run_id	dataset	params	mae	rmse	dense_3000_relbias_pct	zero_mae	ort_cpu1t_512_fps	status	notes
+5418c31	exp_sha_lfi_dsimr_99k	SHA_test	99766	64.05	100.07	n/a	n/a	38.0	keep_baseline	best_ep=255/1500; 1001-3000 RelBias=-6.5%; Direct Fast-Path
+5418c31	exp_shb_lfi_dsimr_99k	SHB_test	99766	10.31	16.60	n/a	n/a	38.0	keep_baseline	best_ep=95/1500; drift=+1.22
+5418c31	exp_qnrf_lfi_dsimr_99k	UCF_QNRF_test	99766	94.71	166.36	-3.1%	n/a	38.0	keep_baseline	best_ep=435/1000; NAE=0.1387
+5418c31	exp_nwpu_lfi_dsimr_99k	NWPU_val	99766	81.21	449.83	-32.9%	9.72	38.0	keep_baseline	best_ep=395/800; 3000+ n=8 MAE=2190.50
+5418c31	exp_jhu_lfi_dsimr_99k	JHU_test	99766	79.15	309.18	-30.3%	70.45	38.0	keep_baseline	3000+ n=25 MAE=1507.47; Zero n=4; Val=59.52/206.78
+897880e	exp_sha_sfi_v3_comp_101k	SHA_test	101174	66.64	99.38	n/a	n/a	29.1	discard	gate4 flatlined 0.4710 vs 0.4736; slower and worse than LFI-99k
+b20cda5f	diag_d05_sha_unbounded_hf_nb_99k	SHA_test	99766	PENDING	PENDING	n/a	n/a	38.0	pending	Isolates unbounded linear HF + pad-aware Laplacian under NB loss
+b20cda5f	diag_d05_nwpu_unbounded_hf_nb_99k	NWPU_val	99766	PENDING	PENDING	PENDING	PENDING	38.0	pending	Isolates unbounded linear HF + pad-aware Laplacian under NB loss
+b20cda5f	diag_d1_sha_unbounded_anscombe_99k	SHA_test	99766	PENDING	PENDING	n/a	n/a	38.0	pending	Adds Anscombe + L1(0.02) count loss
+b20cda5f	diag_d1_nwpu_unbounded_anscombe_99k	NWPU_val	99766	PENDING	PENDING	PENDING	PENDING	38.0	pending	Adds Anscombe + L1(0.02) count loss
+05dc71e4	diag_d2_sha_lfi_s2_99k	SHA_test	99314	PENDING	PENDING	n/a	n/a	25.9	pending	LFI-S2 C2 Stride-2 skip + foldable Stride-2 BN + NativeS2DSIMRHead
+05dc71e4	diag_d2_nwpu_lfi_s2_99k	NWPU_val	99314	PENDING	PENDING	PENDING	PENDING	25.9	pending	LFI-S2 C2 Stride-2 skip + foldable Stride-2 BN + NativeS2DSIMRHead
