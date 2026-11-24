@@ -143,8 +143,7 @@ def profile_stage_breakdown(
         p4, _, _ = model.fusion(c4, c8, c16)
 
     def _run_head():
-        z0 = model.fine_head.forward_logits(p4, scale_weights=None)
-        return model.fine_head.activate(z0, scale_weights=None)
+        return model.fine_head(p4, scale_weights=None)
 
     head_ms = _time_fn(_run_head, iters, warmup, device, ctx_factory)
     with torch.no_grad(), ctx_factory():

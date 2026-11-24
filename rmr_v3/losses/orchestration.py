@@ -285,33 +285,23 @@ def _compute_auxiliary_losses(
 
     # Dual-Lattice Carrier Supervision (Subpixel stride-2)
     y_carrier = outputs.get("y_carrier", None)
+    if y_carrier is None and int(getattr(cfg, "output_stride", 4)) == 2 and (cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0):
+        y_carrier = push_forward_stride2_to_stride4(y)
     is_dual_lattice = (
-        y_carrier is not None
-        and y_carrier.shape[-2:] != y.shape[-2:]
+        y_carrier is not None and y_carrier.shape[-2:] != y.shape[-2:]
         and (cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0)
     )
-    if is_dual_lattice:
+    if is_dual_lattice and y_carrier is not None:
         target_stride4 = push_forward_stride2_to_stride4(target_float)
         dual = compute_dual_lattice_losses(
-            y_fine=y,
-            y_carrier=y_carrier.float(),
-            target_stride2=target_float,
-            target_stride4=target_stride4,
-            lambda_carrier_cell=cfg.lambda_carrier_cell,
-            lambda_fine_cell=cfg.lambda_fine_cell,
-            cell_loss_mode=cfg.cell_loss_mode,
-            beta=cfg.cell_beta,
-            eps=cfg.cell_mass_weight_eps,
-            alpha=float(cfg.cell_mass_weight_alpha),
-            gamma=float(cfg.cell_mass_weight_gamma),
-            compute_fine=False,
+            y_fine=y, y_carrier=y_carrier.float(), target_stride2=target_float, target_stride4=target_stride4,
+            lambda_carrier_cell=cfg.lambda_carrier_cell, lambda_fine_cell=cfg.lambda_fine_cell,
+            cell_loss_mode=cfg.cell_loss_mode, beta=cfg.cell_beta, eps=cfg.cell_mass_weight_eps,
+            alpha=float(cfg.cell_mass_weight_alpha), gamma=float(cfg.cell_mass_weight_gamma), compute_fine=False,
         )
-        losses["cell_carrier"] = dual["cell_carrier"]
-        losses["cell_fine"] = losses["cell"]
+        losses["cell_carrier"], losses["cell_fine"] = dual["cell_carrier"], losses["cell"]
         eff_fine_delta = (cfg.lambda_fine_cell - cfg.lambda_cell) if cfg.lambda_fine_cell > 0.0 else 0.0
-        carrier_boost = cfg.lambda_carrier_cell * dual["cell_carrier"]
-        fine_boost = eff_fine_delta * losses["cell"]
-        losses["total"] = losses["total"] + carrier_boost + fine_boost
+        losses["total"] = losses["total"] + cfg.lambda_carrier_cell * dual["cell_carrier"] + eff_fine_delta * losses["cell"]
     else:
         losses["cell_carrier"] = losses["cell_fine"] = zero_val
 
@@ -408,11 +398,16 @@ def compute_rmr_v3_losses(
     target_float = align_target_to_prediction(
         target_y.float(), y, points=points, stride=int(getattr(cfg, "output_stride", 2 if y.shape[-2] > 150 else 4))
     )
-    regions: RegionSet = outputs["regions"]
-    mean_region = outputs["b_region"].float()
-    dispersion_region = outputs["region_dispersion"].float()
+    regions: RegionSet | None = outputs.get("regions", None)
+    mean_region = outputs["b_region"].float() if "b_region" in outputs else None
+    dispersion_region = outputs["region_dispersion"].float() if "region_dispersion" in outputs else None
 
-    target_region = regional_sum(target_float, regions.boxes, out_dtype=torch.float32)
+    needs_regional_target = regions is not None and (
+        cfg.lambda_region_nb > 0.0
+        or float(getattr(cfg, "lambda_region_count", 0.0)) > 0.0
+        or (outputs.get("hurdle_logit") is not None and (cfg.lambda_hurdle > 0.0 or cfg.lambda_trunc_nb > 0.0))
+    )
+    target_region = regional_sum(target_float, regions.boxes, out_dtype=torch.float32) if (needs_regional_target and regions is not None) else None
 
     router = TargetSupervisionRouter(cfg.dm_target)
     losses = _compute_core_losses(

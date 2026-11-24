@@ -319,40 +319,21 @@ class RMRv3Config:
             if getattr(self, banned, False):
                 raise ValueError(f"{banned}=True is permanently BANNED. Use dynamic DiAG instead.")
         if getattr(self, "dynamic_perspective_windows", False):
-            raise ValueError(
-                "dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8: "
-                "tensor-row coordinate aliasing under random cropping and 16px micro-box discretization explosion). "
-                "Use pure feature-driven dynamic scale routing (use_diag=True) instead."
-            )
-
-        # Permanently Banned Anti-Pattern Guards
+            raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8). Use use_diag=True instead.")
         if self.use_coord_attn:
             raise ValueError("use_coord_attn=True is permanently BANNED (Anti-Pattern #2). Remove this field.")
         if getattr(self, "use_micro_coord_attn", False):
-            raise ValueError(
-                "use_micro_coord_attn=True is permanently BANNED (Anti-Pattern #2: Coordinate Attention family). "
-                "Remove this field from your config."
-            )
+            raise ValueError("use_micro_coord_attn=True is permanently BANNED (Anti-Pattern #2: Coordinate Attention family).")
         if self.use_nesterov_momentum:
-            raise ValueError(
-                "use_nesterov_momentum=True is permanently BANNED (Anti-Pattern #5: kinetic overshoot in T=6 solver). "
-                "Remove this field from your config."
-            )
+            raise ValueError("use_nesterov_momentum=True is permanently BANNED (Anti-Pattern #5: kinetic overshoot in T=6 solver).")
         if self.use_alternating_bb:
-            raise ValueError(
-                "use_alternating_bb=True is permanently BANNED (Anti-Pattern #7: exploding variance in dense clumps). "
-                "Remove this field from your config. Use pure BB-1 with trust damping instead."
-            )
+            raise ValueError("use_alternating_bb=True is permanently BANNED (Anti-Pattern #7). Use pure BB-1 with trust damping instead.")
         if self.use_top_down_semantic_gate:
             raise ValueError("use_top_down_semantic_gate=True is permanently BANNED (Anti-Pattern #4: gradient suppression).")
         if self.foreground_gate:
             raise ValueError("foreground_gate=True is permanently BANNED (Anti-Pattern #4: Hard FG-Gate suppression).")
         if self.hybrid_recovery_alpha > 0.0:
-            raise ValueError(
-                f"hybrid_recovery_alpha={self.hybrid_recovery_alpha} > 0 is permanently BANNED "
-                "(Anti-Pattern #6: Lebesgue Discovery Flux causes mass leakage). "
-                "Keep hybrid_recovery_alpha=0.0."
-            )
+            raise ValueError(f"hybrid_recovery_alpha={self.hybrid_recovery_alpha} > 0 is permanently BANNED (Anti-Pattern #6).")
         valid_solvers = ("additive", "multiplicative", "closed_form_rn", "mcbpro", "perspective_mcbpro", "fed_mcbpro", "direct", "peak_concentrated", "pc_solver", "pc_bpro", "dsr_fw", "dsr_fw_solver")
         if self.solver_mode not in valid_solvers:
             raise ValueError(f"Invalid solver_mode '{self.solver_mode}'")

@@ -166,15 +166,15 @@ class FineMeasureHead(nn.Module):
             return y_intensity * m2
         return y_intensity
 
-    def activate(
+    def _activate_base(
         self,
         z: torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         scale_ref = float(getattr(self, "adaptive_scale_ref", 0.0))
         if getattr(self, "head_activation", "softplus") == "relu":
-            y_out = F.relu(z)
-        elif self.scale_conditioned and scale_weights is not None:
+            return F.relu(z)
+        if self.scale_conditioned and scale_weights is not None:
             if scale_weights.shape[-2:] != z.shape[-2:]:
                 scale_weights = F.interpolate(
                     scale_weights, size=z.shape[-2:], mode="bilinear", align_corners=False
@@ -195,7 +195,7 @@ class FineMeasureHead(nn.Module):
                     g_val = max(float(self.density_scale_gamma), 0.0)
                 y_base = y_base * (1.0 + g_val * F.relu(z + b_eff - scale_ref))
             if self.density_curvature:
-                y_out = _apply_curvature(
+                return _apply_curvature(
                     y_base,
                     self.curvature_alpha,
                     curv_scale=self.curv_scale,
@@ -205,29 +205,44 @@ class FineMeasureHead(nn.Module):
                     gate_beta=self.curvature_gate_beta,
                     curvature_pade=getattr(self, "curvature_pade", False),
                 )
-            else:
-                y_out = y_base
-        else:
-            y_out = _density_activate(
-                z,
-                temp_softplus=self.temp_softplus,
-                tau=getattr(self, "tau", None),
-                density_curvature=self.density_curvature,
-                curvature_alpha=getattr(self, "curvature_alpha", None),
-                gated_density_curvature=self.gated_density_curvature,
-                curvature_dense_threshold=self.curvature_dense_threshold,
-                curvature_gate_beta=self.curvature_gate_beta,
-                curvature_pool_kernel=self.curvature_pool_kernel,
-                curv_scale=self.curv_scale,
-                floor_tau=getattr(self, "floor_tau", 0.0),
-                density_adaptive_scale=self.density_adaptive_scale,
-                density_scale_gamma=self.density_scale_gamma,
-                adaptive_scale_ref=scale_ref,
-                curvature_pade=getattr(self, "curvature_pade", False),
-                head_activation=getattr(self, "head_activation", "softplus"),
-            )
+            return y_base
+        return _density_activate(
+            z,
+            temp_softplus=self.temp_softplus,
+            tau=getattr(self, "tau", None),
+            density_curvature=self.density_curvature,
+            curvature_alpha=getattr(self, "curvature_alpha", None),
+            gated_density_curvature=self.gated_density_curvature,
+            curvature_dense_threshold=self.curvature_dense_threshold,
+            curvature_gate_beta=self.curvature_gate_beta,
+            curvature_pool_kernel=self.curvature_pool_kernel,
+            curv_scale=self.curv_scale,
+            floor_tau=getattr(self, "floor_tau", 0.0),
+            density_adaptive_scale=self.density_adaptive_scale,
+            density_scale_gamma=self.density_scale_gamma,
+            adaptive_scale_ref=scale_ref,
+            curvature_pade=getattr(self, "curvature_pade", False),
+            head_activation=getattr(self, "head_activation", "softplus"),
+        )
 
+    def activate(
+        self,
+        z: torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        y_out = self._activate_base(z, scale_weights=scale_weights)
         return self._apply_dsimr_modulation(y_out)
+
+    def _is_activated_mode(self) -> bool:
+        return bool(
+            self.temp_softplus
+            or self.scale_conditioned
+            or self.density_curvature
+            or getattr(self, "floor_tau", 0.0) > 0.0
+            or getattr(self, "density_adaptive_scale", False)
+            or getattr(self, "dsimr_mode", False)
+            or getattr(self, "head_activation", "softplus") in ("relu", "compact_c1")
+        )
 
     def forward_logits(
         self,
@@ -258,162 +273,52 @@ class FineMeasureHead(nn.Module):
             z = z + float(self.scale_prior_boost) * sw_b[:, 0:1, :, :].float()
         return z
 
+    def forward_with_logits(
+        self,
+        f: tuple[torch.Tensor, ...] | torch.Tensor,
+        scale_weights: torch.Tensor | None = None,
+        need_full_z0: bool = False,
+        force_activate: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute (z0, y0) with Stride-4 DSIMR activation fast-path and no mutable state."""
+        if isinstance(f, tuple):
+            f = f[0]
+        if (
+            getattr(self, "dsimr_mode", False)
+            and getattr(self, "dsimr_proj", None) is not None
+            and self.pixel_shuffle is not None
+            and not self.density_curvature
+            and not self.scale_conditioned
+            and (scale_weights is None or getattr(self, "scale_prior_boost", 0.0) <= 0.0)
+        ):
+            h4 = self.body[:-1](f)
+            z_sub = self.body[-1](h4)
+            alpha = 4.0 * F.softmax(z_sub, dim=1)
+            dsimr_out = self.dsimr_proj(h4)  # type: ignore[misc]
+            z_s = dsimr_out[:, 0:1]
+            z_lambda = dsimr_out[:, 1:2]
+            y_cell = self._activate_base(z_lambda, scale_weights=None)
+            y0 = self.pixel_shuffle((y_cell * torch.sigmoid(z_s)) * alpha)
+            z0 = self.pixel_shuffle(z_lambda.expand(-1, 4, -1, -1)) if need_full_z0 else z_lambda
+            return z0, y0
+
+        z0 = self.forward_logits(f, scale_weights=scale_weights)
+        if force_activate or self._is_activated_mode():
+            y0 = self.activate(z0, scale_weights=scale_weights)
+        else:
+            y0 = z0
+        return z0, y0
+
     def forward(
         self,
         f: tuple[torch.Tensor, ...] | torch.Tensor,
         scale_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return activated density field y0 when activation/curvature is configured, or raw logit for legacy head."""
-        z = self.forward_logits(f, scale_weights=scale_weights)
-        is_activated = (
-            self.temp_softplus
-            or self.scale_conditioned
-            or self.density_curvature
-            or getattr(self, "floor_tau", 0.0) > 0.0
-            or getattr(self, "density_adaptive_scale", False)
-            or getattr(self, "dsimr_mode", False)
-            or getattr(self, "head_activation", "softplus") in ("relu", "compact_c1")
-        )
-        if is_activated:
-            return self.activate(z, scale_weights=scale_weights)
-        return z
+        return self.forward_with_logits(f, scale_weights=scale_weights, need_full_z0=False)[1]
 
 
-class ScaleConditionedFineHead(nn.Module):
-    """Scale-Conditioned Dynamic Fine Density Head (RMR-v22).
-    Combines depthwise context, FiLM scale simplex modulation, and calibrated bias.
-    """
-
-    def __init__(
-        self,
-        width: int = 32,
-        num_scales: int = 3,
-        init_bias: float = _FINE_HEAD_BIAS_INIT,
-        temp_softplus: bool = True,
-        density_curvature: bool = True,
-        gated_density_curvature: bool = True,
-        curvature_dense_threshold: float = 0.15,
-        curvature_gate_beta: float = 0.03,
-        curvature_pool_kernel: int = 8,
-        floor_tau: float = 0.0,
-        curvature_alpha_init: float = _CURVATURE_ALPHA_INIT,
-        density_adaptive_scale: bool = False,
-        density_scale_gamma: float = 0.0,
-        density_scale_learnable: bool = False,
-        curvature_pade: bool = False,
-        head_activation: str = "softplus",
-    ):
-        super().__init__()
-        self.head_activation = str(head_activation)
-        self.floor_tau = float(floor_tau)
-        self.dw = ConvGNAct(width, width, 3, groups=width)
-        self.pw = ConvGNAct(width, width, 1)
-
-        self.num_scales = int(num_scales)
-        self.scale_film = nn.Conv2d(self.num_scales, width, kernel_size=1, bias=False)
-        nn.init.zeros_(self.scale_film.weight)
-
-        self.out_conv = nn.Conv2d(width + self.num_scales, 1, kernel_size=1)
-        nn.init.normal_(self.out_conv.weight, std=0.01)
-        m0 = math.log1p(math.exp(float(init_bias)))
-        if self.head_activation == "relu":
-            eff_bias = float(m0)
-        elif self.head_activation == "compact_c1":
-            eff_bias = _compact_c1_inverse(m0, self.floor_tau)
-        else:
-            eff_bias = _softplus_inverse(m0 + 0.5 * self.floor_tau) if self.floor_tau > 0.0 else init_bias
-        nn.init.constant_(self.out_conv.bias, eff_bias)  # type: ignore[arg-type]
-
-        self.temp_softplus = bool(temp_softplus)
-        if self.temp_softplus and self.head_activation not in ("relu", "compact_c1"):
-            self.tau = nn.Parameter(torch.ones(1))
-
-        self.density_curvature = bool(density_curvature)
-        self.gated_density_curvature = bool(gated_density_curvature)
-        self.curvature_pade = bool(curvature_pade)
-        self.curv_scale = 1.0
-        self.curvature_dense_threshold = float(curvature_dense_threshold)
-        self.curvature_gate_beta = float(curvature_gate_beta)
-        self.curvature_pool_kernel = int(curvature_pool_kernel)
-        if self.density_curvature:
-            self.curvature_alpha = nn.Parameter(torch.tensor(float(curvature_alpha_init)))
-
-        self.density_adaptive_scale = bool(density_adaptive_scale)
-        if self.density_adaptive_scale and bool(density_scale_learnable):
-            self.density_scale_gamma = nn.Parameter(torch.tensor([float(density_scale_gamma)]))
-        else:
-            self.density_scale_gamma = float(density_scale_gamma)
-
-    def activate(
-        self,
-        z: torch.Tensor,
-        scale_weights: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Compute calibrated non-negative measure Y0 from latent logit field z0."""
-        if getattr(self, "head_activation", "softplus") == "relu":
-            y_base = F.relu(z)
-            if self.density_adaptive_scale:
-                b_eff = (
-                    float(self.out_conv.bias.detach().mean().item())
-                    if hasattr(self, "out_conv")
-                    else 0.0
-                )
-                if isinstance(self.density_scale_gamma, torch.Tensor):
-                    g_val = self.density_scale_gamma.clamp_min(0.0)
-                else:
-                    g_val = max(float(self.density_scale_gamma), 0.0)
-                y_base = y_base * (1.0 + g_val * F.relu(z + b_eff))
-            if self.density_curvature:
-                return _apply_curvature(
-                    y_base,
-                    getattr(self, "curvature_alpha", None),
-                    curv_scale=self.curv_scale,
-                    gated=self.gated_density_curvature,
-                    pool_kernel=self.curvature_pool_kernel,
-                    dense_threshold=self.curvature_dense_threshold,
-                    gate_beta=self.curvature_gate_beta,
-                    curvature_pade=getattr(self, "curvature_pade", False),
-                )
-            return y_base
-
-        return _density_activate(
-            z,
-            temp_softplus=self.temp_softplus,
-            tau=getattr(self, "tau", None),
-            density_curvature=self.density_curvature,
-            curvature_alpha=getattr(self, "curvature_alpha", None),
-            gated_density_curvature=self.gated_density_curvature,
-            curvature_dense_threshold=self.curvature_dense_threshold,
-            curvature_gate_beta=self.curvature_gate_beta,
-            curvature_pool_kernel=self.curvature_pool_kernel,
-            curv_scale=self.curv_scale,
-            floor_tau=self.floor_tau,
-            density_adaptive_scale=self.density_adaptive_scale,
-            density_scale_gamma=self.density_scale_gamma,
-            curvature_pade=getattr(self, "curvature_pade", False),
-            head_activation=getattr(self, "head_activation", "softplus"),
-        )
-
-    def forward_logits(
-        self, f: tuple[torch.Tensor, ...] | torch.Tensor, scale_weights: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        """Compute raw pre-activation logit field z0 modulated by scale routing probabilities."""
-        f = f[0] if isinstance(f, tuple) else f
-        h = self.pw(self.dw(f))
-        if scale_weights is None:
-            sw = torch.zeros(h.shape[0], self.num_scales, h.shape[2], h.shape[3], device=h.device, dtype=h.dtype)
-            return self.out_conv(torch.cat([h, sw], dim=1))
-        sw = F.interpolate(scale_weights, size=h.shape[-2:], mode="bilinear", align_corners=False) if scale_weights.shape[-2:] != h.shape[-2:] else scale_weights
-        if sw.shape[1] > self.num_scales:
-            sw = sw[:, : self.num_scales, :, :]
-        elif sw.shape[1] < self.num_scales:
-            sw = F.pad(sw, (0, 0, 0, 0, 0, self.num_scales - sw.shape[1]), mode="constant", value=0.0)
-        return self.out_conv(torch.cat([h * (1.0 + self.scale_film(sw)), sw], dim=1))
-
-    def forward(
-        self, f: tuple[torch.Tensor, ...] | torch.Tensor, scale_weights: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        return self.activate(self.forward_logits(f, scale_weights=scale_weights), scale_weights=scale_weights)
+from .scale_head import ScaleConditionedFineHead  # noqa: E402
 
 
 def build_fine_head(

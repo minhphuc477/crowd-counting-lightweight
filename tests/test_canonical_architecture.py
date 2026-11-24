@@ -151,6 +151,43 @@ def test_remediation_schema_flags_and_pure_direct_budget():
     assert loss_cfg.radon_ot_scale_by_length is True
     x = torch.randn(1, 3, 256, 256, requires_grad=True)
     out = model(x)
+    assert "regions" not in out, "Direct fast-path should omit unused RegionSet generation"
     losses = compute_rmr_v3_losses(out, torch.zeros(1, 1, 64, 64), cfg=loss_cfg, points=[torch.zeros((0, 2))])
     assert torch.isfinite(losses["total"])
     losses["total"].backward()
+
+
+def test_lfi_dsimr_stride4_parity_and_direct_fast_path():
+    """Verify Stride-4 DSIMR activation matches legacy Stride-2 DSIMR and runs Direct Fast-Path cleanly."""
+    from rmr_v3.losses import compute_rmr_v3_losses
+
+    cfg = load_config("configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml")
+    cfg["model"]["pretrained"] = False
+    m_cfg = RMRv3Config.from_dict(cfg["model"])
+    model = RMRv3(m_cfg).eval()
+    total_params = sum(p.numel() for p in model.parameters())
+    assert total_params == 99_766, f"Expected 99,766 params for LFI-Lite+DSIMR, got {total_params}"
+
+    # 1. Exact numerical parity between optimized forward_with_logits and legacy forward_logits + activate
+    p4 = torch.randn(2, m_cfg.feature_width, 64, 64)
+    with torch.no_grad():
+        z_legacy = model.fine_head.forward_logits(p4)
+        y_legacy = model.fine_head.activate(z_legacy)
+        _, y_fast = model.fine_head.forward_with_logits(p4, need_full_z0=False)
+        max_diff = (y_legacy - y_fast).abs().max().item()
+        assert max_diff < 1e-6, f"Stride-4 DSIMR parity drift: {max_diff}"
+
+    # 2. Direct Fast-Path forward (no regions/solver overhead) + backward gradient check
+    model.train()
+    x = torch.randn(2, 3, 256, 256)
+    out = model(x)
+    assert "regions" not in out
+    assert out.y.shape == (2, 1, 128, 128)
+    loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
+    pts = [torch.tensor([[32.0, 48.0], [100.0, 120.0]]), torch.zeros((0, 2))]
+    losses = compute_rmr_v3_losses(out, torch.zeros(2, 1, 128, 128), cfg=loss_cfg, points=pts)
+    assert torch.isfinite(losses["total"])
+    losses["total"].backward()
+    for name, p in model.named_parameters():
+        if p.requires_grad:
+            assert p.grad is not None, f"Missing gradient on {name}"

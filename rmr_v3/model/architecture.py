@@ -179,8 +179,13 @@ class RMRv3(nn.Module):
     def _predict_fine_density(
         self, p4: torch.Tensor, scale_weights: torch.Tensor | None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
-        y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
+        if hasattr(self.fine_head, "forward_with_logits"):
+            z0, y0 = self.fine_head.forward_with_logits(
+                p4, scale_weights=scale_weights, need_full_z0=bool(self.cfg.enable_solver), force_activate=True
+            )
+        else:
+            z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
+            y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
 
         fg_logit = None
         if self.fg_gate is not None:
@@ -277,6 +282,31 @@ class RMRv3(nn.Module):
                 pi_aspect = pi_aspect[..., :target_h4, :target_w4]
             if fg_logit is not None:
                 fg_logit = fg_logit[..., :target_h4, :target_w4]
+
+        is_direct_fast_path = (
+            not self.cfg.enable_solver and self.region_head is None and self.subpixel_allocator is None
+            and not self.cfg.resonant_adjoint and not getattr(self.cfg, "crest_discovery_flux", False)
+        )
+        if is_direct_fast_path:
+            target_h, target_w = ((h_in + 1) // 2, (w_in + 1) // 2) if self.cfg.subpixel_stride2 else (target_h4, target_w4)
+            if y0.shape[-2] != target_h or y0.shape[-1] != target_w:
+                y0 = y0[..., :target_h, :target_w]
+            if z0.shape[-2] >= target_h and z0.shape[-1] >= target_w:
+                if z0.shape[-2] != target_h or z0.shape[-1] != target_w:
+                    z0 = z0[..., :target_h, :target_w]
+            elif z0.shape[-2] != target_h4 or z0.shape[-1] != target_w4:
+                z0 = z0[..., :target_h4, :target_w4]
+            direct_out: dict[str, Any] = {
+                "y": y0, "y0": y0, "z0": z0, "iterates": [y0], "residual_fields": [], "energy_trace": [],
+                "uniform_reliability": uniform_reliability, "solver_strength": 0.0,
+            }
+            for k, v in (
+                ("scale_weights", scale_weights), ("pi_scale", pi_scale), ("pi_aspect", pi_aspect),
+                ("fg_logit", fg_logit), ("delta_scale", delta_scale), ("scene_tilt", scene_tilt),
+            ):
+                if v is not None:
+                    direct_out[k] = v
+            return RMRModelOutput(**direct_out)
 
         regions_feat = self._regions(target_h4, target_w4, x.device, stride=4)
         if self.cfg.subpixel_stride2:

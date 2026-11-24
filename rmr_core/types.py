@@ -24,6 +24,7 @@ class RMRModelOutput(dict):
             "hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "pi_aspect",
             "solver_trust_alpha", "y_carrier", "y0_carrier", "carrier_energy",
             "regions_carrier", "rn_multiplier", "bin_logits", "bin_probs", "bin_centers",
+            "regions", "b_region", "b_solver", "region_dispersion", "solver_count_variance",
         ):
             return None
         raise AttributeError(f"'RMRModelOutput' object has no attribute '{key}'") from None
