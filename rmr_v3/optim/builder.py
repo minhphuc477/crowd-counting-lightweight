@@ -30,7 +30,13 @@ def build_v3_optimizer(model: nn.Module, cfg: dict[str, Any], lr_init: float) ->
         if not param.requires_grad:
             continue
         is_bb = name.startswith("encoder.")
-        if param.ndim <= 1 or name.endswith(".bias") or "tau" in name:
+        if (
+            param.ndim <= 1
+            or name.endswith(".bias")
+            or "tau" in name
+            or "gamma_hf" in name
+            or "gamma_s2" in name
+        ):
             (bb_no_decay if is_bb else other_no_decay).append(param)
         else:
             (bb_decay if is_bb else other_decay).append(param)

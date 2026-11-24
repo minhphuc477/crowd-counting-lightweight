@@ -120,6 +120,8 @@ class DiagnosticTracker:
 
     @torch.no_grad()
     def update(self, outputs: dict[str, Any]) -> None:
+        if "b_region" not in outputs or "regions" not in outputs:
+            return
         self.mu_means.append(float(outputs["b_region"].mean().item()))
         self.disp_means.append(float(outputs["region_dispersion"].mean().item()))
         self.all_disps.append(outputs["region_dispersion"].detach().cpu().float().flatten())

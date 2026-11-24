@@ -5,8 +5,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .necks import ConvGNAct
 from .density_activation import _compact_c1_inverse, _density_activate, _softplus_inverse
+
+
+def _conv_bn_silu(cin: int, cout: int, k: int = 3, groups: int = 1) -> nn.Sequential:
+    return nn.Sequential(
+        nn.Conv2d(cin, cout, k, padding=k // 2, groups=groups, bias=False),
+        nn.BatchNorm2d(cout),
+        nn.SiLU(inplace=True),
+    )
 
 
 class NativeS2DSIMRHead(nn.Module):
@@ -40,8 +47,8 @@ class NativeS2DSIMRHead(nn.Module):
             self.density_scale_gamma = float(density_scale_gamma)
 
         self.body = nn.Sequential(
-            ConvGNAct(self.width, self.width, 3, groups=self.width),
-            ConvGNAct(self.width, self.width, 1),
+            _conv_bn_silu(self.width, self.width, 3, groups=self.width),
+            _conv_bn_silu(self.width, self.width, 1),
         )
         self.out_proj = nn.Conv2d(self.width, 2, kernel_size=1, bias=True)
         nn.init.normal_(self.out_proj.weight, std=0.01)

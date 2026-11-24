@@ -25,6 +25,9 @@ class TargetSupervisionRouter:
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Dispatch loss computation to y, y0, or their symmetric average."""
         if self.mode == "dual":
+            if y is y0:
+                l_out = fn(y, *args, **kwargs)
+                return l_out, {"y": l_out, "y0": l_out}
             l_y, l_y0 = fn(y, *args, **kwargs), fn(y0, *args, **kwargs)
             return 0.5 * (l_y + l_y0), {"y": l_y, "y0": l_y0}
         l_out = fn(y0 if self.mode == "y0" else y, *args, **kwargs)

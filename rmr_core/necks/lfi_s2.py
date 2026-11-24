@@ -4,18 +4,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .blocks import ConvGNAct, DSResidual, DepthwiseDilated, _gn
+from .blocks import ConvGNAct, DSResidual, DepthwiseDilated
 
 
-class _LinearDSResidual(nn.Module):
-    """Depthwise-separable residual block without trailing ReLU/SiLU clipping."""
+class _ConvBNAct(nn.Sequential):
+    """Inference-foldable Conv2d + BatchNorm2d + SiLU block for Stride-2 layers."""
+
+    def __init__(self, cin: int, cout: int, k: int = 3, groups: int = 1, act: bool = True) -> None:
+        layers: list[nn.Module] = [
+            nn.Conv2d(cin, cout, k, padding=k // 2, groups=groups, bias=False),
+            nn.BatchNorm2d(cout),
+        ]
+        if act:
+            layers.append(nn.SiLU(inplace=True))
+        super().__init__(*layers)
+
+
+class _LinearDSResidualBN(nn.Module):
+    """Depthwise-separable residual block with foldable BatchNorm2d and no trailing clipping."""
 
     def __init__(self, c: int = 16) -> None:
         super().__init__()
         self.dw = nn.Conv2d(c, c, kernel_size=3, padding=1, groups=c, bias=False)
-        self.n1 = _gn(c)
+        self.n1 = nn.BatchNorm2d(c)
         self.pw = nn.Conv2d(c, c, kernel_size=1, bias=False)
-        self.n2 = _gn(c)
+        self.n2 = nn.BatchNorm2d(c)
         self.act = nn.SiLU(inplace=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -28,7 +41,7 @@ class LFIS2FPNNeck(nn.Module):
 
     Consumes backbone features (C2, C4, C8, C16) so that dense high-frequency head impulses
     at 2-4px spacing are extracted at native Stride 2 BEFORE MobileNetV4 Stride-4 downsampling
-    causes Nyquist aliasing, and without tanh amplitude saturation.
+    causes Nyquist aliasing, without tanh saturation, and with foldable Stride-2 BatchNorm2d.
     """
 
     def __init__(
@@ -51,7 +64,12 @@ class LFIS2FPNNeck(nn.Module):
         if self.hf_act_mode not in ("linear", "silu", "tanh"):
             raise ValueError(f"Unsupported hf_act_mode: '{self.hf_act_mode}'")
 
-        self.lat2 = ConvGNAct(c2, self.s2_width, 1)
+        self._capture_mechanisms: bool = False
+        self._last_l4: torch.Tensor | None = None
+        self._last_p4: torch.Tensor | None = None
+        self._last_gate4: torch.Tensor | None = None
+
+        self.lat2 = _ConvBNAct(c2, self.s2_width, 1)
         self.lat4 = ConvGNAct(c4, self.width, 1)
         self.lat8 = ConvGNAct(c8, self.width, 1)
         self.lat16 = ConvGNAct(c16, self.width, 1)
@@ -66,7 +84,7 @@ class LFIS2FPNNeck(nn.Module):
         self.ref16 = DSResidual(self.width)
         self.ref8 = DSResidual(self.width)
         self.ref4 = DSResidual(self.width)
-        self.ref2 = _LinearDSResidual(self.s2_width)
+        self.ref2 = _LinearDSResidualBN(self.s2_width)
 
         self.hf_enhance = nn.Conv2d(self.width, self.width, kernel_size=3, padding=1, groups=self.width, bias=False)
         self.gamma_hf = nn.Parameter(torch.full((1, self.width, 1, 1), 0.5))
@@ -116,7 +134,12 @@ class LFIS2FPNNeck(nn.Module):
         l2_lf = F.avg_pool2d(l2, kernel_size=3, stride=1, padding=1, count_include_pad=(not self.pad_aware_laplacian))
         l2_hf = l2 - l2_lf
         up4_to_2 = F.interpolate(self.p4_to_s2(p4), size=l2.shape[-2:], mode="bilinear", align_corners=False)
-        f2 = (l2_lf + up4_to_2) + self.gamma_s2 * self._activate_hf(self.hf2_enhance(l2_hf))
+        f2 = (l2 + up4_to_2) + self.gamma_s2 * self._activate_hf(self.hf2_enhance(l2_hf))
         p2 = self.ref2(f2)
+
+        if self._capture_mechanisms:
+            self._last_l4 = l2.detach()
+            self._last_p4 = p2.detach()
+            self._last_gate4 = None
 
         return p2, p8, p16

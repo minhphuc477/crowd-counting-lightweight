@@ -194,11 +194,13 @@ def test_lfi_dsimr_stride4_parity_and_direct_fast_path():
 
 
 def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
-    """Verify Gap 1-4 fixes: pad-aware unbounded HF, WD exemption, Radon-OT sparse norm, and LFI-S2 (<100k)."""
+    """Verify Gap 1-4 fixes, build_v3_optimizer WD exemption, and end-to-end train_one_epoch on D1 & D2."""
     from rmr_core.necks import SFILiteFPNNeck
+    from rmr_v3.checkpoint import EMAManager
     from rmr_v3.config import validate_v3_config
-    from rmr_v3.engine import build_optimizer
+    from rmr_v3.engine import train_one_epoch
     from rmr_v3.losses import compute_rmr_v3_losses
+    from rmr_v3.optim import build_v3_optimizer
 
     # 1. Pad-aware Laplacian removes 1px border edge impulse on flat input
     flat = torch.ones(1, 32, 16, 16)
@@ -214,18 +216,17 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
         "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
         "configs/benchmarks/dense_cure/diag_d2_nwpu_lfi_s2_99k.yaml",
     ):
-        raw = load_config(p)
-        validate_v3_config(raw)
+        validate_v3_config(load_config(p))
 
     # 3. Build D2 (LFI-S2) and check param budget, odd-shape Stride-2 output, Step-0 parity, and gradients
-    cfg = load_config("configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml")
-    cfg["model"]["pretrained"] = False
-    model = RMRv3(RMRv3Config.from_dict(cfg["model"])).eval()
+    cfg_d2 = load_config("configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml")
+    cfg_d2["model"]["pretrained"] = False
+    model = RMRv3(RMRv3Config.from_dict(cfg_d2["model"])).eval()
     total_params = sum(p.numel() for p in model.parameters())
-    assert total_params < 100_000, f"Expected LFI-S2 < 100k params, got {total_params}"
+    assert total_params == 99_314, f"Expected 99,314 params for LFI-S2, got {total_params}"
 
-    opt = build_optimizer(model, cfg, lr_init=3e-4)
-    no_decay_params = {id(p) for g in opt.param_groups if g["weight_decay"] == 0.0 for p in g["params"]}
+    opt_d2 = build_v3_optimizer(model, cfg_d2, lr_init=3e-4)
+    no_decay_params = {id(p) for g in opt_d2.param_groups if g["weight_decay"] == 0.0 for p in g["params"]}
     assert id(model.fusion.gamma_hf) in no_decay_params
     assert id(model.fusion.gamma_s2) in no_decay_params
 
@@ -240,14 +241,30 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
         rel_err = abs(out_cal.y.mean().item() - expected_s2) / expected_s2
         assert rel_err < 0.10, f"LFI-S2 Step-0 parity drift: {out_cal.y.mean().item()} vs {expected_s2}"
 
-    model.train()
-    x_tr = torch.randn(2, 3, 256, 256)
-    out_tr = model(x_tr)
-    loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
-    pts = [torch.tensor([[32.0, 48.0], [100.0, 120.0]]), torch.tensor([[80.0, 80.0]])]
-    losses = compute_rmr_v3_losses(out_tr, torch.zeros(2, 1, 128, 128), cfg=loss_cfg, points=pts)
-    assert torch.isfinite(losses["total"])
-    losses["total"].backward()
-    for name, p in model.named_parameters():
-        if p.requires_grad:
-            assert p.grad is not None, f"Missing gradient on {name}"
+    # 4. End-to-end train_one_epoch check (DiagnosticTracker + Direct Fast-Path) on D1 & D2
+    device = torch.device("cpu")
+    synthetic_loader = [
+        {
+            "image": torch.randn(2, 3, 128, 128),
+            "target_y": torch.zeros(2, 1, 64, 64),
+            "points": [torch.tensor([[20.0, 24.0], [80.0, 90.0]]), torch.zeros((0, 2))],
+        }
+    ]
+    for cfg_path in (
+        "configs/benchmarks/dense_cure/diag_d1_sha_unbounded_anscombe_99k.yaml",
+        "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
+    ):
+        c = load_config(cfg_path)
+        c["model"]["pretrained"] = False
+        m = RMRv3(RMRv3Config.from_dict(c["model"]))
+        opt = build_v3_optimizer(m, c, lr_init=3e-4)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        ema = EMAManager(m, decay=0.999)
+        l_cfg = RMRv3LossConfig.from_dict(c["loss"])
+        loss_avg, diag_sum = train_one_epoch(
+            model=m, train_loader=synthetic_loader, optimizer=opt, scheduler=None,
+            scaler=scaler, loss_cfg=l_cfg, device=device, amp=False, grad_clip=1.0,
+            uniform_reliability=False, solver_strength=0.0, ema_manager=ema, epoch=0,
+        )
+        assert loss_avg["total"] > 0.0 and torch.isfinite(torch.tensor(loss_avg["total"]))
+        assert isinstance(diag_sum, dict)

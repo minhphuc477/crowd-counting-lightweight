@@ -17,60 +17,60 @@
           "macs": 344473600,
           "m_macs": 344.47,
           "gflops": 0.6889,
-          "latency_ms": 46.495,
-          "fps": 21.51,
+          "latency_ms": 45.997,
+          "fps": 21.74,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 22.754,
-            "neck_ms": 20.012,
-            "head_ms": 6.564,
+            "encoder_ms": 17.12,
+            "neck_ms": 22.354,
+            "head_ms": 8.063,
             "post_ms": 0.013
           },
           "onnx": {
             "onnx_mb": 0.5718,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 23.942,
-            "onnx_fps": 41.77
+            "onnx_ms": 26.294,
+            "onnx_fps": 38.03
           }
         },
         "720x1280": {
           "macs": 1211040000,
           "m_macs": 1211.04,
           "gflops": 2.4221,
-          "latency_ms": 140.615,
-          "fps": 7.11,
+          "latency_ms": 140.794,
+          "fps": 7.1,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 51.169,
-            "neck_ms": 69.263,
-            "head_ms": 20.108,
-            "post_ms": 0.035
+            "encoder_ms": 53.151,
+            "neck_ms": 64.493,
+            "head_ms": 20.849,
+            "post_ms": 0.039
           },
           "onnx": {
             "onnx_mb": 0.9015,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 93.061,
-            "onnx_fps": 10.75
+            "onnx_ms": 98.406,
+            "onnx_fps": 10.16
           }
         },
         "1080x1920": {
           "macs": 2745024000,
           "m_macs": 2745.02,
           "gflops": 5.49,
-          "latency_ms": 326.645,
-          "fps": 3.06,
+          "latency_ms": 322.686,
+          "fps": 3.1,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 120.041,
-            "neck_ms": 157.023,
-            "head_ms": 46.191,
-            "post_ms": 0.08
+            "encoder_ms": 134.613,
+            "neck_ms": 144.049,
+            "head_ms": 48.581,
+            "post_ms": 0.093
           },
           "onnx": {
             "onnx_mb": 0.4495,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 252.029,
-            "onnx_fps": 3.97
+            "onnx_ms": 252.802,
+            "onnx_fps": 3.96
           }
         }
       }
@@ -92,60 +92,60 @@
           "macs": 408961024,
           "m_macs": 408.96,
           "gflops": 0.8179,
-          "latency_ms": 75.452,
-          "fps": 13.25,
+          "latency_ms": 73.021,
+          "fps": 13.69,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 15.251,
-            "neck_ms": 76.873,
-            "head_ms": 9.867,
-            "post_ms": 0.014
+            "encoder_ms": 17.305,
+            "neck_ms": 50.463,
+            "head_ms": 7.397,
+            "post_ms": 0.013
           },
           "onnx": {
-            "onnx_mb": 0.5802,
+            "onnx_mb": 0.5723,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 76.65,
-            "onnx_fps": 13.05
+            "onnx_ms": 38.53,
+            "onnx_fps": 25.95
           }
         },
         "720x1280": {
           "macs": 1437753600,
           "m_macs": 1437.75,
           "gflops": 2.8755,
-          "latency_ms": 291.935,
-          "fps": 3.43,
+          "latency_ms": 256.679,
+          "fps": 3.9,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 50.567,
-            "neck_ms": 181.993,
-            "head_ms": 27.189,
-            "post_ms": 0.036
+            "encoder_ms": 51.331,
+            "neck_ms": 164.421,
+            "head_ms": 23.349,
+            "post_ms": 0.044
           },
           "onnx": {
-            "onnx_mb": 0.91,
+            "onnx_mb": 0.9021,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 228.396,
-            "onnx_fps": 4.38
+            "onnx_ms": 155.993,
+            "onnx_fps": 6.41
           }
         },
         "1080x1920": {
           "macs": 3258908160,
           "m_macs": 3258.91,
           "gflops": 6.5178,
-          "latency_ms": 729.555,
-          "fps": 1.37,
+          "latency_ms": 559.619,
+          "fps": 1.79,
           "peak_vram_mb": null,
           "stages": {
-            "encoder_ms": 118.363,
-            "neck_ms": 416.443,
-            "head_ms": 64.367,
-            "post_ms": 0.085
+            "encoder_ms": 118.666,
+            "neck_ms": 372.729,
+            "head_ms": 50.746,
+            "post_ms": 0.082
           },
           "onnx": {
-            "onnx_mb": 0.4592,
+            "onnx_mb": 0.4513,
             "onnx_provider": "CPUExecutionProvider",
-            "onnx_ms": 720.37,
-            "onnx_fps": 1.39
+            "onnx_ms": 364.749,
+            "onnx_fps": 2.74
           }
         }
       }
