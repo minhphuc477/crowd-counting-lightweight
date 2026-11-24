@@ -1,7 +1,7 @@
 # AGENTS.md — Repository Control Rules (Lean SSOT)
 
 ## 1. Source of Truth & Scope Boundaries
-- **Read FIRST:** `RESEARCH_CONTRACT.md`, `DEAD_ENDS.md`, `EXPERIMENTS.tsv`. Ignore legacy `.md` reports/plans in the repo.
+- **Read FIRST:** `RESEARCH_CONTRACT.md`, `DEAD_ENDS.md`, `EXPERIMENTS.tsv`, `LITERATURE_REVIEW.md`. Ignore legacy `.md` reports/plans in the repo.
 - **Primary Focus:** Model architecture improvements (`rmr_core/necks/`, `rmr_core/heads.py`, `rmr_core/native_s2_head.py`, `rmr_core/backbones.py`, `rmr_v3/losses/`, `configs/benchmarks/`) and paper deliverables.
 - **Strictly Off-Limits (Unless User Asks):** Unsolicited code cleanups, style refactors, tech-debt sweeps, redundant wrappers, or new abstractions. Do not modify metric/evaluation code to inflate numbers.
 - **450-Line Hard Limit:** Keep every `.py` file under `rmr_core/` and `rmr_v3/` strictly `<= 450` lines.
