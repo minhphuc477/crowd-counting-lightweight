@@ -53,6 +53,7 @@ def evaluate_configuration(
 
     eval_items = items[:max_eval_samples] if max_eval_samples > 0 else items
     aes, sqs, naes, times = [], [], [], []
+    dense_aes, dense_errs, dense_gts = [], [], []
 
     for it in eval_items:
         img_path = Path(_REPO_ROOT) / it["image"]
@@ -62,48 +63,63 @@ def evaluate_configuration(
             continue
 
         with Image.open(img_path) as pil_img:
-            w0, h0 = pil_img.size
-            img_t = TF.to_tensor(pil_img.convert("RGB"))
+            rgb_img = pil_img.convert("RGB")
+            w0, h0 = rgb_img.size
+            if tile_size is None and max(w0, h0) > 2048:
+                sc = 2048.0 / float(max(w0, h0))
+                rgb_img = rgb_img.resize(
+                    (int(round(w0 * sc)), int(round(h0 * sc))),
+                    Image.Resampling.BILINEAR,
+                )
+            img_t = TF.to_tensor(rgb_img)
 
         pts = it.get("points", [])
         gt_count = float(len(pts))
+        img_norm_3d = normalize_image(img_t, mode=norm_mode).to(device)
 
-        t0 = time.time()
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        t0 = time.perf_counter()
         with torch.no_grad():
             if tile_size is None:
-                # Direct downscaled forward (cap at 2048)
-                max_dim = max(w0, h0)
-                if max_dim > 2048:
-                    sc = 2048.0 / float(max_dim)
-                    pil_capped = pil_img.resize((int(round(w0 * sc)), int(round(h0 * sc))), Image.Resampling.BILINEAR)
-                    img_t = TF.to_tensor(pil_capped.convert("RGB"))
-                img_norm = normalize_image(img_t, mode=norm_mode).unsqueeze(0).to(device)
-                out = model(img_norm)
+                out = model(img_norm_3d.unsqueeze(0))
                 pred_count = float(out["y"].sum().item())
             else:
                 pred_map = predict_tiled(
                     model=model,
-                    image=img_t.to(device),
+                    image=img_norm_3d,
                     output_stride=eff_stride,
                     tile_size=tile_size,
                     halo=halo,
                     blend_mode=blend_mode,
                 )
                 pred_count = float(pred_map.sum().item())
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
 
-        elapsed_ms = (time.time() - t0) * 1000.0
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
         times.append(elapsed_ms)
 
-        err = abs(pred_count - gt_count)
+        signed_err = pred_count - gt_count
+        err = abs(signed_err)
         aes.append(err)
         sqs.append(err ** 2)
         if gt_count > 0:
             naes.append(err / gt_count)
+        if gt_count >= 3000:
+            dense_aes.append(err)
+            dense_errs.append(signed_err)
+            dense_gts.append(gt_count)
 
     peak_vram_mb = 0.0
     if device.type == "cuda":
         peak_vram_mb = torch.cuda.max_memory_allocated(device) / (1024 * 1024)
 
+    dense_rel_bias = (
+        round((float(np.sum(dense_errs)) / max(float(np.sum(dense_gts)), 1e-6)) * 100.0, 2)
+        if dense_gts
+        else None
+    )
     return {
         "tile_size": tile_size if tile_size is not None else "Downscale_2048",
         "halo": halo,
@@ -111,6 +127,9 @@ def evaluate_configuration(
         "mae": round(float(np.mean(aes)), 2) if aes else 0.0,
         "rmse": round(float(np.sqrt(np.mean(sqs))), 2) if sqs else 0.0,
         "nae": round(float(np.mean(naes)), 3) if naes else 0.0,
+        "dense_3000_n": len(dense_aes),
+        "dense_3000_mae": round(float(np.mean(dense_aes)), 2) if dense_aes else None,
+        "dense_3000_rel_bias_pct": dense_rel_bias,
         "latency_ms_per_img": round(float(np.mean(times)), 1) if times else 0.0,
         "peak_vram_mb": round(peak_vram_mb, 1),
         "evaluated_samples": len(aes),
@@ -143,7 +162,8 @@ def main():
     with open(args.manifest, "r", encoding="utf-8") as f:
         items = [json.loads(line) for line in f if line.strip()]
 
-    print(f"[TILING SWEEP] Testing on {min(args.max_samples, len(items))} samples across 5 configurations...")
+    n_eval = len(items) if args.max_samples <= 0 else min(args.max_samples, len(items))
+    print(f"[TILING SWEEP] Testing on {n_eval} samples across 5 configurations...")
 
     configs_to_test = [
         {"tile_size": None, "halo": 0, "blend_mode": "none"},               # Downscaled baseline
@@ -154,9 +174,9 @@ def main():
     ]
 
     all_results = []
-    print("\n" + "=" * 80)
-    print(f"{'Config':<18} | {'Halo':<5} | {'Blend':<6} | {'MAE':<7} | {'RMSE':<7} | {'Latency':<9} | {'Peak VRAM':<9}")
-    print("=" * 80)
+    print("\n" + "=" * 102)
+    print(f"{'Config':<16} | {'Halo':<4} | {'Blend':<5} | {'MAE':<7} | {'RMSE':<7} | {'D3000 MAE':<9} | {'D3000 Bias':<10} | {'Latency':<9} | {'VRAM':<8}")
+    print("=" * 102)
 
     for c in configs_to_test:
         res = evaluate_configuration(
@@ -172,9 +192,11 @@ def main():
         )
         all_results.append(res)
         tag = f"Tile_{c['tile_size']}" if c['tile_size'] else "Downscale_2048"
-        print(f"{tag:<18} | {c['halo']:<5} | {c['blend_mode']:<6} | {res['mae']:<7.2f} | {res['rmse']:<7.2f} | {res['latency_ms_per_img']:<7.1f}ms | {res['peak_vram_mb']:<6.1f}MB")
+        d_mae = f"{res['dense_3000_mae']:.1f}" if res["dense_3000_mae"] is not None else "n/a"
+        d_bias = f"{res['dense_3000_rel_bias_pct']:+.1f}%" if res["dense_3000_rel_bias_pct"] is not None else "n/a"
+        print(f"{tag:<16} | {c['halo']:<4} | {c['blend_mode']:<5} | {res['mae']:<7.2f} | {res['rmse']:<7.2f} | {d_mae:<9} | {d_bias:<10} | {res['latency_ms_per_img']:<7.1f}ms | {res['peak_vram_mb']:<6.1f}MB")
 
-    print("=" * 80)
+    print("=" * 102)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2)
     print(f"[SAVED] Detailed sweep metrics exported to: {out_path}")

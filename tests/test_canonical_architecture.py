@@ -209,8 +209,10 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
     assert hf_pad.abs().max().item() > 0.1
     assert hf_clean.abs().max().item() < 1e-6
 
-    # 2. Validate both D1 and D2 YAMLs
+    # 2. Validate D0.5, D1, and D2 YAMLs
     for p in (
+        "configs/benchmarks/dense_cure/diag_d05_sha_unbounded_hf_nb_99k.yaml",
+        "configs/benchmarks/dense_cure/diag_d05_nwpu_unbounded_hf_nb_99k.yaml",
         "configs/benchmarks/dense_cure/diag_d1_sha_unbounded_anscombe_99k.yaml",
         "configs/benchmarks/dense_cure/diag_d1_nwpu_unbounded_anscombe_99k.yaml",
         "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
@@ -229,6 +231,10 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
     no_decay_params = {id(p) for g in opt_d2.param_groups if g["weight_decay"] == 0.0 for p in g["params"]}
     assert id(model.fusion.gamma_hf) in no_decay_params
     assert id(model.fusion.gamma_s2) in no_decay_params
+    from rmr_v3.engine import build_optimizer as engine_build_optimizer
+    opt_eng = engine_build_optimizer(model, cfg_d2, lr_init=3e-4)
+    eng_no_decay = {id(p) for g in opt_eng.param_groups if g["weight_decay"] == 0.0 for p in g["params"]}
+    assert id(model.fusion.gamma_hf) in eng_no_decay and id(model.fusion.gamma_s2) in eng_no_decay
 
     with torch.no_grad():
         x_odd = torch.randn(1, 3, 385, 513)

@@ -19,6 +19,7 @@ from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
 from rmr_v3.model import RMRv3, RMRv3Config
 from rmr_v3.tracking import DiagnosticTracker, LossTracker
 from rmr_v3.checkpoint import EMAManager
+from rmr_v3.optim.builder import build_v3_optimizer
 
 
 def make_model(cfg: dict) -> tuple[RMRv3, bool]:
@@ -57,40 +58,8 @@ def make_loss_cfg(cfg: dict) -> RMRv3LossConfig:
 
 
 def build_optimizer(model: RMRv3, cfg: dict, lr_init: float) -> torch.optim.Optimizer:
-    """Build AdamW optimizer with decoupled weight decay for 1D tensors and calibrated priors."""
-    backbone_scale = float(
-        cfg.get("train", {}).get(
-            "backbone_lr_scale", cfg.get("model", {}).get("backbone_lr_scale", 0.1)
-        )
-    )
-    wd = float(cfg.get("train", {}).get("weight_decay", 1e-4))
-
-    bb_decay, bb_no_decay = [], []
-    other_decay, other_no_decay = [], []
-
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        is_bb = name.startswith("encoder.")
-        if (
-            param.ndim <= 1
-            or name.endswith(".bias")
-            or "tau" in name
-            or "gamma_hf" in name
-            or "gamma_s2" in name
-        ):
-            (bb_no_decay if is_bb else other_no_decay).append(param)
-        else:
-            (bb_decay if is_bb else other_decay).append(param)
-
-    return torch.optim.AdamW(
-        [
-            {"name": "backbone_decay", "params": bb_decay, "lr": lr_init * backbone_scale, "weight_decay": wd},
-            {"name": "backbone_no_decay", "params": bb_no_decay, "lr": lr_init * backbone_scale, "weight_decay": 0.0},
-            {"name": "main_decay", "params": other_decay, "lr": lr_init, "weight_decay": wd},
-            {"name": "main_no_decay", "params": other_no_decay, "lr": lr_init, "weight_decay": 0.0},
-        ],
-    )
+    """Delegate optimizer construction to unified rmr_v3.optim.builder.build_v3_optimizer."""
+    return build_v3_optimizer(model, cfg, lr_init)
 
 
 @torch.no_grad()
