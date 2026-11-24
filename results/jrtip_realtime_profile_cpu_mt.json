@@ -1,0 +1,232 @@
+{
+  "results": [
+    {
+      "config": "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+      "name": "exp_sha_lfi_dsimr_99k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99766,
+      "total_params": 99766,
+      "fp32_mb": 0.3991,
+      "fp16_mb": 0.1995,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": null,
+      "profiles": {
+        "512x512": {
+          "macs": 344473600,
+          "m_macs": 344.47,
+          "gflops": 0.6889,
+          "latency_ms": 49.906,
+          "fps": 20.04,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 24.202,
+            "neck_ms": 18.401,
+            "head_ms": 7.317,
+            "post_ms": 0.147
+          }
+        },
+        "720x1280": {
+          "macs": 1211040000,
+          "m_macs": 1211.04,
+          "gflops": 2.4221,
+          "latency_ms": 97.161,
+          "fps": 10.29,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 44.863,
+            "neck_ms": 36.838,
+            "head_ms": 14.298,
+            "post_ms": 0.141
+          }
+        },
+        "1080x1920": {
+          "macs": 2745024000,
+          "m_macs": 2745.02,
+          "gflops": 5.49,
+          "latency_ms": 220.131,
+          "fps": 4.54,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 91.109,
+            "neck_ms": 82.23,
+            "head_ms": 32.961,
+            "post_ms": 0.196
+          }
+        }
+      }
+    },
+    {
+      "config": "configs/benchmarks/sfi_v3_complementary/exp_sha_sfi_v3_comp_101k.yaml",
+      "name": "exp_sha_sfi_v3_comp_101k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 101174,
+      "total_params": 101174,
+      "fp32_mb": 0.4047,
+      "fp16_mb": 0.2023,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": null,
+      "profiles": {
+        "512x512": {
+          "macs": 365969408,
+          "m_macs": 365.97,
+          "gflops": 0.7319,
+          "latency_ms": 53.053,
+          "fps": 18.85,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 23.688,
+            "neck_ms": 22.401,
+            "head_ms": 7.864,
+            "post_ms": 0.136
+          }
+        },
+        "720x1280": {
+          "macs": 1286611200,
+          "m_macs": 1286.61,
+          "gflops": 2.5732,
+          "latency_ms": 120.726,
+          "fps": 8.28,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 44.855,
+            "neck_ms": 46.33,
+            "head_ms": 14.781,
+            "post_ms": 0.157
+          }
+        },
+        "1080x1920": {
+          "macs": 2916318720,
+          "m_macs": 2916.32,
+          "gflops": 5.8326,
+          "latency_ms": 204.233,
+          "fps": 4.9,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 75.2,
+            "neck_ms": 100.041,
+            "head_ms": 40.951,
+            "post_ms": 0.235
+          }
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_a_v0_additive.yaml",
+      "name": "axis_a_v0_additive",
+      "neck_type": "additive",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 98870,
+      "total_params": 98870,
+      "fp32_mb": 0.3955,
+      "fp16_mb": 0.1977,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": null,
+      "profiles": {
+        "512x512": {
+          "macs": 339230720,
+          "m_macs": 339.23,
+          "gflops": 0.6785,
+          "latency_ms": 53.236,
+          "fps": 18.78,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 27.132,
+            "neck_ms": 17.691,
+            "head_ms": 9.685,
+            "post_ms": 0.175
+          }
+        },
+        "720x1280": {
+          "macs": 1192608000,
+          "m_macs": 1192.61,
+          "gflops": 2.3852,
+          "latency_ms": 82.298,
+          "fps": 12.15,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 43.147,
+            "neck_ms": 24.399,
+            "head_ms": 12.944,
+            "post_ms": 0.115
+          }
+        },
+        "1080x1920": {
+          "macs": 2703244800,
+          "m_macs": 2703.24,
+          "gflops": 5.4065,
+          "latency_ms": 169.571,
+          "fps": 5.9,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 73.393,
+            "neck_ms": 52.716,
+            "head_ms": 28.704,
+            "post_ms": 0.155
+          }
+        }
+      }
+    },
+    {
+      "config": "configs/experiments_pr_sfi/axis_c_frankenstein_sota_lite.yaml",
+      "name": "axis_c_frankenstein_sota_lite",
+      "neck_type": "frankenstein_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99763,
+      "total_params": 99763,
+      "fp32_mb": 0.3991,
+      "fp16_mb": 0.1995,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": null,
+      "profiles": {
+        "512x512": {
+          "macs": 350929408,
+          "m_macs": 350.93,
+          "gflops": 0.7019,
+          "latency_ms": 80.379,
+          "fps": 12.44,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 26.85,
+            "neck_ms": 40.562,
+            "head_ms": 8.939,
+            "post_ms": 0.126
+          }
+        },
+        "720x1280": {
+          "macs": 1233734912,
+          "m_macs": 1233.73,
+          "gflops": 2.4675,
+          "latency_ms": 133.023,
+          "fps": 7.52,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 41.217,
+            "neck_ms": 75.285,
+            "head_ms": 15.256,
+            "post_ms": 0.153
+          }
+        },
+        "1080x1920": {
+          "macs": 2796465152,
+          "m_macs": 2796.47,
+          "gflops": 5.5929,
+          "latency_ms": 305.998,
+          "fps": 3.27,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 93.513,
+            "neck_ms": 159.369,
+            "head_ms": 27.974,
+            "post_ms": 0.199
+          }
+        }
+      }
+    }
+  ]
+}
