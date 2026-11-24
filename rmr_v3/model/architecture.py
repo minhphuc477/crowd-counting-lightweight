@@ -51,10 +51,11 @@ class RMRv3(nn.Module):
         validate_architecture_contract(cfg)
         self.cfg = cfg
 
+        target_reductions = (2, 4, 8, 16) if cfg.neck_type == "lfi_s2" else (4, 8, 16)
         self.encoder = TimmPyramidBackbone(
             model_name=cfg.backbone_name,
             pretrained=cfg.pretrained,
-            target_reductions=(4, 8, 16),
+            target_reductions=target_reductions,
         )
         self.fusion = build_neck_module(self.encoder.out_channels, cfg)
         self.fine_head = build_fine_carrier_head(cfg)
@@ -143,8 +144,8 @@ class RMRv3(nn.Module):
         return region_set
 
     def _extract_carrier_features(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        c4, c8, c16 = self.encoder(x)
-        p4, p8, p16 = self.fusion(c4, c8, c16)
+        feats = self.encoder(x)
+        p4, p8, p16 = self.fusion(*feats)
 
         if self.tdsg is not None:
             sem_logit = self.tdsg(p16)
@@ -270,8 +271,10 @@ class RMRv3(nn.Module):
         z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
 
         target_h4, target_w4 = (h_in + 3) // 4, (w_in + 3) // 4
-        if pad_h > 0 or pad_w > 0 or p4.shape[-2] != target_h4 or p4.shape[-1] != target_w4:
-            p4 = p4[..., :target_h4, :target_w4]
+        target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
+        p4_th, p4_tw = (target_h2, target_w2) if self.cfg.neck_type == "lfi_s2" else (target_h4, target_w4)
+        if pad_h > 0 or pad_w > 0 or p4.shape[-2] != p4_th or p4.shape[-1] != p4_tw:
+            p4 = p4[..., :p4_th, :p4_tw]
             p8 = p8[..., :(h_in + 7) // 8, :(w_in + 7) // 8]
             p16 = p16[..., :(h_in + 15) // 16, :(w_in + 15) // 16]
             if scale_weights is not None:

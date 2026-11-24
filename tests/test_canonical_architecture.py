@@ -191,3 +191,63 @@ def test_lfi_dsimr_stride4_parity_and_direct_fast_path():
     for name, p in model.named_parameters():
         if p.requires_grad:
             assert p.grad is not None, f"Missing gradient on {name}"
+
+
+def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
+    """Verify Gap 1-4 fixes: pad-aware unbounded HF, WD exemption, Radon-OT sparse norm, and LFI-S2 (<100k)."""
+    from rmr_core.necks import SFILiteFPNNeck
+    from rmr_v3.config import validate_v3_config
+    from rmr_v3.engine import build_optimizer
+    from rmr_v3.losses import compute_rmr_v3_losses
+
+    # 1. Pad-aware Laplacian removes 1px border edge impulse on flat input
+    flat = torch.ones(1, 32, 16, 16)
+    _, hf_pad = SFILiteFPNNeck.decompose_frequency(flat, pad_aware=False)
+    _, hf_clean = SFILiteFPNNeck.decompose_frequency(flat, pad_aware=True)
+    assert hf_pad.abs().max().item() > 0.1
+    assert hf_clean.abs().max().item() < 1e-6
+
+    # 2. Validate both D1 and D2 YAMLs
+    for p in (
+        "configs/benchmarks/dense_cure/diag_d1_sha_unbounded_anscombe_99k.yaml",
+        "configs/benchmarks/dense_cure/diag_d1_nwpu_unbounded_anscombe_99k.yaml",
+        "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
+        "configs/benchmarks/dense_cure/diag_d2_nwpu_lfi_s2_99k.yaml",
+    ):
+        raw = load_config(p)
+        validate_v3_config(raw)
+
+    # 3. Build D2 (LFI-S2) and check param budget, odd-shape Stride-2 output, Step-0 parity, and gradients
+    cfg = load_config("configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml")
+    cfg["model"]["pretrained"] = False
+    model = RMRv3(RMRv3Config.from_dict(cfg["model"])).eval()
+    total_params = sum(p.numel() for p in model.parameters())
+    assert total_params < 100_000, f"Expected LFI-S2 < 100k params, got {total_params}"
+
+    opt = build_optimizer(model, cfg, lr_init=3e-4)
+    no_decay_params = {id(p) for g in opt.param_groups if g["weight_decay"] == 0.0 for p in g["params"]}
+    assert id(model.fusion.gamma_hf) in no_decay_params
+    assert id(model.fusion.gamma_s2) in no_decay_params
+
+    with torch.no_grad():
+        x_odd = torch.randn(1, 3, 385, 513)
+        out_odd = model(x_odd)
+        assert out_odd.y.shape == (1, 1, 193, 257)
+        assert (out_odd.y >= 0.0).all()
+
+        out_cal = model(torch.randn(2, 3, 256, 256))
+        expected_s2 = float(model.cfg.init_m0) / 4.0
+        rel_err = abs(out_cal.y.mean().item() - expected_s2) / expected_s2
+        assert rel_err < 0.10, f"LFI-S2 Step-0 parity drift: {out_cal.y.mean().item()} vs {expected_s2}"
+
+    model.train()
+    x_tr = torch.randn(2, 3, 256, 256)
+    out_tr = model(x_tr)
+    loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
+    pts = [torch.tensor([[32.0, 48.0], [100.0, 120.0]]), torch.tensor([[80.0, 80.0]])]
+    losses = compute_rmr_v3_losses(out_tr, torch.zeros(2, 1, 128, 128), cfg=loss_cfg, points=pts)
+    assert torch.isfinite(losses["total"])
+    losses["total"].backward()
+    for name, p in model.named_parameters():
+        if p.requires_grad:
+            assert p.grad is not None, f"Missing gradient on {name}"

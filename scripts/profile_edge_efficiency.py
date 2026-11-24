@@ -137,10 +137,10 @@ def profile_stage_breakdown(
 
     enc_ms = _time_fn(lambda: model.encoder(x), iters, warmup, device, ctx_factory)
     with torch.no_grad(), ctx_factory():
-        c4, c8, c16 = model.encoder(x)
-    neck_ms = _time_fn(lambda: model.fusion(c4, c8, c16), iters, warmup, device, ctx_factory)
+        feats = model.encoder(x)
+    neck_ms = _time_fn(lambda: model.fusion(*feats), iters, warmup, device, ctx_factory)
     with torch.no_grad(), ctx_factory():
-        p4, _, _ = model.fusion(c4, c8, c16)
+        p4, _, _ = model.fusion(*feats)
 
     def _run_head():
         return model.fine_head(p4, scale_weights=None)

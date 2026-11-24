@@ -68,12 +68,15 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "neck_type" in m_cfg and m_cfg["neck_type"] is not None:
             nt = str(m_cfg["neck_type"]).strip()
             valid_necks = (
-                "additive", "aspp_lite", "hdc_lite", "sfi_lite", "rlk_hdc",
+                "additive", "aspp_lite", "hdc_lite", "sfi_lite", "lfi_s2", "rlk_hdc",
                 "rep_weighted", "rep_aspp_lite", "bifpn_lite",
                 "pafpn_binorm", "pconv_fpn", "frankenstein_lite",
             )
             if nt not in valid_necks:
                 raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")
+        if "sfi_hf_act_mode" in m_cfg and m_cfg["sfi_hf_act_mode"] is not None:
+            if str(m_cfg["sfi_hf_act_mode"]).lower().strip() not in ("tanh", "linear", "silu"):
+                raise ValueError(f"sfi_hf_act_mode must be 'tanh', 'linear', or 'silu', got {m_cfg['sfi_hf_act_mode']!r}")
         if "sfi_hf_gate_mode" in m_cfg and m_cfg["sfi_hf_gate_mode"] is not None:
             hfgm = str(m_cfg["sfi_hf_gate_mode"]).lower().strip()
             if hfgm not in ("coupled", "complementary", "none"):
@@ -82,9 +85,11 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "head_type" in m_cfg and m_cfg["head_type"] is not None:
             ht = str(m_cfg["head_type"]).lower().strip()
-            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel")
+            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "native_s2_dsimr")
             if ht not in valid_heads:
                 raise ValueError(f"head_type must be one of {valid_heads}, got {m_cfg['head_type']!r}")
+        if str(m_cfg.get("neck_type", "")) == "lfi_s2" and str(m_cfg.get("head_type", "")) != "native_s2_dsimr":
+            raise ValueError("neck_type='lfi_s2' operates at Stride 2 and requires head_type='native_s2_dsimr'.")
         if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
             fct = str(m_cfg["fine_carrier_type"]).lower().strip()
             if fct not in ("standard", "mpc"):

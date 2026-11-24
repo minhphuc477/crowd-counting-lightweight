@@ -11,6 +11,7 @@ from rmr_core.necks import (
     FrankensteinSOTALiteNeck,
     HDCLiteFPNNeck,
     HighResPConvFPNNeck,
+    LFIS2FPNNeck,
     PAFPNBiNormNeck,
     RLKHDCFPNNeck,
     RepASPPLiteNeck,
@@ -75,6 +76,19 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             gate_mode=str(getattr(cfg, "sfi_gate_mode", "selective")),
             hf_norm_mode=str(getattr(cfg, "sfi_hf_norm_mode", "none")),
             hf_gate_mode=str(getattr(cfg, "sfi_hf_gate_mode", "coupled")),
+            hf_act_mode=str(getattr(cfg, "sfi_hf_act_mode", "tanh")),
+            pad_aware_laplacian=bool(getattr(cfg, "sfi_pad_aware_laplacian", False)),
+        )
+    if cfg.neck_type == "lfi_s2":
+        return LFIS2FPNNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            s2_width=int(getattr(cfg, "lfi_s2_width", 16)),
+            hdc_dilations=cfg.hdc_dilations,
+            use_hdc_proj=bool(getattr(cfg, "sfi_use_hdc_proj", True)),
+            hdc_proj_groups=int(getattr(cfg, "sfi_hdc_proj_groups", 2)),
+            hf_act_mode=str(getattr(cfg, "sfi_hf_act_mode", "linear")),
+            pad_aware_laplacian=bool(getattr(cfg, "sfi_pad_aware_laplacian", True)),
         )
     if cfg.neck_type == "frankenstein_lite":
         return FrankensteinSOTALiteNeck(
@@ -190,8 +204,13 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
             floor_tau=cfg.floor_tau,
             head_blocks=getattr(cfg, "head_blocks", 1),
         )
+    head_width = (
+        int(getattr(cfg, "lfi_s2_width", 16))
+        if (cfg.neck_type == "lfi_s2" and getattr(cfg, "head_type", "standard") == "native_s2_dsimr")
+        else cfg.feature_width
+    )
     return build_fine_head(
-        width=cfg.feature_width,
+        width=head_width,
         scale_conditioned_fine_head=cfg.scale_conditioned_fine_head,
         num_scales=len(cfg.region_sizes_px),
         init_bias=init_bias,

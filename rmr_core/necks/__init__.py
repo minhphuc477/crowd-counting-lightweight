@@ -42,6 +42,9 @@ from .rep_fpn import (
 from .sfi import (
     SFILiteFPNNeck,
 )
+from .lfi_s2 import (
+    LFIS2FPNNeck,
+)
 from .frankenstein import (
     FrankensteinSOTALiteNeck,
 )
@@ -59,6 +62,7 @@ __all__ = [
     "FrankensteinSOTALiteNeck",
     "HDCLiteFPNNeck",
     "HighResPConvFPNNeck",
+    "LFIS2FPNNeck",
     "PAFPNBiNormNeck",
     "PConvBlock",
     "RLKHDCFPNNeck",

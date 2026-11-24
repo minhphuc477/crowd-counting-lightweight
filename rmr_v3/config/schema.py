@@ -80,6 +80,7 @@ ALLOWED_MODEL_KEYS = {
     "sfi_norm_free_hf", "sfi_use_hdc_proj", "sfi_hdc_proj_groups",
     "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
     "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode", "sfi_hf_gate_mode",
+    "sfi_hf_act_mode", "sfi_pad_aware_laplacian", "lfi_s2_width",
 }
 
 ALLOWED_LOSS_KEYS = {

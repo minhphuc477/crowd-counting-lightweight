@@ -23,9 +23,9 @@ class TimmPyramidBackbone(nn.Module):
         import timm
 
         target_reductions = tuple(int(r) for r in target_reductions)
-        if target_reductions != (4, 8, 16):
+        if target_reductions not in ((4, 8, 16), (2, 4, 8, 16)):
             raise ValueError(
-                f"TimmPyramidBackbone requires target_reductions=(4, 8, 16), got {target_reductions}"
+                f"TimmPyramidBackbone requires target_reductions=(4, 8, 16) or (2, 4, 8, 16), got {target_reductions}"
             )
 
         self.model_name = model_name
@@ -90,9 +90,9 @@ class TimmPyramidBackbone(nn.Module):
             except Exception:
                 pass
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         feats = tuple(self.backbone(x))
-        return feats[0], feats[1], feats[2]
+        return tuple(feats[: len(self.target_reductions)])
 
 
 # Backward compatibility alias

@@ -39,6 +39,8 @@ class SFILiteFPNNeck(nn.Module):
         gate_mode: str = "selective",
         hf_norm_mode: str = "none",
         hf_gate_mode: str = "coupled",
+        hf_act_mode: str = "tanh",
+        pad_aware_laplacian: bool = False,
     ) -> None:
         super().__init__()
         c4, c8, c16 = in_channels
@@ -53,6 +55,8 @@ class SFILiteFPNNeck(nn.Module):
         self.gate_mode = str(gate_mode).lower().strip() if use_selective_gate else "additive"
         self.hf_norm_mode = str(hf_norm_mode).lower().strip()
         self.hf_gate_mode = str(hf_gate_mode).lower().strip()
+        self.hf_act_mode = str(hf_act_mode).lower().strip()
+        self.pad_aware_laplacian = bool(pad_aware_laplacian)
         if self.gate_mode == "none":
             self.gate_mode = "additive"
         self.use_selective_gate = self.gate_mode != "additive"
@@ -68,6 +72,8 @@ class SFILiteFPNNeck(nn.Module):
             raise ValueError(f"Unsupported hf_norm_mode: '{self.hf_norm_mode}'")
         if self.hf_gate_mode not in ("coupled", "complementary", "none"):
             raise ValueError(f"Unsupported hf_gate_mode: '{self.hf_gate_mode}'")
+        if self.hf_act_mode not in ("tanh", "linear", "silu"):
+            raise ValueError(f"Unsupported hf_act_mode: '{self.hf_act_mode}'")
 
         # Optional mechanism-capture hooks for Layer-4 evaluation (disabled during training)
         self._capture_mechanisms: bool = False
@@ -198,15 +204,15 @@ class SFILiteFPNNeck(nn.Module):
             self.concat_fuse = ConvGNAct(2 * self.width, self.width, k=1)
 
     @staticmethod
-    def decompose_frequency(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def decompose_frequency(x: torch.Tensor, pad_aware: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """Decompose feature map into smooth low-frequency base and Laplacian HF impulse residual."""
-        x_lf = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
+        x_lf = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1, count_include_pad=(not pad_aware))
         x_hf = x - x_lf
         return x_lf, x_hf
 
     def _decompose(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.decomp_mode == "laplacian":
-            return self.decompose_frequency(x)
+            return self.decompose_frequency(x, pad_aware=self.pad_aware_laplacian)
         if self.decomp_mode == "gaussian":
             x_lf = F.conv2d(x, self._gauss_kernel, padding=2, groups=self.width)  # type: ignore[arg-type]
             return x_lf, x - x_lf
@@ -304,7 +310,13 @@ class SFILiteFPNNeck(nn.Module):
         if self.use_laplacian and self.hf_enhance is not None and self.gamma_hf is not None and l4_hf is not None:
             is_norm_free_act = self.norm_free_hf or (self.hf_norm_mode in ("gn", "bn", "bias"))
             if is_norm_free_act:
-                hf_raw = torch.tanh(self.hf_enhance(l4_hf))
+                hf_pre = self.hf_enhance(l4_hf)
+                if self.hf_act_mode == "linear":
+                    hf_raw = hf_pre
+                elif self.hf_act_mode == "silu":
+                    hf_raw = F.silu(hf_pre)
+                else:
+                    hf_raw = torch.tanh(hf_pre)
                 if gate4 is not None and self.hf_gate_mode == "complementary":
                     hf_term = self.gamma_hf * (1.0 - gate4) * hf_raw
                 elif gate4 is not None and self.hf_gate_mode == "coupled":

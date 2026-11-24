@@ -43,7 +43,7 @@ class RMRv3Config:
     subpixel_kernel_size: int = 3
 
     # Neck
-    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "sfi_lite" | "rep_weighted" | "rep_aspp_lite" | "bifpn_lite" | "rlk_hdc" | "pafpn_binorm" | "pconv_fpn"
+    neck_type: str = "additive"  # "additive" | "aspp_lite" | "hdc_lite" | "sfi_lite" | "lfi_s2" | "rep_weighted" | "rep_aspp_lite" | "bifpn_lite" | "rlk_hdc" | "pafpn_binorm" | "pconv_fpn"
     context_dilations: tuple[int, ...] = (1, 2, 3)
     use_aspp_gap: bool = True
     aspp_dilations: tuple[int, ...] = (1, 3, 6)
@@ -60,6 +60,9 @@ class RMRv3Config:
     sfi_gate_mode: str = "selective"
     sfi_hf_norm_mode: str = "none"
     sfi_hf_gate_mode: str = "coupled"
+    sfi_hf_act_mode: str = "tanh"
+    sfi_pad_aware_laplacian: bool = False
+    lfi_s2_width: int = 16
 
     # Region dictionary
     region_sizes_px: tuple[int, ...] = (32, 64, 128)

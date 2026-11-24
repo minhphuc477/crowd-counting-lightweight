@@ -364,6 +364,18 @@ def build_fine_head(
             floor_tau=floor_tau,
             head_activation=head_activation,
         )
+    if head_type_l == "native_s2_dsimr":
+        from .native_s2_head import NativeS2DSIMRHead
+        return NativeS2DSIMRHead(
+            width=width,
+            init_bias=init_bias,
+            floor_tau=floor_tau,
+            density_adaptive_scale=density_adaptive_scale,
+            density_scale_gamma=density_scale_gamma,
+            density_scale_learnable=density_scale_learnable,
+            head_activation=head_activation,
+            temp_softplus=temp_softplus,
+        )
     if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3", "dsimr_subpixel"):
         raise ValueError(
             f"Unsupported head_type: '{head_type}'. "

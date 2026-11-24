@@ -1,0 +1,154 @@
+{
+  "results": [
+    {
+      "config": "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+      "name": "exp_sha_lfi_dsimr_99k",
+      "neck_type": "sfi_lite",
+      "head_type": "dsimr_subpixel",
+      "trainable_params": 99766,
+      "total_params": 99766,
+      "fp32_mb": 0.3991,
+      "fp16_mb": 0.1995,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": 1,
+      "profiles": {
+        "512x512": {
+          "macs": 344473600,
+          "m_macs": 344.47,
+          "gflops": 0.6889,
+          "latency_ms": 46.495,
+          "fps": 21.51,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 22.754,
+            "neck_ms": 20.012,
+            "head_ms": 6.564,
+            "post_ms": 0.013
+          },
+          "onnx": {
+            "onnx_mb": 0.5718,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 23.942,
+            "onnx_fps": 41.77
+          }
+        },
+        "720x1280": {
+          "macs": 1211040000,
+          "m_macs": 1211.04,
+          "gflops": 2.4221,
+          "latency_ms": 140.615,
+          "fps": 7.11,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 51.169,
+            "neck_ms": 69.263,
+            "head_ms": 20.108,
+            "post_ms": 0.035
+          },
+          "onnx": {
+            "onnx_mb": 0.9015,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 93.061,
+            "onnx_fps": 10.75
+          }
+        },
+        "1080x1920": {
+          "macs": 2745024000,
+          "m_macs": 2745.02,
+          "gflops": 5.49,
+          "latency_ms": 326.645,
+          "fps": 3.06,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 120.041,
+            "neck_ms": 157.023,
+            "head_ms": 46.191,
+            "post_ms": 0.08
+          },
+          "onnx": {
+            "onnx_mb": 0.4495,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 252.029,
+            "onnx_fps": 3.97
+          }
+        }
+      }
+    },
+    {
+      "config": "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
+      "name": "diag_d2_sha_lfi_s2_99k",
+      "neck_type": "lfi_s2",
+      "head_type": "native_s2_dsimr",
+      "trainable_params": 99314,
+      "total_params": 99314,
+      "fp32_mb": 0.3973,
+      "fp16_mb": 0.1986,
+      "device": "cpu",
+      "fp16_mode": false,
+      "cpu_threads": 1,
+      "profiles": {
+        "512x512": {
+          "macs": 408961024,
+          "m_macs": 408.96,
+          "gflops": 0.8179,
+          "latency_ms": 75.452,
+          "fps": 13.25,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 15.251,
+            "neck_ms": 76.873,
+            "head_ms": 9.867,
+            "post_ms": 0.014
+          },
+          "onnx": {
+            "onnx_mb": 0.5802,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 76.65,
+            "onnx_fps": 13.05
+          }
+        },
+        "720x1280": {
+          "macs": 1437753600,
+          "m_macs": 1437.75,
+          "gflops": 2.8755,
+          "latency_ms": 291.935,
+          "fps": 3.43,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 50.567,
+            "neck_ms": 181.993,
+            "head_ms": 27.189,
+            "post_ms": 0.036
+          },
+          "onnx": {
+            "onnx_mb": 0.91,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 228.396,
+            "onnx_fps": 4.38
+          }
+        },
+        "1080x1920": {
+          "macs": 3258908160,
+          "m_macs": 3258.91,
+          "gflops": 6.5178,
+          "latency_ms": 729.555,
+          "fps": 1.37,
+          "peak_vram_mb": null,
+          "stages": {
+            "encoder_ms": 118.363,
+            "neck_ms": 416.443,
+            "head_ms": 64.367,
+            "post_ms": 0.085
+          },
+          "onnx": {
+            "onnx_mb": 0.4592,
+            "onnx_provider": "CPUExecutionProvider",
+            "onnx_ms": 720.37,
+            "onnx_fps": 1.39
+          }
+        }
+      }
+    }
+  ]
+}
