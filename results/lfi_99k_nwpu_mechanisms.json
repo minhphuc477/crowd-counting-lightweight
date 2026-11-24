@@ -1,0 +1,69 @@
+{
+  "config": "configs/benchmarks/lfi_sub100k/exp_nwpu_lfi_dsimr_99k.yaml",
+  "checkpoint": "runs_fixed/benchmarks/lfi_sub100k/exp_nwpu_lfi_dsimr_99k/best_val_mae.pt",
+  "trainable_params": 99766,
+  "fps_512": 720.23,
+  "erf_p4": {
+    "r50_px": 56.13,
+    "r95_px": 132.52
+  },
+  "counting": {
+    "num_samples": 500,
+    "mae": 81.2066,
+    "rmse": 449.7667,
+    "bias": -41.4412
+  },
+  "mechanisms": {
+    "hf_preservation_ratio": 0.1365184234392606,
+    "mean_peak_sharpness": 0.053068163003615325,
+    "mean_spatial_entropy": 8.854765929222108,
+    "mean_normalized_entropy": 0.6634491919541314,
+    "gate_response": {
+      "available": false,
+      "image_level": {
+        "sparse": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        },
+        "medium": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        },
+        "dense": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        }
+      },
+      "local_patch_level": {
+        "bg": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        },
+        "sparse_fg": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        },
+        "dense_fg": {
+          "mean": NaN,
+          "std": NaN,
+          "n": 0
+        }
+      },
+      "mean_hf_preservation_ratio": 0.1365184234392606
+    },
+    "per_size_mae": {
+      "size_source": "gt_boxes",
+      "small_lt16_mae": 0.4297968879672793,
+      "small_count": 137696,
+      "medium_16_32_mae": 0.34924765476528563,
+      "medium_count": 41231,
+      "large_gt32_mae": 0.3259688994409472,
+      "large_count": 17311
+    }
+  }
+}
