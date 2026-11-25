@@ -44,7 +44,8 @@ model:
   subpixel_kernel_size: 3
   head_type: dw_subpixel
   head_activation: softplus
-  density_adaptive_scale: false
+  density_adaptive_scale: true
+  density_scale_gamma: 0.15
   feature_width: 32
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
