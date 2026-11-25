@@ -83,6 +83,7 @@ def train_transform(
     erasing_scale: tuple[float, float] = (0.005, 0.03),
     erasing_ratio: tuple[float, float] = (0.5, 2.0),
     erasing_max_patches: int = 2,
+    erasing_drop_points: bool = False,
     crowd_aware_crop: bool = True,
     crowd_aware_prob: float = 0.50,
     stratified_crowd_crop: bool = False,
@@ -258,6 +259,7 @@ def train_transform(
         scale=erasing_scale,
         ratio=erasing_ratio,
         max_patches=erasing_max_patches,
+        drop_points=erasing_drop_points,
     )
 
     return image_t.clamp(0, 1), pts
@@ -270,12 +272,13 @@ def point_preserving_random_erasing(
     scale: tuple[float, float] = (0.005, 0.03),
     ratio: tuple[float, float] = (0.5, 2.0),
     max_patches: int = 2,
+    drop_points: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Point-Preserving Random Erasing / Patch Occlusion Augmentation.
+    """Random Erasing / Patch Occlusion Augmentation.
 
-    Simulates physical crowd occlusions (umbrellas, shoulders, signs, foreground obstacles).
-    Ground-truth points inside erased patches are PRESERVED 100%, forcing the network
-    to infer occluded heads from surrounding crowd context and regional density.
+    When ``drop_points=False`` (legacy), GT points inside erased patches are preserved.
+    When ``drop_points=True``, GT points inside erased patches are dropped so flat mean
+    patches never receive positive density supervision.
     """
     if prob <= 0.0 or random.random() >= prob:
         return image_t, pts
@@ -295,6 +298,14 @@ def point_preserving_random_erasing(
             top_e = random.randint(0, h - h_e)
             left_e = random.randint(0, w - w_e)
             image_t[:, top_e : top_e + h_e, left_e : left_e + w_e] = c_mean
+            if drop_points and pts.numel() > 0:
+                in_box = (
+                    (pts[:, 0] >= float(left_e))
+                    & (pts[:, 0] < float(left_e + w_e))
+                    & (pts[:, 1] >= float(top_e))
+                    & (pts[:, 1] < float(top_e + h_e))
+                )
+                pts = pts[~in_box]
     return image_t, pts
 
 

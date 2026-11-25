@@ -49,6 +49,7 @@ class CrowdManifestDataset(Dataset):
         erasing_scale: tuple[float, float] = (0.005, 0.03),
         erasing_ratio: tuple[float, float] = (0.5, 2.0),
         erasing_max_patches: int = 2,
+        erasing_drop_points: bool = False,
         data_root: str | Path | None = None,
         cache_images: bool = True,
         preload: bool = False,
@@ -87,6 +88,7 @@ class CrowdManifestDataset(Dataset):
         self.erasing_scale = (float(erasing_scale[0]), float(erasing_scale[1]))
         self.erasing_ratio = (float(erasing_ratio[0]), float(erasing_ratio[1]))
         self.erasing_max_patches = int(erasing_max_patches)
+        self.erasing_drop_points = bool(erasing_drop_points)
         self.cache_images = bool(cache_images)
         self.crowd_aware_crop = bool(crowd_aware_crop)
         self.crowd_aware_prob = float(crowd_aware_prob)
@@ -209,6 +211,7 @@ class CrowdManifestDataset(Dataset):
                 erasing_scale=self.erasing_scale,
                 erasing_ratio=self.erasing_ratio,
                 erasing_max_patches=self.erasing_max_patches,
+                erasing_drop_points=self.erasing_drop_points,
                 crowd_aware_crop=self.crowd_aware_crop,
                 crowd_aware_prob=self.crowd_aware_prob,
                 stratified_crowd_crop=self.stratified_crowd_crop,

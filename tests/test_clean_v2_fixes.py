@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import math
+import random
+from pathlib import Path
+
+import torch
+
+from rmr_core.heads import FineMeasureHead, _FINE_HEAD_BIAS_INIT
+from rmr_core.transforms import point_preserving_random_erasing
+from rmr_v3.config import load_config, validate_v3_config
+from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
+from rmr_v3.model import RMRv3, RMRv3Config
+
+
+def test_random_erasing_drop_points_behavior() -> None:
+    img = torch.rand(3, 128, 128)
+    # Dense grid of points covering the whole image so at least some fall inside any erased patch.
+    xs = torch.arange(4, 128, 8, dtype=torch.float32)
+    ys = torch.arange(4, 128, 8, dtype=torch.float32)
+    gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+    pts = torch.stack([gx.flatten(), gy.flatten()], dim=1)
+
+    random.seed(12345)
+    img_keep, pts_keep = point_preserving_random_erasing(
+        img, pts, prob=1.0, scale=(0.15, 0.15), ratio=(1.0, 1.0), max_patches=1, drop_points=False
+    )
+    assert pts_keep.shape[0] == pts.shape[0]
+    assert img_keep.shape == img.shape
+
+    random.seed(12345)
+    img_drop, pts_drop = point_preserving_random_erasing(
+        img, pts, prob=1.0, scale=(0.15, 0.15), ratio=(1.0, 1.0), max_patches=1, drop_points=True
+    )
+    assert torch.allclose(img_drop, img_keep)
+    assert 0 < pts_drop.shape[0] < pts.shape[0]
+
+    # Verify remaining points are outside the erased constant region.
+    c_mean = img.mean(dim=(-2, -1), keepdim=True)
+    erased_mask = (img_drop - c_mean).abs().sum(dim=0) < 1e-6
+    px = pts_drop[:, 0].long()
+    py = pts_drop[:, 1].long()
+    assert not erased_mask[py, px].any()
+
+
+def test_dsimr_init_z_s_parity_and_gradient() -> None:
+    torch.manual_seed(7)
+    m0 = math.log1p(math.exp(_FINE_HEAD_BIAS_INIT))
+    feat = torch.zeros(2, 32, 16, 16)
+
+    head_0 = FineMeasureHead(
+        width=32,
+        subpixel_stride2=True,
+        dsimr_mode=True,
+        dsimr_init_z_s=0.0,
+        floor_tau=0.001,
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+    )
+    head_2 = FineMeasureHead(
+        width=32,
+        subpixel_stride2=True,
+        dsimr_mode=True,
+        dsimr_init_z_s=2.0,
+        floor_tau=0.001,
+        density_adaptive_scale=True,
+        density_scale_gamma=0.15,
+    )
+
+    assert head_0.dsimr_proj is not None
+    assert math.isclose(float(head_0.dsimr_proj.bias[0].item()), 0.0, abs_tol=1e-6)
+    assert head_2.dsimr_proj is not None
+    assert math.isclose(float(head_2.dsimr_proj.bias[0].item()), 2.0, abs_tol=1e-6)
+
+    with torch.no_grad():
+        _, y0 = head_0.forward_with_logits(feat, force_activate=True)
+        _, y2 = head_2.forward_with_logits(feat, force_activate=True)
+        assert abs(float(y0.mean().item()) - m0 / 4.0) < 1e-3
+        assert abs(float(y2.mean().item()) - m0 / 4.0) < 1e-3
+
+    # Gradient magnitude on z_s bias should be strictly larger at z_s=0.0 than z_s=2.0
+    feat_rand = torch.randn(2, 32, 16, 16)
+    head_0.zero_grad()
+    _, y0_r = head_0.forward_with_logits(feat_rand, force_activate=True)
+    y0_r.sum().backward()
+    grad_0 = float(head_0.dsimr_proj.bias.grad[0].abs().item())
+
+    head_2.zero_grad()
+    _, y2_r = head_2.forward_with_logits(feat_rand, force_activate=True)
+    y2_r.sum().backward()
+    grad_2 = float(head_2.dsimr_proj.bias.grad[0].abs().item())
+
+    assert grad_0 > grad_2
+
+
+def test_lfi_v2_configs_valid_sub100k_and_zero_dead_grads() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    cfg_paths = [
+        repo / "configs/benchmarks/lfi_v2/exp_sha_lfi_v2_99k.yaml",
+        repo / "configs/benchmarks/lfi_v2/fair_baseline_sha_additive_v2_99k.yaml",
+    ]
+    for p in cfg_paths:
+        cfg = load_config(p)
+        validate_v3_config(cfg)
+        m_dict = dict(cfg["model"])
+        m_dict["pretrained"] = False
+        m_cfg = RMRv3Config.from_dict(m_dict)
+        model = RMRv3(m_cfg)
+        n_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+        assert n_params < 100_000, f"{p.name} params={n_params}"
+
+        x = torch.randn(2, 3, 128, 128)
+        pts = [torch.tensor([[20.0, 20.0], [60.0, 60.0]]), torch.tensor([[30.0, 40.0]])]
+        target_y = torch.zeros(2, 1, 64, 64)
+        out = model(x)
+        loss_cfg = RMRv3LossConfig.from_dict(cfg["loss"])
+        loss_dict = compute_rmr_v3_losses(
+            outputs=out,
+            target_y=target_y,
+            cfg=loss_cfg,
+            points=pts,
+        )
+        loss = loss_dict["total"]
+        assert torch.isfinite(loss)
+        model.zero_grad()
+        loss.backward()
+        dead = [n for n, param in model.named_parameters() if param.requires_grad and param.grad is None]
+        assert not dead, f"{p.name} dead grads: {dead}"

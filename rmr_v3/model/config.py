@@ -297,6 +297,7 @@ class RMRv3Config:
     deficit_seed_eps: float = 0.02
     density_adaptive_morozov: bool = False
     morozov_density_beta: float = 2.0
+    dsimr_init_z_s: float = 2.0
 
     def __post_init__(self) -> None:
         if isinstance(self.init_m0, str) and self.init_m0.strip().lower() == 'auto':

@@ -18,7 +18,7 @@ ALLOWED_DATA_KEYS = {
     "random_invert_prob", "data_root", "cache_images", "preload",
     "pad_small_images", "max_size", "boundary_margin",
     "saturation_jitter", "grayscale_prob", "random_grayscale",
-    "random_erasing_prob", "erasing_scale", "erasing_ratio", "erasing_max_patches",
+    "random_erasing_prob", "erasing_scale", "erasing_ratio", "erasing_max_patches", "erasing_drop_points",
     "crowd_aware_crop", "crowd_aware_prob", "stratified_crowd_crop", "norm_mode",
 }
 
@@ -80,7 +80,7 @@ ALLOWED_MODEL_KEYS = {
     "sfi_norm_free_hf", "sfi_use_hdc_proj", "sfi_hdc_proj_groups",
     "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
     "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode", "sfi_hf_gate_mode",
-    "sfi_hf_act_mode", "sfi_pad_aware_laplacian", "lfi_s2_width",
+    "sfi_hf_act_mode", "sfi_pad_aware_laplacian", "lfi_s2_width", "dsimr_init_z_s",
 }
 
 ALLOWED_LOSS_KEYS = {

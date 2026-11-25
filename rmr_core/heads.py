@@ -55,6 +55,7 @@ class FineMeasureHead(nn.Module):
         icnr_init: bool = False,
         pre_shuffle_kernel_size: int = 1,
         dsimr_mode: bool = False,
+        dsimr_init_z_s: float = 2.0,
     ):
         super().__init__()
         self.head_activation = str(head_activation).lower()
@@ -90,7 +91,8 @@ class FineMeasureHead(nn.Module):
                 self.dsimr_proj: nn.Conv2d | None = nn.Conv2d(width, 2, kernel_size=1, bias=True)
                 nn.init.normal_(self.dsimr_proj.weight, std=0.01)
                 nn.init.zeros_(final_conv.bias)
-                s0 = 1.0 / (1.0 + math.exp(-2.0))
+                z_s_init = float(dsimr_init_z_s)
+                s0 = 1.0 / (1.0 + math.exp(-z_s_init))
                 target_sub = (m0 / 4.0) / s0
                 if self.head_activation == "relu":
                     b_lambda = target_sub
@@ -100,7 +102,7 @@ class FineMeasureHead(nn.Module):
                     b_lambda = _softplus_inverse(target_sub + 0.5 * self.floor_tau)
                     self.adaptive_scale_ref = float(b_lambda) + math.log(4.0)
                 with torch.no_grad():
-                    self.dsimr_proj.bias.copy_(torch.tensor([2.0, float(b_lambda)], dtype=torch.float32))
+                    self.dsimr_proj.bias.copy_(torch.tensor([z_s_init, float(b_lambda)], dtype=torch.float32))
             else:
                 self.dsimr_proj = None
                 if self.head_activation == "relu":
@@ -347,6 +349,7 @@ def build_fine_head(
     fine_head_dilations: tuple[int, ...] = (1, 2),
     subpixel_kernel_size: int = 3,
     use_film: bool = True,
+    dsimr_init_z_s: float = 2.0,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     head_type_l = str(head_type).lower().strip()
@@ -411,5 +414,6 @@ def build_fine_head(
         icnr_init=is_dw_subpixel,
         pre_shuffle_kernel_size=max(3, int(subpixel_kernel_size)) if is_dw_subpixel else 1,
         dsimr_mode=is_dsimr,
+        dsimr_init_z_s=float(dsimr_init_z_s),
         **kw,
     )
