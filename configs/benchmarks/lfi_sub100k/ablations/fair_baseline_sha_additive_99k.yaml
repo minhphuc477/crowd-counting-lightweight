@@ -12,6 +12,8 @@ data:
   data_root: data
   crop_size: 512
   pad_small_images: true
+  crowd_aware_crop: true
+  crowd_aware_prob: 0.5
   max_size: 2048
   scale_range:
   - 0.6
@@ -33,6 +35,7 @@ data:
   - 0.5
   - 2.0
   erasing_max_patches: 3
+  erasing_drop_points: true
 
 model:
   output_stride: 2
@@ -71,13 +74,14 @@ loss:
   bayesian_canonical_bg: true
   empty_scene_full_weight: true
   dm_target: dual
-  count_loss_mode: nb
+  count_loss_mode: anscombe
   count_nb_dispersion: 50.0
   lambda_bayesian: 1.0
   lambda_radon_ot: 0.0
   lambda_flat_dm16: 0.0
   lambda_region_nb: 0.0
-  lambda_count: 0.5
+  lambda_count: 1.0
+  lambda_count_l1: 0.02
   lambda_cell: 0.0
   lambda_hurdle: 0.0
   lambda_trunc_nb: 0.0

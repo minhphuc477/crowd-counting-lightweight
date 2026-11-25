@@ -15,7 +15,6 @@ from rmr_v3.model import RMRv3, RMRv3Config
 
 def test_random_erasing_drop_points_behavior() -> None:
     img = torch.rand(3, 128, 128)
-    # Dense grid of points covering the whole image so at least some fall inside any erased patch.
     xs = torch.arange(4, 128, 8, dtype=torch.float32)
     ys = torch.arange(4, 128, 8, dtype=torch.float32)
     gy, gx = torch.meshgrid(ys, xs, indexing="ij")
@@ -35,7 +34,6 @@ def test_random_erasing_drop_points_behavior() -> None:
     assert torch.allclose(img_drop, img_keep)
     assert 0 < pts_drop.shape[0] < pts.shape[0]
 
-    # Verify remaining points are outside the erased constant region.
     c_mean = img.mean(dim=(-2, -1), keepdim=True)
     erased_mask = (img_drop - c_mean).abs().sum(dim=0) < 1e-6
     px = pts_drop[:, 0].long()
@@ -78,7 +76,6 @@ def test_dsimr_init_z_s_parity_and_gradient() -> None:
         assert abs(float(y0.mean().item()) - m0 / 4.0) < 1e-3
         assert abs(float(y2.mean().item()) - m0 / 4.0) < 1e-3
 
-    # Gradient magnitude on z_s bias should be strictly larger at z_s=0.0 than z_s=2.0
     feat_rand = torch.randn(2, 32, 16, 16)
     head_0.zero_grad()
     _, y0_r = head_0.forward_with_logits(feat_rand, force_activate=True)
@@ -93,11 +90,14 @@ def test_dsimr_init_z_s_parity_and_gradient() -> None:
     assert grad_0 > grad_2
 
 
-def test_lfi_v2_configs_valid_sub100k_and_zero_dead_grads() -> None:
+def test_lfi_canonical_configs_valid_sub100k_and_zero_dead_grads() -> None:
     repo = Path(__file__).resolve().parents[1]
     cfg_paths = [
-        repo / "configs/benchmarks/lfi_v2/exp_sha_lfi_v2_99k.yaml",
-        repo / "configs/benchmarks/lfi_v2/fair_baseline_sha_additive_v2_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_additive_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_no_laplacian_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_pure_bayesian_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_dw_subpixel_99k.yaml",
     ]
     for p in cfg_paths:
         cfg = load_config(p)

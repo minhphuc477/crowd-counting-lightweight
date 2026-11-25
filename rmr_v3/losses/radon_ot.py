@@ -97,7 +97,7 @@ def radon_sliced_wasserstein_loss(
     )
 
     y_valid = torch.relu(pred[valid_indices, 0].float()).flatten(1)
-    probs = y_valid / y_valid.sum(dim=1, keepdim=True).clamp_min(1e-6)
+    probs = y_valid / y_valid.sum(dim=1, keepdim=True).clamp_min(1.0)
     bv = len(valid_indices)
     m_cells = s0.shape[1]
 

@@ -1,18 +1,19 @@
 # ==============================================================================
-# DENSE-CURE DIAGNOSTIC D2 (NWPU): LFI-S2 (C2 Stride-2 Nyquist Skip + Native S2 Head)
-# ~99,314 params (< 100k, 0% KD) matched against D1
-# Purpose: Test whether preserving C2 (32ch @ Stride 2) cures 3000+ dense undercounting
+# GROUP A ABLATION: LFI-99K WITHOUT DSIMR HEAD (SHA)
+# Identical to exp_sha_lfi_dsimr_99k.yaml except head_type: dw_subpixel
+# Isolates DSIMR (+66 params) impact on SHA MAE & Background Fog.
 # ==============================================================================
 
 seed: 42
 
 data:
-  train_manifest: data/nwpu_train.jsonl
-  val_manifest: data/nwpu_val.jsonl
-  test_manifest: data/nwpu_test.jsonl
+  train_manifest: data/sha_a_train_all.jsonl
+  val_manifest: data/sha_a_test.jsonl
   data_root: data
   crop_size: 512
   pad_small_images: true
+  crowd_aware_crop: true
+  crowd_aware_prob: 0.5
   max_size: 2048
   scale_range:
   - 0.6
@@ -34,23 +35,23 @@ data:
   - 0.5
   - 2.0
   erasing_max_patches: 3
+  erasing_drop_points: true
 
 model:
   output_stride: 2
   subpixel_stride2: true
   subpixel_kernel_size: 3
-  head_type: native_s2_dsimr
+  head_type: dw_subpixel
   head_activation: softplus
   density_adaptive_scale: true
   density_scale_gamma: 0.15
   feature_width: 32
-  lfi_s2_width: 16
   max_trainable_params: 104441
   backbone_name: mobilenetv4_conv_small_050.e3000_r224_in1k
   pretrained: true
   backbone_lr_scale: 0.25
-  init_m0: 0.00158
-  neck_type: lfi_s2
+  init_m0: auto
+  neck_type: sfi_lite
   sfi_norm_free_hf: true
   sfi_hf_act_mode: linear
   sfi_pad_aware_laplacian: true
@@ -75,7 +76,7 @@ loss:
   bayesian_adaptive_sigma: true
   bayesian_sigma_min: 2.0
   bayesian_sigma_max: 8.0
-  bayesian_background_ratio: 0.10
+  bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
   empty_scene_full_weight: true
   lambda_radon_ot: 0.85
@@ -99,7 +100,7 @@ loss:
   lambda_fg_gate: 0.0
 
 train:
-  epochs: 800
+  epochs: 1500
   batch_size: 8
   workers: 4
   pin_memory: true
@@ -122,4 +123,4 @@ eval:
   - 500.0
   run_tiling: false
 
-output_dir: runs_fixed/benchmarks/dense_cure/diag_d2_nwpu_lfi_s2_99k
+output_dir: runs_fixed/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_dw_subpixel_99k

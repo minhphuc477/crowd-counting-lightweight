@@ -209,20 +209,16 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
     assert hf_pad.abs().max().item() > 0.1
     assert hf_clean.abs().max().item() < 1e-6
 
-    # 2. Validate D0.5, D1, and D2 YAMLs
-    for p in (
-        "configs/benchmarks/dense_cure/diag_d05_sha_unbounded_hf_nb_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d05_nwpu_unbounded_hf_nb_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d1_sha_unbounded_anscombe_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d1_nwpu_unbounded_anscombe_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d2_nwpu_lfi_s2_99k.yaml",
-    ):
-        validate_v3_config(load_config(p))
+    # 2. Validate canonical lfi_sub100k SHA config
+    cfg_sha = load_config("configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml")
+    validate_v3_config(cfg_sha)
 
-    # 3. Build D2 (LFI-S2) and check param budget, odd-shape Stride-2 output, Step-0 parity, and gradients
-    cfg_d2 = load_config("configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml")
+    # 3. Build in-memory LFI-S2 and check param budget, odd-shape Stride-2 output, Step-0 parity, and gradients
+    cfg_d2 = load_config("configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml")
     cfg_d2["model"]["pretrained"] = False
+    cfg_d2["model"]["neck_type"] = "lfi_s2"
+    cfg_d2["model"]["head_type"] = "native_s2_dsimr"
+    cfg_d2["model"]["lfi_s2_width"] = 16
     model = RMRv3(RMRv3Config.from_dict(cfg_d2["model"])).eval()
     total_params = sum(p.numel() for p in model.parameters())
     assert total_params == 99_314, f"Expected 99,314 params for LFI-S2, got {total_params}"
@@ -247,7 +243,7 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
         rel_err = abs(out_cal.y.mean().item() - expected_s2) / expected_s2
         assert rel_err < 0.10, f"LFI-S2 Step-0 parity drift: {out_cal.y.mean().item()} vs {expected_s2}"
 
-    # 4. End-to-end train_one_epoch check (DiagnosticTracker + Direct Fast-Path) on D1 & D2
+    # 4. End-to-end train_one_epoch check (DiagnosticTracker + Direct Fast-Path) on LFI-99k & LFI-S2
     device = torch.device("cpu")
     synthetic_loader = [
         {
@@ -256,13 +252,9 @@ def test_dense_cure_d1_and_d2_lfi_s2_architecture_and_optimizer():
             "points": [torch.tensor([[20.0, 24.0], [80.0, 90.0]]), torch.zeros((0, 2))],
         }
     ]
-    for cfg_path in (
-        "configs/benchmarks/dense_cure/diag_d1_sha_unbounded_anscombe_99k.yaml",
-        "configs/benchmarks/dense_cure/diag_d2_sha_lfi_s2_99k.yaml",
-    ):
-        c = load_config(cfg_path)
-        c["model"]["pretrained"] = False
-        m = RMRv3(RMRv3Config.from_dict(c["model"]))
+    for c in (cfg_sha, cfg_d2):
+        c_run = {**c, "model": {**c["model"], "pretrained": False}}
+        m = RMRv3(RMRv3Config.from_dict(c_run["model"]))
         opt = build_v3_optimizer(m, c, lr_init=3e-4)
         scaler = torch.amp.GradScaler("cpu", enabled=False)
         ema = EMAManager(m, decay=0.999)
