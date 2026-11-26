@@ -1,61 +1,55 @@
-# LITERATURE_REVIEW.md — Prior Art, Diagnostic Proof & Architecture Connections
+# LITERATURE_REVIEW.md — Snowballing Literature Map & Gap Verification
 
-Citation-verified literature map linking published crowd counting findings (2018–2026) directly to our `<100k`-parameter architecture, failure modes, and diagnostic experiments.
-
----
-
-## 1. Sub-200k & Real-Time Lightweight Models (Scope & Aim Comparison)
-
-| Model | Venue / Year | Params | Output Stride | Core Architecture / Loss | SHA / QNRF / NWPU Val | Connection to Our Architecture |
-| :--- | :--- | :---: | :---: | :--- | :---: | :--- |
-| **LCDnet** (Khan et al.) | *JRTIP* 2023 ([arXiv:2302.05374](https://arxiv.org/abs/2302.05374)) | `50k` | **S2 (`1/2`)** | 6-layer CNN, asymmetric `1x3`+`3x1` convs; MSE + curriculum | `118.4` / — / — | Proves `1/2` stride preserves tiny targets, but plain 6-layer CNN lacks semantic context (`SHA 118.4`). |
-| **TinyCount** (Lee & Lee) | *JRTIP* 2024 ([Springer](https://link.springer.com/article/10.1007/s11554-024-01531-8)) | `60,078` | S8 $\to$ Deconv | MobileNetV2 + SE + dilated SPM + TransposedConv; MSE | `80.3` / `143.1` / — | Primary JRTIP baseline; S8 bottleneck loses dense QNRF heads (`143.1`). |
-| **Lw-Count** (Liu et al.) | *IEEE TCSVT* 2022 ([DOI](https://doi.org/10.1109/tcsvt.2022.3171235)) | `70k` | Enc-Dec | Ghost ELCM + Spatial GroupNorm (SGN) + SRM; RNCC + Count | `69.7` / `149.7` / — | Motivates `GroupNorm`/SGN for uneven empty-to-dense variance. |
-| **C-CNN** (Shi et al.) | *ICASSP* 2020 ([arXiv:2002.06515](https://arxiv.org/abs/2002.06515)) | `73k` | S8 | 3 parallel front filters (`5,7,9`) + 6-layer trunk; MSE | `88.1` / — / — | Shows multi-scale front kernels help (`88.1` vs `98.9`), still limited by S8 pooling. |
-| **EdgeCount** (Shen et al.) | *IEEE TCSVT* 2024 ([DOI](https://doi.org/10.1109/TCSVT.2024.3469933)) | `120k` | Enc-Dec | MobileViT + SCConv (SRU+CRU) + LWMFFM; **DMKD distillation** | — | Not standalone (`DMKD`); whereas ours uses `0% KD`. |
-| **CPMS-Net** (Shang et al.) | *JKSU-CIS* 2026 ([DOI](https://doi.org/10.1007/s44443-026-01052-3)) | `125,132` | S8 $\to$ 3-branch | MobileNetV2 + CPM + MSOM + LRAM ($H/32$ MHA); **RCJL (`MSE + 4x4 grid L1`)** | `72.3` / `126.7` / — | Validates regional `4x4` grid `L1` count conservation against dense undercounting. |
-| **DroneNet** (Khan et al.) | *IEEE CCNC* 2023 ([arXiv:2211.07137](https://arxiv.org/abs/2211.07137)) | `150k` | S4 | 3-col Self-ONN Maclaurin nodal ops + Tanh; MSE | `98.5` / — / — | Tanh-bounded nonlinearities limit extreme high-density scaling. |
-| **Zhao et al.** | [arXiv:2510.13250](https://arxiv.org/html/2510.13250v1) (2025) | `149k` | S4 | From scratch; `(9,7,5)` stem + ShuffleNetV2 + Lite-HRNet CCW/MLF + `3x3` FPN; MSE (`512x1024`) | `63.4` / `104.1` / `102.0` | Strongest sub-150k prior baseline; large continuous kernels beat dilated `3x3` (`104.1` vs `110.1`), yet S4 + `512x1024` still undercounts ultra-dense scenes. |
-| **MobileCount** (Wang et al.) | *Neurocomputing* 2020 ([GitHub](https://github.com/ChenyuGAO-CS/MobileCount)) | `3.40M` | S32 $\to$ S4 | MobileNetV2 + Light-Weight RefineNet (CRP); MSE | `89.4` / `131.1` / — | Proves heavy 3.4M S32 encoder still lags compact high-res designs. |
-| **LFI-99k (Ours Base)** | This work (`5418c31`) | **`99,766`** | **S2 (subpixel)** | MobileNetV4-S050 (`C4,8,16`) + HDC `(1,2,3)` + Laplacian HF + DSIMR | **`64.05` / `94.71` / `81.21`** | Beats TinyCount/CPMS-Net/Lw-Count/Zhao-149k on QNRF & NWPU at `<100k`, `0% KD`. |
-| **LFI-S2 (Ours D2)** | This work (`05dc71e4`) | **`99,314`** | **S2 (native `C2`)** | Preserves `C2 (32ch @ H/2)` + Unbounded Laplacian HF + Foldable S2 BN + Native S2 DSIMR | *Pending D2* | Directly targets S4 Nyquist aliasing (`3000+` undercounting). |
+Systematic backward & forward snowballing across Semantic Scholar and arXiv (2018–2026). Every metric below was directly verified on the source page/PDF (`Not verified on page` = behind publisher paywall).
 
 ---
 
-## 2. Gap 1 Proof — Resolution Collapse & Nyquist/Scale Truncation in Dense Crowds
-
-- **LSC-CNN** (Sam et al., *IEEE TPAMI*, [ar5iv:1906.07538](https://ar5iv.labs.arxiv.org/html/1906.07538)): Diagnoses that `1/8` and `1/16` feature strides merge dense tiny heads into unresolvable blobs; introduces top-down branches down to **`1/2` input resolution** to separate packed heads.
-- **P2PNet** (Song et al., *ICCV 2021*, [ar5iv:2107.12746](https://ar5iv.labs.arxiv.org/html/2107.12746)): Table 5 (SHA stride ablation) proves localization `nAP_delta` collapses across coarse strides: **`66.8 (s=4)` $\to$ `64.4 (s=8)` $\to$ `52.4 (s=16)`**, while MAE degrades (`53.51 / 52.74 -> 54.3`).
-- **SASNet** (Song et al., *AAAI 2021*, [DOI](https://doi.org/10.1609/aaai.v35i3.16360)) & **FIDT** (Liang et al., *IEEE TMM 2022*, [ar5iv:2102.07925](https://ar5iv.labs.arxiv.org/html/2102.07925)): Both prove Gaussian blobs + coarse strides merge dense local maxima; SASNet routes tiny heads to `1/2` & `1/1` decoder stages, while FIDT keeps HRNet high-resolution maps.
-- **SACC-Net** (Hsieh et al., *arXiv:2312.16771 / IEEE TIP 2025*, [HTML](https://arxiv.org/html/2312.16771)): Explicitly names **scale truncation** across standard `1/2 -> 1/4 -> 1/8` stride pyramids as the cause of tiny-head disappearance.
-- **STEERER** (Han et al., *ICCV 2023*, [arXiv:2308.10468](https://arxiv.org/html/2308.10468)): Uses selective inheritance from low-to-high resolution (HRNet FSIA) to avoid cross-scale smearing (`NWPU test MAE 63.7`).
-- **Connection to Ours:** Confirms `LFI-99k`'s drop from QNRF (`-3.1%` RelBias at `3000+`) to NWPU (`-32.9%` at `3000+`) and JHU (`-30.3%` at `3000+`) is fundamentally **Stride-4 Nyquist aliasing** (`C2` discarded by `TimmPyramidBackbone`), directly motivating **`LFI-S2` (`C2 @ H/2` skip)**.
+## 1. Snowballing Search Log & Seeds
+- **Platforms:** Semantic Scholar (`semanticscholar.org`), arXiv (`arxiv.org`).
+- **Queries:** `"lightweight crowd counting"`, `"Compact Convolutional Neural Network" / "C-CNN"`, `"GhostNet crowd counting"`, `"Frequency-Aware Feature Fusion" FreqFusion`, `"Laplacian feature pyramid high-frequency"`, `"FADE upsampling"`, `"HS-FPN"`, `"AFPN"`, `"BiFPN"`, `"Slim-Neck GSConv"`, `"Gold-YOLO"`.
+- **Backward/Forward Seeds:**
+  - *Crowd Counting:* P2PNet (ICCV 2021), PET (ICCV 2023), STEERER (ICCV 2023), MobileCount (PRCV 2019 / Neurocomputing 2020), SKT (ACM MM 2020), TinyCount (JRTIP 2024), LMSFFNet (TGRS 2023).
+  - *Frequency / Laplacian FPN:* CARAFE (ICCV 2019), DHPF (ICCV 2021) $\to$ FADE (ECCV 2022 / IJCV 2024), LFPN (TGRS 2022) $\to$ FreqFusion (TPAMI 2024), HS-FPN (AAAI 2025) $\to$ S2FCNet (TGRS 2025), SFM (TPAMI 2025), LaFINet (AAAI 2026), HF-DETR (IEEE SPL 2026), FSDC-DETR (ECCV 2026).
 
 ---
 
-## 3. Gap 2 & Gap 4 Proof — Dense Undercounting, Gradient Decay & Background Fog Losses
+## 2. Lightweight Crowd Counting Competitors (<300k Params + Key Seeds)
 
-- **Bayesian Loss (`BL+`)** (Ma et al., *ICCV 2019*, [ar5iv:1908.03684](https://ar5iv.labs.arxiv.org/html/1908.03684)): Replaces Gaussian targets with posterior expectation $\mathbb{E}[c_n] \to 1$ per head and dummy background expectation $\mathbb{E}[c_0] \to 0$ to suppress background fog.
-- **DM-Count** (Wang et al., *NeurIPS 2020*, [ar5iv:2009.13077](https://ar5iv.labs.arxiv.org/html/2009.13077)): Proves Gaussian smoothing loosens generalization bounds and KL/JS fails on disjoint supports; combines `L1 Count + Sinkhorn OT + TV`.
-- **Generalized Loss (`GL`)** (Wan et al., *CVPR 2021*, [CVF](https://openaccess.thecvf.com/content/CVPR2021/html/Wan_A_Generalized_Loss_Function_for_Crowd_Counting_and_Localization_CVPR_2021_paper.html)): Formulates density learning as unbalanced OT and proves pixel L2 and BL are suboptimal special cases.
-- **ChfL** (Shu et al., *CVPR 2022*, [CVF](https://openaccess.thecvf.com/content/CVPR2022/html/Shu_Crowd_Counting_in_the_Frequency_Domain_CVPR_2022_paper.html)): Proves characteristic-function frequency distance upper-bounds the **pseudo sup-norm error across all spatial sub-regions**, eliminating Gaussian-overlap saturation in dense clusters.
-- **CLIP-EBC** (Ma et al., *arXiv:2403.09281*, 2024, [HTML](https://arxiv.org/html/2403.09281)) & **CPMS-Net (`RCJL`)** ([DOI](https://doi.org/10.1007/s44443-026-01052-3)): Prove pure global/classification objectives undercount dense tails; CLIP-EBC merges dense bins `[m, \infty)` + discrete Wasserstein count (`DACE`), while `CPMS-Net` adds `4x4` non-overlapping grid `L1` count conservation (`RCJL`).
-- **Connection to Ours:** Explains why `count_loss_mode: nb` (`r=50`, `1/y` gradient decay) starves `3000+` scenes while normalized `Radon-OT` carries zero count gradient—motivating `D0.5` (unbounded `linear` HF) $\to$ `D1` (`Anscombe + L1 0.02`) and optionally `4x4 Grid-L1` (`RCJL`, `0` inference params) if dense clusters still lag.
+| Method | Venue / Year | Params | FLOPs | KD | SHA (MAE/RMSE) | SHB (MAE/RMSE) | QNRF (MAE/RMSE) | NWPU (MAE/RMSE) | Source |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **LCN** | *ICIP* 2019 | `32k` | — | — | `93.3 / 157.0` | `15.1 / 23.3` | `262.0 / 358.6` | — | [LSKD PDF](https://pdfs.semanticscholar.org/306d/86451fb5f7e5ac1489605f4d7f2d497ca895.pdf) |
+| **LCDnet** | *arXiv* 2023 | `50k` | `4.85G` | No | *Not evaluated on SHA* *(DroneRGBT 21.4, CARPK 13.1)* | — | — | — | [arXiv:2302.05374](https://arxiv.org/abs/2302.05374) |
+| **TinyCount** | *JRTIP* 2024 | `60k` | — | No | *Paywall* | *Paywall* | *Paywall* | — | [S2](https://www.semanticscholar.org/paper/TinyCount%3A-an-efficient-crowd-counting-network-for-Lee-Lee/cae1b7e6de2540536c3fb5664fc148f2e8f0e25f) |
+| **C-CNN** | *ICASSP* 2020 | `70k–73k` | `19.83G` | No | `88.1 / 141.7` | `14.9 / 22.1` | — | — | [arXiv:2002.06515](https://arxiv.org/abs/2002.06515) |
+| **Lw-Count** | *TCSVT* 2022 | `71k` | — | No | `69.7 / 100.5` | `10.1 / 12.4` | `149.7 / 238.4` | — | [S2](https://www.semanticscholar.org/paper/Lw-Count%3A-An-Effective-Lightweight-Crowd-Counting-Liu-Cao/6528f558a266116ae169c6eb2720e5a99adf6882) |
+| **EdgeCount** | *TCSVT* 2025 | `120k` | `19.87M*` | **Yes** | *Paywall* | *Paywall* | *Paywall* | — | [S2](https://www.semanticscholar.org/paper/A-Lightweight-Object-Counting-Network-Based-on-Map-Shen-Li/8c0d9c692b0ad88f3a9f620fd3805c290b4053b3) |
+| **CPMS-Net** | *JKSUCIS* 2026 | `120k` | — | No | *Paywall* | *Paywall* | `126.7 / 201.0` | — | [S2](https://www.semanticscholar.org/paper/CPMS-Net%3A-A-lightweight-cooperative-perception-for-Shang-Weng/9ae103811d32727b08b00c4d464f83cc8c5f1a6f) |
+| **Zhao et al.** | *arXiv* 2025 | `149k` | `1.32G` | No | `63.4 / 106.3` | `7.3 / 11.2` | `104.1 / 172.2` | `102.5 / 388.6` | [arXiv:2510.13250](https://arxiv.org/abs/2510.13250) |
+| **LSANet** | *Neurocomp.* 2022 | `200k` | `5.41G` | No | `66.1 / 110.2` | `8.6 / 13.9` | `112.3 / 186.9` | — | [S2](https://www.semanticscholar.org/paper/Real-time-crowd-counting-via-lightweight-network-Zhu-Yan/c5db3ac46aef75d2ddb8971b87582b8d4b23e966) |
+| **STRmt** | *CCPE* 2024 | `240k` | `2.04G` | — | `64.7 / 111.8` | `7.6 / 11.8` | — | `120.1 / 435.8` | [S2](https://www.semanticscholar.org/paper/STRmt%3A-A-state-transition-based-model-for-real%E2%80%90time-Sun-Zhao/54369000be38416f1fecfef0cc2768782fc8ac28) |
+| **1/5-CSRNet+SKT** | *ACM MM* 2020 | `640k` | `8.45G` | **Yes** | `RMSE 118.78` | — | — | — | [S2](https://www.semanticscholar.org/paper/Efficient-Crowd-Counting-via-Structured-Knowledge-Liu-Chen/d0f5b5d2592d5802a6181860fe5f132dc83526ae) |
+| **MobileCount** | *Neurocomp.* 2020 | `3.40M` | `6.15G` | No | `89.4 / 146.0` | `9.0 / 15.4` | `131.1 / 222.6` | — | [S2](https://www.semanticscholar.org/paper/MobileCount%3A-An-Efficient-Encoder-Decoder-Framework-Wang-Gao/82f18b696cbe2290e536ecf4e22620e7299691b9) |
+
+*Additional related 2022–2026 lightweight counting works (paywalled metrics):* **PDDNet** (*Applied Intelligence* 2022), **GAPNet** (*FGCS* 2023), **LMSFFNet** (*IEEE TGRS* 2023), **LEDCrowdNet** (*IEEE IoT-J* 2024), **LMGNet** (*IEEE TIM* 2025), **PEGNet** (*IEEE TITS* 2026).
 
 ---
 
-## 4. Normalization (`BN` vs `GN`/`SGN`) & Real-Time Edge Folding Tradeoff
+## 3. Frequency / Laplacian FPN & Lightweight Small-Object Necks
 
-- **Group Normalization** (Wu & He, *ECCV 2018*, [arXiv:1803.08494](https://arxiv.org/abs/1803.08494)), **SACANet** (Bai et al., [ar5iv:1909.03839](https://ar5iv.labs.arxiv.org/html/1909.03839)), & **Lw-Count** (Liu et al., *TCSVT 2022*): Prove small-batch high-resolution crowd training with extreme empty-to-dense patch variance corrupts BN running stats; GN / Spatial GroupNorm (SGN) stabilizes convergence. **MDKNet** ([arXiv:2402.03758](https://arxiv.org/html/2402.03758)) similarly shows cross-density mixing biases shared BN statistics.
-- **RepVGG** (Ding et al., *CVPR 2021*, [arXiv:2101.03697](https://arxiv.org/abs/2101.03697)): Proves only static-stat `BatchNorm` algebraically folds into `Conv2d` at zero inference latency, whereas per-sample `GN`/`SGN` cannot fold.
-- **Connection to Ours:** Directly verified in our ORT CPU 1-thread benchmark (`results/jrtip_realtime_profile_lfi_s2_cpu1t_onnx.json`): `GroupNorm` at Stride 2 crushed `LFI-S2` to `13.1 FPS` (`512`) / `1.4 FPS` (`1080p`), while replacing Stride-2 `GN` with foldable `BatchNorm2d` (keeping `GN` at coarse `S4/8/16`) doubled throughput to **`25.9 FPS` / `2.7 FPS`**.
+| Paper | Venue / Year | Mechanism & Comparison to `LFI-Lite` |
+| :--- | :--- | :--- |
+| **CARAFE** / **DHPF** | *ICCV* 2019 / 2021 | Backward seeds: content-aware upsampling / dynamic high-pass filtering for SR; no FPN AvgPool subtraction. |
+| **FADE** ([arXiv:2407.13500](https://arxiv.org/abs/2407.13500)) | *ECCV* 2022 / *IJCV* 2024 | Task-agnostic encoder-decoder upsampling + gating; not sub-100k crowd counting. |
+| **LFPN** ([S2](https://www.semanticscholar.org/paper/Laplacian-Feature-Pyramid-Network-for-Object-in-VHR-Zhang-Jiao/3de30852e4675dc4a6205285b22ffcb300831aa7)) | *IEEE TGRS* 2022 | Parallel Laplacian pyramid pathway for VHR remote sensing detection; not sub-100k crowd counting. |
+| **FreqFusion** ([arXiv:2408.12879](https://arxiv.org/abs/2408.12879)) | *IEEE TPAMI* 2024 | ALPF + offset resampling + AHPF (identity minus **Softmax-normalized** dynamic $3\times 3$ kernel); not norm-free linear AvgPool, not sub-100k crowd counting. |
+| **HS-FPN** ([arXiv:2412.10116](https://arxiv.org/abs/2412.10116)) | *AAAI* 2025 | **DCT** high-pass filter generating channel/spatial attention masks + cross-attention (`71.73M` w/ R-50) for tiny object detection. |
+| **SFM** / **S2FCNet** | *TPAMI* 2025 / *TGRS* 2025 | Forward from FreqFusion: adaptive resampling modulation / semantic-spatial compensation for segmentation & remote-sensing TOD. |
+| **LaFINet** / **HF-DETR** / **FSDC-DETR** | *AAAI* 2026 / *SPL* 2026 / *ECCV* 2026 | Camouflaged detection Laplacian injection / `8.6M` LoG+wavelet UAV-DETR / DETR frequency-spatial encoder. |
+| **PAFPN / BiFPN / Slim-Neck / AFPN / Gold-YOLO / IHP+SNI** | *CVPR* 2018–*ECCV* 2024 | Canonical lightweight & small-object necks ([PAFPN](https://arxiv.org/abs/1803.01534), [BiFPN](https://arxiv.org/abs/1911.09070), [Slim-Neck](https://arxiv.org/abs/2206.02424), [AFPN](https://arxiv.org/abs/2306.15988), [Gold-YOLO](https://arxiv.org/abs/2309.11331), [IHP+SNI](https://arxiv.org/abs/2505.12820)); none use norm-free linear Laplacian HF residual at `P4/L4`. |
 
 ---
 
-## 5. 4K Ultra-Dense Inference Protocols (`2048` Cap vs `3072` / Sliding-Window Tiling)
-
-- **Standard `<=2048` Protocol:** **NWPU-Crowd** ([ar5iv:2001.03360](https://ar5iv.labs.arxiv.org/html/2001.03360)), **JHU-Crowd++** ([ar5iv:2004.03597](https://ar5iv.labs.arxiv.org/html/2004.03597)), **FIDT** (`<2048`), **DM-Count** (`NWPU 1920`), **P2PNet** (`NWPU 1920`), and **Zhao et al.** (`512x1024`) downscale large scenes for single-pass memory/speed.
-- **Explicit Literature Precedent That `2048` Breaks `3000+` Ultra-Dense Scenes:**
-  - **ChfL** (*CVPR 2022*, [preprocessor.py](https://github.com/wbshu/Crowd_Counting_in_the_Frequency_Domain/blob/main/Dataset/preprocessor.py)) caps NWPU Val at `2048` **except explicitly hardcoding `exception=(3234,)` resized to `3024`** because `2048` destroys head spacing on NWPU image `3234`!
-  - **CLIP-EBC** ([preprocess.sh](https://github.com/Yiming-M/CLIP-EBC/blob/main/preprocess.sh), [test_nwpu.sh](https://github.com/Yiming-M/CLIP-EBC/blob/main/test_nwpu.sh)) raises NWPU cap to **`max_size=3072`** and evaluates with **sliding-window tiling** (`58.2` MAE).
-- **Connection to Ours:** Our worst outlier on NWPU (`99,766`-param `LFI-99k`) is literally **`id=3234.0`** (`GT 12,924 -> Pred 4,272.8`, `-8,651.2`), matching ChfL's exact hardcoded exception! Run **`D3` (`eval_nwpu_tiling_sweep.py`)** on existing `best_val_mae.pt` to quantify input downscale loss vs model capacity directly.
+## 4. Gap Check & Literature Foundations
+- **Gap Verified (`0` prior matches):** No found paper combines **(1) sub-100k KD-free crowd counting** with **(2) a norm-free linear Laplacian HF residual on FPN `P4/L4` modulated by a WD-exempt channel $\gamma$**.
+- **Point Supervision & Resolution:** **Bayesian Loss** (*ICCV* 2019, [ar5iv:1908.03684](https://ar5iv.labs.arxiv.org/html/1908.03684)), **P2PNet** (*ICCV* 2021), **STEERER** (*ICCV* 2023), **ChfL** (*CVPR* 2022, NWPU `id=3234` `max_size` exception), **CLIP-EBC** (`2024`, `max_size=3072` tiling).
+- **Normalization & Folding:** **GroupNorm** (*ECCV* 2018) stabilizes small-batch crowd variance; **RepVGG** (*CVPR* 2021) folds `BatchNorm` into `Conv2d` for CPU latency.

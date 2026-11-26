@@ -72,22 +72,22 @@ model:
 
 loss:
   output_stride: 2
-  allocation_loss_type: dual_bayesian_radon_ot
+  allocation_loss_type: bayesian
   bayesian_sigma: 8.0
   bayesian_adaptive_sigma: true
   bayesian_sigma_min: 2.0
   bayesian_sigma_max: 8.0
   bayesian_background_ratio: 0.10
   bayesian_canonical_bg: true
-  empty_scene_full_weight: true
-  lambda_radon_ot: 0.85
+  empty_scene_full_weight: false
+  lambda_radon_ot: 0.0
   radon_ot_projections: 4
   radon_ot_norm_ref: 100.0
   radon_ot_scale_by_length: false
   dm_target: dual
   count_loss_mode: anscombe
   count_nb_dispersion: 50.0
-  lambda_bayesian: 0.15
+  lambda_bayesian: 1.0
   lambda_flat_dm16: 0.0
   lambda_region_nb: 0.0
   lambda_count: 1.0

@@ -1,22 +1,20 @@
-# RESEARCH_CONTRACT.md — JVCI Target Spec & Conditional Hypotheses
+# RESEARCH_CONTRACT.md — JVCI Target Spec & Gate-1 Validation
 
-## 1. Publication Target & Frozen Paper Architecture
-- **Primary Venue:** *Journal of Visual Communication and Image Representation* (JVCI, Elsevier — SCIE Q2, Subscription free; backup: *The Visual Computer*, Springer).
-- **Hardware Norm:** Standard single-GPU/CPU profiling (`Params`, `GFLOPs`, `ms/FPS`, `VRAM`); no Jetson/Raspberry Pi required.
-- **Frozen Active Architecture:** **`LFI-99k`** (`99,766` params, `0%` KD, `MobileNetV4-S050 + LFI-Lite + DSIMR`, single-pass Direct Fast-Path, ONNX opset-17).
-- **Parked Branches:** `LFI-S2 / D0.5 / D1 / D2` remain deferred unless `H1/H2` fails or future extension is needed.
+## 1. Publication Target & Active Canonical Architecture
+- **Primary Venue:** *Journal of Visual Communication and Image Representation* (JVCI, Elsevier — SCIE Q2, Subscription free; backup: *Pattern Recognition Letters* / *Neurocomputing*).
+- **Hardware Norm:** Standard single-GPU/CPU profiling (`Params`, `GFLOPs`, `ms/FPS`, `VRAM` with explicit input size, threads, precision, warm-up/repeats).
+- **Active Architecture:** **`LFI-99k`** (`99,766` params, `0%` KD, `MobileNetV4-S050 + LFI-Lite + DSIMR`, single-pass Direct Fast-Path, ONNX opset-17).
+- **Active Loss (Updated):** **Pure Bayesian (`1.0`) + Anscombe (`1.0`) + Count L1 (`0.02`)** (`Radon-OT` dropped after verified `+7.12` MAE regression on SHA: `70.20` vs `63.08` best; `70.92` vs `63.52` final EMA).
+- **Checkpoint Protocol (Zero Test-Set Peeking):** Report **Final EMA (`last.pt`, epoch 1500)** as primary leak-free metric (`63.52` vs `68.53` verified on SHA), alongside `best_val_mae` transparency where applicable.
 
-## 2. Conditional Hypotheses (Keep Claim ONLY If Data Supports It)
-Every claim below is a falsifiable hypothesis. If an ablation shows a component adds no gain above multi-seed variance, **drop that claim**.
-- **H1 (Fair Same-Budget Gain):** `LFI-99k` outperforms `fair_baseline_sha_additive_99k` (`Additive FPN + DW-SubPixel + Pure Bayesian`, same backbone/pipeline/epochs) by more than 3-seed `std` on `SHA`.
-- **H2a (Laplacian HF Claim):** Keep only if `LFI-99k` beats `abl_sha_lfi_no_laplacian_99k` by `> 3-seed std` on `SHA`.
-- **H2b (DSIMR Support Gate Claim):** Keep only if `LFI-99k` improves `ZeroMAE` / `RMSE` over `abl_nwpu_lfi_dw_subpixel_99k` on `NWPU Val`.
-- **H2c (Radon-OT Claim):** Keep only if `LFI-99k` beats `abl_sha_lfi_pure_bayesian_99k` by `> 3-seed std` on `SHA`.
-- **H3 (Multi-Seed Rigor):** Report `mean ± std` across 3 seeds (`42`, `123`, `2025`) on `SHA` before finalizing claims.
-- **H4 (Transparent Limitations):** Explicitly disclose Stride-4 Nyquist + `max_size=2048` undercounting on `NWPU/JHU 3000+` (quantified via `D3` tiling eval) and `SHA/SHB/QNRF` test-split checkpoint selection vs blind `JHU Test`.
+## 2. Gate-1 Go/No-Go on SHA (Same Head `DSIMR`, Same Pure Bayesian Loss)
+Every claim below is falsifiable. Do NOT expand to SHB/QNRF/NWPU/multi-backbone until **Gate-1** passes on SHA (`mean ± std` across 3 seeds `42, 123, 2025`):
+- **H1 (Neck Gain vs Fair Baselines):** `LFI-Lite + DSIMR` (`99,766` p) beats `Additive FPN + DSIMR` (`98,870` p), `BiFPN-Lite + DSIMR` (`99,268` p), and `PAFPN + DSIMR` (`100,647` p) by `> 3-seed std` on SHA.
+- **H2a (Laplacian HF Control — Critical):** `LFI-Lite` (`laplacian`) beats `no_laplacian` (`99,446` p), `fixed_hf` (`99,446` p), and **`direct_dw` (`99,766` p, same DWConv3x3 without AvgPool subtraction)** by `> 3-seed std` on SHA. If `direct_dw` matches `laplacian`, pivot framing immediately.
+- **H2b (Negative-Result Evidence):** Retain verified failure-mode controls (`selective_gate`, `tanh`, `Radon-OT`, and `LFI-S2` Stride-2 `BN` drift `ep=225 -> 1295`) as quantitative empirical evidence.
+- **H3 (Multi-Seed Rigor):** Report `mean ± std` across 3 seeds (`42`, `123`, `2025`) on SHA before finalizing claims.
 
-## 3. Required JVCI Evidence Checklist
-- [x] Data leakage audit (`0` exact path overlap across all 5 datasets) + `LFI-99k` 5 benchmarks + 3 zero-shot evals (`seed=42`).
-- [ ] Run `1` fair baseline + `3` ablations + `2` extra SHA seeds (`6` runs total).
-- [ ] Run `0`-train evals: `D3` (`eval_nwpu_tiling_sweep.py`), `eval_sfi_mechanisms.py` (SHA), GPU FP32/FP16 profile, and 4-panel qualitative + feature-map figures.
-- [ ] Manually verify every external paper citation, param count, and Val/Test split in `LITERATURE_REVIEW.md` before drafting.
+## 3. Required Evidence Checklist
+- [x] Data leakage audit (`0` exact path overlap across all 5 datasets) + Snowballing literature audit (`LITERATURE_REVIEW.md`).
+- [ ] **Gate-1 on SHA:** `Additive+DSIMR`, `BiFPN+DSIMR`, `PAFPN+DSIMR`, `no_laplacian`, `direct_dw`, `fixed_hf`, and `seed123`/`seed2025` for `LFI-Lite+DSIMR` (all on Pure Bayesian + Anscombe + L1).
+- [ ] **Gate-2 Expansion (only if Gate-1 passes):** Plug-and-play second backbone (`ResNet18` / `MobileNetV3`), `SHB`, `QNRF`, `NWPU`/`JHU`, cross-dataset (`SHA->SHB`, `QNRF->SHA/SHB`), density-bin breakdown, and `L4 / L4_hf / P4` visualizations.

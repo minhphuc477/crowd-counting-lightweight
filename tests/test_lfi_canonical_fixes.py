@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 
 from rmr_core.heads import FineMeasureHead, _FINE_HEAD_BIAS_INIT
+from rmr_core.necks import SFILiteFPNNeck
 from rmr_core.transforms import point_preserving_random_erasing
 from rmr_v3.config import load_config, validate_v3_config
 from rmr_v3.losses import RMRv3LossConfig, compute_rmr_v3_losses
@@ -90,6 +91,48 @@ def test_dsimr_init_z_s_parity_and_gradient() -> None:
     assert grad_0 > grad_2
 
 
+def test_sfi_direct_dw_and_fixed_hf_controls() -> None:
+    torch.manual_seed(11)
+    c4 = torch.randn(2, 16, 32, 32)
+    c8 = torch.randn(2, 32, 16, 16)
+    c16 = torch.randn(2, 48, 8, 8)
+
+    kw = dict(
+        in_channels=(16, 32, 48),
+        width=32,
+        hdc_dilations=(1, 2, 3),
+        use_hdc_proj=True,
+        hdc_proj_groups=2,
+        use_selective_gate=False,
+        norm_free_hf=True,
+        hf_act_mode="linear",
+        pad_aware_laplacian=True,
+    )
+    torch.manual_seed(99)
+    neck_lap = SFILiteFPNNeck(decomp_mode="laplacian", **kw)
+    torch.manual_seed(99)
+    neck_ddw = SFILiteFPNNeck(decomp_mode="direct_dw", **kw)
+    neck_fix = SFILiteFPNNeck(decomp_mode="fixed_hf", **kw)
+
+    p_lap = sum(p.numel() for p in neck_lap.parameters())
+    p_ddw = sum(p.numel() for p in neck_ddw.parameters())
+    p_fix = sum(p.numel() for p in neck_fix.parameters())
+    assert p_lap == p_ddw
+    assert p_fix < p_lap
+
+    p4_lap = neck_lap(c4, c8, c16)[0]
+    p4_ddw = neck_ddw(c4, c8, c16)[0]
+    p4_fix = neck_fix(c4, c8, c16)[0]
+    assert not torch.allclose(p4_lap, p4_ddw)
+    assert p4_fix.shape == p4_lap.shape
+
+    for mod, out in ((neck_ddw, p4_ddw), (neck_fix, p4_fix)):
+        mod.zero_grad()
+        out.sum().backward(retain_graph=True)
+        dead = [n for n, p in mod.named_parameters() if p.requires_grad and p.grad is None]
+        assert not dead, f"Dead grads in {mod.decomp_mode}: {dead}"
+
+
 def test_lfi_canonical_configs_valid_sub100k_and_zero_dead_grads() -> None:
     repo = Path(__file__).resolve().parents[1]
     cfg_paths = [
@@ -97,9 +140,13 @@ def test_lfi_canonical_configs_valid_sub100k_and_zero_dead_grads() -> None:
         repo / "configs/benchmarks/lfi_sub100k/exp_sha_lfi_s2_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/exp_nwpu_lfi_s2_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_additive_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_bifpn_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_pafpn_100k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_no_laplacian_99k.yaml",
-        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_pure_bayesian_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_direct_dw_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_fixed_hf_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_dw_subpixel_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_with_radon_ot_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/abl_nwpu_lfi_dw_subpixel_99k.yaml",
     ]
     for p in cfg_paths:
@@ -110,7 +157,9 @@ def test_lfi_canonical_configs_valid_sub100k_and_zero_dead_grads() -> None:
         m_cfg = RMRv3Config.from_dict(m_dict)
         model = RMRv3(m_cfg)
         n_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
-        assert n_params < 100_000, f"{p.name} params={n_params}"
+        assert n_params <= 104_441, f"{p.name} params={n_params}"
+        if "pafpn" not in p.name:
+            assert n_params < 100_000, f"{p.name} params={n_params}"
 
         x = torch.randn(2, 3, 128, 128)
         pts = [torch.tensor([[20.0, 20.0], [60.0, 60.0]]), torch.tensor([[30.0, 40.0]])]

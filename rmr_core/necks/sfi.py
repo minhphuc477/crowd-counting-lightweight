@@ -64,7 +64,7 @@ class SFILiteFPNNeck(nn.Module):
         self.aspp_gap_mode = str(aspp_gap_mode).lower().strip()
         if self.aspp_gap_mode not in ("add", "gate"):
             raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
-        if self.decomp_mode not in ("laplacian", "gaussian", "bilateral", "haar", "learnable_lp"):
+        if self.decomp_mode not in ("laplacian", "gaussian", "bilateral", "haar", "learnable_lp", "direct_dw", "fixed_hf"):
             raise ValueError(f"Unsupported decomp_mode: '{self.decomp_mode}'")
         if self.gate_mode not in ("selective", "asff", "se", "cbam", "concat_conv", "additive"):
             raise ValueError(f"Unsupported gate_mode: '{self.gate_mode}'")
@@ -127,8 +127,8 @@ class SFILiteFPNNeck(nn.Module):
         else:
             self.lp_conv = None
 
-        # High-frequency impulse enhancer on L4_hf (omitted if use_laplacian=False to avoid dead params)
-        if self.use_laplacian:
+        # High-frequency impulse enhancer on L4_hf (omitted if use_laplacian=False or fixed_hf)
+        if self.use_laplacian and self.decomp_mode != "fixed_hf":
             if self.hf_norm_mode == "gn":
                 self.hf_enhance: nn.Module | None = nn.Sequential(
                     nn.Conv2d(self.width, self.width, kernel_size=3, padding=1, groups=self.width, bias=False),
@@ -211,7 +211,9 @@ class SFILiteFPNNeck(nn.Module):
         return x_lf, x_hf
 
     def _decompose(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.decomp_mode == "laplacian":
+        if self.decomp_mode == "direct_dw":
+            return x, x
+        if self.decomp_mode in ("laplacian", "fixed_hf"):
             return self.decompose_frequency(x, pad_aware=self.pad_aware_laplacian)
         if self.decomp_mode == "gaussian":
             x_lf = F.conv2d(x, self._gauss_kernel, padding=2, groups=self.width)  # type: ignore[arg-type]
@@ -307,7 +309,9 @@ class SFILiteFPNNeck(nn.Module):
         else:
             fused_base = l4 + up8_to_4
 
-        if self.use_laplacian and self.hf_enhance is not None and self.gamma_hf is not None and l4_hf is not None:
+        if self.use_laplacian and self.decomp_mode == "fixed_hf" and l4_hf is not None:
+            f4 = fused_base + l4_hf
+        elif self.use_laplacian and self.hf_enhance is not None and self.gamma_hf is not None and l4_hf is not None:
             is_norm_free_act = self.norm_free_hf or (self.hf_norm_mode in ("gn", "bn", "bias"))
             if is_norm_free_act:
                 hf_pre = self.hf_enhance(l4_hf)

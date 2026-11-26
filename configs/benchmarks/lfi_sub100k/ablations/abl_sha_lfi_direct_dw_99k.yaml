@@ -1,7 +1,6 @@
 # ==============================================================================
-# GROUP A ABLATION 3: LFI-99K PURE BAYESIAN LOSS (NO RADON-OT, SHA)
-# Identical to exp_sha_lfi_dsimr_99k.yaml except allocation_loss_type: bayesian,
-# lambda_radon_ot: 0.0, empty_scene_full_weight: false.
+# GATE-1 TABLE 3 CONTROL: DIRECT DWCONV3X3 ON L4 WITHOUT AVGPOOL SUBTRACTION
+# Exact same 99,766 params as exp_sha_lfi_dsimr_99k.yaml (sfi_decomp_mode: direct_dw)
 # ==============================================================================
 
 seed: 42
@@ -53,6 +52,7 @@ model:
   backbone_lr_scale: 0.25
   init_m0: auto
   neck_type: sfi_lite
+  sfi_decomp_mode: direct_dw
   sfi_norm_free_hf: true
   sfi_hf_act_mode: linear
   sfi_pad_aware_laplacian: true
@@ -124,4 +124,4 @@ eval:
   - 500.0
   run_tiling: false
 
-output_dir: runs_fixed/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_pure_bayesian_99k
+output_dir: runs_fixed/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_direct_dw_99k

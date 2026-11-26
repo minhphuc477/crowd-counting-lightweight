@@ -41,7 +41,8 @@ model:
   output_stride: 2
   subpixel_stride2: true
   subpixel_kernel_size: 3
-  head_type: dw_subpixel
+  head_type: dsimr_subpixel
+  dsimr_init_z_s: 0.0
   head_activation: softplus
   density_adaptive_scale: true
   density_scale_gamma: 0.15
@@ -72,7 +73,7 @@ loss:
   bayesian_sigma_max: 8.0
   bayesian_background_ratio: 0.05
   bayesian_canonical_bg: true
-  empty_scene_full_weight: true
+  empty_scene_full_weight: false
   dm_target: dual
   count_loss_mode: anscombe
   count_nb_dispersion: 50.0
