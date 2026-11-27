@@ -28,6 +28,12 @@ from .pafpn import (
     PConvBlock,
     StripMultiKernelContext,
 )
+from .pafpn_lite import (
+    PAFPNLiteNeck,
+)
+from .sc_lfi import (
+    SCLFINeck,
+)
 from .rlk_hdc import (
     RLKHDCFPNNeck,
     StaticFastNormalizedFusion,
@@ -64,11 +70,13 @@ __all__ = [
     "HighResPConvFPNNeck",
     "LFIS2FPNNeck",
     "PAFPNBiNormNeck",
+    "PAFPNLiteNeck",
     "PConvBlock",
     "RLKHDCFPNNeck",
     "RepASPPLiteNeck",
     "RepDWBlock7x7",
     "RepWeightedFPNNeck",
+    "SCLFINeck",
     "SFILiteFPNNeck",
     "StaticFastNormalizedFusion",
     "StripMultiKernelContext",

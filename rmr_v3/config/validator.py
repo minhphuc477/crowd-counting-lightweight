@@ -68,9 +68,9 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "neck_type" in m_cfg and m_cfg["neck_type"] is not None:
             nt = str(m_cfg["neck_type"]).strip()
             valid_necks = (
-                "additive", "aspp_lite", "hdc_lite", "sfi_lite", "lfi_s2", "rlk_hdc",
+                "additive", "aspp_lite", "hdc_lite", "sfi_lite", "lfi_s2", "sc_lfi", "rlk_hdc",
                 "rep_weighted", "rep_aspp_lite", "bifpn_lite",
-                "pafpn_binorm", "pconv_fpn", "frankenstein_lite",
+                "pafpn_binorm", "pafpn_lite", "pconv_fpn", "frankenstein_lite",
             )
             if nt not in valid_necks:
                 raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")

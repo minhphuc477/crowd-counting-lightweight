@@ -36,6 +36,9 @@ In multi-scale object detectors (MMDetection / EfficientDet), detection heads at
 | **`ASPPLiteFPNNeck`** ([`aspp.py`](file:///f:/lightweightcrcn/rmr_core/necks/aspp.py)) | — | **Custom Lite** | Parallel `DepthwiseDilated(1,3,6)` + optional `GAP` + `1x1` proj + top-down `DSResidual`. |
 | **`HDCLiteFPNNeck`** ([`hdc.py`](file:///f:/lightweightcrcn/rmr_core/necks/hdc.py)) | — | **Custom Lite** | Sequential `DepthwiseDilated(1,2,3)` cascade on `L16` + `1x1` proj + top-down `DSResidual`. |
 | **`SFILiteFPNNeck` (`LFI-Lite`)** ([`sfi.py`](file:///f:/lightweightcrcn/rmr_core/necks/sfi.py)) | `99,766` | **Proposed** | `HDCLite` (`groups=2` proj) + norm-free linear Laplacian HF residual `gamma_hf * DW3x3(L4 - AvgPool3x3(L4))` (`+320` params, WD-exempt). |
+| **`SCLFINeck` (`SC-LFI`)** ([`sc_lfi.py`](file:///f:/lightweightcrcn/rmr_core/necks/sc_lfi.py)) | `98,462` | **Proposed (Unified)** | Combines `StripMultiKernelContext (3x3,1x5,5x1)` on `L16` + 3-level `ConvexFastNormalizedFusion` into `P4` + norm-free linear Laplacian HF (`+320` params, WD-exempt), without slow BU loops. |
+| **`PAFPNLiteNeck` (`pafpn_lite`)** ([`pafpn_lite.py`](file:///f:/lightweightcrcn/rmr_core/necks/pafpn_lite.py)) | `99,958` | **Faithful + Adapted** | Paper-faithful PANet (CVPR 2018): plain TD+BU addition, nearest upsample, stride-2 DW downsample, and PANet Sec. 3.2 AFP element-wise sum into `P4_out` (no StripContext, no convex weights). |
+| **`AdditiveFPNNeck` (`context_dilations=[]`)** | `97,814` | **Faithful Top-Down** | Plain top-down FPN-Lite without `L16` dilated context (`PlainFPN-Lite`), matching CVPR 2017 FPN topology with `GN+DSResidual`. |
 | **`LFIS2FPNNeck` (`LFI-S2`)** ([`lfi_s2.py`](file:///f:/lightweightcrcn/rmr_core/necks/lfi_s2.py)) | `99,314` | **Proposed (Parked)** | Adds `C2` (`H/2`) skip + foldable Stride-2 `BatchNorm2d` + `NativeS2DSIMRHead`. |
 
 ---

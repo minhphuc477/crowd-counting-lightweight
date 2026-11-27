@@ -13,9 +13,11 @@ from rmr_core.necks import (
     HighResPConvFPNNeck,
     LFIS2FPNNeck,
     PAFPNBiNormNeck,
+    PAFPNLiteNeck,
     RLKHDCFPNNeck,
     RepASPPLiteNeck,
     RepWeightedFPNNeck,
+    SCLFINeck,
     SFILiteFPNNeck,
 )
 from rmr_core.scale_routing import ScaleRoutingHead, FactorizedRoutingHead
@@ -123,13 +125,30 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
             in_channels=in_channels,
             width=cfg.feature_width,
         )
+    if cfg.neck_type == "pafpn_lite":
+        return PAFPNLiteNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+        )
+    if cfg.neck_type == "sc_lfi":
+        return SCLFINeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            decomp_mode=str(getattr(cfg, "sfi_decomp_mode", "laplacian")),
+            pad_aware_laplacian=bool(getattr(cfg, "sfi_pad_aware_laplacian", True)),
+            hf_act_mode=str(getattr(cfg, "sfi_hf_act_mode", "linear")),
+        )
     if cfg.neck_type == "pconv_fpn":
         return HighResPConvFPNNeck(
             in_channels=in_channels,
             width=cfg.feature_width,
         )
     if cfg.neck_type == "additive":
-        return AdditiveFPNNeck(in_channels=in_channels, width=cfg.feature_width)
+        return AdditiveFPNNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+            context_dilations=getattr(cfg, "context_dilations", (1, 2, 3)),
+        )
     raise ValueError(
         f"Unsupported neck_type: '{cfg.neck_type}'. "
         "Must be 'additive', 'aspp_lite', 'hdc_lite', 'sfi_lite', 'rlk_hdc', 'rep_weighted', "

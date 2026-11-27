@@ -137,9 +137,12 @@ def test_lfi_canonical_configs_valid_sub100k_and_zero_dead_grads() -> None:
     repo = Path(__file__).resolve().parents[1]
     cfg_paths = [
         repo / "configs/benchmarks/lfi_sub100k/exp_sha_lfi_dsimr_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/exp_sha_sc_lfi_98k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/exp_sha_lfi_s2_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/exp_nwpu_lfi_s2_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_additive_99k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_plain_fpn_98k.yaml",
+        repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_pafpn_lite_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_bifpn_99k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/fair_baseline_sha_pafpn_100k.yaml",
         repo / "configs/benchmarks/lfi_sub100k/ablations/abl_sha_lfi_no_laplacian_99k.yaml",
