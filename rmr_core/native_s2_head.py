@@ -37,6 +37,7 @@ class NativeS2DSIMRHead(nn.Module):
     ) -> None:
         super().__init__()
         self.width = int(width)
+        self._last_support_logit: torch.Tensor | None = None
         self.head_activation = str(head_activation).lower()
         self.temp_softplus = bool(temp_softplus)
         self.floor_tau = float(floor_tau) / 4.0  # Stride-2 cell convention = m0^(4) / 4
@@ -111,6 +112,7 @@ class NativeS2DSIMRHead(nn.Module):
         logits = self.out_proj(self.body(f))
         z_s = logits[:, 0:1]
         z_lambda = logits[:, 1:2]
+        self._last_support_logit = z_s
         y_intensity = self.activate(z_lambda)
         y0 = y_intensity * torch.sigmoid(z_s)
         return z_lambda, y0

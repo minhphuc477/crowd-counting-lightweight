@@ -51,14 +51,25 @@ class RMRv3(nn.Module):
         validate_architecture_contract(cfg)
         self.cfg = cfg
 
-        target_reductions = (2, 4, 8, 16) if cfg.neck_type == "lfi_s2" else (4, 8, 16)
+        self._has_c2_phase = bool(
+            getattr(cfg, "use_c2_phase_guidance", False) or getattr(cfg, "head_type", "") == "dsimr_c2_phase"
+        )
+        target_reductions = (2, 4, 8, 16) if (cfg.neck_type == "lfi_s2" or self._has_c2_phase) else (4, 8, 16)
         self.encoder = TimmPyramidBackbone(
             model_name=cfg.backbone_name,
             pretrained=cfg.pretrained,
             target_reductions=target_reductions,
+            stride_mode=getattr(cfg, "backbone_stride_mode", "standard"),
         )
-        self.fusion = build_neck_module(self.encoder.out_channels, cfg)
-        self.fine_head = build_fine_carrier_head(cfg)
+        neck_in_ch = (
+            self.encoder.out_channels[1:]
+            if (self._has_c2_phase and cfg.neck_type != "lfi_s2")
+            else self.encoder.out_channels
+        )
+        self.fusion = build_neck_module(neck_in_ch, cfg)
+        self.fine_head = build_fine_carrier_head(
+            cfg, c2_channels=self.encoder.out_channels[0] if self._has_c2_phase else 0
+        )
         self.region_head = build_regional_evidence_head(cfg) if getattr(cfg, "enable_regional_head", True) else None
         self.coord_attn = CoordinateAttention(channels=cfg.feature_width, reduction=4) if cfg.use_coord_attn else None
 
@@ -143,9 +154,12 @@ class RMRv3(nn.Module):
         self._region_cache[key] = region_set
         return region_set
 
-    def _extract_carrier_features(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _extract_carrier_features(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         feats = self.encoder(x)
-        p4, p8, p16 = self.fusion(*feats)
+        c2 = feats[0] if (self._has_c2_phase and self.cfg.neck_type != "lfi_s2") else None
+        p4, p8, p16 = self.fusion(*(feats[1:] if c2 is not None else feats))
 
         if self.tdsg is not None:
             sem_logit = self.tdsg(p16)
@@ -159,7 +173,7 @@ class RMRv3(nn.Module):
         if self.coord_attn is not None:
             p4 = self.coord_attn(p4)
 
-        return p4, p8, p16
+        return p4, p8, p16, c2
 
     def _route_scales(
         self,
@@ -178,15 +192,21 @@ class RMRv3(nn.Module):
         return router_out, None, None
 
     def _predict_fine_density(
-        self, p4: torch.Tensor, scale_weights: torch.Tensor | None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        self, p4: torch.Tensor, scale_weights: torch.Tensor | None, c2: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         if hasattr(self.fine_head, "forward_with_logits"):
-            z0, y0 = self.fine_head.forward_with_logits(
-                p4, scale_weights=scale_weights, need_full_z0=bool(self.cfg.enable_solver), force_activate=True
-            )
+            kw: dict[str, Any] = {
+                "scale_weights": scale_weights,
+                "need_full_z0": bool(self.cfg.enable_solver),
+                "force_activate": True,
+            }
+            if c2 is not None and self._has_c2_phase:
+                kw["c2"] = c2
+            z0, y0 = self.fine_head.forward_with_logits(p4, **kw)
         else:
             z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
             y0 = self.fine_head.activate(z0, scale_weights=scale_weights)
+        support_logit = getattr(self.fine_head, "_last_support_logit", None)
 
         fg_logit = None
         if self.fg_gate is not None:
@@ -199,7 +219,7 @@ class RMRv3(nn.Module):
                 )
             y0 = y0 * fg_mask
 
-        return z0, y0, fg_logit
+        return z0, y0, fg_logit, support_logit
 
     def _extract_regional_evidence(
         self, p4: torch.Tensor, p8: torch.Tensor, p16: torch.Tensor,
@@ -261,22 +281,25 @@ class RMRv3(nn.Module):
         # In normalized [-1, 1] space, 0.0 equals neutral mid-gray RGB (128, 128, 128) matching train_transform
         x_in = F.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0) if (pad_h > 0 or pad_w > 0) else x
 
-        p4, p8, p16 = self._extract_carrier_features(x_in)
+        p4, p8, p16, c2 = self._extract_carrier_features(x_in)
         scene_tilt, delta_scale = None, None
         if self.dcap is not None:
             scene_tilt, delta_scale = self.dcap(p16)
         scale_weights, pi_scale, pi_aspect = self._route_scales(
             p4, delta_scale=delta_scale, scene_tilt=scene_tilt
         )
-        z0, y0, fg_logit = self._predict_fine_density(p4, scale_weights)
+        z0, y0, fg_logit, support_logit = self._predict_fine_density(p4, scale_weights, c2=c2)
 
         target_h4, target_w4 = (h_in + 3) // 4, (w_in + 3) // 4
         target_h2, target_w2 = (h_in + 1) // 2, (w_in + 1) // 2
         p4_th, p4_tw = (target_h2, target_w2) if self.cfg.neck_type == "lfi_s2" else (target_h4, target_w4)
+        p16_h, p16_w = (
+            ((h_in + 7) // 8, (w_in + 7) // 8)
+            if getattr(self.cfg, "backbone_stride_mode", "standard") == "dilated_os8"
+            else ((h_in + 15) // 16, (w_in + 15) // 16)
+        )
         if pad_h > 0 or pad_w > 0 or p4.shape[-2] != p4_th or p4.shape[-1] != p4_tw:
-            p4 = p4[..., :p4_th, :p4_tw]
-            p8 = p8[..., :(h_in + 7) // 8, :(w_in + 7) // 8]
-            p16 = p16[..., :(h_in + 15) // 16, :(w_in + 15) // 16]
+            p4, p8, p16 = p4[..., :p4_th, :p4_tw], p8[..., :(h_in + 7) // 8, :(w_in + 7) // 8], p16[..., :p16_h, :p16_w]
             if scale_weights is not None:
                 scale_weights = scale_weights[..., :target_h4, :target_w4]
             if pi_scale is not None:
@@ -285,6 +308,8 @@ class RMRv3(nn.Module):
                 pi_aspect = pi_aspect[..., :target_h4, :target_w4]
             if fg_logit is not None:
                 fg_logit = fg_logit[..., :target_h4, :target_w4]
+            if support_logit is not None:
+                support_logit = support_logit[..., :target_h4, :target_w4]
 
         is_direct_fast_path = (
             not self.cfg.enable_solver and self.region_head is None and self.subpixel_allocator is None
@@ -305,7 +330,7 @@ class RMRv3(nn.Module):
             }
             for k, v in (
                 ("scale_weights", scale_weights), ("pi_scale", pi_scale), ("pi_aspect", pi_aspect),
-                ("fg_logit", fg_logit), ("delta_scale", delta_scale), ("scene_tilt", scene_tilt),
+                ("fg_logit", fg_logit), ("support_logit", support_logit), ("delta_scale", delta_scale), ("scene_tilt", scene_tilt),
             ):
                 if v is not None:
                     direct_out[k] = v
@@ -323,15 +348,9 @@ class RMRv3(nn.Module):
             regions_solver = regions_feat
 
         regional_evidence = self._extract_regional_evidence(
-            p4=p4,
-            p8=p8,
-            p16=p16,
-            regions=regions_feat,
-            scale_weights=scale_weights,
-            uniform_reliability=uniform_reliability,
-            grid_h=target_h4,
+            p4=p4, p8=p8, p16=p16, regions=regions_feat, scale_weights=scale_weights,
+            uniform_reliability=uniform_reliability, grid_h=target_h4,
         )
-
         carrier_energy = None
         if self.cfg.resonant_adjoint or getattr(self.cfg, "crest_discovery_flux", False):
             b_c, c_p4, h_p4, w_p4 = p4.shape
@@ -342,28 +361,21 @@ class RMRv3(nn.Module):
 
         out = self._solve_inverse_measure(
             y0=y0, z0=z0, regional_evidence=regional_evidence, regions=regions_solver,
-            scale_weights=scale_weights, solver_strength=solver_strength,
-            uniform_reliability=uniform_reliability,
+            scale_weights=scale_weights, solver_strength=solver_strength, uniform_reliability=uniform_reliability,
             p16=p16, fg_logit=fg_logit, pi_scale=pi_scale, pi_aspect=pi_aspect, p4=p4,
             carrier_energy=carrier_energy, compute_energy=compute_energy,
         )
-
         package_subpixel_output(
-            out=out,
-            p4=p4,
-            allocator=self.subpixel_allocator,
-            subpixel_stride2=self.cfg.subpixel_stride2,
-            h_in=h_in,
-            w_in=w_in,
-            regions_solver=regions_solver,
-            regions_carrier=regions_feat,
+            out=out, p4=p4, allocator=self.subpixel_allocator, subpixel_stride2=self.cfg.subpixel_stride2,
+            h_in=h_in, w_in=w_in, regions_solver=regions_solver, regions_carrier=regions_feat,
         )
 
         if delta_scale is not None:
             out["delta_scale"] = delta_scale
         if scene_tilt is not None:
             out["scene_tilt"] = scene_tilt
-
+        if support_logit is not None:
+            out["support_logit"] = support_logit
         return out
 
     def switch_to_deploy(self) -> None:
@@ -415,28 +427,14 @@ class RMRv3(nn.Module):
             integrate_window=(peak_threshold is None),
         )
 
-        # 2. Analytical uncertainty quantification
         b_var = getattr(out, "solver_count_variance", None)
         ci_lower, ci_upper, std_err = compute_count_confidence_interval(pred_count, b_var)
-
-        # 3. Continuous perspective scale map
         scale_weights = getattr(out, "scale_weights", None)
-        if scale_weights is not None:
-            scale_map = extract_perspective_field(scale_weights[0], self.cfg.region_sizes_px)
-        else:
-            scale_map = None
-
-        # 4. Crowd risk index
+        scale_map = extract_perspective_field(scale_weights[0], self.cfg.region_sizes_px) if scale_weights is not None else None
         risk_summary = compute_crowd_risk_index(density, scale_map=scale_map, area_sqm=area_sqm)
-
         return {
-            "count": pred_count,
-            "confidence_interval": (ci_lower, ci_upper, std_err),
-            "points": points_xy,
-            "point_scores": scores,
-            "density_map": density,
-            "scale_map": scale_map,
-            "risk_summary": risk_summary,
-            "model_output": out,
+            "count": pred_count, "confidence_interval": (ci_lower, ci_upper, std_err),
+            "points": points_xy, "point_scores": scores, "density_map": density,
+            "scale_map": scale_map, "risk_summary": risk_summary, "model_output": out,
         }
 

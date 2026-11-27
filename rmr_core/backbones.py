@@ -2,6 +2,35 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+class _StridedShortcutUIB(nn.Module):
+    """Wrap a timm UniversalInvertedResidual block to downsample both residual & shortcut."""
+
+    def __init__(self, block: nn.Module) -> None:
+        super().__init__()
+        if not hasattr(block, "dw_mid") or not isinstance(getattr(block.dw_mid, "conv", None), nn.Conv2d):
+            raise ValueError(f"Expected UIB block with dw_mid.conv Conv2d, got {type(block).__name__}")
+        self._use_pool_skip = bool(getattr(block, "has_skip", False))
+        block.has_skip = False
+        block.dw_mid.conv.stride = (2, 2)
+        self.block = block
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.block(x)
+        if self._use_pool_skip:
+            skip = F.avg_pool2d(x, kernel_size=2, stride=2, ceil_mode=True)
+            if skip.shape[-2:] != out.shape[-2:]:
+                skip = skip[..., : out.shape[-2], : out.shape[-1]]
+            return out + skip
+        return out
+
+
+def _set_conv_dilation(conv: nn.Conv2d, dilation: int) -> None:
+    kh, kw = conv.kernel_size
+    conv.dilation = (dilation, dilation)
+    conv.padding = (dilation * (kh - 1) // 2, dilation * (kw - 1) // 2)
 
 
 class TimmPyramidBackbone(nn.Module):
@@ -18,6 +47,8 @@ class TimmPyramidBackbone(nn.Module):
         model_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k",
         pretrained: bool = False,
         target_reductions: tuple[int, ...] = (4, 8, 16),
+        stride_mode: str = "standard",
+        split_block_idx: int = 3,
     ):
         super().__init__()
         import timm
@@ -26,6 +57,11 @@ class TimmPyramidBackbone(nn.Module):
         if target_reductions not in ((4, 8, 16), (2, 4, 8, 16)):
             raise ValueError(
                 f"TimmPyramidBackbone requires target_reductions=(4, 8, 16) or (2, 4, 8, 16), got {target_reductions}"
+            )
+        self.stride_mode = str(stride_mode).lower().strip()
+        if self.stride_mode not in ("standard", "split_s8_s16", "dilated_os8"):
+            raise ValueError(
+                f"stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got '{stride_mode}'"
             )
 
         self.model_name = model_name
@@ -90,7 +126,45 @@ class TimmPyramidBackbone(nn.Module):
             except Exception:
                 pass
 
+        self.split_s8_blocks: nn.Sequential | None = None
+        self.split_s16_blocks: nn.Sequential | None = None
+        if self.stride_mode in ("split_s8_s16", "dilated_os8"):
+            if (
+                not hasattr(self.backbone, "blocks")
+                or getattr(self.backbone, "feature_hooks", None) is not None
+                or len(self.backbone.blocks) < 3
+            ):
+                raise ValueError(f"stride_mode='{self.stride_mode}' requires sequential blocks >= 3 in {model_name}")
+            b2_list = list(self.backbone.blocks[2].children())
+            b0 = b2_list[0]
+            if not hasattr(b0, "dw_mid") or getattr(b0.dw_mid.conv, "stride", None) != (2, 2):
+                raise ValueError(f"Expected blocks[2][0].dw_mid.conv stride=(2,2) in {model_name}")
+            b0.dw_mid.conv.stride = (1, 1)
+            if self.stride_mode == "split_s8_s16":
+                split_idx = int(split_block_idx)
+                if not (1 <= split_idx < len(b2_list)):
+                    raise ValueError(f"split_block_idx={split_idx} out of range for {len(b2_list)} blocks")
+                b2_list[split_idx] = _StridedShortcutUIB(b2_list[split_idx])
+                self.split_s8_blocks = nn.Sequential(*b2_list[:split_idx])
+                self.split_s16_blocks = nn.Sequential(*b2_list[split_idx:])
+                self.backbone.blocks = nn.Sequential(*list(self.backbone.blocks.children())[:2])
+                ch_list = list(self.out_channels)
+                ch_list[-2] = ch_list[-1]
+                self.out_channels = tuple(ch_list)
+            else:
+                for blk in b2_list[1:]:
+                    for attr in ("dw_start", "dw_mid", "dw_end"):
+                        sub = getattr(blk, attr, None)
+                        conv = getattr(sub, "conv", None) if sub is not None else None
+                        if isinstance(conv, nn.Conv2d) and conv.kernel_size != (1, 1):
+                            _set_conv_dilation(conv, 2)
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        if self.stride_mode == "split_s8_s16" and self.split_s8_blocks is not None and self.split_s16_blocks is not None:
+            base_feats = tuple(self.backbone(x))
+            c8_rich = self.split_s8_blocks(base_feats[-1])
+            c16 = self.split_s16_blocks(c8_rich)
+            return base_feats[:-1] + (c8_rich, c16)
         feats = tuple(self.backbone(x))
         return tuple(feats[: len(self.target_reductions)])
 

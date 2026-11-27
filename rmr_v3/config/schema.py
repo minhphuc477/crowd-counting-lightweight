@@ -81,6 +81,7 @@ ALLOWED_MODEL_KEYS = {
     "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
     "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode", "sfi_hf_gate_mode",
     "sfi_hf_act_mode", "sfi_pad_aware_laplacian", "lfi_s2_width", "dsimr_init_z_s",
+    "backbone_stride_mode", "use_c2_phase_guidance",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -133,6 +134,7 @@ ALLOWED_LOSS_KEYS = {
     "lambda_sn_vp", "sn_vp_lambda_center", "sn_vp_lambda_global",
     "sn_vp_chunk_size", "sn_vp_norm_mode", "sn_vp_norm_ref",
     "empty_scene_full_weight",
+    "lambda_support_bce", "support_bce_kernel", "support_bce_pos_weight",
 }
 
 ALLOWED_TRAIN_KEYS = {
@@ -272,7 +274,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
         "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up", "dsr_fw_power", "dsr_fw_unit_mass",
         "dsr_fw_tau_z_floor", "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
-        "enable_regional_head",
+        "enable_regional_head", "backbone_stride_mode", "use_c2_phase_guidance",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell",
@@ -293,7 +295,7 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dense_loss_thresh", "dense_loss_norm", "dense_loss_alpha", "dense_loss_max_boost",
         "bayesian_sigma", "bayesian_background_ratio", "ot_reg", "ot_num_iters", "dm_strict",
         "bayesian_norm_mode", "bayesian_adaptive_sigma", "adaptive_sigma",
-        "radon_ot_scale_by_length",
+        "radon_ot_scale_by_length", "lambda_support_bce", "support_bce_kernel", "support_bce_pos_weight",
     ],
     "train": [
         "lr",

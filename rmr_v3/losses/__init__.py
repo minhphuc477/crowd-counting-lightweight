@@ -19,6 +19,7 @@ from .spatial_priors import (
     curvature_power_loss,
     foreground_gating_bce_loss,
     physical_scale_alignment_loss,
+    support_gate_bce_loss,
     topk_hard_background_loss,
 )
 from .point_supervision import bayesian_loss, fidt_loss, sinkhorn_ot_loss
@@ -49,6 +50,7 @@ __all__ = [
     "topk_hard_background_loss",
     "physical_scale_alignment_loss",
     "foreground_gating_bce_loss",
+    "support_gate_bce_loss",
     "bayesian_loss",
     "scale_normalized_voronoi_poisson_loss",
     "ScaleNormalizedVoronoiPoissonLoss",

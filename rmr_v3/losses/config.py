@@ -89,6 +89,9 @@ class RMRv3LossConfig:
     lambda_hard_bg: float = 0.0          # weight for top-k hard background loss (0 = disabled)
     hard_bg_ratio: float = 0.10          # fraction of worst false alarm background pixels to penalize
     lambda_fg_gate: float = 0.0          # weight for foreground gate BCE loss (0 = disabled)
+    lambda_support_bce: float = 0.0      # weight for DSIMR support gate z_s BCE loss (0 = disabled)
+    support_bce_kernel: int = 5          # dilation kernel on Stride-4 binary point support mask
+    support_bce_pos_weight: float = 2.0  # positive recall weight for DSIMR support gate BCE
     lambda_strauss: float = 0.0          # weight for Strauss hard-core repulsion regularizer (0 = disabled)
     strauss_radius: int = 1              # exclusion radius in cells for Strauss repulsion
 
@@ -210,6 +213,12 @@ class RMRv3LossConfig:
             raise ValueError(f"hard_bg_ratio must be in (0.0, 1.0], got {self.hard_bg_ratio}")
         if self.lambda_fg_gate < 0.0:
             raise ValueError(f"lambda_fg_gate must be non-negative, got {self.lambda_fg_gate}")
+        if self.lambda_support_bce < 0.0:
+            raise ValueError(f"lambda_support_bce must be non-negative, got {self.lambda_support_bce}")
+        if self.support_bce_kernel <= 0 or self.support_bce_kernel % 2 == 0:
+            raise ValueError(f"support_bce_kernel must be a positive odd integer, got {self.support_bce_kernel}")
+        if self.support_bce_pos_weight <= 0.0:
+            raise ValueError(f"support_bce_pos_weight must be strictly positive, got {self.support_bce_pos_weight}")
         if self.lambda_scale_align < 0.0:
             raise ValueError(f"lambda_scale_align must be non-negative, got {self.lambda_scale_align}")
         if self.lambda_rn_transport < 0.0:

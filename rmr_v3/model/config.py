@@ -31,6 +31,8 @@ class RMRv3Config:
     backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
     pretrained: bool = True
     backbone_lr_scale: float = 0.1
+    backbone_stride_mode: str = "standard"  # "standard" | "split_s8_s16" | "dilated_os8"
+    use_c2_phase_guidance: bool = False
     init_m0: float = 0.015763  # Canonical Stride-4 cell density m0^{(4)} (heads scale by 1/4 for subpixel_stride2)
     max_trainable_params: int = 105000
 
@@ -93,25 +95,21 @@ class RMRv3Config:
     dispersion_init: float = 50.0
     dispersion_min: float = 0.5
     dispersion_max: float = 500.0
-
     # Reliability: "nb_rate_variance" | "snr" | "hybrid_hurdle" (RMR-v14)
     reliability_mode: str = "nb_rate_variance"
     reliability_rate_std_floor: float = 0.01
     reliability_weight_min: float = 0.25
     reliability_weight_max: float = 4.0
     normalize_reliability_within_scale: bool = True
-
     # Registered clean-causal variant
     detach_region_mean_in_solver: bool = True
     detach_reliability_in_solver: bool = True
     uniform_reliability: bool = False
-
     # V4 candidate switches
     native_scale_pooling: bool = False
     regional_feature_stats: str = "mean"
     region_head_hidden: int = 48
     enable_regional_head: bool = True
-
     # Hurdle NB head
     hurdle_head: bool = False
     hurdle_gating_mode: str = "occupancy"
@@ -343,6 +341,10 @@ class RMRv3Config:
             raise ValueError(f"Invalid solver_mode '{self.solver_mode}'")
         if self.aspp_gap_mode not in ("add", "gate"):
             raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
+        if self.backbone_stride_mode not in ("standard", "split_s8_s16", "dilated_os8"):
+            raise ValueError(
+                f"backbone_stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got '{self.backbone_stride_mode}'"
+            )
         if self.fine_carrier_type not in ("standard", "mpc"):
             raise ValueError(f"fine_carrier_type must be 'standard' or 'mpc', got '{self.fine_carrier_type}'")
         if self.regional_head_type not in ("probabilistic", "ebgb"):

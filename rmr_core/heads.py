@@ -63,6 +63,7 @@ class FineMeasureHead(nn.Module):
         self.subpixel_stride2 = bool(subpixel_stride2)
         self.dsimr_mode = bool(dsimr_mode) and self.subpixel_stride2
         self._last_dsimr_state: tuple[torch.Tensor, torch.Tensor] | None = None
+        self._last_support_logit: torch.Tensor | None = None
         self.floor_tau = float(floor_tau) / (4.0 if self.subpixel_stride2 else 1.0)
         out_channels = 4 if self.subpixel_stride2 else 1
         blocks = []
@@ -262,9 +263,11 @@ class FineMeasureHead(nn.Module):
             z_s = dsimr_out[:, 0:1]
             z_lambda = dsimr_out[:, 1:2]
             self._last_dsimr_state = (z_s, alpha)
+            self._last_support_logit = z_s
             z = self.pixel_shuffle(z_lambda.expand(-1, 4, -1, -1))
         else:
             self._last_dsimr_state = None
+            self._last_support_logit = None
             z = self.body(f)
             if self.subpixel_stride2 and self.pixel_shuffle is not None:
                 z = self.pixel_shuffle(z)
@@ -299,6 +302,7 @@ class FineMeasureHead(nn.Module):
             dsimr_out = self.dsimr_proj(h4)  # type: ignore[misc]
             z_s = dsimr_out[:, 0:1]
             z_lambda = dsimr_out[:, 1:2]
+            self._last_support_logit = z_s
             y_cell = self._activate_base(z_lambda, scale_weights=None)
             y0 = self.pixel_shuffle((y_cell * torch.sigmoid(z_s)) * alpha)
             z0 = self.pixel_shuffle(z_lambda.expand(-1, 4, -1, -1)) if need_full_z0 else z_lambda
@@ -350,9 +354,19 @@ def build_fine_head(
     subpixel_kernel_size: int = 3,
     use_film: bool = True,
     dsimr_init_z_s: float = 2.0,
+    c2_channels: int = 0,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     head_type_l = str(head_type).lower().strip()
+    if head_type_l == "dsimr_c2_phase":
+        from .phase_head import S2DPhaseDSIMRHead
+        return S2DPhaseDSIMRHead(
+            width=width, c2_channels=c2_channels, init_bias=init_bias, floor_tau=floor_tau,
+            density_adaptive_scale=density_adaptive_scale, density_scale_gamma=density_scale_gamma,
+            density_scale_learnable=density_scale_learnable, head_activation=head_activation,
+            temp_softplus=temp_softplus, subpixel_kernel_size=max(3, int(subpixel_kernel_size)),
+            dsimr_init_z_s=float(dsimr_init_z_s), head_blocks=head_blocks,
+        )
     if head_type_l in ("residual_dilated", "first_principles", "rd_finehead"):
         from .fine_head import ResidualDilatedFineHead
         return ResidualDilatedFineHead(
@@ -379,10 +393,10 @@ def build_fine_head(
             head_activation=head_activation,
             temp_softplus=temp_softplus,
         )
-    if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3", "dsimr_subpixel"):
+    if head_type_l not in ("standard", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "dsimr_c2_phase"):
         raise ValueError(
             f"Unsupported head_type: '{head_type}'. "
-            "Must be 'standard', 'residual_dilated', 'first_principles', 'rd_finehead', 'dw_subpixel', 'subpixel_k3', or 'dsimr_subpixel'."
+            "Must be 'standard', 'residual_dilated', 'first_principles', 'rd_finehead', 'dw_subpixel', 'subpixel_k3', 'dsimr_subpixel', or 'dsimr_c2_phase'."
         )
     kw = {
         "width": width,

@@ -85,9 +85,13 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "head_type" in m_cfg and m_cfg["head_type"] is not None:
             ht = str(m_cfg["head_type"]).lower().strip()
-            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "native_s2_dsimr")
+            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "dsimr_c2_phase", "native_s2_dsimr")
             if ht not in valid_heads:
                 raise ValueError(f"head_type must be one of {valid_heads}, got {m_cfg['head_type']!r}")
+        if "backbone_stride_mode" in m_cfg and m_cfg["backbone_stride_mode"] is not None:
+            bsm = str(m_cfg["backbone_stride_mode"]).lower().strip()
+            if bsm not in ("standard", "split_s8_s16", "dilated_os8"):
+                raise ValueError(f"backbone_stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got {m_cfg['backbone_stride_mode']!r}")
         if str(m_cfg.get("neck_type", "")) == "lfi_s2" and str(m_cfg.get("head_type", "")) != "native_s2_dsimr":
             raise ValueError("neck_type='lfi_s2' operates at Stride 2 and requires head_type='native_s2_dsimr'.")
         if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
@@ -267,12 +271,18 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
         if "cell_fg_ratio" in l_cfg_pre and not (0.0 <= float(l_cfg_pre["cell_fg_ratio"]) <= 1.0):
             raise ValueError(f"cell_fg_ratio must be in [0.0, 1.0], got {l_cfg_pre['cell_fg_ratio']}")
         for key in (
-            "lambda_curvature", "lambda_hard_bg", "lambda_fg_gate", "lambda_carrier_cell",
+            "lambda_curvature", "lambda_hard_bg", "lambda_fg_gate", "lambda_support_bce", "lambda_carrier_cell",
             "lambda_fine_cell", "lambda_spectral", "lambda_spectral_dc", "lambda_scale_align",
             "lambda_kd_spatial", "lambda_kd_count", "lambda_rn_transport",
         ):
             if key in l_cfg_pre and float(l_cfg_pre[key]) < 0.0:
                 raise ValueError(f"{key} must be non-negative, got {l_cfg_pre[key]}")
+        if "support_bce_kernel" in l_cfg_pre:
+            sbk = int(l_cfg_pre["support_bce_kernel"])
+            if sbk <= 0 or sbk % 2 == 0:
+                raise ValueError(f"support_bce_kernel must be a positive odd integer, got {sbk}")
+        if "support_bce_pos_weight" in l_cfg_pre and float(l_cfg_pre["support_bce_pos_weight"]) <= 0.0:
+            raise ValueError(f"support_bce_pos_weight must be > 0, got {l_cfg_pre['support_bce_pos_weight']}")
         if "dm_norm_mode" in l_cfg_pre:
             dnm = str(l_cfg_pre["dm_norm_mode"])
             if dnm not in ("count", "head_balanced", "none", "unnorm_ref"):

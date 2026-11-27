@@ -211,7 +211,7 @@ def build_1x1_gate(enabled: bool, in_channels: int) -> nn.Conv2d | None:
     return gate
 
 
-def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
+def build_fine_carrier_head(cfg: RMRv3Config, c2_channels: int = 0) -> nn.Module:
     """Construct fine carrier head from configuration."""
     init_bias = _softplus_inverse(cfg.init_m0)
     if getattr(cfg, "fine_carrier_type", "standard") == "mpc":
@@ -253,6 +253,7 @@ def build_fine_carrier_head(cfg: RMRv3Config) -> nn.Module:
         fine_head_dilations=getattr(cfg, "fine_head_dilations", (1, 2)),
         subpixel_kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
         dsimr_init_z_s=float(getattr(cfg, "dsimr_init_z_s", 2.0)),
+        c2_channels=int(c2_channels),
         use_film=bool(
             getattr(cfg, "fine_head_use_film", True)
             and (

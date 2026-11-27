@@ -34,6 +34,7 @@ from .spatial_priors import (
     physical_scale_alignment_loss,
     radon_nikodym_transport_energy_loss,
     strauss_repulsion_loss,
+    support_gate_bce_loss,
     topk_hard_background_loss,
 )
 from .dual_supervision import align_target_to_prediction, compute_dual_lattice_losses
@@ -170,7 +171,8 @@ def _compute_auxiliary_losses(
     """Compute auxiliary geometric, prior, and dual-lattice regularizers."""
     has_aux = (
         cfg.lambda_curvature > 0.0 or cfg.lambda_hard_bg > 0.0 or cfg.lambda_fg_gate > 0.0
-        or getattr(cfg, "lambda_strauss", 0.0) > 0.0 or cfg.lambda_hurdle > 0.0 or cfg.lambda_trunc_nb > 0.0
+        or getattr(cfg, "lambda_support_bce", 0.0) > 0.0 or getattr(cfg, "lambda_strauss", 0.0) > 0.0
+        or cfg.lambda_hurdle > 0.0 or cfg.lambda_trunc_nb > 0.0
         or cfg.lambda_scale_align > 0.0 or getattr(cfg, "lambda_rn_transport", 0.0) > 0.0
         or cfg.lambda_carrier_cell > 0.0 or cfg.lambda_fine_cell > 0.0
         or (cfg.use_spectral_loss and cfg.lambda_spectral > 0.0)
@@ -178,15 +180,13 @@ def _compute_auxiliary_losses(
     )
     if not has_aux:
         for k in (
-            "curvature", "hard_bg", "fg_bce", "strauss", "hurdle_bce", "trunc_nb",
-            "scale_align", "rn_transport", "cell_carrier", "cell_fine",
-            "spectral", "spectral_dc", "spectral_ac", "chfl",
+            "curvature", "hard_bg", "fg_bce", "support_bce", "strauss", "hurdle_bce", "trunc_nb",
+            "scale_align", "rn_transport", "cell_carrier", "cell_fine", "spectral", "spectral_dc", "spectral_ac", "chfl",
         ):
             losses[k] = zero_val
         return losses
 
     stride = int(getattr(cfg, "output_stride", 4))
-
     # Curvature Power Loss (high-density variance stabilization)
     if cfg.lambda_curvature > 0.0:
         def _compute_curv(dmap: torch.Tensor) -> torch.Tensor:
@@ -223,6 +223,16 @@ def _compute_auxiliary_losses(
         losses["total"] = losses["total"] + cfg.lambda_fg_gate * fg_bce
     else:
         losses["fg_bce"] = zero_val
+
+    # DSIMR Support Gate BCE Loss (cures z_s gradient starvation on background)
+    sup_logit = outputs.get("support_logit", None)
+    if sup_logit is not None and getattr(cfg, "lambda_support_bce", 0.0) > 0.0:
+        losses["support_bce"] = support_gate_bce_loss(
+            sup_logit, target_float, kernel_size=int(cfg.support_bce_kernel), pos_weight=float(cfg.support_bce_pos_weight),
+        )
+        losses["total"] = losses["total"] + float(cfg.lambda_support_bce) * losses["support_bce"]
+    else:
+        losses["support_bce"] = zero_val
 
     # Strauss Hard-Core Point Process Repulsion Loss
     if getattr(cfg, "lambda_strauss", 0.0) > 0.0:
@@ -385,8 +395,8 @@ def compute_rmr_v3_losses(
         empty_val = (y.sum() + y0.sum()) * 0.0
         keys = [
             "total", "count", "count_l1", "cell", "allocation", "flat_dm16", "region_nb", "curvature",
-            "hard_bg", "fg_bce", "hurdle_bce", "trunc_nb", "scale_align", "rn_transport", "cell_carrier", "cell_fine",
-            "spectral", "spectral_dc", "spectral_ac", "chfl",
+            "hard_bg", "fg_bce", "support_bce", "hurdle_bce", "trunc_nb", "scale_align", "rn_transport",
+            "cell_carrier", "cell_fine", "spectral", "spectral_dc", "spectral_ac", "chfl",
         ]
         return {k: empty_val for k in keys}
 

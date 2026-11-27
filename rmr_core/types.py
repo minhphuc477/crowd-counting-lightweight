@@ -21,7 +21,7 @@ class RMRModelOutput(dict):
         if key in self:
             return self[key]
         if key in (
-            "hurdle_logit", "fg_logit", "scale_weights", "pi_scale", "pi_aspect",
+            "hurdle_logit", "fg_logit", "support_logit", "scale_weights", "pi_scale", "pi_aspect",
             "solver_trust_alpha", "y_carrier", "y0_carrier", "carrier_energy",
             "regions_carrier", "rn_multiplier", "bin_logits", "bin_probs", "bin_centers",
             "regions", "b_region", "b_solver", "region_dispersion", "solver_count_variance",
@@ -67,6 +67,7 @@ class RMRModelOutput(dict):
     pi_scale: torch.Tensor | None
     hurdle_logit: torch.Tensor | None
     fg_logit: torch.Tensor | None
+    support_logit: torch.Tensor | None
     bin_logits: torch.Tensor | None
     bin_probs: torch.Tensor | None
     bin_centers: torch.Tensor | None

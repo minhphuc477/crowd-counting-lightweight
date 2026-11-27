@@ -292,4 +292,42 @@ def radon_nikodym_transport_energy_loss(
     return sample_loss.mean()
 
 
+def support_gate_bce_loss(
+    support_logit: torch.Tensor,
+    target_float: torch.Tensor,
+    kernel_size: int = 5,
+    pos_weight: float = 2.0,
+) -> torch.Tensor:
+    """Explicit recall-safe BCE supervision on DSIMR Stride-4 support logit z_s.
+
+    Prevents gradient starvation when intensity y_cell -> 0 on background cells by
+    supervising z_s directly against a dilated binary point-support mask.
+    """
+    if target_float.ndim == 2:
+        target_float = target_float.unsqueeze(0).unsqueeze(0)
+    elif target_float.ndim == 3:
+        target_float = target_float.unsqueeze(1)
+    if support_logit.ndim == 2:
+        support_logit = support_logit.unsqueeze(0).unsqueeze(0)
+    elif support_logit.ndim == 3:
+        support_logit = support_logit.unsqueeze(1)
+
+    logit_f = support_logit.float()
+    if logit_f.numel() == 0 or target_float.numel() == 0:
+        return (logit_f.sum() + target_float.float().sum()) * 0.0
+
+    t_bin = (target_float.float() > 0.0).float()
+    ht, wt = t_bin.shape[-2:]
+    hs, ws = logit_f.shape[-2:]
+    if ht == 2 * hs and wt == 2 * ws:
+        t_s = F.max_pool2d(t_bin, kernel_size=2, stride=2)
+    elif (ht, wt) != (hs, ws):
+        t_s = F.adaptive_max_pool2d(t_bin, output_size=(hs, ws))
+    else:
+        t_s = t_bin
+
+    k = int(kernel_size)
+    t_support = F.max_pool2d(t_s, kernel_size=k, stride=1, padding=k // 2) if k > 1 else t_s
+    pw = torch.tensor(float(pos_weight), device=logit_f.device, dtype=torch.float32)
+    return F.binary_cross_entropy_with_logits(logit_f, t_support.detach(), pos_weight=pw)
 
