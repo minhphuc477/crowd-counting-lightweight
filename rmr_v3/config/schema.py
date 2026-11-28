@@ -81,7 +81,7 @@ ALLOWED_MODEL_KEYS = {
     "sfi_use_laplacian", "sfi_use_selective_gate", "sfi_use_hdc",
     "sfi_decomp_mode", "sfi_gate_mode", "sfi_hf_norm_mode", "sfi_hf_gate_mode",
     "sfi_hf_act_mode", "sfi_pad_aware_laplacian", "lfi_s2_width", "dsimr_init_z_s",
-    "backbone_stride_mode", "use_c2_phase_guidance",
+    "backbone_stride_mode", "backbone_max_stage2_blocks", "use_c2_phase_guidance", "ler_use_persp_prior",
 }
 
 ALLOWED_LOSS_KEYS = {
@@ -274,7 +274,8 @@ METHOD_CRITICAL_FIELDS: dict[str, list[str]] = {
         "dynamic_perspective_windows", "dpw_min_scale_ratio", "dpw_horizon_pos", "dpw_tilt_levels",
         "rn_iterations", "rn_trust_alpha", "rn_trust_alpha_up", "dsr_fw_power", "dsr_fw_unit_mass",
         "dsr_fw_tau_z_floor", "dsr_fw_max_spike_mass", "dsr_fw_morozov_tol", "dsr_fw_morozov_gamma",
-        "enable_regional_head", "backbone_stride_mode", "use_c2_phase_guidance",
+        "enable_regional_head", "backbone_stride_mode", "backbone_max_stage2_blocks",
+        "use_c2_phase_guidance", "ler_use_persp_prior",
     ],
     "loss": [
         "lambda_count", "lambda_flat_dm16", "lambda_cell",

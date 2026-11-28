@@ -31,8 +31,10 @@ class RMRv3Config:
     backbone_name: str = "mobilenetv4_conv_small_050.e3000_r224_in1k"
     pretrained: bool = True
     backbone_lr_scale: float = 0.1
-    backbone_stride_mode: str = "standard"  # "standard" | "split_s8_s16" | "dilated_os8"
+    backbone_stride_mode: str = "standard"  # "standard" | "split_s8_s16" | "dilated_os8" | "os8_hdc"
+    backbone_max_stage2_blocks: int = 0
     use_c2_phase_guidance: bool = False
+    ler_use_persp_prior: bool = False
     init_m0: float = 0.015763  # Canonical Stride-4 cell density m0^{(4)} (heads scale by 1/4 for subpixel_stride2)
     max_trainable_params: int = 105000
 
@@ -341,9 +343,9 @@ class RMRv3Config:
             raise ValueError(f"Invalid solver_mode '{self.solver_mode}'")
         if self.aspp_gap_mode not in ("add", "gate"):
             raise ValueError(f"aspp_gap_mode must be 'add' or 'gate', got '{self.aspp_gap_mode}'")
-        if self.backbone_stride_mode not in ("standard", "split_s8_s16", "dilated_os8"):
+        if self.backbone_stride_mode not in ("standard", "split_s8_s16", "dilated_os8", "os8_hdc"):
             raise ValueError(
-                f"backbone_stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got '{self.backbone_stride_mode}'"
+                f"backbone_stride_mode must be 'standard', 'split_s8_s16', 'dilated_os8', or 'os8_hdc', got '{self.backbone_stride_mode}'"
             )
         if self.fine_carrier_type not in ("standard", "mpc"):
             raise ValueError(f"fine_carrier_type must be 'standard' or 'mpc', got '{self.fine_carrier_type}'")

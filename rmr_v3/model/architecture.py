@@ -60,6 +60,7 @@ class RMRv3(nn.Module):
             pretrained=cfg.pretrained,
             target_reductions=target_reductions,
             stride_mode=getattr(cfg, "backbone_stride_mode", "standard"),
+            max_stage2_blocks=int(getattr(cfg, "backbone_max_stage2_blocks", 0)),
         )
         neck_in_ch = (
             self.encoder.out_channels[1:]
@@ -202,6 +203,8 @@ class RMRv3(nn.Module):
             }
             if c2 is not None and self._has_c2_phase:
                 kw["c2"] = c2
+            if getattr(self.cfg, "head_type", "") == "ler_subpixel":
+                kw["row_ctx"] = getattr(self.fusion, "_last_row_context", None)
             z0, y0 = self.fine_head.forward_with_logits(p4, **kw)
         else:
             z0 = self.fine_head.forward_logits(p4, scale_weights=scale_weights)
@@ -295,7 +298,7 @@ class RMRv3(nn.Module):
         p4_th, p4_tw = (target_h2, target_w2) if self.cfg.neck_type == "lfi_s2" else (target_h4, target_w4)
         p16_h, p16_w = (
             ((h_in + 7) // 8, (w_in + 7) // 8)
-            if getattr(self.cfg, "backbone_stride_mode", "standard") == "dilated_os8"
+            if getattr(self.cfg, "backbone_stride_mode", "standard") in ("dilated_os8", "os8_hdc")
             else ((h_in + 15) // 16, (w_in + 15) // 16)
         )
         if pad_h > 0 or pad_w > 0 or p4.shape[-2] != p4_th or p4.shape[-1] != p4_tw:

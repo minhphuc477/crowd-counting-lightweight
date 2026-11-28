@@ -14,6 +14,7 @@ from rmr_core.necks import (
     LFIS2FPNNeck,
     PAFPNBiNormNeck,
     PAFPNLiteNeck,
+    PGRFPNNeck,
     RLKHDCFPNNeck,
     RepASPPLiteNeck,
     RepWeightedFPNNeck,
@@ -127,6 +128,11 @@ def build_neck_module(in_channels: tuple[int, ...], cfg: RMRv3Config) -> nn.Modu
         )
     if cfg.neck_type == "pafpn_lite":
         return PAFPNLiteNeck(
+            in_channels=in_channels,
+            width=cfg.feature_width,
+        )
+    if cfg.neck_type == "pgr_fpn":
+        return PGRFPNNeck(
             in_channels=in_channels,
             width=cfg.feature_width,
         )
@@ -254,6 +260,7 @@ def build_fine_carrier_head(cfg: RMRv3Config, c2_channels: int = 0) -> nn.Module
         subpixel_kernel_size=getattr(cfg, "subpixel_kernel_size", 3),
         dsimr_init_z_s=float(getattr(cfg, "dsimr_init_z_s", 2.0)),
         c2_channels=int(c2_channels),
+        ler_use_persp_prior=bool(getattr(cfg, "ler_use_persp_prior", False)),
         use_film=bool(
             getattr(cfg, "fine_head_use_film", True)
             and (

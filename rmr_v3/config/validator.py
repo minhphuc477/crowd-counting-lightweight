@@ -70,7 +70,7 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             valid_necks = (
                 "additive", "aspp_lite", "hdc_lite", "sfi_lite", "lfi_s2", "sc_lfi", "rlk_hdc",
                 "rep_weighted", "rep_aspp_lite", "bifpn_lite",
-                "pafpn_binorm", "pafpn_lite", "pconv_fpn", "frankenstein_lite",
+                "pafpn_binorm", "pafpn_lite", "pgr_fpn", "pconv_fpn", "frankenstein_lite",
             )
             if nt not in valid_necks:
                 raise ValueError(f"neck_type must be one of {valid_necks}, got {m_cfg['neck_type']!r}")
@@ -85,13 +85,17 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                 )
         if "head_type" in m_cfg and m_cfg["head_type"] is not None:
             ht = str(m_cfg["head_type"]).lower().strip()
-            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "dsimr_c2_phase", "native_s2_dsimr")
+            valid_heads = ("standard", "residual_dilated", "first_principles", "rd_finehead", "dw_subpixel", "subpixel_k3", "dsimr_subpixel", "dsimr_c2_phase", "ler_subpixel", "native_s2_dsimr")
             if ht not in valid_heads:
                 raise ValueError(f"head_type must be one of {valid_heads}, got {m_cfg['head_type']!r}")
         if "backbone_stride_mode" in m_cfg and m_cfg["backbone_stride_mode"] is not None:
             bsm = str(m_cfg["backbone_stride_mode"]).lower().strip()
-            if bsm not in ("standard", "split_s8_s16", "dilated_os8"):
-                raise ValueError(f"backbone_stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got {m_cfg['backbone_stride_mode']!r}")
+            if bsm not in ("standard", "split_s8_s16", "dilated_os8", "os8_hdc"):
+                raise ValueError(f"backbone_stride_mode must be 'standard', 'split_s8_s16', 'dilated_os8', or 'os8_hdc', got {m_cfg['backbone_stride_mode']!r}")
+        if "backbone_max_stage2_blocks" in m_cfg and int(m_cfg["backbone_max_stage2_blocks"]) < 0:
+            raise ValueError(f"backbone_max_stage2_blocks must be >= 0, got {m_cfg['backbone_max_stage2_blocks']!r}")
+        if bool(m_cfg.get("ler_use_persp_prior", False)) and (str(m_cfg.get("neck_type", "")) != "pgr_fpn" or str(m_cfg.get("head_type", "")) != "ler_subpixel"):
+            raise ValueError("ler_use_persp_prior=True requires neck_type='pgr_fpn' and head_type='ler_subpixel'.")
         if str(m_cfg.get("neck_type", "")) == "lfi_s2" and str(m_cfg.get("head_type", "")) != "native_s2_dsimr":
             raise ValueError("neck_type='lfi_s2' operates at Stride 2 and requires head_type='native_s2_dsimr'.")
         if "fine_carrier_type" in m_cfg and m_cfg["fine_carrier_type"] is not None:
@@ -110,23 +114,14 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
                     f"curvature_alpha_init must be a float, got {m_cfg['curvature_alpha_init']!r}"
                 ) from err
         if "backbone" in m_cfg and "backbone_name" in m_cfg:
-            raise ValueError(
-                "Conflicting alias keys in model config: cannot declare both 'backbone' and 'backbone_name'."
-            )
+            raise ValueError("Conflicting alias keys in model config: cannot declare both 'backbone' and 'backbone_name'.")
         if "omega" in m_cfg and "sirt_omega" in m_cfg:
-            raise ValueError(
-                "Conflicting alias keys in model config: cannot declare both 'omega' and 'sirt_omega'."
-            )
+            raise ValueError("Conflicting alias keys in model config: cannot declare both 'omega' and 'sirt_omega'.")
         has_subpixel = bool(m_cfg.get("subpixel_stride2", False)) or bool(m_cfg.get("subpixel_dm", False))
         if has_subpixel and int(m_cfg.get("output_stride", 4)) != 2:
-            raise ValueError(
-                f"Inconsistent config: subpixel_stride2=True or subpixel_dm=True requires output_stride=2, "
-                f"got output_stride={m_cfg.get('output_stride')}"
-            )
+            raise ValueError(f"Inconsistent config: subpixel_stride2/subpixel_dm requires output_stride=2, got {m_cfg.get('output_stride')}")
         if int(m_cfg.get("output_stride", 4)) == 2 and not has_subpixel:
-            raise ValueError(
-                "Inconsistent config: output_stride=2 requires subpixel_stride2=True or subpixel_dm=True."
-            )
+            raise ValueError("Inconsistent config: output_stride=2 requires subpixel_stride2=True or subpixel_dm=True.")
         for k in (
             "reliability_weight_min", "dispersion_min", "density_gate_rho", "tv_eps_c",
             "pm_kappa", "anscombe_tau_dense", "scale_router_temperature", "trust_region_floor",
@@ -220,8 +215,6 @@ def validate_v3_config(cfg: dict[str, Any]) -> None:
             raise ValueError("use_park=True is permanently BANNED. Use dynamic DiAG instead.")
         if bool(m_cfg.get("dynamic_perspective_windows", False)):
             raise ValueError("dynamic_perspective_windows=True is permanently BANNED (Anti-Pattern #8).")
-
-
     # Validate loss section -------- Stage 2 extensions
     l_cfg_pre = cfg.get("loss", {})
     if isinstance(l_cfg_pre, dict):

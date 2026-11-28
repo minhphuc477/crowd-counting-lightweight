@@ -31,6 +31,9 @@ from .pafpn import (
 from .pafpn_lite import (
     PAFPNLiteNeck,
 )
+from .pgr_fpn import (
+    PGRFPNNeck,
+)
 from .sc_lfi import (
     SCLFINeck,
 )
@@ -72,6 +75,7 @@ __all__ = [
     "PAFPNBiNormNeck",
     "PAFPNLiteNeck",
     "PConvBlock",
+    "PGRFPNNeck",
     "RLKHDCFPNNeck",
     "RepASPPLiteNeck",
     "RepDWBlock7x7",

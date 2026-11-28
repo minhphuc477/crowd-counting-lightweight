@@ -355,9 +355,17 @@ def build_fine_head(
     use_film: bool = True,
     dsimr_init_z_s: float = 2.0,
     c2_channels: int = 0,
+    ler_use_persp_prior: bool = False,
 ) -> nn.Module:
     """Factory function for instantiating polymorphic RMR fine density heads."""
     head_type_l = str(head_type).lower().strip()
+    if head_type_l == "ler_subpixel":
+        from .ler_head import LERSubpixelHead
+        return LERSubpixelHead(
+            width=width, init_bias=init_bias,
+            subpixel_kernel_size=max(3, int(subpixel_kernel_size)),
+            head_blocks=head_blocks, use_persp_prior=bool(ler_use_persp_prior),
+        )
     if head_type_l == "dsimr_c2_phase":
         from .phase_head import S2DPhaseDSIMRHead
         return S2DPhaseDSIMRHead(

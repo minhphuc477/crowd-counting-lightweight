@@ -49,6 +49,7 @@ class TimmPyramidBackbone(nn.Module):
         target_reductions: tuple[int, ...] = (4, 8, 16),
         stride_mode: str = "standard",
         split_block_idx: int = 3,
+        max_stage2_blocks: int = 0,
     ):
         super().__init__()
         import timm
@@ -59,9 +60,9 @@ class TimmPyramidBackbone(nn.Module):
                 f"TimmPyramidBackbone requires target_reductions=(4, 8, 16) or (2, 4, 8, 16), got {target_reductions}"
             )
         self.stride_mode = str(stride_mode).lower().strip()
-        if self.stride_mode not in ("standard", "split_s8_s16", "dilated_os8"):
+        if self.stride_mode not in ("standard", "split_s8_s16", "dilated_os8", "os8_hdc"):
             raise ValueError(
-                f"stride_mode must be 'standard', 'split_s8_s16', or 'dilated_os8', got '{stride_mode}'"
+                f"stride_mode must be 'standard', 'split_s8_s16', 'dilated_os8', or 'os8_hdc', got '{stride_mode}'"
             )
 
         self.model_name = model_name
@@ -128,7 +129,16 @@ class TimmPyramidBackbone(nn.Module):
 
         self.split_s8_blocks: nn.Sequential | None = None
         self.split_s16_blocks: nn.Sequential | None = None
-        if self.stride_mode in ("split_s8_s16", "dilated_os8"):
+        if int(max_stage2_blocks) > 0:
+            if not hasattr(self.backbone, "blocks") or len(self.backbone.blocks) < 3:
+                raise ValueError(f"max_stage2_blocks={max_stage2_blocks} requires blocks >= 3 in {model_name}")
+            b2_all = list(self.backbone.blocks[2].children())
+            n_keep = int(max_stage2_blocks)
+            if not (1 <= n_keep <= len(b2_all)):
+                raise ValueError(f"max_stage2_blocks={n_keep} out of range for {len(b2_all)} blocks")
+            self.backbone.blocks[2] = nn.Sequential(*b2_all[:n_keep])
+
+        if self.stride_mode in ("split_s8_s16", "dilated_os8", "os8_hdc"):
             if (
                 not hasattr(self.backbone, "blocks")
                 or getattr(self.backbone, "feature_hooks", None) is not None
@@ -152,12 +162,14 @@ class TimmPyramidBackbone(nn.Module):
                 ch_list[-2] = ch_list[-1]
                 self.out_channels = tuple(ch_list)
             else:
-                for blk in b2_list[1:]:
+                hdc_cycle = (1, 2, 3)
+                for idx, blk in enumerate(b2_list[1:]):
+                    d_rate = hdc_cycle[idx % 3] if self.stride_mode == "os8_hdc" else 2
                     for attr in ("dw_start", "dw_mid", "dw_end"):
                         sub = getattr(blk, attr, None)
                         conv = getattr(sub, "conv", None) if sub is not None else None
                         if isinstance(conv, nn.Conv2d) and conv.kernel_size != (1, 1):
-                            _set_conv_dilation(conv, 2)
+                            _set_conv_dilation(conv, d_rate)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         if self.stride_mode == "split_s8_s16" and self.split_s8_blocks is not None and self.split_s16_blocks is not None:
