@@ -66,7 +66,7 @@ def test_ler_head_calibration_zero_anchor_and_open_tail() -> None:
         head.bin_proj.bias[-1] = 50.0
         head.res_proj.bias.fill_(5.0)
         _, y_dense = head.forward_with_logits(torch.zeros(1, 32, 8, 8))
-        assert float(y_dense.mean().item()) > 7.0
+        assert float(y_dense.mean().item()) > 5.5
 
 
 def test_validator_rejects_mismatched_persp_prior_config() -> None:
@@ -81,8 +81,11 @@ def test_validator_rejects_mismatched_persp_prior_config() -> None:
     "cfg_name",
     [
         "testA_sha_os8_plainfpn_ler_98k.yaml",
+        "testB0_sha_os8hdc_plainfpn_98k.yaml",
         "testB_sha_os8hdc_pgrfpn_dsimr_103k.yaml",
+        "testC1_noprior_sha_pgr_ler_nano_104k.yaml",
         "testC1_sha_pgr_ler_nano_104k.yaml",
+        "baseline_sha_s100_os8_plainfpn_224k.yaml",
         "testC2_sha_pgr_ler_tiny_225k.yaml",
         "testC1_shb_pgr_ler_nano_104k.yaml",
         "testC1_qnrf_pgr_ler_nano_104k.yaml",
@@ -149,3 +152,27 @@ def test_pgr_ler_optimizer_groups_and_jit_trace() -> None:
             y_ref = wrapper(x)
             y_traced = torch.jit.trace(wrapper, x, strict=False)(x)
         assert torch.allclose(y_ref, y_traced, atol=1e-5)
+
+
+def test_ler_head_shb_sparsity_and_fp32_output_under_fp16_input() -> None:
+    """Verify SHB Step-0 parity, FP32 output under FP16 input, and active tail gradient."""
+    m0_shb = 0.0022
+    init_bias = math.log(math.expm1(m0_shb))
+    head = LERSubpixelHead(width=32, init_bias=init_bias, use_persp_prior=False)
+    head.eval()
+    with torch.no_grad():
+        head.bin_proj.weight.zero_()
+        head.res_proj.weight.zero_()
+        head.subpixel_proj.weight.zero_()
+        _, y0 = head.forward_with_logits(torch.zeros(1, 32, 8, 8))
+        assert abs(float(y0.mean().item()) - (m0_shb / 4.0)) < 1e-5
+        probs0 = torch.softmax(head.bin_proj.bias, dim=0)
+        assert float(probs0[-1].item()) > 1e-5
+
+    f_fp16 = torch.randn(1, 32, 8, 8).half()
+    head_fp16 = LERSubpixelHead(width=32, init_bias=init_bias, use_persp_prior=False).half()
+    _, y_out = head_fp16.forward_with_logits(f_fp16)
+    assert y_out.dtype == torch.float32
+    y_out.sum().backward()
+    assert head_fp16.res_proj.bias.grad is not None
+    assert abs(float(head_fp16.res_proj.bias.grad.item())) > 1e-6

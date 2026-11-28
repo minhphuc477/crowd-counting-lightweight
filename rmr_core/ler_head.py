@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from .necks import ConvGNAct
 
-_DEFAULT_ANCHORS: tuple[float, ...] = (0.0, 0.004, 0.015, 0.05, 0.15, 0.40, 1.0, 2.5)
+_DEFAULT_ANCHORS: tuple[float, ...] = (0.0, 0.002, 0.006, 0.018, 0.05, 0.14, 0.35, 0.80)
 
 
 class LERSubpixelHead(nn.Module):
@@ -54,7 +54,7 @@ class LERSubpixelHead(nn.Module):
 
         self.res_proj = nn.Conv2d(self.width, 1, kernel_size=1, bias=True)
         nn.init.normal_(self.res_proj.weight, std=0.01)
-        nn.init.constant_(self.res_proj.bias, -4.0)
+        nn.init.constant_(self.res_proj.bias, -2.0)
 
         if self.use_persp_prior:
             self.persp_prior_proj: nn.Conv2d | None = nn.Conv2d(self.width, self.num_bins, kernel_size=1, bias=False)
@@ -67,7 +67,7 @@ class LERSubpixelHead(nn.Module):
         # Bisection calibration of bin_proj.bias so Step-0 E[y_cell] == m0 / 4.0
         m0 = math.log1p(math.exp(float(init_bias)))
         target_sub = max(m0 / 4.0, 1e-6)
-        r0 = math.log1p(math.exp(-4.0))
+        r0 = math.log1p(math.exp(-2.0))
         eff_anchors = anchor_t.clone()
         eff_anchors[-1] = eff_anchors[-1] + r0
         lo, hi = 0.05, 50.0
@@ -113,7 +113,7 @@ class LERSubpixelHead(nn.Module):
         anchors_view = self.anchors.to(device=probs.device, dtype=torch.float32).view(1, self.num_bins, 1, 1)
         y_cell = (probs * anchors_view).sum(dim=1, keepdim=True) + probs[:, -1:] * r_tail
 
-        y0 = self.pixel_shuffle(y_cell * alpha.float()).to(dtype=f.dtype)
+        y0 = self.pixel_shuffle(y_cell * alpha.float())
         z0_cell = torch.log(y_cell.clamp_min(1e-6))
         z0 = self.pixel_shuffle(z0_cell.expand(-1, 4, -1, -1)) if need_full_z0 else z0_cell
         return z0, y0
